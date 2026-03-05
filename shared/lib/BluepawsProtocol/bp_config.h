@@ -45,18 +45,20 @@
 struct bp_profile_config_t {
     bp_profile_t profile;
     int8_t       tx_power_dBm;
-    uint16_t     sleep_interval_s;
+    uint16_t     sleep_interval_s;   // 0 = no sleep (lost mode)
     uint8_t      led_flashes;
-    bool         beacon_enabled;
+    bool         beacon_enabled;     // LED beacon during active period
+    bool         gps_continuous;     // keep GPS on between cycles
+    uint8_t      cellular_ratio;     // 1 cellular per N cycles (0 = disabled)
 };
 
 // Profile lookup table
 static const bp_profile_config_t BP_PROFILES[] = {
-    // profile            power  interval  led  beacon
-    { PROFILE_NORMAL,      19,    600,      5,   false },  // 10 min
-    { PROFILE_POWERSAVE,   10,   1200,      5,   false },  // 20 min
-    { PROFILE_ACTIVE,      19,     60,      5,   false },  //  1 min
-    { PROFILE_LOST,        22,     30,     10,   true  },  // 30 sec
+    //                        power  sleep   led  beacon  gps_cont  cell_ratio
+    { PROFILE_NORMAL,          19,    600,    5,  false,  false,    10 },  // 10 min, cell 1:10
+    { PROFILE_POWERSAVE,       10,   1200,    3,  false,  false,    20 },  // 20 min, cell 1:20
+    { PROFILE_ACTIVE,          19,     60,    5,  false,  false,     5 },  //  1 min, cell 1:5
+    { PROFILE_LOST,            22,      0,   10,  true,   true,      3 },  // no sleep, cell 1:3
 };
 
 #define BP_PROFILE_COUNT  (sizeof(BP_PROFILES) / sizeof(BP_PROFILES[0]))
@@ -75,14 +77,23 @@ static inline const bp_profile_config_t *bp_profile_config(bp_profile_t p) {
 // ═══════════════════════════════════════════════
 #define LOST_MODE_MAX_DURATION_S  7200   // 2 hours
 #define LOST_MODE_FALLBACK        PROFILE_ACTIVE
+#define LOST_MODE_CYCLE_INTERVAL_S  30   // TX interval when in lost mode (no sleep)
 
 // ═══════════════════════════════════════════════
-// GPS Timing
+// GPS Timing (two-phase acquisition)
+//
+// Phase 1 — TTFF (Time To First Fix):
+//   Wake GPS, wait up to TTFF timeout for initial fix.
+//   Cold start: up to 60s. Warm start: up to 20s.
+//
+// Phase 2 — Stabilisation:
+//   Once initial fix is detected, wait an additional
+//   period for the fix to stabilise before reading coords.
 // ═══════════════════════════════════════════════
-#define GPS_COLD_START_TIMEOUT_S  60
-#define GPS_WARM_START_TIMEOUT_S  20
-#define GPS_STABILISATION_S       15
-#define GPS_STALE_THRESHOLD_S     60
+#define GPS_TTFF_COLD_TIMEOUT_S   20     // max wait for first fix (cold)
+#define GPS_TTFF_WARM_TIMEOUT_S   15     // max wait for first fix (warm)
+#define GPS_STABILISATION_S       10     // stabilisation after first fix
+#define GPS_STALE_THRESHOLD_S     60     // fix older than this = stale
 
 // ═══════════════════════════════════════════════
 // BLE Home Beacon
@@ -94,8 +105,18 @@ static inline const bp_profile_config_t *bp_profile_config(bp_profile_t p) {
 // ═══════════════════════════════════════════════
 // NB-IoT Cellular
 // ═══════════════════════════════════════════════
-#define CELLULAR_TX_RATIO         10   // 1 cellular per N LoRa transmissions
 #define CELLULAR_BAUD_RATE        115200
+
+// BG77 Power Saving Mode (PSM) — collar sleep periods
+// TAU (T3412): periodic tracking area update timer
+// Active timer (T3324): time modem stays reachable after TAU
+#define CELLULAR_PSM_TAU          "10100010"  // 12 hours (binary coded)
+#define CELLULAR_PSM_ACTIVE       "00000101"  // 10 seconds
+
+// eDRX (Extended Discontinuous Reception)
+// Cycle length for paging windows when modem is idle
+#define CELLULAR_EDRX_VALUE       "0010"      // 20.48 seconds
+#define CELLULAR_EDRX_PTW         "0000"      // 1.28 seconds paging window
 
 // ═══════════════════════════════════════════════
 // Command Listen Window
