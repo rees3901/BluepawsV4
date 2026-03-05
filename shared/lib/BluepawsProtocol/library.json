@@ -1,0 +1,8 @@
+{
+    "name": "BluepawsProtocol",
+    "version": "4.0.0",
+    "description": "Shared TLV binary protocol for Bluepaws cat tracker (collar + hub)",
+    "keywords": "tlv, protocol, lora, iot, cat-tracker",
+    "frameworks": "arduino",
+    "platforms": ["nordicnrf52", "espressif32"]
+}
