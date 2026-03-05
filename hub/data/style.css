@@ -1,0 +1,444 @@
+/*
+  Bluepaws V4 — Hub Web GUI Styles
+  Mobile-first responsive layout using Flexbox
+*/
+
+/* ── Reset & Base ── */
+*, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+:root {
+    --bg-primary: #0f1923;
+    --bg-card: #1a2733;
+    --bg-panel: #15202b;
+    --text-primary: #e8edf2;
+    --text-secondary: #8899a6;
+    --accent: #1d9bf0;
+    --accent-hover: #1a8cd8;
+    --success: #00c853;
+    --warning: #ffab00;
+    --danger: #ff1744;
+    --border: #2f3e4e;
+    --radius: 8px;
+    --shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+
+html, body {
+    height: 100%;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    overflow: hidden;
+}
+
+/* ── Layout ── */
+body {
+    display: flex;
+    flex-direction: column;
+}
+
+#map {
+    flex: 1;
+    min-height: 0;
+    z-index: 1;
+}
+
+#panel {
+    flex: 0 0 auto;
+    max-height: 40vh;
+    overflow-y: auto;
+    background: var(--bg-panel);
+    border-top: 1px solid var(--border);
+    z-index: 10;
+}
+
+/* ── Status Banner ── */
+#statusBanner {
+    position: fixed;
+    top: 10px;
+    right: 10px;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    background: rgba(15, 25, 35, 0.9);
+    backdrop-filter: blur(8px);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow);
+}
+
+#statusBanner.connected #statusIcon {
+    color: var(--success);
+}
+
+#statusBanner.disconnected #statusIcon {
+    color: var(--danger);
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+}
+
+/* ── Device Cards ── */
+#deviceCards {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 12px;
+}
+
+.device-card {
+    flex: 1 1 280px;
+    max-width: 400px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px;
+    cursor: pointer;
+    transition: border-color 0.2s, transform 0.1s;
+}
+
+.device-card:hover {
+    border-color: var(--accent);
+    transform: translateY(-1px);
+}
+
+.device-card.stale {
+    opacity: 0.5;
+}
+
+.card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.card-name {
+    font-weight: 600;
+    font-size: 0.95rem;
+}
+
+.card-status {
+    font-size: 0.7rem;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 500;
+    text-transform: uppercase;
+}
+
+.card-status.status-out   { background: var(--accent); color: #fff; }
+.card-status.status-home  { background: var(--success); color: #000; }
+.card-status.status-error { background: var(--danger); color: #fff; }
+.card-status.status-lost  { background: var(--warning); color: #000; }
+.card-status.status-ok    { background: var(--success); color: #000; }
+
+.card-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px 12px;
+    font-size: 0.78rem;
+}
+
+.card-grid .label {
+    color: var(--text-secondary);
+}
+
+.card-grid .value {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.card-actions {
+    margin-top: 8px;
+    display: flex;
+    gap: 6px;
+}
+
+.card-actions button {
+    flex: 1;
+    padding: 4px 8px;
+    font-size: 0.72rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.card-actions button:hover {
+    background: var(--accent);
+    border-color: var(--accent);
+}
+
+/* ── Controls Bar ── */
+#controlsBar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-top: 1px solid var(--border);
+    background: var(--bg-primary);
+}
+
+.ctrl-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-card);
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.ctrl-btn:hover {
+    background: var(--accent);
+    border-color: var(--accent);
+}
+
+.ctrl-btn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+}
+
+.spacer {
+    flex: 1;
+}
+
+/* ── Modals ── */
+.modal {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+}
+
+.modal.hidden {
+    display: none;
+}
+
+.modal-content {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    width: 90%;
+    max-width: 420px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.modal-content h2 {
+    font-size: 1.1rem;
+    margin-bottom: 16px;
+}
+
+.form-group {
+    margin-bottom: 12px;
+}
+
+.form-group label {
+    display: block;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+}
+
+.form-group input,
+.form-group select {
+    width: 100%;
+    padding: 8px 10px;
+    font-size: 0.85rem;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-primary);
+    outline: none;
+}
+
+.form-group input:focus,
+.form-group select:focus {
+    border-color: var(--accent);
+}
+
+.status-info {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    padding: 6px 0;
+    line-height: 1.6;
+}
+
+.modal-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 16px;
+}
+
+.btn-primary,
+.btn-secondary {
+    flex: 1;
+    padding: 8px;
+    font-size: 0.85rem;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 500;
+}
+
+.btn-primary {
+    background: var(--accent);
+    color: #fff;
+}
+
+.btn-primary:hover {
+    background: var(--accent-hover);
+}
+
+.btn-secondary {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+}
+
+.btn-secondary:hover {
+    background: var(--bg-primary);
+}
+
+/* ── Leaflet Overrides (dark theme) ── */
+.leaflet-control-zoom a {
+    background: var(--bg-card) !important;
+    color: var(--text-primary) !important;
+    border-color: var(--border) !important;
+}
+
+.leaflet-control-layers {
+    background: var(--bg-card) !important;
+    color: var(--text-primary) !important;
+    border-color: var(--border) !important;
+    border-radius: var(--radius) !important;
+}
+
+.leaflet-control-layers label {
+    color: var(--text-primary);
+}
+
+.leaflet-popup-content-wrapper {
+    background: var(--bg-card) !important;
+    color: var(--text-primary) !important;
+    border-radius: var(--radius) !important;
+    box-shadow: var(--shadow) !important;
+}
+
+.leaflet-popup-tip {
+    background: var(--bg-card) !important;
+}
+
+.leaflet-popup-close-button {
+    color: var(--text-secondary) !important;
+}
+
+/* ── Measure Overlay ── */
+.measure-label {
+    background: rgba(15, 25, 35, 0.85);
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    padding: 2px 6px;
+    color: var(--text-primary);
+    font-size: 0.72rem;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+/* ── Marker Icons ── */
+.bp-marker {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 3px solid var(--accent);
+    background: var(--bg-card);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    transition: transform 0.3s ease;
+}
+
+.bp-marker.updated {
+    animation: marker-pop 0.4s ease-out;
+}
+
+@keyframes marker-pop {
+    0%   { transform: scale(1); }
+    50%  { transform: scale(1.3); }
+    100% { transform: scale(1); }
+}
+
+.bp-marker.status-home { border-color: var(--success); }
+.bp-marker.status-lost { border-color: var(--danger); }
+
+/* ── Responsive ── */
+@media (max-width: 600px) {
+    #panel {
+        max-height: 50vh;
+    }
+
+    .device-card {
+        flex: 1 1 100%;
+        max-width: none;
+    }
+
+    .modal-content {
+        width: 95%;
+        padding: 16px;
+    }
+}
+
+@media (min-width: 1024px) {
+    body {
+        flex-direction: row;
+    }
+
+    #map {
+        flex: 1;
+        height: 100%;
+    }
+
+    #panel {
+        flex: 0 0 360px;
+        max-height: 100%;
+        border-top: none;
+        border-left: 1px solid var(--border);
+    }
+}
+
+/* ── Scrollbar ── */
+#panel::-webkit-scrollbar {
+    width: 4px;
+}
+
+#panel::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+#panel::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 2px;
+}
