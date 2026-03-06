@@ -41,6 +41,7 @@
 
 #include <bp_protocol.h>
 #include <bp_config.h>
+#include <bp_crypto.h>
 #include "collar_pins.h"
 
 // FreeRTOS (built into Adafruit nRF52 BSP)
@@ -86,9 +87,15 @@ static volatile bool gpsFix       = false;
 // BLE state
 static volatile bool bleHomeFound = false;
 
+// Command deduplication — ignore retransmitted commands from hub
+static uint32_t lastProcessedCmdSeq = 0;
+
 // Lost mode
 static volatile bool     inLostMode      = false;
 static volatile uint32_t lostModeStartMs = 0;
+
+// AES-128 encryption key
+static const uint8_t aesKey[16] = LORA_AES_KEY;
 
 // Cellular
 static volatile bool cellularPending = false;
@@ -139,6 +146,7 @@ static void     transmitPacket(uint8_t *buf, uint8_t len);
 // Command handling
 static void     handleReceivedCommand(const uint8_t *buf, uint8_t len);
 static void     applyProfile(bp_profile_t profile);
+static void     sendFindAck(uint32_t cmdMsgSeq);
 
 // GPS helpers
 static void     gpsModuleWake();
@@ -148,6 +156,12 @@ static uint32_t gpsGetUnixTime();
 // LED
 static void     ledFlicker(uint8_t count, uint16_t onMs, uint16_t offMs);
 static void     ledBeacon();
+
+// Buzzer (passive piezo via PWM)
+static void     buzzerInit();
+static void     buzzerPlayPattern(bp_buzzer_pattern_t pattern);
+static void     buzzerTone(uint16_t freqHz, uint16_t durationMs);
+static void     buzzerOff();
 
 // Cellular helpers
 static void     cellularSendTlv(const uint8_t *pkt, uint8_t len);
@@ -198,6 +212,9 @@ void setup() {
     // ── Button ──
     pinMode(PIN_BUTTON, INPUT_PULLUP);
 
+    // ── Buzzer (passive piezo) ──
+    buzzerInit();
+
     // ── GPS Init (start sleeping) ──
     pinMode(PIN_GPS_SLEEP, OUTPUT);
     pinMode(PIN_GPS_RESET, OUTPUT);
@@ -230,6 +247,8 @@ void setup() {
     Serial.printf("[LORA] Ready: %.1fMHz SF%d BW%.0fkHz %ddBm\n",
                   LORA_FREQUENCY, LORA_SPREADING, LORA_BANDWIDTH,
                   currentConfig->tx_power_dBm);
+    Serial.printf("[LORA] AES-128: %s\n",
+                  bp_aes_key_is_zero(aesKey) ? "OFF (key all zeros)" : "ENABLED");
 
     // ── BLE Init ──
     Bluefruit.begin(0, 1);  // 0 peripheral, 1 central
@@ -631,6 +650,22 @@ static void sendStatusResponse(uint32_t cmdMsgSeq) {
 }
 
 // ═══════════════════════════════════════════════
+// Send Find ACK (PKT_FIND_ACK)
+// ═══════════════════════════════════════════════
+static void sendFindAck(uint32_t cmdMsgSeq) {
+    messageSeq++;
+    uint8_t buf[BP_MAX_PACKET_SIZE];
+    pkt_init(buf, MY_DEVICE_ID, messageSeq, 0, STATUS_OK, PKT_FIND_ACK);
+
+    pkt_add_tlv_u32(buf, TLV_CMD_MSG_ID, cmdMsgSeq);
+    pkt_add_tlv_u8(buf,  TLV_PROFILE,    currentProfile);
+
+    uint8_t pktLen = pkt_finalize(buf);
+    Serial.printf("[TX] FIND_ACK for cmd seq %lu\n", cmdMsgSeq);
+    transmitPacket(buf, pktLen);
+}
+
+// ═══════════════════════════════════════════════
 // Send Lost Mode Timeout Alert (PKT_ALERT)
 // ═══════════════════════════════════════════════
 static void sendLostModeAlert() {
@@ -651,6 +686,11 @@ static void sendLostModeAlert() {
 // LoRa Transmit
 // ═══════════════════════════════════════════════
 static void transmitPacket(uint8_t *buf, uint8_t len) {
+    // Encrypt payload if AES key is configured
+    if (!bp_aes_key_is_zero(aesKey)) {
+        bp_aes_ctr_apply(buf, len, aesKey);
+    }
+
     lora.standby();
     int state = lora.transmit(buf, len);
 
@@ -687,6 +727,12 @@ static void listenForCommands() {
             if (state == RADIOLIB_ERR_NONE) {
                 uint8_t rxLen = lora.getPacketLength();
                 Serial.printf("[RX] Received %d bytes\n", rxLen);
+
+                // Decrypt if AES key is configured
+                if (!bp_aes_key_is_zero(aesKey)) {
+                    bp_aes_ctr_apply(rxBuf, rxLen, aesKey);
+                }
+
                 pkt_print_hex(rxBuf, rxLen);
 
                 if (rxLen >= BP_MIN_PACKET_SIZE && rxBuf[0] == BP_PROTOCOL_VERSION) {
@@ -719,6 +765,13 @@ static void handleReceivedCommand(const uint8_t *buf, uint8_t len) {
     uint16_t pktType = pkt_pkt_type(buf);
     uint32_t cmdSeq  = pkt_msg_seq(buf);
 
+    // ── Deduplication: hub retries up to 3x, ignore already-processed commands ──
+    if (cmdSeq != 0 && cmdSeq == lastProcessedCmdSeq) {
+        Serial.printf("[RX] Duplicate cmd seq %lu — ignoring\n", cmdSeq);
+        return;
+    }
+    lastProcessedCmdSeq = cmdSeq;
+
     switch (pktType) {
     case PKT_CMD_MODE: {
         uint8_t newProfile;
@@ -736,6 +789,26 @@ static void handleReceivedCommand(const uint8_t *buf, uint8_t len) {
         Serial.printf("[RX] CMD_STATUS (seq %lu)\n", cmdSeq);
         sendStatusResponse(cmdSeq);
         break;
+    case PKT_CMD_FIND: {
+        Serial.printf("[RX] CMD_FIND (seq %lu)\n", cmdSeq);
+
+        // LED flash — run ledFlicker once per command
+        uint8_t flashCount = 5;  // default
+        pkt_tlv_get_u8(buf, TLV_LED_FLASH, &flashCount);
+        if (flashCount > 0) {
+            ledFlicker(flashCount, 80, 80);
+        }
+
+        // Buzzer pattern
+        uint8_t pattern = BUZZER_CHIRP;  // default
+        pkt_tlv_get_u8(buf, TLV_BUZZER_PATTERN, &pattern);
+        if (pattern != BUZZER_OFF) {
+            buzzerPlayPattern((bp_buzzer_pattern_t)pattern);
+        }
+
+        sendFindAck(cmdSeq);
+        break;
+    }
     default:
         Serial.printf("[RX] Unknown type: 0x%04X\n", pktType);
         break;
@@ -989,4 +1062,83 @@ static void ledBeacon() {
     vTaskDelay(pdMS_TO_TICKS(100));
     digitalWrite(PIN_LED, LOW);
     vTaskDelay(pdMS_TO_TICKS(900));  // ~1 flash per second in lost mode
+}
+
+// ═══════════════════════════════════════════════
+// Buzzer — Passive Piezo (PWM)
+// Uses tone() for frequency generation on nRF52840.
+// Different patterns let users distinguish collars.
+// ═══════════════════════════════════════════════
+
+static void buzzerInit() {
+    pinMode(PIN_BUZZER, OUTPUT);
+    digitalWrite(PIN_BUZZER, LOW);
+    Serial.println("[BUZZ] Passive piezo on A4 ready");
+}
+
+static void buzzerTone(uint16_t freqHz, uint16_t durationMs) {
+    tone(PIN_BUZZER, freqHz, durationMs);
+    vTaskDelay(pdMS_TO_TICKS(durationMs));
+}
+
+static void buzzerOff() {
+    noTone(PIN_BUZZER);
+    digitalWrite(PIN_BUZZER, LOW);
+}
+
+static void buzzerPlayPattern(bp_buzzer_pattern_t pattern) {
+    Serial.printf("[BUZZ] Playing pattern %d\n", pattern);
+
+    switch (pattern) {
+    case BUZZER_CHIRP:
+        // 3 short chirps — quick "I'm here"
+        for (uint8_t i = 0; i < 3; i++) {
+            buzzerTone(BUZZER_DEFAULT_FREQ_HZ, BUZZER_NOTE_DURATION_MS);
+            vTaskDelay(pdMS_TO_TICKS(BUZZER_PAUSE_MS));
+        }
+        break;
+
+    case BUZZER_TRILL:
+        // Rising trill — ascending 5 notes
+        for (uint16_t f = 1800; f <= 3400; f += 400) {
+            buzzerTone(f, 100);
+            vTaskDelay(pdMS_TO_TICKS(30));
+        }
+        break;
+
+    case BUZZER_SIREN:
+        // Two-tone siren — alternating high/low x4
+        for (uint8_t i = 0; i < 4; i++) {
+            buzzerTone(2200, 200);
+            buzzerTone(3200, 200);
+        }
+        break;
+
+    case BUZZER_MELODY_A:
+        // Melody A — collar 1 identifier (short jingle)
+        buzzerTone(2637, 150);  // E
+        vTaskDelay(pdMS_TO_TICKS(50));
+        buzzerTone(2093, 150);  // C
+        vTaskDelay(pdMS_TO_TICKS(50));
+        buzzerTone(2349, 150);  // D
+        vTaskDelay(pdMS_TO_TICKS(50));
+        buzzerTone(3136, 300);  // G (long)
+        break;
+
+    case BUZZER_MELODY_B:
+        // Melody B — collar 2 identifier (different jingle)
+        buzzerTone(3136, 150);  // G
+        vTaskDelay(pdMS_TO_TICKS(50));
+        buzzerTone(2637, 150);  // E
+        vTaskDelay(pdMS_TO_TICKS(50));
+        buzzerTone(2093, 300);  // C (long)
+        vTaskDelay(pdMS_TO_TICKS(50));
+        buzzerTone(2093, 150);  // C
+        break;
+
+    default:
+        break;
+    }
+
+    buzzerOff();
 }

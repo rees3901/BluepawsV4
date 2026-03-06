@@ -353,10 +353,14 @@ body.light #statusBanner {
 .btn-jump:hover   { border-color: var(--accent); color: var(--accent); }
 .btn-follow:hover { border-color: var(--success); color: var(--success); }
 .btn-trail:hover  { border-color: var(--warning); color: var(--warning); }
+.btn-find:hover   { border-color: #f97316; color: #f97316; }
 .btn-cmd:hover    { border-color: #a855f7; color: #a855f7; }
 
 .btn-follow.active { background: var(--success); border-color: var(--success); color: #000; }
 .btn-trail.active  { background: var(--warning); border-color: var(--warning); color: #000; }
+
+.btn-find-send { background: #f97316; }
+.btn-find-send:hover { background: #ea580c; }
 
 /* ── Control Buttons (shared) ── */
 .ctrl-btn {

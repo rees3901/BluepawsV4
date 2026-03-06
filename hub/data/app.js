@@ -378,6 +378,10 @@
                     '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M2 14l4-4 3 3 5-7v2l-5 7-3-3-4 4v-2z"/></svg>' +
                     ' Trail' +
                 '</button>' +
+                '<button class="btn-action btn-find" data-action="find" title="Find collar (buzzer + LED)">' +
+                    '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M11.7 1.3a1 1 0 011.4 1.4L4.4 11.4a1 1 0 01-1.4-1.4l8.7-8.7zM3 13a2 2 0 100-4 2 2 0 000 4z"/></svg>' +
+                    ' Find' +
+                '</button>' +
                 '<button class="btn-action btn-cmd" data-action="cmd" title="Command & Control">' +
                     '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M6 1h4v2h3v4h-2V5H5v2H3V3h3V1zm4 14H6v-2H3v-4h2v2h6v-2h2v4h-3v2z"/></svg>' +
                     ' Cmd' +
@@ -393,6 +397,7 @@
                 if (action === 'jump') focusDevice(dev.id);
                 if (action === 'follow') toggleFollow(dev.id);
                 if (action === 'trail') toggleTrail(dev.id);
+                if (action === 'find') openFindModal(dev.id, data.name);
                 if (action === 'cmd') sendModeCmd(dev.id, data.name);
             });
         });
@@ -645,6 +650,45 @@
           });
     }
 
+    // ═══════════════════════════════════════════════
+    // Find Modal
+    // ═══════════════════════════════════════════════
+    var findTargetId = 0;
+
+    function openFindModal(deviceId, deviceName) {
+        findTargetId = deviceId;
+        document.getElementById('findDeviceName').textContent = deviceName;
+        document.getElementById('findModal').classList.remove('hidden');
+    }
+
+    function closeFind() {
+        document.getElementById('findModal').classList.add('hidden');
+    }
+
+    function sendFind() {
+        var pattern = document.getElementById('findPattern').value;
+        var flash = document.getElementById('findFlash').value;
+        var body = 'device=' + findTargetId.toString(16).padStart(4, '0') +
+                   '&pattern=' + pattern +
+                   '&flash=' + flash;
+
+        fetch('/api/find', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: body
+        }).then(function (r) { return r.json(); })
+          .then(function (d) {
+              if (d.ok) {
+                  closeFind();
+              } else {
+                  alert('Find command failed');
+              }
+          })
+          .catch(function () {
+              alert('Failed to send find command');
+          });
+    }
+
     function focusDevice(deviceId) {
         var dev = devices[deviceId];
         if (dev && dev.marker) {
@@ -684,6 +728,8 @@
         document.getElementById('btnSaveConfig').addEventListener('click', saveConfig);
         document.getElementById('btnSendCmd').addEventListener('click', sendCommand);
         document.getElementById('btnCloseCmd').addEventListener('click', closeCommand);
+        document.getElementById('btnSendFind').addEventListener('click', sendFind);
+        document.getElementById('btnCloseFind').addEventListener('click', closeFind);
 
         // Tell map about initial layout
         setTimeout(function () { map.invalidateSize(); }, 350);
@@ -692,6 +738,7 @@
     // Public API
     window.BP = {
         sendModeCmd: sendModeCmd,
+        openFindModal: openFindModal,
         focusDevice: focusDevice,
         toggleFollow: toggleFollow,
         toggleTrail: toggleTrail

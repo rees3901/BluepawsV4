@@ -105,6 +105,36 @@
         </div>
     </div>
 
+    <!-- Find Modal -->
+    <div id="findModal" class="modal hidden">
+        <div class="modal-content">
+            <h2>Find Collar</h2>
+            <p>Device: <strong id="findDeviceName"></strong></p>
+            <div class="form-group">
+                <label>Buzzer Pattern</label>
+                <select id="findPattern">
+                    <option value="chirp">Chirp (3 beeps)</option>
+                    <option value="trill">Trill (rising)</option>
+                    <option value="siren">Siren (two-tone)</option>
+                    <option value="melody_a">Melody A</option>
+                    <option value="melody_b">Melody B</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>LED Flashes</label>
+                <select id="findFlash">
+                    <option value="3">3 flashes</option>
+                    <option value="5" selected>5 flashes</option>
+                    <option value="10">10 flashes</option>
+                </select>
+            </div>
+            <div class="modal-actions">
+                <button id="btnSendFind" class="btn-primary btn-find-send">Find</button>
+                <button id="btnCloseFind" class="btn-secondary">Cancel</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Leaflet JS -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
             integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
