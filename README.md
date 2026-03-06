@@ -1,19 +1,30 @@
 # Bluepaws V4
 
-Unified firmware repository for the Bluepaws cat tracker system. Both the transmitting collar and receiving home hub share a single codebase with common protocol and configuration libraries.
+Unified firmware repository for the Bluepaws animal tracker system. Both the transmitting collar and receiving home hub share a single codebase with a common TLV binary protocol and configuration library.
 
 ## System Overview
 
 | Component | MCU | Radio | Connectivity |
 |-----------|-----|-------|-------------|
-| **Collar** | nRF52840 | SX1262 LoRa | NB-IoT (BG77), GNSS (L76K), BLE |
+| **Collar** | nRF52840 | SX1262 LoRa | Sequans Monarch 2 GM02SP (LTE-M/NB-IoT + GNSS), BLE |
 | **Home Hub** | ESP32-S3 | SX1262 LoRa | WiFi, BLE beacon |
 
 **Data paths:**
 - Collar → LoRa → Home Hub → WiFi → Cloud (Supabase)
-- Collar → NB-IoT → REST POST → Cloud (1:10 ratio with LoRa)
+- Collar → LTE-M/NB-IoT → REST POST → Cloud (1:10 ratio with LoRa)
 
 **Battery target:** 30+ days at 10-minute wake intervals.
+
+## Hardware
+
+| Part | Role | Key Specs |
+|------|------|-----------|
+| **nRF52840** (Seeed XIAO BLE Sense) | Collar MCU | ARM Cortex-M4F, BLE 5.0, 256KB RAM |
+| **SX1262** | LoRa transceiver | 150 MHz–960 MHz, +22 dBm, LoRa/FSK |
+| **[Sequans Monarch 2 GM02SP](https://sequans.com/products/monarch-2-gm02s/)** | Cellular + GNSS | LTE Cat M1/NB-IoT, integrated GNSS, 1µA deep sleep, 23 dBm TX, EAL5+ secure enclave, iSIM, single 2.2V rail, global bands |
+| **ESP32-S3** (Seeed XIAO) | Hub MCU | Dual-core, WiFi, BLE 5.0, 512KB SRAM |
+
+The Sequans GM02SP replaces the previous BG77 + L76K combination — a single module handles both cellular IoT and GPS positioning, simplifying the collar BOM and reducing power draw.
 
 ## Repository Structure
 
@@ -21,6 +32,7 @@ Unified firmware repository for the Bluepaws cat tracker system. Both the transm
 BluepawsV4/
 ├── platformio.ini                    # Multi-environment build config
 ├── shared/lib/BluepawsProtocol/      # Shared protocol & config
+│   ├── library.json                  # PlatformIO library manifest
 │   ├── bp_protocol.h                 # TLV binary protocol v2
 │   └── bp_config.h                   # LoRa params, profiles, timing
 ├── collar/                           # nRF52840 collar firmware
@@ -30,7 +42,48 @@ BluepawsV4/
 │   ├── src/main.cpp
 │   ├── include/hub_pins.h
 │   └── data/                         # LittleFS web GUI (HTML/CSS/JS)
-└── README.md
+│       ├── index.html
+│       ├── style.css
+│       └── app.js
+├── tools/
+│   └── mock-server.js                # Node.js mock hub for local GUI dev
+└── mock_server.py                    # Python mock server (legacy)
+```
+
+## Web GUI
+
+The hub serves a real-time tracking dashboard over WiFi, built with Leaflet.js and Server-Sent Events (SSE).
+
+**Device Cards** — each tracked animal gets a card in the left sidebar showing:
+- Unique emoji avatar with colour-coded ring (auto-assigned per device)
+- Last GPS coordinates in monospace
+- Status badge (Home / Out / Lost)
+- Telemetry grid: profile, battery %, signal strength, GPS accuracy, fix age, last seen
+- **Jump** — centres map on the animal at zoom 17
+- **Follow** — auto-pans the map as new positions arrive (green when active)
+- **Trail** — toggles breadcrumb polyline on/off per device (amber when active)
+- **Cmd** — opens command modal (change mode: Normal / Active / PowerSave / Lost)
+
+**Map Features:**
+- Three base layers: Street (OSM), Satellite (Esri), Topographic
+- Per-device coloured trail lines with dashed polylines
+- Lost-mode markers pulse red
+- Measurement tool (click to measure distances)
+- Dark / light theme toggle (persisted to localStorage)
+
+**Connection Monitoring:**
+- Server sends SSE heartbeat every 5 seconds
+- Client watchdog flips to "No heartbeat" if 10 seconds pass without any event
+- Status banner shows Connected (green) or Disconnected (red, pulsing)
+
+## Mock Server
+
+Simulates 5 animals with live SSE telemetry for local GUI development:
+
+```bash
+node tools/mock-server.js
+# → http://localhost:3000
+# Streams position updates every 2s + heartbeat every 5s
 ```
 
 ## TLV Protocol v2
