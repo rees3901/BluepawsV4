@@ -832,8 +832,18 @@ static void webTask(void *param) {
     (void)param;
     initWebServer();
 
+    TickType_t lastHeartbeat = 0;
+
     for (;;) {
         httpServer.handleClient();
+
+        // Send SSE heartbeat every 5 seconds so the browser knows we're alive
+        TickType_t now = xTaskGetTickCount();
+        if (now - lastHeartbeat >= pdMS_TO_TICKS(5000)) {
+            lastHeartbeat = now;
+            sseBroadcast("heartbeat", "{}");
+        }
+
         vTaskDelay(pdMS_TO_TICKS(5));
     }
 }
