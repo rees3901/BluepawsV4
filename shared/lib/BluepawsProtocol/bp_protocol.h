@@ -125,20 +125,22 @@ static inline uint16_t bp_device_id_from_name(const char *name) {
 // Profile Helpers
 // ═══════════════════════════════════════════════
 static inline bp_profile_t bp_profile_from_name(const char *name) {
-    if (strcmp(name, "normal") == 0)    return PROFILE_NORMAL;
-    if (strcmp(name, "powersave") == 0) return PROFILE_POWERSAVE;
-    if (strcmp(name, "active") == 0)    return PROFILE_ACTIVE;
-    if (strcmp(name, "lost") == 0)      return PROFILE_LOST;
+    if (strcmp(name, "normal") == 0)       return PROFILE_NORMAL;
+    if (strcmp(name, "powersave") == 0)    return PROFILE_POWERSAVE;
+    if (strcmp(name, "active_find") == 0)  return PROFILE_ACTIVE;
+    if (strcmp(name, "active") == 0)       return PROFILE_ACTIVE;   // legacy alias
+    if (strcmp(name, "emergency_lost") == 0) return PROFILE_LOST;
+    if (strcmp(name, "lost") == 0)         return PROFILE_LOST;     // legacy alias
     return PROFILE_UNKNOWN;
 }
 
 static inline const char *bp_profile_name(bp_profile_t p) {
     switch (p) {
-    case PROFILE_NORMAL:    return "normal";
-    case PROFILE_POWERSAVE: return "powersave";
-    case PROFILE_ACTIVE:    return "active";
-    case PROFILE_LOST:      return "lost";
-    default:                return "unknown";
+    case PROFILE_NORMAL:    return "Normal";
+    case PROFILE_POWERSAVE: return "PowerSave";
+    case PROFILE_ACTIVE:    return "Active Find";
+    case PROFILE_LOST:      return "Emergency Lost";
+    default:                return "Unknown";
     }
 }
 
