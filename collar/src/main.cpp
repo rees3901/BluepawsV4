@@ -41,6 +41,7 @@
 
 #include <bp_protocol.h>
 #include <bp_config.h>
+#include <bp_crypto.h>
 #include "collar_pins.h"
 
 // FreeRTOS (built into Adafruit nRF52 BSP)
@@ -86,9 +87,15 @@ static volatile bool gpsFix       = false;
 // BLE state
 static volatile bool bleHomeFound = false;
 
+// Command deduplication — ignore retransmitted commands from hub
+static uint32_t lastProcessedCmdSeq = 0;
+
 // Lost mode
 static volatile bool     inLostMode      = false;
 static volatile uint32_t lostModeStartMs = 0;
+
+// AES-128 encryption key
+static const uint8_t aesKey[16] = LORA_AES_KEY;
 
 // Cellular
 static volatile bool cellularPending = false;
@@ -240,6 +247,8 @@ void setup() {
     Serial.printf("[LORA] Ready: %.1fMHz SF%d BW%.0fkHz %ddBm\n",
                   LORA_FREQUENCY, LORA_SPREADING, LORA_BANDWIDTH,
                   currentConfig->tx_power_dBm);
+    Serial.printf("[LORA] AES-128: %s\n",
+                  bp_aes_key_is_zero(aesKey) ? "OFF (key all zeros)" : "ENABLED");
 
     // ── BLE Init ──
     Bluefruit.begin(0, 1);  // 0 peripheral, 1 central
@@ -677,6 +686,11 @@ static void sendLostModeAlert() {
 // LoRa Transmit
 // ═══════════════════════════════════════════════
 static void transmitPacket(uint8_t *buf, uint8_t len) {
+    // Encrypt payload if AES key is configured
+    if (!bp_aes_key_is_zero(aesKey)) {
+        bp_aes_ctr_apply(buf, len, aesKey);
+    }
+
     lora.standby();
     int state = lora.transmit(buf, len);
 
@@ -713,6 +727,12 @@ static void listenForCommands() {
             if (state == RADIOLIB_ERR_NONE) {
                 uint8_t rxLen = lora.getPacketLength();
                 Serial.printf("[RX] Received %d bytes\n", rxLen);
+
+                // Decrypt if AES key is configured
+                if (!bp_aes_key_is_zero(aesKey)) {
+                    bp_aes_ctr_apply(rxBuf, rxLen, aesKey);
+                }
+
                 pkt_print_hex(rxBuf, rxLen);
 
                 if (rxLen >= BP_MIN_PACKET_SIZE && rxBuf[0] == BP_PROTOCOL_VERSION) {
@@ -744,6 +764,13 @@ static void handleReceivedCommand(const uint8_t *buf, uint8_t len) {
 
     uint16_t pktType = pkt_pkt_type(buf);
     uint32_t cmdSeq  = pkt_msg_seq(buf);
+
+    // ── Deduplication: hub retries up to 3x, ignore already-processed commands ──
+    if (cmdSeq != 0 && cmdSeq == lastProcessedCmdSeq) {
+        Serial.printf("[RX] Duplicate cmd seq %lu — ignoring\n", cmdSeq);
+        return;
+    }
+    lastProcessedCmdSeq = cmdSeq;
 
     switch (pktType) {
     case PKT_CMD_MODE: {

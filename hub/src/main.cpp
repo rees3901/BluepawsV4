@@ -31,6 +31,7 @@
 
 #include <bp_protocol.h>
 #include <bp_config.h>
+#include <bp_crypto.h>
 #include "hub_pins.h"
 
 // ═══════════════════════════════════════════════
@@ -125,6 +126,9 @@ struct cloud_entry_t {
     int16_t  rssi;
     float    snr;
 };
+
+// AES-128 encryption key
+static const uint8_t aesKey[16] = LORA_AES_KEY;
 
 // Packet stats
 static uint32_t rxCount = 0;
@@ -288,6 +292,8 @@ static void initLoRa() {
     lora.startReceive();
 
     Serial.println("OK");
+    Serial.printf("[LORA] AES-128: %s\n",
+                  bp_aes_key_is_zero(aesKey) ? "OFF (key all zeros)" : "ENABLED");
 }
 
 static void initWiFi() {
@@ -404,6 +410,10 @@ static void loraTask(void *param) {
                     xSemaphoreGive(loraMutex);
 
                     if (state == RADIOLIB_ERR_NONE) {
+                        // Decrypt if AES key is configured
+                        if (!bp_aes_key_is_zero(aesKey)) {
+                            bp_aes_ctr_apply(rxBuf, (uint8_t)len, aesKey);
+                        }
                         handlePacket(rxBuf, (uint8_t)len, rssi, snr);
                     }
                 } else {
@@ -418,6 +428,11 @@ static void loraTask(void *param) {
         TickType_t now = xTaskGetTickCount();
         if ((now - lastCmdTx) >= pdMS_TO_TICKS(CMD_QUEUE_INTERVAL_MS)) {
             if (xQueueReceive(cmdQueue, &cmd, 0) == pdTRUE) {
+                // Encrypt if AES key is configured
+                if (!bp_aes_key_is_zero(aesKey)) {
+                    bp_aes_ctr_apply(cmd.buf, cmd.len, aesKey);
+                }
+
                 if (xSemaphoreTake(loraMutex, pdMS_TO_TICKS(200))) {
                     int state = lora.transmit(cmd.buf, cmd.len);
                     lora.startReceive();  // Back to RX
