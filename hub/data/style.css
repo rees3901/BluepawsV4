@@ -1,6 +1,6 @@
 /*
   Bluepaws V4 — Hub Web GUI Styles
-  Mobile-first responsive layout using Flexbox
+  Left sidebar with hamburger collapse, dark/light theme, Flexbox layout
 */
 
 /* ── Reset & Base ── */
@@ -10,6 +10,7 @@
     padding: 0;
 }
 
+/* ── Dark Theme (default) ── */
 :root {
     --bg-primary: #0f1923;
     --bg-card: #1a2733;
@@ -24,6 +25,23 @@
     --border: #2f3e4e;
     --radius: 8px;
     --shadow: 0 2px 8px rgba(0,0,0,0.3);
+    --panel-width: 340px;
+}
+
+/* ── Light Theme ── */
+body.light {
+    --bg-primary: #f0f2f5;
+    --bg-card: #ffffff;
+    --bg-panel: #f8f9fa;
+    --text-primary: #1a1a2e;
+    --text-secondary: #6b7280;
+    --accent: #1d9bf0;
+    --accent-hover: #1a8cd8;
+    --success: #16a34a;
+    --warning: #d97706;
+    --danger: #dc2626;
+    --border: #d1d5db;
+    --shadow: 0 2px 8px rgba(0,0,0,0.1);
 }
 
 html, body {
@@ -34,25 +52,103 @@ html, body {
     overflow: hidden;
 }
 
-/* ── Layout ── */
+/* ── Layout: sidebar left + map right ── */
 body {
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
 }
 
 #map {
     flex: 1;
-    min-height: 0;
+    min-width: 0;
+    height: 100%;
     z-index: 1;
 }
 
+/* ── Sidebar Panel (left) ── */
 #panel {
-    flex: 0 0 auto;
-    max-height: 40vh;
-    overflow-y: auto;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: var(--panel-width);
+    height: 100%;
     background: var(--bg-panel);
-    border-top: 1px solid var(--border);
-    z-index: 10;
+    border-right: 1px solid var(--border);
+    z-index: 500;
+    display: flex;
+    flex-direction: column;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    overflow: hidden;
+}
+
+#panel.open {
+    transform: translateX(0);
+}
+
+/* Push map over when panel is open (desktop) */
+body.panel-open #map {
+    margin-left: var(--panel-width);
+}
+
+#panelHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.panel-title {
+    font-weight: 700;
+    font-size: 0.95rem;
+    letter-spacing: 0.02em;
+}
+
+.panel-header-btns {
+    display: flex;
+    gap: 6px;
+}
+
+#deviceCards {
+    flex: 1;
+    overflow-y: auto;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+/* ── Hamburger Button ── */
+.hamburger-btn {
+    position: fixed;
+    top: 10px;
+    left: 10px;
+    z-index: 1000;
+    width: 38px;
+    height: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-card);
+    color: var(--text-primary);
+    cursor: pointer;
+    box-shadow: var(--shadow);
+    transition: background 0.15s;
+}
+
+.hamburger-btn:hover {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+
+/* Shift hamburger right when panel is open */
+body.panel-open .hamburger-btn {
+    left: calc(var(--panel-width) + 10px);
 }
 
 /* ── Status Banner ── */
@@ -74,6 +170,10 @@ body {
     box-shadow: var(--shadow);
 }
 
+body.light #statusBanner {
+    background: rgba(255, 255, 255, 0.9);
+}
+
 #statusBanner.connected #statusIcon {
     color: var(--success);
 }
@@ -89,16 +189,7 @@ body {
 }
 
 /* ── Device Cards ── */
-#deviceCards {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 10px;
-    padding: 12px;
-}
-
 .device-card {
-    flex: 1 1 280px;
-    max-width: 400px;
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius);
@@ -181,22 +272,13 @@ body {
     border-color: var(--accent);
 }
 
-/* ── Controls Bar ── */
-#controlsBar {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 12px;
-    border-top: 1px solid var(--border);
-    background: var(--bg-primary);
-}
-
+/* ── Control Buttons (shared) ── */
 .ctrl-btn {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 36px;
-    height: 36px;
+    width: 32px;
+    height: 32px;
     border: 1px solid var(--border);
     border-radius: var(--radius);
     background: var(--bg-card);
@@ -208,15 +290,42 @@ body {
 .ctrl-btn:hover {
     background: var(--accent);
     border-color: var(--accent);
+    color: #fff;
 }
 
 .ctrl-btn.active {
     background: var(--accent);
     border-color: var(--accent);
+    color: #fff;
 }
 
-.spacer {
-    flex: 1;
+/* ── Leaflet Map Controls (custom buttons) ── */
+.leaflet-map-btn {
+    width: 34px;
+    height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-card);
+    color: var(--text-primary);
+    cursor: pointer;
+    box-shadow: var(--shadow);
+    transition: background 0.15s;
+    margin-bottom: 6px;
+}
+
+.leaflet-map-btn:hover {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+
+.leaflet-map-btn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
 }
 
 /* ── Modals ── */
@@ -366,6 +475,10 @@ body {
     white-space: nowrap;
 }
 
+body.light .measure-label {
+    background: rgba(255, 255, 255, 0.9);
+}
+
 /* ── Marker Icons ── */
 .bp-marker {
     width: 28px;
@@ -394,14 +507,18 @@ body {
 .bp-marker.status-home { border-color: var(--success); }
 .bp-marker.status-lost { border-color: var(--danger); }
 
-/* ── Responsive ── */
-@media (max-width: 600px) {
-    #panel {
-        max-height: 50vh;
+/* ── Responsive: mobile ── */
+@media (max-width: 768px) {
+    :root {
+        --panel-width: 280px;
+    }
+
+    /* On mobile, panel overlays the map */
+    body.panel-open #map {
+        margin-left: 0;
     }
 
     .device-card {
-        flex: 1 1 100%;
         max-width: none;
     }
 
@@ -411,34 +528,16 @@ body {
     }
 }
 
-@media (min-width: 1024px) {
-    body {
-        flex-direction: row;
-    }
-
-    #map {
-        flex: 1;
-        height: 100%;
-    }
-
-    #panel {
-        flex: 0 0 360px;
-        max-height: 100%;
-        border-top: none;
-        border-left: 1px solid var(--border);
-    }
-}
-
 /* ── Scrollbar ── */
-#panel::-webkit-scrollbar {
+#deviceCards::-webkit-scrollbar {
     width: 4px;
 }
 
-#panel::-webkit-scrollbar-track {
+#deviceCards::-webkit-scrollbar-track {
     background: transparent;
 }
 
-#panel::-webkit-scrollbar-thumb {
+#deviceCards::-webkit-scrollbar-thumb {
     background: var(--border);
     border-radius: 2px;
 }

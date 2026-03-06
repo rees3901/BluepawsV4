@@ -1,6 +1,7 @@
 /*
   Bluepaws V4 — Hub Web GUI
   Leaflet.js map with SSE real-time updates
+  Left sidebar, dark/light theme, map-based measure tool
 */
 
 (function () {
@@ -9,13 +10,15 @@
     // ═══════════════════════════════════════════════
     // State
     // ═══════════════════════════════════════════════
-    const devices = {};   // keyed by device id
+    const devices = {};
     let map = null;
     let evtSource = null;
     let measuring = false;
     let measurePoints = [];
     let measureLine = null;
     let measureLabels = [];
+    let measureMarkers = [];
+    let darkMode = true;
 
     // ═══════════════════════════════════════════════
     // Map Initialisation
@@ -28,17 +31,17 @@
         });
 
         // Layer options
-        const street = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        var street = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '&copy; OpenStreetMap',
             maxZoom: 19
         });
 
-        const satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        var satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
             attribution: '&copy; Esri',
             maxZoom: 19
         });
 
-        const topo = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+        var topo = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
             attribution: '&copy; OpenTopoMap',
             maxZoom: 17
         });
@@ -52,11 +55,97 @@
             'Topographic': topo
         }, null, { position: 'topright' }).addTo(map);
 
-        // Zoom control (top-left)
+        // Zoom control (top-left, below hamburger)
         L.control.zoom({ position: 'topleft' }).addTo(map);
+
+        // ── Custom map controls (bottomleft) ──
+
+        // Theme toggle (crescent moon)
+        var ThemeControl = L.Control.extend({
+            options: { position: 'topleft' },
+            onAdd: function () {
+                var btn = L.DomUtil.create('div', 'leaflet-map-btn');
+                btn.id = 'btnTheme';
+                btn.title = 'Toggle dark/light theme';
+                btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">' +
+                    '<path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z"/>' +
+                    '</svg>';
+                L.DomEvent.disableClickPropagation(btn);
+                L.DomEvent.on(btn, 'click', function () { toggleTheme(); });
+                return btn;
+            }
+        });
+        new ThemeControl().addTo(map);
+
+        // Measure tool (ruler icon)
+        var MeasureControl = L.Control.extend({
+            options: { position: 'topleft' },
+            onAdd: function () {
+                var btn = L.DomUtil.create('div', 'leaflet-map-btn');
+                btn.id = 'btnMeasure';
+                btn.title = 'Measure distance (click points on map)';
+                btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
+                    '<path d="M2 22L22 2"/>' +
+                    '<path d="M6 18l2-2"/><path d="M10 14l2-2"/><path d="M14 10l2-2"/><path d="M18 6l2-2"/>' +
+                    '</svg>';
+                L.DomEvent.disableClickPropagation(btn);
+                L.DomEvent.on(btn, 'click', function () { toggleMeasure(); });
+                return btn;
+            }
+        });
+        new MeasureControl().addTo(map);
 
         // Click handler for measurement mode
         map.on('click', onMapClick);
+    }
+
+    // ═══════════════════════════════════════════════
+    // Theme Toggle
+    // ═══════════════════════════════════════════════
+    function toggleTheme() {
+        darkMode = !darkMode;
+        document.body.classList.toggle('light', !darkMode);
+
+        // Update moon/sun icon
+        var btn = document.getElementById('btnTheme');
+        if (btn) {
+            if (darkMode) {
+                // Moon icon (dark mode active)
+                btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">' +
+                    '<path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z"/>' +
+                    '</svg>';
+            } else {
+                // Sun icon (light mode active)
+                btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">' +
+                    '<circle cx="12" cy="12" r="5"/>' +
+                    '<path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>' +
+                    '</svg>';
+            }
+        }
+
+        // Save preference
+        try { localStorage.setItem('bp_theme', darkMode ? 'dark' : 'light'); } catch (e) {}
+    }
+
+    function loadTheme() {
+        try {
+            var saved = localStorage.getItem('bp_theme');
+            if (saved === 'light') {
+                darkMode = false;
+                document.body.classList.add('light');
+            }
+        } catch (e) {}
+    }
+
+    // ═══════════════════════════════════════════════
+    // Sidebar Toggle (hamburger)
+    // ═══════════════════════════════════════════════
+    function toggleSidebar() {
+        var panel = document.getElementById('panel');
+        var isOpen = panel.classList.toggle('open');
+        document.body.classList.toggle('panel-open', isOpen);
+        // Invalidate map size after transition
+        setTimeout(function () { map.invalidateSize(); }, 300);
     }
 
     // ═══════════════════════════════════════════════
@@ -69,7 +158,7 @@
 
         evtSource.addEventListener('telemetry', function (e) {
             try {
-                const data = JSON.parse(e.data);
+                var data = JSON.parse(e.data);
                 updateDevice(data);
             } catch (err) {
                 console.error('SSE parse error:', err);
@@ -82,13 +171,12 @@
 
         evtSource.onerror = function () {
             setStatus('disconnected', 'Disconnected');
-            // Auto-reconnect is built into EventSource
         };
     }
 
     function setStatus(state, text) {
-        const banner = document.getElementById('statusBanner');
-        const textEl = document.getElementById('statusText');
+        var banner = document.getElementById('statusBanner');
+        var textEl = document.getElementById('statusText');
         banner.className = state;
         textEl.textContent = text;
     }
@@ -97,8 +185,8 @@
     // Device Updates
     // ═══════════════════════════════════════════════
     function updateDevice(data) {
-        const id = data.id;
-        let dev = devices[id];
+        var id = data.id;
+        var dev = devices[id];
 
         if (!dev) {
             dev = {
@@ -111,16 +199,14 @@
             devices[id] = dev;
         }
 
-        // Update stored data
         dev.data = data;
         dev.lastUpdate = Date.now();
 
-        // Update map marker
         if (data.hasGps && data.lat !== 0 && data.lon !== 0) {
-            const latlng = [data.lat, data.lon];
+            var latlng = [data.lat, data.lon];
 
             if (!dev.marker) {
-                const icon = L.divIcon({
+                var icon = L.divIcon({
                     className: '',
                     html: '<div class="bp-marker" id="marker-' + id + '">&#128062;</div>',
                     iconSize: [28, 28],
@@ -129,34 +215,29 @@
                 dev.marker = L.marker(latlng, { icon: icon }).addTo(map);
                 dev.marker.bindPopup('');
 
-                // Zoom to first device
                 if (Object.keys(devices).length === 1) {
                     map.setView(latlng, 16);
                 }
             } else {
                 dev.marker.setLatLng(latlng);
 
-                // Pop animation
-                const el = document.getElementById('marker-' + id);
+                var el = document.getElementById('marker-' + id);
                 if (el) {
                     el.classList.remove('updated');
-                    void el.offsetWidth;  // force reflow
+                    void el.offsetWidth;
                     el.classList.add('updated');
                 }
             }
 
-            // Update popup content
             dev.marker.setPopupContent(buildPopup(data));
 
-            // Update marker style based on status
-            const el = document.getElementById('marker-' + id);
-            if (el) {
-                el.className = 'bp-marker';
-                if (data.status === 'Home') el.classList.add('status-home');
-                if (data.status === 'LostTimeout') el.classList.add('status-lost');
+            var markerEl = document.getElementById('marker-' + id);
+            if (markerEl) {
+                markerEl.className = 'bp-marker';
+                if (data.status === 'Home') markerEl.classList.add('status-home');
+                if (data.status === 'LostTimeout') markerEl.classList.add('status-lost');
             }
 
-            // Trail line
             dev.trail.push(latlng);
             if (dev.trail.length > 100) dev.trail.shift();
             if (dev.trailLine) {
@@ -171,7 +252,6 @@
             }
         }
 
-        // Update device card in panel
         renderDeviceCard(dev);
     }
 
@@ -192,9 +272,9 @@
     // Device Cards
     // ═══════════════════════════════════════════════
     function renderDeviceCard(dev) {
-        const data = dev.data;
-        const container = document.getElementById('deviceCards');
-        let card = document.getElementById('card-' + dev.id);
+        var data = dev.data;
+        var container = document.getElementById('deviceCards');
+        var card = document.getElementById('card-' + dev.id);
 
         if (!card) {
             card = document.createElement('div');
@@ -211,12 +291,12 @@
             });
         }
 
-        const age = Math.floor((Date.now() - dev.lastUpdate) / 1000);
-        const stale = age > 600;
+        var age = Math.floor((Date.now() - dev.lastUpdate) / 1000);
+        var stale = age > 600;
         card.className = 'device-card' + (stale ? ' stale' : '');
 
-        const statusClass = 'status-' + data.status.toLowerCase().replace('timeout', '');
-        const battPct = Math.min(100, Math.max(0, Math.round((data.batt - 3000) / 12)));
+        var statusClass = 'status-' + data.status.toLowerCase().replace('timeout', '');
+        var battPct = Math.min(100, Math.max(0, Math.round((data.batt - 3000) / 12)));
 
         card.innerHTML =
             '<div class="card-header">' +
@@ -245,7 +325,6 @@
         return Math.floor(seconds / 3600) + 'h ago';
     }
 
-    // Periodically refresh card ages
     setInterval(function () {
         for (var id in devices) {
             renderDeviceCard(devices[id]);
@@ -253,11 +332,12 @@
     }, 5000);
 
     // ═══════════════════════════════════════════════
-    // Measurement Tool
+    // Measurement Tool (on map)
     // ═══════════════════════════════════════════════
     function toggleMeasure() {
         measuring = !measuring;
-        document.getElementById('btnMeasure').classList.toggle('active', measuring);
+        var btn = document.getElementById('btnMeasure');
+        if (btn) btn.classList.toggle('active', measuring);
 
         if (!measuring) {
             clearMeasure();
@@ -271,20 +351,18 @@
 
         measurePoints.push(e.latlng);
 
-        L.circleMarker(e.latlng, {
+        var cm = L.circleMarker(e.latlng, {
             radius: 4,
             color: '#1d9bf0',
             fillOpacity: 1
         }).addTo(map);
+        measureMarkers.push(cm);
 
         if (measurePoints.length > 1) {
-            var prev = measurePoints[measurePoints.length - 2];
-            var curr = e.latlng;
-            var dist = prev.distanceTo(curr);
             var total = totalMeasureDistance();
 
             if (measureLine) {
-                measureLine.addLatLng(curr);
+                measureLine.addLatLng(e.latlng);
             } else {
                 measureLine = L.polyline(measurePoints, {
                     color: '#1d9bf0',
@@ -293,7 +371,7 @@
                 }).addTo(map);
             }
 
-            var label = L.marker(curr, {
+            var label = L.marker(e.latlng, {
                 icon: L.divIcon({
                     className: 'measure-label',
                     html: formatDistance(total),
@@ -325,12 +403,8 @@
         }
         measureLabels.forEach(function (l) { map.removeLayer(l); });
         measureLabels = [];
-        // Also remove circle markers — they're on the map directly
-        map.eachLayer(function (layer) {
-            if (layer instanceof L.CircleMarker && !(layer instanceof L.Circle)) {
-                map.removeLayer(layer);
-            }
-        });
+        measureMarkers.forEach(function (m) { map.removeLayer(m); });
+        measureMarkers = [];
     }
 
     // ═══════════════════════════════════════════════
@@ -354,7 +428,6 @@
     function openSettings() {
         document.getElementById('settingsModal').classList.remove('hidden');
 
-        // Fetch hub status
         fetch('/api/status')
             .then(function (r) { return r.json(); })
             .then(function (s) {
@@ -447,8 +520,15 @@
     // Bootstrap
     // ═══════════════════════════════════════════════
     function init() {
+        loadTheme();
         initMap();
         connectSSE();
+
+        // Open sidebar by default on desktop, closed on mobile
+        if (window.innerWidth >= 768) {
+            document.getElementById('panel').classList.add('open');
+            document.body.classList.add('panel-open');
+        }
 
         // Fetch initial device list
         fetch('/api/devices')
@@ -460,13 +540,16 @@
             .catch(function () { /* SSE will catch up */ });
 
         // Button handlers
+        document.getElementById('btnHamburger').addEventListener('click', toggleSidebar);
         document.getElementById('btnFitAll').addEventListener('click', fitAllMarkers);
-        document.getElementById('btnMeasure').addEventListener('click', toggleMeasure);
         document.getElementById('btnSettings').addEventListener('click', openSettings);
         document.getElementById('btnCloseSettings').addEventListener('click', closeSettings);
         document.getElementById('btnSaveConfig').addEventListener('click', saveConfig);
         document.getElementById('btnSendCmd').addEventListener('click', sendCommand);
         document.getElementById('btnCloseCmd').addEventListener('click', closeCommand);
+
+        // Tell map about initial layout
+        setTimeout(function () { map.invalidateSize(); }, 350);
     }
 
     // Public API for inline onclick handlers
@@ -475,7 +558,6 @@
         focusDevice: focusDevice
     };
 
-    // Wait for DOM
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', init);
     } else {

@@ -16,42 +16,46 @@
     <style>.modal.hidden { display: none; }</style>
 </head>
 <body>
+    <!-- Hamburger Toggle (always visible) -->
+    <button id="btnHamburger" class="hamburger-btn" title="Toggle sidebar">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+            <rect x="2" y="4" width="16" height="2" rx="1"/>
+            <rect x="2" y="9" width="16" height="2" rx="1"/>
+            <rect x="2" y="14" width="16" height="2" rx="1"/>
+        </svg>
+    </button>
+
     <!-- Status Banner -->
     <div id="statusBanner" class="disconnected">
         <span id="statusIcon">&#9679;</span>
         <span id="statusText">Connecting...</span>
     </div>
 
-    <!-- Map Container -->
-    <div id="map"></div>
+    <!-- Sidebar (left, collapsible) -->
+    <div id="panel" class="open">
+        <div id="panelHeader">
+            <span class="panel-title">Bluepaws V4</span>
+            <div class="panel-header-btns">
+                <button id="btnFitAll" class="ctrl-btn" title="Fit all markers">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                        <path d="M2 2h4V0H0v6h2V2zm12 0h-4V0h6v6h-2V2zM2 14h4v2H0v-6h2v4zm12 0h-4v2h6v-6h-2v4z"/>
+                    </svg>
+                </button>
+                <button id="btnSettings" class="ctrl-btn" title="Settings">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                        <path d="M8 4.5a3.5 3.5 0 100 7 3.5 3.5 0 000-7zM6.5 8a1.5 1.5 0 113 0 1.5 1.5 0 01-3 0z"/>
+                        <path d="M9.4.2l.9 1.7c.2.1.4.2.6.3l1.9-.3.8 1.4-1 1.4v.6l1 1.4-.8 1.4-1.9-.3c-.2.1-.4.3-.6.3L9.4 15.8H7.6l-.9-1.7c-.2-.1-.4-.2-.6-.3l-1.9.3-.8-1.4 1-1.4c0-.2 0-.4 0-.6l-1-1.4.8-1.4 1.9.3c.2-.1.4-.3.6-.3L7.6.2h1.8z"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
 
-    <!-- Bottom Panel -->
-    <div id="panel">
         <!-- Device Cards -->
         <div id="deviceCards"></div>
-
-        <!-- Controls Bar -->
-        <div id="controlsBar">
-            <button id="btnFitAll" class="ctrl-btn" title="Fit all markers">
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                    <path d="M2 2h4V0H0v6h2V2zm12 0h-4V0h6v6h-2V2zM2 14h4v2H0v-6h2v4zm12 0h-4v2h6v-6h-2v4z"/>
-                </svg>
-            </button>
-            <button id="btnMeasure" class="ctrl-btn" title="Measure distance">
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                    <path d="M1 8h2v2H1V8zm4 0h2v2H5V8zm4 0h2v2H9V8zm4 0h2v2h-2V8zM0 6h16v4H0V6z" opacity="0.3"/>
-                    <path d="M0 7h16v2H0V7z"/>
-                </svg>
-            </button>
-            <div class="spacer"></div>
-            <button id="btnSettings" class="ctrl-btn" title="Settings">
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-                    <path d="M8 4.5a3.5 3.5 0 100 7 3.5 3.5 0 000-7zM6.5 8a1.5 1.5 0 113 0 1.5 1.5 0 01-3 0z"/>
-                    <path d="M9.4.2l.9 1.7c.2.1.4.2.6.3l1.9-.3.8 1.4-1 1.4v.6l1 1.4-.8 1.4-1.9-.3c-.2.1-.4.3-.6.3L9.4 15.8H7.6l-.9-1.7c-.2-.1-.4-.2-.6-.3l-1.9.3-.8-1.4 1-1.4c0-.2 0-.4 0-.6l-1-1.4.8-1.4 1.9.3c.2-.1.4-.3.6-.3L7.6.2h1.8z"/>
-                </svg>
-            </button>
-        </div>
     </div>
+
+    <!-- Map Container -->
+    <div id="map"></div>
 
     <!-- Settings Modal -->
     <div id="settingsModal" class="modal hidden">
