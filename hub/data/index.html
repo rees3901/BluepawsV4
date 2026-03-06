@@ -5,18 +5,28 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Bluepaws V4</title>
 
-    <!-- Leaflet CSS (CDN — will cache locally for offline use later) -->
+    <!-- Leaflet CSS — mapping library (loaded from CDN) -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
           integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
           crossorigin="">
 
+    <!-- Our custom styles (served from hub's LittleFS flash) -->
     <link rel="stylesheet" href="style.css">
 
-    <!-- Fallback: hide modals even if CSS fails to load -->
+    <!-- Safety net: ensure modals stay hidden even if CSS fails to load -->
     <style>.modal.hidden { display: none; }</style>
 </head>
 <body>
-    <!-- Hamburger Toggle (always visible) -->
+    <!--
+      Page Layout:
+        - Hamburger button (fixed, top-left) — toggles sidebar
+        - Status banner (fixed, top-right) — shows SSE connection state
+        - Sidebar panel (left, collapsible) — device cards + controls
+        - Map container (fills remaining space) — Leaflet.js map
+        - 3 modals: Settings, Command, Find (hidden by default)
+    -->
+
+    <!-- Hamburger Toggle (always visible, moves right when sidebar opens) -->
     <button id="btnHamburger" class="hamburger-btn" title="Toggle sidebar">
         <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
             <rect x="2" y="4" width="16" height="2" rx="1"/>
@@ -25,13 +35,13 @@
         </svg>
     </button>
 
-    <!-- Status Banner -->
+    <!-- Status Banner — shows "Connected" (green) or "Disconnected" (red pulsing) -->
     <div id="statusBanner" class="disconnected">
-        <span id="statusIcon">&#9679;</span>
+        <span id="statusIcon">&#9679;</span>  <!-- Colored dot (green/red via CSS) -->
         <span id="statusText">Connecting...</span>
     </div>
 
-    <!-- Sidebar (left, collapsible) -->
+    <!-- Sidebar Panel — contains device cards and header controls -->
     <div id="panel" class="open">
         <div id="panelHeader">
             <span class="panel-title">Bluepaws V4</span>
@@ -50,14 +60,14 @@
             </div>
         </div>
 
-        <!-- Device Cards -->
+        <!-- Device Cards — dynamically populated by app.js -->
         <div id="deviceCards"></div>
     </div>
 
-    <!-- Map Container -->
+    <!-- Map Container — Leaflet.js renders here -->
     <div id="map"></div>
 
-    <!-- Settings Modal -->
+    <!-- Settings Modal — WiFi/cloud config + hub diagnostics -->
     <div id="settingsModal" class="modal hidden">
         <div class="modal-content">
             <h2>Hub Settings</h2>
@@ -84,7 +94,7 @@
         </div>
     </div>
 
-    <!-- Command Modal -->
+    <!-- Command Modal — change collar operating mode (Normal/PowerSave/Active/Lost) -->
     <div id="commandModal" class="modal hidden">
         <div class="modal-content">
             <h2>Send Command</h2>
@@ -105,7 +115,7 @@
         </div>
     </div>
 
-    <!-- Find Modal -->
+    <!-- Find Modal — "Find My Pet" buzzer pattern + LED flash control -->
     <div id="findModal" class="modal hidden">
         <div class="modal-content">
             <h2>Find Collar</h2>
@@ -135,11 +145,12 @@
         </div>
     </div>
 
-    <!-- Leaflet JS -->
+    <!-- Leaflet JS — mapping library (loaded from CDN, must load before app.js) -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
             integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
             crossorigin=""></script>
 
+    <!-- Our app — served from hub's LittleFS flash -->
     <script src="app.js"></script>
 </body>
 </html>

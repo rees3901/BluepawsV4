@@ -1,27 +1,42 @@
 /*
   Bluepaws V4 — Hub Web GUI
-  Leaflet.js map with SSE real-time updates
-  Left sidebar, dark/light theme, enhanced device cards with avatar, follow, trail controls
+  ══════════════════════════════════════════════════════════════
+  Single-page app that runs in the browser, served from the hub's
+  on-chip LittleFS flash storage.
+
+  Key features:
+   - Leaflet.js map with Street/Satellite/Topo layers
+   - Real-time telemetry via SSE (Server-Sent Events) from GET /events
+   - Device cards in a collapsible sidebar showing telemetry + action buttons
+   - Follow mode: auto-center map on a specific device
+   - Trail mode: breadcrumb polyline showing movement history
+   - Measure tool: click-to-measure distance on the map
+   - Find modal: trigger collar buzzer + LED flash
+   - Command modal: change collar operating mode
+   - Settings modal: configure WiFi SSID/password + cloud endpoint
+   - Dark/light theme toggle with localStorage persistence
+  ══════════════════════════════════════════════════════════════
 */
 
 (function () {
     'use strict';
 
     // ═══════════════════════════════════════════════
-    // State
+    // Application State
     // ═══════════════════════════════════════════════
-    const devices = {};
-    let map = null;
-    let evtSource = null;
-    let measuring = false;
-    let measurePoints = [];
-    let measureLine = null;
-    let measureLabels = [];
-    let measureMarkers = [];
-    let darkMode = true;
-    let followedDeviceId = null;
+    const devices = {};            // Map of device_id → device object (marker, trail, data)
+    let map = null;                // Leaflet map instance
+    let evtSource = null;          // EventSource for SSE connection
+    let measuring = false;         // true when measure tool is active
+    let measurePoints = [];        // Array of L.LatLng clicked during measurement
+    let measureLine = null;        // Leaflet polyline connecting measure points
+    let measureLabels = [];        // Distance labels at each measure point
+    let measureMarkers = [];       // Circle markers at each measure point
+    let darkMode = true;           // Current theme (persisted to localStorage)
+    let followedDeviceId = null;   // Device ID being auto-followed on map (null = none)
 
-    // Emoji + color palette for distinguishing animals
+    // Each new device gets assigned an emoji avatar and a trail color
+    // from these palettes. Cycles if more than 8 devices are tracked.
     const AVATARS = [
         { emoji: '\u{1F431}', color: '#1d9bf0', label: 'Cat'     },
         { emoji: '\u{1F436}', color: '#ff6b35', label: 'Dog'     },
@@ -38,18 +53,21 @@
         '#f97316', '#06b6d4', '#84cc16', '#ec4899'
     ];
 
-    let avatarIndex = 0;
+    let avatarIndex = 0;  // Increments as new devices are discovered
 
     // ═══════════════════════════════════════════════
     // Map Initialisation
+    // Creates a Leaflet map with 3 tile layer options.
+    // Default center is London — will auto-recenter when first device data arrives.
     // ═══════════════════════════════════════════════
     function initMap() {
         map = L.map('map', {
-            center: [51.505, -0.09],
+            center: [51.505, -0.09],  // Default center (overridden on first device)
             zoom: 13,
-            zoomControl: false
+            zoomControl: false        // We add our own zoom control below
         });
 
+        // Three base layers — user can switch between them via layer control
         var street = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '&copy; OpenStreetMap',
             maxZoom: 19
@@ -65,8 +83,9 @@
             maxZoom: 17
         });
 
-        street.addTo(map);
+        street.addTo(map);  // Street map is the default
 
+        // Layer switcher control (top-right corner)
         L.control.layers({
             'Street': street,
             'Satellite': satellite,
@@ -160,11 +179,17 @@
     }
 
     // ═══════════════════════════════════════════════
-    // SSE Connection with heartbeat watchdog
+    // SSE Connection with Heartbeat Watchdog
+    //
+    // The hub sends a "heartbeat" event every 5 seconds.
+    // If we don't receive ANY event within 10 seconds, we
+    // show a "No heartbeat" warning in the status banner.
+    // The EventSource API automatically reconnects on disconnect.
     // ═══════════════════════════════════════════════
     var heartbeatTimer = null;
-    var HEARTBEAT_TIMEOUT_MS = 10000;  // mark disconnected if no event in 10s
+    var HEARTBEAT_TIMEOUT_MS = 10000;  // Show "No heartbeat" after 10s of silence
 
+    // Reset the watchdog timer — called on every SSE event
     function resetHeartbeatWatchdog() {
         clearTimeout(heartbeatTimer);
         setStatus('connected', 'Connected');
@@ -173,21 +198,24 @@
         }, HEARTBEAT_TIMEOUT_MS);
     }
 
+    // Open SSE connection to the hub's /events endpoint
     function connectSSE() {
-        if (evtSource) evtSource.close();
+        if (evtSource) evtSource.close();  // Close any existing connection
 
         evtSource = new EventSource('/events');
 
+        // "telemetry" events carry device data as JSON
         evtSource.addEventListener('telemetry', function (e) {
             resetHeartbeatWatchdog();
             try {
                 var data = JSON.parse(e.data);
-                updateDevice(data);
+                updateDevice(data);  // Update map marker + device card
             } catch (err) {
                 console.error('SSE parse error:', err);
             }
         });
 
+        // "heartbeat" events are empty — just prove the connection is alive
         evtSource.addEventListener('heartbeat', function () {
             resetHeartbeatWatchdog();
         });
@@ -199,72 +227,88 @@
         evtSource.onerror = function () {
             clearTimeout(heartbeatTimer);
             setStatus('disconnected', 'Disconnected');
+            // EventSource will auto-reconnect after a short delay
         };
     }
 
+    // Update the connection status pill (top-right corner)
     function setStatus(state, text) {
         var banner = document.getElementById('statusBanner');
         var textEl = document.getElementById('statusText');
-        banner.className = state;
+        banner.className = state;    // 'connected' or 'disconnected' — CSS styles the color
         textEl.textContent = text;
     }
 
     // ═══════════════════════════════════════════════
     // Device Updates
+    //
+    // Called for every "telemetry" SSE event AND for the initial
+    // /api/devices fetch. Creates or updates the device's map marker,
+    // trail breadcrumb, and sidebar card.
     // ═══════════════════════════════════════════════
     function updateDevice(data) {
         var id = data.id;
         var dev = devices[id];
 
+        // First time seeing this device — create a new entry with
+        // an assigned avatar emoji and trail color
         if (!dev) {
             var av = AVATARS[avatarIndex % AVATARS.length];
             var tc = TRAIL_COLORS[avatarIndex % TRAIL_COLORS.length];
             dev = {
                 id: id,
                 name: data.name,
-                marker: null,
-                trail: [],
-                trailLine: null,
-                showTrail: true,
-                avatar: av,
-                trailColor: tc
+                marker: null,       // Leaflet marker (created on first GPS fix)
+                trail: [],          // Array of [lat, lon] for breadcrumb trail
+                trailLine: null,    // Leaflet polyline for the trail
+                showTrail: true,    // Trail visible by default
+                avatar: av,         // Assigned emoji + color
+                trailColor: tc      // Trail line color
             };
             avatarIndex++;
             devices[id] = dev;
         }
 
-        dev.data = data;
-        dev.lastUpdate = Date.now();
+        dev.data = data;               // Store latest telemetry payload
+        dev.lastUpdate = Date.now();    // Timestamp for "last seen" calculation
 
+        // Only update map if we have valid GPS coordinates
         if (data.hasGps && data.lat !== 0 && data.lon !== 0) {
             var latlng = [data.lat, data.lon];
 
             if (!dev.marker) {
+                // First GPS fix for this device — create a map marker
+                // using a custom div icon with the device's emoji avatar
                 var icon = L.divIcon({
                     className: '',
                     html: '<div class="bp-marker" id="marker-' + id + '" style="border-color:' + dev.avatar.color + '">' + dev.avatar.emoji + '</div>',
                     iconSize: [32, 32],
-                    iconAnchor: [16, 16]
+                    iconAnchor: [16, 16]  // Center the icon on the position
                 });
                 dev.marker = L.marker(latlng, { icon: icon }).addTo(map);
-                dev.marker.bindPopup('');
+                dev.marker.bindPopup('');  // Popup gets content below
 
+                // If this is the first device ever, auto-zoom to it
                 if (Object.keys(devices).length === 1) {
                     map.setView(latlng, 16);
                 }
             } else {
+                // Existing marker — just move it to the new position
                 dev.marker.setLatLng(latlng);
 
+                // Trigger the "pop" animation on the marker (scale up then back)
                 var el = document.getElementById('marker-' + id);
                 if (el) {
                     el.classList.remove('updated');
-                    void el.offsetWidth;
+                    void el.offsetWidth;  // Force reflow to restart CSS animation
                     el.classList.add('updated');
                 }
             }
 
+            // Update the popup content with latest telemetry
             dev.marker.setPopupContent(buildPopup(dev));
 
+            // Apply status-based marker styles (green border for home, red pulse for lost)
             var markerEl = document.getElementById('marker-' + id);
             if (markerEl) {
                 markerEl.className = 'bp-marker';
@@ -273,28 +317,33 @@
                 if (data.status === 'LostTimeout') markerEl.classList.add('status-lost');
             }
 
-            // Trail line
+            // ── Trail breadcrumb line ──
+            // Each GPS update adds a point. Max 100 points (oldest dropped).
+            // Renders as a dashed polyline in the device's trail color.
             if (dev.showTrail) {
                 dev.trail.push(latlng);
-                if (dev.trail.length > 100) dev.trail.shift();
+                if (dev.trail.length > 100) dev.trail.shift();  // Keep trail manageable
                 if (dev.trailLine) {
-                    dev.trailLine.setLatLngs(dev.trail);
+                    dev.trailLine.setLatLngs(dev.trail);  // Update existing polyline
                 } else {
+                    // Create new trail polyline on first point
                     dev.trailLine = L.polyline(dev.trail, {
                         color: dev.trailColor,
                         weight: 2,
                         opacity: 0.6,
-                        dashArray: '4 4'
+                        dashArray: '4 4'  // Dashed line
                     }).addTo(map);
                 }
             }
 
-            // Follow mode: auto-center
+            // ── Follow mode ──
+            // If this device is being followed, keep the map centered on it
             if (followedDeviceId === id) {
                 map.setView(latlng);
             }
         }
 
+        // Update or create the sidebar device card
         renderDeviceCard(dev);
     }
 
@@ -313,7 +362,14 @@
     }
 
     // ═══════════════════════════════════════════════
-    // Device Cards
+    // Device Cards — Sidebar UI
+    //
+    // Each device gets a card in the sidebar showing:
+    //  - Avatar emoji + device name + GPS coordinates
+    //  - Status badge (Out, Home, Lost, etc.)
+    //  - Telemetry grid: profile, battery, signal, accuracy, fix age, last seen
+    //  - Action buttons: Jump, Follow, Trail, Find, Cmd
+    // Cards are re-rendered on every telemetry update.
     // ═══════════════════════════════════════════════
     function renderDeviceCard(dev) {
         var data = dev.data;
@@ -321,6 +377,7 @@
         var card = document.getElementById('card-' + dev.id);
         var isNew = false;
 
+        // Create card element if this is a new device
         if (!card) {
             card = document.createElement('div');
             card.id = 'card-' + dev.id;
@@ -329,11 +386,13 @@
             isNew = true;
         }
 
+        // Calculate time since last update — cards older than 10 minutes get dimmed
         var age = Math.floor((Date.now() - dev.lastUpdate) / 1000);
-        var stale = age > 600;
+        var stale = age > 600;  // 10 minutes
         card.className = 'device-card' + (stale ? ' stale' : '');
 
         var statusClass = 'status-' + data.status.toLowerCase().replace('timeout', '');
+        // Battery percentage: rough estimate from voltage (3000mV = 0%, 4200mV = 100%)
         var battPct = Math.min(100, Math.max(0, Math.round((data.batt - 3000) / 12)));
         var isFollowed = (followedDeviceId === dev.id);
 
@@ -416,6 +475,7 @@
         };
     }
 
+    // Human-friendly time display (e.g. "just now", "5s ago", "3m ago", "2h ago")
     function formatAge(seconds) {
         if (seconds < 5) return 'just now';
         if (seconds < 60) return seconds + 's ago';
@@ -423,7 +483,9 @@
         return Math.floor(seconds / 3600) + 'h ago';
     }
 
-    // Periodically refresh card ages
+    // Re-render all cards every 5 seconds to update "last seen" ages
+    // (the actual telemetry data only changes on SSE events, but the
+    //  age counter needs to tick every few seconds)
     setInterval(function () {
         for (var id in devices) {
             renderDeviceCard(devices[id]);
@@ -474,7 +536,12 @@
     }
 
     // ═══════════════════════════════════════════════
-    // Measurement Tool (on map)
+    // Measurement Tool
+    //
+    // Click the ruler button, then click points on the map to
+    // measure distance. Each click adds a point; a dashed line
+    // connects them and a label shows cumulative distance.
+    // Click the ruler again to clear and exit measure mode.
     // ═══════════════════════════════════════════════
     function toggleMeasure() {
         measuring = !measuring;
@@ -482,17 +549,20 @@
         if (btn) btn.classList.toggle('active', measuring);
 
         if (!measuring) {
-            clearMeasure();
+            clearMeasure();  // Remove all measure markers/lines when deactivating
         }
 
+        // Change cursor to crosshair while measuring
         map.getContainer().style.cursor = measuring ? 'crosshair' : '';
     }
 
+    // Handle map clicks — only active when measure tool is on
     function onMapClick(e) {
         if (!measuring) return;
 
         measurePoints.push(e.latlng);
 
+        // Add a small blue dot at the clicked point
         var cm = L.circleMarker(e.latlng, {
             radius: 4,
             color: '#1d9bf0',
@@ -500,11 +570,12 @@
         }).addTo(map);
         measureMarkers.push(cm);
 
+        // After 2+ points, draw/extend the line and show cumulative distance
         if (measurePoints.length > 1) {
             var total = totalMeasureDistance();
 
             if (measureLine) {
-                measureLine.addLatLng(e.latlng);
+                measureLine.addLatLng(e.latlng);  // Extend existing line
             } else {
                 measureLine = L.polyline(measurePoints, {
                     color: '#1d9bf0',
@@ -513,6 +584,7 @@
                 }).addTo(map);
             }
 
+            // Show distance label at this point
             var label = L.marker(e.latlng, {
                 icon: L.divIcon({
                     className: 'measure-label',
@@ -524,19 +596,22 @@
         }
     }
 
+    // Sum up distances between all consecutive measure points
     function totalMeasureDistance() {
         var total = 0;
         for (var i = 1; i < measurePoints.length; i++) {
-            total += measurePoints[i - 1].distanceTo(measurePoints[i]);
+            total += measurePoints[i - 1].distanceTo(measurePoints[i]);  // Leaflet's distanceTo uses Haversine
         }
         return total;
     }
 
+    // Format distance for display (meters or km)
     function formatDistance(meters) {
         if (meters < 1000) return Math.round(meters) + ' m';
         return (meters / 1000).toFixed(2) + ' km';
     }
 
+    // Remove all measurement artifacts from the map
     function clearMeasure() {
         measurePoints = [];
         if (measureLine) {
@@ -551,6 +626,8 @@
 
     // ═══════════════════════════════════════════════
     // Fit All Markers
+    // Zooms the map to show all tracked devices at once.
+    // Adds 20% padding so markers aren't right at the edge.
     // ═══════════════════════════════════════════════
     function fitAllMarkers() {
         var bounds = [];
@@ -566,10 +643,13 @@
 
     // ═══════════════════════════════════════════════
     // Settings Modal
+    // Opens a dialog to configure WiFi SSID/password and cloud endpoint.
+    // Also fetches and displays hub diagnostics (uptime, memory, etc.).
     // ═══════════════════════════════════════════════
     function openSettings() {
         document.getElementById('settingsModal').classList.remove('hidden');
 
+        // Fetch hub status to display diagnostics in the modal
         fetch('/api/status')
             .then(function (r) { return r.json(); })
             .then(function (s) {
@@ -593,6 +673,7 @@
         document.getElementById('settingsModal').classList.add('hidden');
     }
 
+    // POST new WiFi/cloud config to the hub. The hub saves to flash and restarts.
     function saveConfig() {
         var ssid = document.getElementById('cfgSSID').value;
         var pass = document.getElementById('cfgPass').value;
@@ -614,9 +695,13 @@
     }
 
     // ═══════════════════════════════════════════════
-    // Command Modal
+    // Command Modal — Change Collar Operating Mode
+    //
+    // Opens a dialog where the user selects a mode (Normal, PowerSave,
+    // Active Find, Emergency Lost) and sends it to the collar via
+    // POST /api/command. The hub builds a LoRa PKT_CMD_MODE packet.
     // ═══════════════════════════════════════════════
-    var cmdTargetId = 0;
+    var cmdTargetId = 0;  // Device ID for the command modal
 
     function sendModeCmd(deviceId, deviceName) {
         cmdTargetId = deviceId;
@@ -628,8 +713,10 @@
         document.getElementById('commandModal').classList.add('hidden');
     }
 
+    // Send the selected mode command to the hub's API
     function sendCommand() {
         var mode = document.getElementById('cmdMode').value;
+        // Device ID is sent as 4-digit hex (e.g. "0001")
         var body = 'device=' + cmdTargetId.toString(16).padStart(4, '0') +
                    '&mode=' + mode;
 
@@ -651,9 +738,14 @@
     }
 
     // ═══════════════════════════════════════════════
-    // Find Modal
+    // Find Modal — "Find My Pet" Feature
+    //
+    // Opens a dialog where the user picks a buzzer pattern
+    // (chirp, trill, siren, melody A/B) and LED flash count,
+    // then sends it via POST /api/find. The collar will beep
+    // and flash its LED so you can locate it.
     // ═══════════════════════════════════════════════
-    var findTargetId = 0;
+    var findTargetId = 0;  // Device ID for the find modal
 
     function openFindModal(deviceId, deviceName) {
         findTargetId = deviceId;
@@ -689,38 +781,42 @@
           });
     }
 
+    // Jump to a device's location and open its popup
     function focusDevice(deviceId) {
         var dev = devices[deviceId];
         if (dev && dev.marker) {
-            map.setView(dev.marker.getLatLng(), 17);
+            map.setView(dev.marker.getLatLng(), 17);  // Zoom level 17 = close-up
             dev.marker.openPopup();
         }
     }
 
     // ═══════════════════════════════════════════════
-    // Bootstrap
+    // Bootstrap — App Entry Point
+    //
+    // Called on DOMContentLoaded. Sets up the map, SSE connection,
+    // fetches initial device list, and wires up all button handlers.
     // ═══════════════════════════════════════════════
     function init() {
-        loadTheme();
-        initMap();
-        connectSSE();
+        loadTheme();     // Restore dark/light preference from localStorage
+        initMap();       // Create Leaflet map with tile layers
+        connectSSE();    // Open SSE connection for real-time updates
 
-        // Open sidebar by default on desktop, closed on mobile
+        // On desktop (>768px), show sidebar by default. On mobile, hide it.
         if (window.innerWidth >= 768) {
             document.getElementById('panel').classList.add('open');
             document.body.classList.add('panel-open');
         }
 
-        // Fetch initial device list
+        // Fetch the current device list via REST (in case SSE snapshot was missed)
         fetch('/api/devices')
             .then(function (r) { return r.json(); })
             .then(function (devs) {
                 devs.forEach(function (d) { updateDevice(d); });
-                if (devs.length > 0) fitAllMarkers();
+                if (devs.length > 0) fitAllMarkers();  // Zoom to show all devices
             })
-            .catch(function () { /* SSE will catch up */ });
+            .catch(function () { /* SSE will catch up — ignore fetch errors */ });
 
-        // Button handlers
+        // Wire up all UI button event handlers
         document.getElementById('btnHamburger').addEventListener('click', toggleSidebar);
         document.getElementById('btnFitAll').addEventListener('click', fitAllMarkers);
         document.getElementById('btnSettings').addEventListener('click', openSettings);
@@ -731,11 +827,11 @@
         document.getElementById('btnSendFind').addEventListener('click', sendFind);
         document.getElementById('btnCloseFind').addEventListener('click', closeFind);
 
-        // Tell map about initial layout
+        // After sidebar CSS transition completes, tell Leaflet to recalculate map size
         setTimeout(function () { map.invalidateSize(); }, 350);
     }
 
-    // Public API
+    // Expose key functions globally so they can be called from HTML onclick or console
     window.BP = {
         sendModeCmd: sendModeCmd,
         openFindModal: openFindModal,
@@ -744,6 +840,7 @@
         toggleTrail: toggleTrail
     };
 
+    // Start the app when DOM is ready
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', init);
     } else {

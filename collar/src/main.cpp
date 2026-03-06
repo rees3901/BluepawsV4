@@ -33,24 +33,28 @@
     BG77 cellular: PSM + eDRX configured
 */
 
+// ── Core libraries ──
 #include <Arduino.h>
 #include <SPI.h>
-#include <RadioLib.h>
-#include <TinyGPS++.h>
-#include <bluefruit.h>
+#include <RadioLib.h>        // SX1262 LoRa radio driver
+#include <TinyGPS++.h>       // Lightweight NMEA sentence parser
+#include <bluefruit.h>       // Adafruit nRF52 BLE library (scanner for home beacon)
 
-#include <bp_protocol.h>
-#include <bp_config.h>
-#include <bp_crypto.h>
-#include "collar_pins.h"
+// ── BluePaws shared protocol library ──
+#include <bp_protocol.h>     // Binary TLV packet format, builder & parser
+#include <bp_config.h>       // LoRa params, profiles, AES key, timing constants
+#include <bp_crypto.h>       // AES-128-CTR encrypt/decrypt
+#include "collar_pins.h"     // GPIO pin assignments for this board
 
-// FreeRTOS (built into Adafruit nRF52 BSP)
+// FreeRTOS (built into Adafruit nRF52 BSP — no separate install needed)
 #include <FreeRTOS.h>
-#include <task.h>
-#include <semphr.h>
+#include <task.h>            // xTaskCreate, vTaskDelay
+#include <semphr.h>          // xSemaphoreCreateMutex, Take/Give
 
 // ═══════════════════════════════════════════════
 // Device Identity — set per collar at provisioning
+// Each collar gets a unique ID (e.g. 0x0001, 0x0002).
+// Override via build flag: -DMY_DEVICE_ID=0x0002
 // ═══════════════════════════════════════════════
 #ifndef MY_DEVICE_ID
 #define MY_DEVICE_ID  0x0001
@@ -59,132 +63,149 @@
 // ═══════════════════════════════════════════════
 // Hardware Instances
 // ═══════════════════════════════════════════════
+// LoRa radio on SPI2 (nRF52840 has multiple SPI peripherals)
 SPIClass loraSPI(NRF_SPIM2, PIN_LORA_MISO, PIN_LORA_SCK, PIN_LORA_MOSI);
 SX1262   lora = new Module(PIN_LORA_NSS, PIN_LORA_DIO1, PIN_LORA_RST, PIN_LORA_BUSY, loraSPI);
 
-TinyGPSPlus   gps;
-Uart          gpsSerial(Serial1);   // nRF52 hardware UART
+// GPS module — communicates via UART with NMEA sentences
+TinyGPSPlus   gps;                     // NMEA parser (converts sentences → lat/lon/time)
+Uart          gpsSerial(Serial1);      // Hardware UART connected to L76K GPS module
 
 // ═══════════════════════════════════════════════
 // Global State (protected by mutex where needed)
 // ═══════════════════════════════════════════════
-static SemaphoreHandle_t gpsMutex;
+static SemaphoreHandle_t gpsMutex;  // Protects the TinyGPS++ object (shared between tasks)
 
-// Profile & mode
-static volatile bp_profile_t currentProfile = PROFILE_NORMAL;
-static const bp_profile_config_t *currentConfig = &BP_PROFILES[0];
+// ── Operating Profile ──
+// Controls sleep interval, TX power, GPS mode, cellular ratio.
+// Changed via PKT_CMD_MODE commands from the hub.
+static volatile bp_profile_t currentProfile = PROFILE_NORMAL;          // Current profile enum
+static const bp_profile_config_t *currentConfig = &BP_PROFILES[0];    // Pointer to profile params
 
-// Counters
-static uint32_t messageSeq     = 0;
-static uint32_t cycleCount     = 0;   // total wake cycles
-static uint8_t  homeCycleCount = 0;   // consecutive BLE home detections
+// ── Counters ──
+static uint32_t messageSeq     = 0;    // Incrementing sequence number for outgoing packets
+static uint32_t cycleCount     = 0;    // Total wake/transmit cycles since boot
+static uint8_t  homeCycleCount = 0;    // Consecutive cycles where BLE home beacon was detected
 
-// GPS state
-static volatile bool gpsAwake     = false;
-static volatile bool gpsWarmStart = false;
-static volatile bool gpsFix       = false;
+// ── GPS State ──
+static volatile bool gpsAwake     = false;   // true = GPS module is powered on
+static volatile bool gpsWarmStart = false;   // true = we had a fix before (ephemeris cached)
+static volatile bool gpsFix       = false;   // true = valid fix obtained this cycle
 
-// BLE state
-static volatile bool bleHomeFound = false;
+// ── BLE State ──
+static volatile bool bleHomeFound = false;   // Set by BLE scan callback when home beacon found
 
-// Command deduplication — ignore retransmitted commands from hub
+// ── Command Deduplication ──
+// The hub retries commands up to 3 times if no ACK received.
+// We store the last processed command sequence number and ignore
+// any duplicates, so the collar doesn't execute the same command twice.
 static uint32_t lastProcessedCmdSeq = 0;
 
-// Lost mode
-static volatile bool     inLostMode      = false;
-static volatile uint32_t lostModeStartMs = 0;
+// ── Lost Mode Tracking ──
+static volatile bool     inLostMode      = false;  // true = currently in emergency lost mode
+static volatile uint32_t lostModeStartMs = 0;      // millis() when lost mode started
 
-// AES-128 encryption key
+// ── AES-128 Encryption Key (must match the hub's key) ──
 static const uint8_t aesKey[16] = LORA_AES_KEY;
 
-// Cellular
-static volatile bool cellularPending = false;
-static uint8_t lastTxPacket[BP_MAX_PACKET_SIZE];
-static uint8_t lastTxPacketLen = 0;
-static bool cellularInitialised = false;
+// ── Cellular (BG77 NB-IoT modem) ──
+static volatile bool cellularPending = false;          // true = cellular TX requested
+static uint8_t lastTxPacket[BP_MAX_PACKET_SIZE];       // Copy of last LoRa packet (for cellular re-send)
+static uint8_t lastTxPacketLen = 0;                    // Length of lastTxPacket
+static bool cellularInitialised = false;               // true = PSM/eDRX already configured
 
 // ═══════════════════════════════════════════════
-// Task Handles
+// FreeRTOS Task Handles & Config
 // ═══════════════════════════════════════════════
-static TaskHandle_t cycleTaskHandle  = NULL;
-static TaskHandle_t gpsTaskHandle    = NULL;
-static TaskHandle_t cellTaskHandle   = NULL;
+static TaskHandle_t cycleTaskHandle  = NULL;  // Main cycle orchestrator
+static TaskHandle_t gpsTaskHandle    = NULL;  // Background NMEA parser
+static TaskHandle_t cellTaskHandle   = NULL;  // Cellular transmission (notification-based)
 
-#define STACK_CYCLE  4096
-#define STACK_GPS    2048
-#define STACK_CELL   3072
+#define STACK_CYCLE  4096   // Main cycle — needs room for packet building + LoRa TX
+#define STACK_GPS    2048   // GPS feeder — just reads serial and parses NMEA
+#define STACK_CELL   3072   // Cellular — AT command strings
 
-#define PRIO_CYCLE   3
-#define PRIO_GPS     2
-#define PRIO_CELL    1
+#define PRIO_CYCLE   3      // Highest — orchestrates the whole wake/sleep cycle
+#define PRIO_GPS     2      // Medium — must keep up with NMEA stream
+#define PRIO_CELL    1      // Lowest — cellular runs async, not time-critical
 
 // ═══════════════════════════════════════════════
 // Forward Declarations
 // ═══════════════════════════════════════════════
-static void cycleTask(void *param);
-static void gpsFeederTask(void *param);
-static void cellularTask(void *param);
 
-// Cycle phases
-static bool     bleScanForHome();
-static bool     gpsAcquireFix();
-static void     listenForCommands();
-static void     enterDeepSleep();
-static void     runLostMode();
+// FreeRTOS task entry points
+static void cycleTask(void *param);        // Main cycle: wake → sense → TX → sleep
+static void gpsFeederTask(void *param);    // Background: reads serial → feeds TinyGPS++
+static void cellularTask(void *param);     // Notification-driven: wakes BG77 → POSTs TLV
+
+// Cycle phases (called in sequence by cycleTask)
+static bool     bleScanForHome();          // BLE scan for hub's home beacon
+static bool     gpsAcquireFix();           // Two-phase GPS acquisition
+static void     listenForCommands();       // Open 2s LoRa RX window for hub commands
+static void     enterDeepSleep();          // Power down, sleep until next cycle
+static void     runLostMode();             // Emergency continuous operation loop
 
 // Peripheral power management
-static void     peripheralsWake();
-static void     peripheralsSleep();
+static void     peripheralsWake();         // Wake LoRa from sleep mode
+static void     peripheralsSleep();        // Sleep GPS, LoRa, stop BLE
 
-// Packet builders
-static void     sendTelemetry();
-static void     sendModeAck(uint32_t cmdMsgSeq);
-static void     sendStatusResponse(uint32_t cmdMsgSeq);
-static void     sendLostModeAlert();
-static void     transmitPacket(uint8_t *buf, uint8_t len);
+// Packet builders (construct TLV packets and transmit)
+static void     sendTelemetry();           // Build + send PKT_TELEMETRY
+static void     sendModeAck(uint32_t cmdMsgSeq);        // ACK a mode change command
+static void     sendStatusResponse(uint32_t cmdMsgSeq); // Respond to status query
+static void     sendLostModeAlert();       // Alert: lost mode 2hr timeout expired
+static void     transmitPacket(uint8_t *buf, uint8_t len);  // Encrypt + LoRa TX
 
 // Command handling
 static void     handleReceivedCommand(const uint8_t *buf, uint8_t len);
-static void     applyProfile(bp_profile_t profile);
-static void     sendFindAck(uint32_t cmdMsgSeq);
+static void     applyProfile(bp_profile_t profile);  // Switch operating profile
+static void     sendFindAck(uint32_t cmdMsgSeq);     // ACK a find command
 
 // GPS helpers
-static void     gpsModuleWake();
-static void     gpsModuleSleep();
-static uint32_t gpsGetUnixTime();
+static void     gpsModuleWake();           // Pull sleep pin HIGH → GPS powers on
+static void     gpsModuleSleep();          // Pull sleep pin LOW → GPS powers off
+static uint32_t gpsGetUnixTime();          // Convert GPS date/time → Unix timestamp
 
-// LED
-static void     ledFlicker(uint8_t count, uint16_t onMs, uint16_t offMs);
-static void     ledBeacon();
+// LED helpers
+static void     ledFlicker(uint8_t count, uint16_t onMs, uint16_t offMs);  // Blink N times
+static void     ledBeacon();               // Single flash (used in lost mode continuous blink)
 
-// Buzzer (passive piezo via PWM)
+// Buzzer (passive piezo — frequency generated via PWM)
 static void     buzzerInit();
-static void     buzzerPlayPattern(bp_buzzer_pattern_t pattern);
+static void     buzzerPlayPattern(bp_buzzer_pattern_t pattern);  // Play chirp/trill/siren/melody
 static void     buzzerTone(uint16_t freqHz, uint16_t durationMs);
 static void     buzzerOff();
 
-// Cellular helpers
-static void     cellularSendTlv(const uint8_t *pkt, uint8_t len);
-static void     cellularConfigurePSM();
+// Cellular (BG77 NB-IoT modem via AT commands)
+static void     cellularSendTlv(const uint8_t *pkt, uint8_t len);  // Full send sequence
+static void     cellularConfigurePSM();    // Configure PSM + eDRX (first use only)
 static bool     cellularSendAT(const char *cmd, const char *expect, uint16_t timeoutMs);
 
 // ═══════════════════════════════════════════════
 // BLE Scan Callback
+//
+// Called by the nRF52 BLE stack for every advertisement packet seen.
+// We check if the advertised name matches our hub's beacon name.
+// If found, we set bleHomeFound=true and stop scanning immediately
+// (no need to keep scanning once we know the pet is home).
 // ═══════════════════════════════════════════════
 static void bleScanCallback(ble_gap_evt_adv_report_t *report) {
     uint8_t buf[32];
+    // Extract the "Complete Local Name" from the advertisement data
     uint8_t len = Bluefruit.Scanner.parseReportByType(
         report, BLE_GAP_AD_TYPE_COMPLETE_LOCAL_NAME, buf, sizeof(buf));
 
     if (len > 0) {
-        buf[len] = '\0';
+        buf[len] = '\0';  // Null-terminate the name string
         if (strcmp((const char *)buf, BLE_HOME_BEACON_NAME) == 0) {
+            // Found the hub's beacon! Pet is home.
             bleHomeFound = true;
-            Bluefruit.Scanner.stop();
+            Bluefruit.Scanner.stop();  // Stop scanning — we found what we need
             Serial.println("[BLE] Home beacon found!");
         }
     }
 
+    // Resume scanning for more advertisements (if we haven't found the beacon yet)
     Bluefruit.Scanner.resume();
 }
 
@@ -204,45 +225,50 @@ void setup() {
     // ── Mutex ──
     gpsMutex = xSemaphoreCreateMutex();
 
-    // ── LED ──
+    // ── LED (visual feedback for TX, errors, and lost mode beacon) ──
     pinMode(PIN_LED, OUTPUT);
     digitalWrite(PIN_LED, LOW);
-    ledFlicker(3, 30, 30);  // boot indicator
+    ledFlicker(3, 30, 30);  // 3 quick flashes = "I'm alive" boot indicator
 
-    // ── Button ──
+    // ── Button (can be used for manual mode toggle — TODO) ──
     pinMode(PIN_BUTTON, INPUT_PULLUP);
 
-    // ── Buzzer (passive piezo) ──
+    // ── Buzzer (passive piezo — needs PWM to generate tones) ──
     buzzerInit();
 
-    // ── GPS Init (start sleeping) ──
-    pinMode(PIN_GPS_SLEEP, OUTPUT);
-    pinMode(PIN_GPS_RESET, OUTPUT);
+    // ── GPS Init ──
+    // GPS starts in sleep mode to save power. It only wakes up when
+    // the collar is NOT home and needs to acquire a position fix.
+    pinMode(PIN_GPS_SLEEP, OUTPUT);   // HIGH = awake, LOW = sleep
+    pinMode(PIN_GPS_RESET, OUTPUT);   // HIGH = normal, LOW = reset
     digitalWrite(PIN_GPS_RESET, HIGH);
-    digitalWrite(PIN_GPS_SLEEP, LOW);
+    digitalWrite(PIN_GPS_SLEEP, LOW); // Start sleeping
     gpsAwake = false;
-    gpsSerial.begin(GPS_BAUD_RATE);
+    gpsSerial.begin(GPS_BAUD_RATE);   // Open UART to L76K at configured baud
     Serial.println("[GPS] UART initialised (sleeping)");
 
-    // ── LoRa Init ──
+    // ── LoRa Radio Init ──
+    // All LoRa parameters must match the hub exactly, or packets won't be received.
     loraSPI.begin();
     Serial.println("[LORA] Initialising SX1262...");
 
-    int state = lora.begin(LORA_FREQUENCY);
+    int state = lora.begin(LORA_FREQUENCY);  // e.g. 915.0 MHz
     if (state != RADIOLIB_ERR_NONE) {
+        // Fatal error — can't operate without radio. Flash LED rapidly and halt.
         Serial.printf("[LORA] FATAL: init failed (%d)\n", state);
         ledFlicker(12, 80, 80);
         while (true) { vTaskDelay(pdMS_TO_TICKS(1000)); }
     }
 
-    lora.setSpreadingFactor(LORA_SPREADING);
-    lora.setBandwidth(LORA_BANDWIDTH);
-    lora.setCodingRate(LORA_CODING_RATE);
-    lora.setPreambleLength(LORA_PREAMBLE_LEN);
-    lora.setSyncWord(LORA_SYNC_WORD);
-    lora.setCRC(LORA_CRC_ENABLED);
-    lora.setOutputPower(currentConfig->tx_power_dBm);
-    lora.sleep();  // start in sleep mode
+    // Configure radio parameters (must match hub's settings in bp_config.h)
+    lora.setSpreadingFactor(LORA_SPREADING);     // SF10 — good range
+    lora.setBandwidth(LORA_BANDWIDTH);           // 125 kHz
+    lora.setCodingRate(LORA_CODING_RATE);        // 4/5
+    lora.setPreambleLength(LORA_PREAMBLE_LEN);   // Long preamble for easier detection
+    lora.setSyncWord(LORA_SYNC_WORD);            // Private network sync word
+    lora.setCRC(LORA_CRC_ENABLED);               // Hardware CRC
+    lora.setOutputPower(currentConfig->tx_power_dBm);  // TX power from current profile
+    lora.sleep();  // Start in sleep mode — only wake when we need to TX/RX
 
     Serial.printf("[LORA] Ready: %.1fMHz SF%d BW%.0fkHz %ddBm\n",
                   LORA_FREQUENCY, LORA_SPREADING, LORA_BANDWIDTH,
@@ -251,23 +277,26 @@ void setup() {
                   bp_aes_key_is_zero(aesKey) ? "OFF (key all zeros)" : "ENABLED");
 
     // ── BLE Init ──
-    Bluefruit.begin(0, 1);  // 0 peripheral, 1 central
+    // We use BLE in "central" mode (scanner only) — NOT advertising.
+    // The collar scans for the hub's BLE beacon to detect if pet is home.
+    Bluefruit.begin(0, 1);  // 0 peripheral connections, 1 central connection
     Bluefruit.setName("BP_COLLAR");
-    Bluefruit.Scanner.setRxCallback(bleScanCallback);
-    Bluefruit.Scanner.restartOnDisconnect(false);
-    Bluefruit.Scanner.setInterval(160, 80);  // 100ms interval, 50ms window
-    Bluefruit.Scanner.useActiveScan(true);
+    Bluefruit.Scanner.setRxCallback(bleScanCallback);  // Called for each advertisement seen
+    Bluefruit.Scanner.restartOnDisconnect(false);       // Don't auto-restart after scan stops
+    Bluefruit.Scanner.setInterval(160, 80);  // Scan interval 100ms, window 50ms (in 0.625ms units)
+    Bluefruit.Scanner.useActiveScan(true);   // Active scan = request scan response for more data
     Serial.printf("[BLE] Ready, beacon: \"%s\"\n", BLE_HOME_BEACON_NAME);
 
-    // ── Cellular Init (UART only — modem stays off until needed) ──
-    Serial1.begin(CELLULAR_BAUD_RATE);
-    pinMode(PIN_CELL_PWR, OUTPUT);
-    pinMode(PIN_CELL_RST, OUTPUT);
-    digitalWrite(PIN_CELL_PWR, LOW);
-    digitalWrite(PIN_CELL_RST, HIGH);
+    // ── Cellular Init (UART only — BG77 modem stays powered off until needed) ──
+    Serial1.begin(CELLULAR_BAUD_RATE);  // UART to BG77 NB-IoT modem
+    pinMode(PIN_CELL_PWR, OUTPUT);      // Power key — pulse to toggle modem on/off
+    pinMode(PIN_CELL_RST, OUTPUT);      // Reset pin — LOW to reset
+    digitalWrite(PIN_CELL_PWR, LOW);    // Keep modem off until we need it
+    digitalWrite(PIN_CELL_RST, HIGH);   // Not in reset
     Serial.println("[CELL] BG77 UART ready (modem off)");
 
-    // ── Create Tasks ──
+    // ── Create FreeRTOS Tasks ──
+    // nRF52840 is single-core, so tasks are time-sliced by priority.
     xTaskCreate(cycleTask,     "cycle", STACK_CYCLE, NULL, PRIO_CYCLE, &cycleTaskHandle);
     xTaskCreate(gpsFeederTask, "gps",   STACK_GPS,   NULL, PRIO_GPS,   &gpsTaskHandle);
     xTaskCreate(cellularTask,  "cell",  STACK_CELL,  NULL, PRIO_CELL,  &cellTaskHandle);
@@ -276,6 +305,7 @@ void setup() {
     Serial.println("──────────────────────────────────");
 }
 
+// Arduino loop() — not used. All work happens in FreeRTOS tasks.
 void loop() {
     vTaskDelay(pdMS_TO_TICKS(10000));
 }
@@ -326,13 +356,17 @@ static void cycleTask(void *param) {
         listenForCommands();
 
         // ── Phase 5: Cellular (every Nth cycle per profile) ──
+        // cellular_ratio defines how often we also send via NB-IoT:
+        //   ratio=6  → every 6th cycle (normal)
+        //   ratio=3  → every 3rd cycle (lost mode — more frequent)
+        //   ratio=0  → disabled
         uint8_t cellRatio = currentConfig->cellular_ratio;
         if (cellRatio > 0 && (cycleCount % cellRatio == 0)) {
             Serial.printf("[CELL] Triggering (cycle %lu, ratio 1:%d)\n",
                           cycleCount, cellRatio);
             cellularPending = true;
-            xTaskNotifyGive(cellTaskHandle);
-            // Cellular runs async — don't block
+            xTaskNotifyGive(cellTaskHandle);  // Wake the cellularTask
+            // Cellular runs asynchronously — don't block the main cycle
         }
 
         // ── Phase 6: Power down everything, deep sleep ──
@@ -549,61 +583,68 @@ static void sendTelemetry() {
     uint16_t flags = PKT_TELEMETRY;
 
     if (xSemaphoreTake(gpsMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        // Check if GPS fix is valid and recent (not stale)
         bool locValid = gps.location.isValid() &&
                         gps.location.age() < (GPS_STALE_THRESHOLD_S * 1000UL);
 
         if (locValid) {
-            status = STATUS_OUT_AND_ABOUT;
-            flags |= FLAG_HAS_GPS;
+            status = STATUS_OUT_AND_ABOUT;  // Pet is outside with valid position
+            flags |= FLAG_HAS_GPS;          // Tell hub we have GPS coordinates
         } else {
-            status = STATUS_INVALID_GPS;
+            status = STATUS_INVALID_GPS;    // No usable GPS fix this cycle
         }
 
-        if (gpsWarmStart) flags |= FLAG_GPS_WARM;
+        if (gpsWarmStart) flags |= FLAG_GPS_WARM;  // Inform hub we have cached ephemeris
 
-        uint32_t unixTime = gpsGetUnixTime();
+        uint32_t unixTime = gpsGetUnixTime();  // Get timestamp from GPS satellites
 
-        // Build packet
+        // ── Build the packet ──
+        // Fixed 29-byte header: version, device_id, msg_seq, time, status, flags, GPS, quality
         uint8_t buf[BP_MAX_PACKET_SIZE];
         pkt_init(buf, MY_DEVICE_ID, messageSeq, unixTime, status, flags);
 
         if (flags & FLAG_HAS_GPS) {
+            // Store GPS coordinates as integers × 10^7 (avoids floating point in the packet)
             int32_t lat_e7 = (int32_t)(gps.location.lat() * 1e7);
             int32_t lon_e7 = (int32_t)(gps.location.lng() * 1e7);
             pkt_set_gps(buf, lat_e7, lon_e7);
 
+            // GPS accuracy derived from HDOP (Horizontal Dilution of Precision)
+            // Rough conversion: accuracy_meters ≈ HDOP × 5
             uint16_t acc_m = gps.hdop.isValid() ? (uint16_t)(gps.hdop.hdop() * 5) : 0;
             uint16_t fix_age_s = (uint16_t)(gps.location.age() / 1000);
-            uint16_t batt_mV = 3700;  // TODO: ADC reading
+            uint16_t batt_mV = 3700;  // TODO: Read actual battery voltage via ADC
             pkt_set_quality(buf, batt_mV, acc_m, fix_age_s);
         } else {
-            uint16_t batt_mV = 3700;  // TODO: ADC reading
+            uint16_t batt_mV = 3700;  // TODO: Read actual battery voltage via ADC
             pkt_set_quality(buf, batt_mV, 0, 0);
         }
 
-        xSemaphoreGive(gpsMutex);
+        xSemaphoreGive(gpsMutex);  // Release GPS mutex — done reading TinyGPS++
 
-        // TLV payload
-        pkt_add_tlv_u8(buf,  TLV_PROFILE,        currentProfile);
-        pkt_add_tlv_i8(buf,  TLV_TX_POWER,       currentConfig->tx_power_dBm);
-        pkt_add_tlv_u16(buf, TLV_SLEEP_INTERVAL,  currentConfig->sleep_interval_s);
-        pkt_add_tlv_u8(buf,  TLV_GPS_WARM,        gpsWarmStart ? 1 : 0);
-        pkt_add_tlv_u8(buf,  TLV_HOME_CYCLES,     homeCycleCount);
+        // ── Append TLV payload (variable-length key-value pairs after the header) ──
+        pkt_add_tlv_u8(buf,  TLV_PROFILE,        currentProfile);           // Current operating mode
+        pkt_add_tlv_i8(buf,  TLV_TX_POWER,       currentConfig->tx_power_dBm); // TX power in use
+        pkt_add_tlv_u16(buf, TLV_SLEEP_INTERVAL,  currentConfig->sleep_interval_s); // Sleep interval
+        pkt_add_tlv_u8(buf,  TLV_GPS_WARM,        gpsWarmStart ? 1 : 0);    // Warm/cold start indicator
+        pkt_add_tlv_u8(buf,  TLV_HOME_CYCLES,     homeCycleCount);          // How many consecutive home detections
 
         if (inLostMode) {
+            // Include how long we've been in lost mode (so hub can display it)
             uint32_t lostElapsed = (millis() - lostModeStartMs) / 1000;
             pkt_add_tlv_u32(buf, TLV_LOST_MODE_S, lostElapsed);
         }
 
+        // Finalize: compute and append CRC-16, return total packet length
         uint8_t pktLen = pkt_finalize(buf);
 
         Serial.printf("[TX] TELEMETRY seq=%lu status=%s size=%dB\n",
                       messageSeq, bp_status_display(status), pktLen);
         pkt_print_hex(buf, pktLen);
 
-        transmitPacket(buf, pktLen);
+        transmitPacket(buf, pktLen);  // Encrypt + LoRa transmit
 
-        // Stash copy for cellular task
+        // Save a copy for the cellular task to re-send via NB-IoT
         memcpy(lastTxPacket, buf, pktLen);
         lastTxPacketLen = pktLen;
     } else {
@@ -684,42 +725,56 @@ static void sendLostModeAlert() {
 
 // ═══════════════════════════════════════════════
 // LoRa Transmit
+//
+// Encrypts the packet (AES-128-CTR), wakes the radio from sleep,
+// transmits, then provides visual feedback via LED flashes.
+// LED pattern tells you the result: normal flashes = OK,
+// 2 slow flashes = timeout, 6 rapid flashes = error.
 // ═══════════════════════════════════════════════
 static void transmitPacket(uint8_t *buf, uint8_t len) {
-    // Encrypt payload if AES key is configured
+    // Encrypt the packet in-place (byte 0 = version stays cleartext)
     if (!bp_aes_key_is_zero(aesKey)) {
         bp_aes_ctr_apply(buf, len, aesKey);
     }
 
-    lora.standby();
-    int state = lora.transmit(buf, len);
+    lora.standby();                      // Wake radio from sleep → standby mode
+    int state = lora.transmit(buf, len); // Blocking TX — returns when done or timeout
 
     if (state == RADIOLIB_ERR_NONE) {
         Serial.printf("[LORA] TX OK (%d bytes)\n", len);
-        ledFlicker(currentConfig->led_flashes, 50, 50);
+        ledFlicker(currentConfig->led_flashes, 50, 50);  // Success: profile-defined flash count
     } else if (state == RADIOLIB_ERR_TX_TIMEOUT) {
         Serial.println("[LORA] TX timeout");
-        ledFlicker(2, 200, 200);
+        ledFlicker(2, 200, 200);  // Slow double-flash = timeout
     } else {
         Serial.printf("[LORA] TX failed: %d\n", state);
-        ledFlicker(6, 80, 80);
+        ledFlicker(6, 80, 80);    // Rapid 6-flash = error
     }
 }
 
 // ═══════════════════════════════════════════════
 // Listen for Commands (2s RX window)
+//
+// After transmitting telemetry, the collar opens a short receive
+// window so the hub can send commands (mode change, find, etc.).
+// This is like a "half-duplex" protocol — the collar is mostly
+// sleeping/transmitting, but briefly listens after each TX.
+// The hub times its command TX to coincide with this window.
 // ═══════════════════════════════════════════════
 static void listenForCommands() {
     Serial.printf("[RX] Listening %dms...\n", CMD_LISTEN_WINDOW_MS);
 
+    // Put radio into RX mode
     int rxState = lora.startReceive();
     if (rxState != RADIOLIB_ERR_NONE) {
         Serial.printf("[RX] startReceive failed: %d\n", rxState);
         return;
     }
 
+    // Poll for incoming packet within the RX window
     uint32_t listenStart = millis();
     while (millis() - listenStart < CMD_LISTEN_WINDOW_MS) {
+        // Check the radio's IRQ status register for RX_DONE flag
         uint16_t irq = lora.getIrqStatus();
         if (irq & RADIOLIB_SX126X_IRQ_RX_DONE) {
             uint8_t rxBuf[BP_MAX_PACKET_SIZE];
@@ -728,34 +783,42 @@ static void listenForCommands() {
                 uint8_t rxLen = lora.getPacketLength();
                 Serial.printf("[RX] Received %d bytes\n", rxLen);
 
-                // Decrypt if AES key is configured
+                // Decrypt the received command
                 if (!bp_aes_key_is_zero(aesKey)) {
                     bp_aes_ctr_apply(rxBuf, rxLen, aesKey);
                 }
 
-                pkt_print_hex(rxBuf, rxLen);
+                pkt_print_hex(rxBuf, rxLen);  // Debug: hex dump to serial
 
+                // Basic validation before processing
                 if (rxLen >= BP_MIN_PACKET_SIZE && rxBuf[0] == BP_PROTOCOL_VERSION) {
                     handleReceivedCommand(rxBuf, rxLen);
                 }
             }
-            break;
+            break;  // Only process one command per RX window
         }
-        vTaskDelay(pdMS_TO_TICKS(10));
+        vTaskDelay(pdMS_TO_TICKS(10));  // Poll every 10ms
     }
 
-    lora.standby();
+    lora.standby();  // Return radio to standby (will go to sleep later)
 }
 
 // ═══════════════════════════════════════════════
 // Command Handler
+//
+// Processes incoming commands from the hub. Supported commands:
+//   PKT_CMD_MODE   — Change operating profile (normal/powersave/active/lost)
+//   PKT_CMD_STATUS — Request a status response packet
+//   PKT_CMD_FIND   — Flash LED + play buzzer pattern ("Find My Pet")
 // ═══════════════════════════════════════════════
 static void handleReceivedCommand(const uint8_t *buf, uint8_t len) {
+    // Validate software CRC
     if (!pkt_validate_crc(buf, len)) {
         Serial.println("[RX] CRC failed — dropping");
         return;
     }
 
+    // Check if this command is addressed to us (or is a broadcast)
     uint16_t targetId = pkt_device_id(buf);
     if (targetId != MY_DEVICE_ID && targetId != DEVICE_ID_BROADCAST) {
         Serial.printf("[RX] Not for us (0x%04X)\n", targetId);
@@ -765,7 +828,10 @@ static void handleReceivedCommand(const uint8_t *buf, uint8_t len) {
     uint16_t pktType = pkt_pkt_type(buf);
     uint32_t cmdSeq  = pkt_msg_seq(buf);
 
-    // ── Deduplication: hub retries up to 3x, ignore already-processed commands ──
+    // ── Deduplication ──
+    // The hub retries commands up to 3 times if it doesn't get an ACK.
+    // We track the last processed sequence number to avoid executing
+    // the same command multiple times (e.g. switching profile twice).
     if (cmdSeq != 0 && cmdSeq == lastProcessedCmdSeq) {
         Serial.printf("[RX] Duplicate cmd seq %lu — ignoring\n", cmdSeq);
         return;
@@ -774,39 +840,43 @@ static void handleReceivedCommand(const uint8_t *buf, uint8_t len) {
 
     switch (pktType) {
     case PKT_CMD_MODE: {
+        // Hub is telling us to switch to a different operating profile.
+        // Extract the target profile from TLV_PROFILE in the packet payload.
         uint8_t newProfile;
         if (pkt_tlv_get_u8(buf, TLV_PROFILE, &newProfile)) {
             Serial.printf("[RX] CMD_MODE → %s (seq %lu)\n",
                           bp_profile_name((bp_profile_t)newProfile), cmdSeq);
-            applyProfile((bp_profile_t)newProfile);
-            sendModeAck(cmdSeq);
+            applyProfile((bp_profile_t)newProfile);  // Apply new settings (TX power, sleep time, etc.)
+            sendModeAck(cmdSeq);                     // ACK back to hub with new config
         } else {
             Serial.println("[RX] CMD_MODE missing TLV_PROFILE");
         }
         break;
     }
     case PKT_CMD_STATUS:
+        // Hub wants a status report — send back current config details
         Serial.printf("[RX] CMD_STATUS (seq %lu)\n", cmdSeq);
         sendStatusResponse(cmdSeq);
         break;
     case PKT_CMD_FIND: {
+        // "Find My Pet" — flash the LED and play a buzzer sound
         Serial.printf("[RX] CMD_FIND (seq %lu)\n", cmdSeq);
 
-        // LED flash — run ledFlicker once per command
-        uint8_t flashCount = 5;  // default
+        // Extract LED flash count from TLV (default: 5)
+        uint8_t flashCount = 5;
         pkt_tlv_get_u8(buf, TLV_LED_FLASH, &flashCount);
         if (flashCount > 0) {
-            ledFlicker(flashCount, 80, 80);
+            ledFlicker(flashCount, 80, 80);  // Visible blink to help locate the pet
         }
 
-        // Buzzer pattern
-        uint8_t pattern = BUZZER_CHIRP;  // default
+        // Extract buzzer pattern from TLV (default: chirp)
+        uint8_t pattern = BUZZER_CHIRP;
         pkt_tlv_get_u8(buf, TLV_BUZZER_PATTERN, &pattern);
         if (pattern != BUZZER_OFF) {
-            buzzerPlayPattern((bp_buzzer_pattern_t)pattern);
+            buzzerPlayPattern((bp_buzzer_pattern_t)pattern);  // Audible alert
         }
 
-        sendFindAck(cmdSeq);
+        sendFindAck(cmdSeq);  // ACK back to hub
         break;
     }
     default:
@@ -850,22 +920,30 @@ static void applyProfile(bp_profile_t profile) {
 }
 
 // ═══════════════════════════════════════════════
-// GPS Feeder Task
-// Background NMEA parsing into TinyGPS++.
+// GPS Feeder Task — Background NMEA Parser
+//
+// The L76K GPS module continuously outputs NMEA sentences via UART
+// (e.g. $GPRMC, $GPGGA). This task reads them and feeds them into
+// TinyGPS++, which extracts lat/lon/time/satellites/HDOP.
+//
+// Runs in background while cycleTask waits for a fix.
+// When GPS is sleeping, this task polls slowly (500ms).
+// When GPS is awake, it polls fast (50ms) to keep up with NMEA stream.
 // ═══════════════════════════════════════════════
 static void gpsFeederTask(void *param) {
     (void)param;
     for (;;) {
         if (gpsAwake) {
+            // GPS is on — read all available NMEA bytes and feed to parser
             if (xSemaphoreTake(gpsMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
                 while (gpsSerial.available() > 0) {
-                    gps.encode(gpsSerial.read());
+                    gps.encode(gpsSerial.read());  // Feed one byte at a time to TinyGPS++
                 }
                 xSemaphoreGive(gpsMutex);
             }
-            vTaskDelay(pdMS_TO_TICKS(50));
+            vTaskDelay(pdMS_TO_TICKS(50));   // 50ms — fast enough for 9600 baud NMEA
         } else {
-            vTaskDelay(pdMS_TO_TICKS(500));
+            vTaskDelay(pdMS_TO_TICKS(500));  // GPS sleeping — check infrequently
         }
     }
 }
@@ -1015,12 +1093,15 @@ static void gpsModuleSleep() {
     }
 }
 
+// Convert GPS date/time to Unix timestamp (seconds since 1970-01-01).
+// Returns 0 if GPS time is invalid or stale (older than 60 seconds).
+// The collar doesn't have an RTC, so GPS is our only time source.
 static uint32_t gpsGetUnixTime() {
     if (gps.time.isValid() && gps.date.isValid() && gps.time.age() < 60000) {
         return bp_gps_to_unix(gps.date.year(), gps.date.month(), gps.date.day(),
                               gps.time.hour(), gps.time.minute(), gps.time.second());
     }
-    return 0;
+    return 0;  // No valid time available
 }
 
 // ═══════════════════════════════════════════════
