@@ -132,6 +132,22 @@ static uint32_t crcFailCount = 0;
 static uint32_t txCount = 0;
 static uint32_t cmdSeqCounter = 0;
 
+// Pending command ACK tracking
+struct pending_cmd_t {
+    uint32_t cmdSeq;        // msg_seq we sent
+    uint16_t targetId;      // target collar
+    bp_pkt_type_t type;     // command type (PKT_CMD_MODE, PKT_CMD_FIND, etc.)
+    uint32_t sentAtMs;      // millis() when sent
+    uint8_t  retries;       // retransmission count
+    uint8_t  buf[BP_MAX_PACKET_SIZE];
+    uint8_t  len;
+    bool     active;        // slot in use
+};
+
+#define MAX_PENDING_CMDS 4
+static pending_cmd_t pendingCmds[MAX_PENDING_CMDS];
+static SemaphoreHandle_t pendingMutex = NULL;
+
 // WiFi state
 static bool staConnected = false;
 static String staSSID = WIFI_STA_SSID;
@@ -190,6 +206,11 @@ static void logToStorage(const uint8_t *buf, uint8_t len, int16_t rssi);
 static void sseBroadcast(const char *event, const char *data);
 static device_state_t *findDevice(uint16_t id);
 static void sendCommand(uint16_t target_id, bp_pkt_type_t type, bp_profile_t mode);
+static void sendCommandFind(uint16_t target_id, bp_pkt_type_t type,
+                              bp_profile_t mode, uint8_t ledFlash,
+                              bp_buzzer_pattern_t buzzerPattern);
+static void checkPendingAcks();
+static void handleAck(const uint8_t *buf);
 
 // DIO1 ISR
 static void IRAM_ATTR onLoRaDio1() {
@@ -214,8 +235,12 @@ void setup() {
     loraMutex   = xSemaphoreCreateMutex();
     sseMutex    = xSemaphoreCreateMutex();
     deviceMutex = xSemaphoreCreateMutex();
+    pendingMutex = xSemaphoreCreateMutex();
     cmdQueue    = xQueueCreate(CMD_QUEUE_SIZE, sizeof(cmd_entry_t));
     cloudQueue  = xQueueCreate(CLOUD_QUEUE_SIZE, sizeof(cloud_entry_t));
+
+    // Clear pending command slots
+    memset(pendingCmds, 0, sizeof(pendingCmds));
 
     initStorage();
     initLoRa();
@@ -409,7 +434,79 @@ static void loraTask(void *param) {
             }
         }
 
+        // Check for timed-out pending commands (retry or expire)
+        checkPendingAcks();
+
         vTaskDelay(pdMS_TO_TICKS(10));
+    }
+}
+
+// ═══════════════════════════════════════════════
+// Command ACK Tracking
+// ═══════════════════════════════════════════════
+
+static void handleAck(const uint8_t *buf) {
+    uint32_t ackedSeq = 0;
+    if (!pkt_tlv_get_u32(buf, TLV_CMD_MSG_ID, &ackedSeq)) return;
+
+    if (xSemaphoreTake(pendingMutex, pdMS_TO_TICKS(50))) {
+        for (int i = 0; i < MAX_PENDING_CMDS; i++) {
+            if (pendingCmds[i].active && pendingCmds[i].cmdSeq == ackedSeq) {
+                uint32_t rtt = millis() - pendingCmds[i].sentAtMs;
+                Serial.printf("[ACK] Cmd seq %lu ACK'd by %s (RTT %lums)\n",
+                              ackedSeq, bp_device_name(pkt_device_id(buf)), rtt);
+                pendingCmds[i].active = false;
+
+                // Notify SSE clients
+                char json[128];
+                snprintf(json, sizeof(json),
+                    "{\"cmdSeq\":%u,\"device\":%u,\"rtt\":%u,\"status\":\"acked\"}",
+                    ackedSeq, pkt_device_id(buf), rtt);
+                sseBroadcast("cmd_ack", json);
+                break;
+            }
+        }
+        xSemaphoreGive(pendingMutex);
+    }
+}
+
+static void checkPendingAcks() {
+    if (xSemaphoreTake(pendingMutex, pdMS_TO_TICKS(20))) {
+        uint32_t now = millis();
+        for (int i = 0; i < MAX_PENDING_CMDS; i++) {
+            if (!pendingCmds[i].active) continue;
+            if (now - pendingCmds[i].sentAtMs < CMD_ACK_TIMEOUT_MS) continue;
+
+            if (pendingCmds[i].retries < CMD_MAX_RETRIES) {
+                pendingCmds[i].retries++;
+                pendingCmds[i].sentAtMs = now;
+
+                // Re-queue for retransmission
+                cmd_entry_t cmd;
+                memcpy(cmd.buf, pendingCmds[i].buf, pendingCmds[i].len);
+                cmd.len = pendingCmds[i].len;
+                xQueueSend(cmdQueue, &cmd, 0);
+
+                Serial.printf("[ACK] Retry %d/%d for seq %lu → %s\n",
+                              pendingCmds[i].retries, CMD_MAX_RETRIES,
+                              pendingCmds[i].cmdSeq,
+                              bp_device_name(pendingCmds[i].targetId));
+            } else {
+                Serial.printf("[ACK] EXPIRED seq %lu → %s (no ACK after %d retries)\n",
+                              pendingCmds[i].cmdSeq,
+                              bp_device_name(pendingCmds[i].targetId),
+                              CMD_MAX_RETRIES);
+
+                char json[128];
+                snprintf(json, sizeof(json),
+                    "{\"cmdSeq\":%u,\"device\":%u,\"status\":\"expired\"}",
+                    pendingCmds[i].cmdSeq, pendingCmds[i].targetId);
+                sseBroadcast("cmd_ack", json);
+
+                pendingCmds[i].active = false;
+            }
+        }
+        xSemaphoreGive(pendingMutex);
     }
 }
 
@@ -437,6 +534,11 @@ static void handlePacket(const uint8_t *buf, uint8_t len, int16_t rssi, float sn
 
     Serial.printf("[LORA] RX #%u from %s | type=0x%02X rssi=%d snr=%.1f\n",
                   rxCount, bp_device_name(devId), pktType, rssi, snr);
+
+    // Handle ACKs for pending commands
+    if (pktType == PKT_MODE_ACK || pktType == PKT_FIND_ACK || pktType == PKT_STATUS_RESP) {
+        handleAck(buf);
+    }
 
     // Update device state for web GUI
     updateDeviceState(buf, rssi, snr);
@@ -758,6 +860,58 @@ static void handleApiCommand() {
     httpServer.send(200, "application/json", "{\"ok\":true}");
 }
 
+// API: find collar (LED flash + buzzer)
+static void handleApiFind() {
+    if (httpServer.method() != HTTP_POST) {
+        httpServer.send(405, "text/plain", "POST only");
+        return;
+    }
+
+    String body = httpServer.arg("plain");
+
+    // Parse: device=XXXX&pattern=chirp&flash=5
+    uint16_t targetId = 0;
+    int dIdx = body.indexOf("device=");
+    if (dIdx >= 0) {
+        targetId = (uint16_t)strtoul(body.c_str() + dIdx + 7, NULL, 16);
+    }
+
+    if (targetId == 0) {
+        httpServer.send(400, "text/plain", "Bad request: device=XXXX required");
+        return;
+    }
+
+    // Parse buzzer pattern (default: chirp)
+    bp_buzzer_pattern_t pattern = BUZZER_CHIRP;
+    int pIdx = body.indexOf("pattern=");
+    if (pIdx >= 0) {
+        String patStr = body.substring(pIdx + 8);
+        int amp = patStr.indexOf('&');
+        if (amp >= 0) patStr = patStr.substring(0, amp);
+        if      (patStr == "off")      pattern = BUZZER_OFF;
+        else if (patStr == "chirp")    pattern = BUZZER_CHIRP;
+        else if (patStr == "trill")    pattern = BUZZER_TRILL;
+        else if (patStr == "siren")    pattern = BUZZER_SIREN;
+        else if (patStr == "melody_a") pattern = BUZZER_MELODY_A;
+        else if (patStr == "melody_b") pattern = BUZZER_MELODY_B;
+    }
+
+    // Parse LED flash count (default: 5)
+    uint8_t flashCount = 5;
+    int fIdx = body.indexOf("flash=");
+    if (fIdx >= 0) {
+        flashCount = (uint8_t)strtoul(body.c_str() + fIdx + 6, NULL, 10);
+    }
+
+    sendCommandFind(targetId, PKT_CMD_FIND, PROFILE_UNKNOWN, flashCount, pattern);
+
+    char resp[128];
+    snprintf(resp, sizeof(resp),
+        "{\"ok\":true,\"device\":%u,\"pattern\":%u,\"flash\":%u}",
+        targetId, pattern, flashCount);
+    httpServer.send(200, "application/json", resp);
+}
+
 // API: save WiFi/cloud config
 static void handleApiConfig() {
     if (httpServer.method() != HTTP_POST) {
@@ -828,6 +982,7 @@ static void initWebServer() {
     httpServer.on("/api/devices",  HTTP_GET,  handleApiDevices);
     httpServer.on("/api/status",   HTTP_GET,  handleApiStatus);
     httpServer.on("/api/command",  HTTP_POST, handleApiCommand);
+    httpServer.on("/api/find",     HTTP_POST, handleApiFind);
     httpServer.on("/api/config",   HTTP_POST, handleApiConfig);
     httpServer.onNotFound(handleNotFound);
     httpServer.begin();
@@ -910,24 +1065,54 @@ static void cloudTask(void *param) {
 // Command Builder — Hub → Collar
 // ═══════════════════════════════════════════════
 
+// Build and queue a command packet, then track it for ACK
 static void sendCommand(uint16_t target_id, bp_pkt_type_t type, bp_profile_t mode) {
+    sendCommandFind(target_id, type, mode, 0, BUZZER_OFF);
+}
+
+static void sendCommandFind(uint16_t target_id, bp_pkt_type_t type,
+                              bp_profile_t mode, uint8_t ledFlash,
+                              bp_buzzer_pattern_t buzzerPattern) {
     cmd_entry_t cmd;
     uint16_t flags = (uint16_t)type;
+    uint32_t seq = ++cmdSeqCounter;
 
-    pkt_init(cmd.buf, DEVICE_ID_HUB, ++cmdSeqCounter, 0, STATUS_OK, flags);
+    pkt_init(cmd.buf, DEVICE_ID_HUB, seq, 0, STATUS_OK, flags);
 
     if (type == PKT_CMD_MODE && mode != PROFILE_UNKNOWN) {
         pkt_add_tlv_u8(cmd.buf, TLV_PROFILE, (uint8_t)mode);
     }
 
-    // Set target device ID in the packet (overwrite device_id field)
-    // Convention: for commands, device_id = target collar
+    if (type == PKT_CMD_FIND) {
+        pkt_add_tlv_u8(cmd.buf, TLV_LED_FLASH, ledFlash > 0 ? ledFlash : 5);
+        pkt_add_tlv_u8(cmd.buf, TLV_BUZZER_PATTERN, (uint8_t)buzzerPattern);
+    }
+
+    // Set target device ID
     memcpy(&cmd.buf[1], &target_id, 2);
 
     cmd.len = pkt_finalize(cmd.buf);
 
     if (xQueueSend(cmdQueue, &cmd, pdMS_TO_TICKS(100)) == pdTRUE) {
-        Serial.printf("[CMD] Queued mode=%s for %s\n",
-                      bp_profile_name(mode), bp_device_name(target_id));
+        Serial.printf("[CMD] Queued type=0x%02X for %s (seq %lu)\n",
+                      type, bp_device_name(target_id), seq);
+
+        // Track for ACK
+        if (xSemaphoreTake(pendingMutex, pdMS_TO_TICKS(50))) {
+            for (int i = 0; i < MAX_PENDING_CMDS; i++) {
+                if (!pendingCmds[i].active) {
+                    pendingCmds[i].cmdSeq   = seq;
+                    pendingCmds[i].targetId = target_id;
+                    pendingCmds[i].type     = type;
+                    pendingCmds[i].sentAtMs = millis();
+                    pendingCmds[i].retries  = 0;
+                    memcpy(pendingCmds[i].buf, cmd.buf, cmd.len);
+                    pendingCmds[i].len      = cmd.len;
+                    pendingCmds[i].active   = true;
+                    break;
+                }
+            }
+            xSemaphoreGive(pendingMutex);
+        }
     }
 }

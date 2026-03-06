@@ -31,6 +31,7 @@
 // ── User Interface ──
 #define PIN_LED        LED_BUILTIN
 #define PIN_BUTTON     D10  // Provision / wake button
+#define PIN_BUZZER     A4   // Passive piezo buzzer (PWM)
 
 // ── NFC (provisioning) ──
 // NFC pins are fixed on nRF52840 (P0.09 / P0.10)

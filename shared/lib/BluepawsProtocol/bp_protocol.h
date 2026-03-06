@@ -55,6 +55,8 @@ enum bp_pkt_type_t : uint16_t {
     PKT_ALERT        = 0x0004,  // TX→RX  alert notification
     PKT_CMD_MODE     = 0x0005,  // RX→TX  mode change command
     PKT_CMD_STATUS   = 0x0006,  // RX→TX  status request
+    PKT_CMD_FIND     = 0x0007,  // RX→TX  find collar (LED + buzzer)
+    PKT_FIND_ACK     = 0x0008,  // TX→RX  find command ACK
 };
 
 #define FLAG_HAS_GPS    0x0010  // Packet contains valid GPS coordinates
@@ -90,6 +92,8 @@ enum bp_tlv_type_t : uint8_t {
     TLV_NEW_MODE       = 0x09,  // u8   — bp_profile_t (mode reverted to)
     TLV_DURATION_S     = 0x0A,  // u32  — total duration in seconds
     TLV_CMD_MSG_ID     = 0x0B,  // u32  — msg_seq of command being ACK'd
+    TLV_LED_FLASH      = 0x0C,  // u8   — LED flash count (0 = skip)
+    TLV_BUZZER_PATTERN = 0x0D,  // u8   — buzzer melody ID (0 = off, 1-N = patterns)
 };
 
 // ═══════════════════════════════════════════════

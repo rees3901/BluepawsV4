@@ -124,4 +124,28 @@ static inline const bp_profile_config_t *bp_profile_config(bp_profile_t p) {
 #define CMD_LISTEN_WINDOW_MS      2000
 #define CMD_QUEUE_INTERVAL_MS     3000  // rate limit between outbound commands
 
+// ═══════════════════════════════════════════════
+// Buzzer (passive piezo — PWM-driven)
+// Melody patterns for "find my collar" feature.
+// Each collar can be assigned a different pattern
+// so the user can distinguish them by sound.
+// ═══════════════════════════════════════════════
+#define BUZZER_DEFAULT_FREQ_HZ    2700   // resonant frequency for most small piezos
+#define BUZZER_NOTE_DURATION_MS   150    // default note length
+#define BUZZER_PAUSE_MS           80     // gap between notes
+
+// Pattern IDs (used in TLV_BUZZER_PATTERN)
+enum bp_buzzer_pattern_t : uint8_t {
+    BUZZER_OFF       = 0x00,  // no buzzer
+    BUZZER_CHIRP     = 0x01,  // 3 short chirps (default)
+    BUZZER_TRILL     = 0x02,  // rising trill
+    BUZZER_SIREN     = 0x03,  // alternating two-tone siren
+    BUZZER_MELODY_A  = 0x04,  // short melody A (distinguish collar 1)
+    BUZZER_MELODY_B  = 0x05,  // short melody B (distinguish collar 2)
+};
+
+// Hub command ACK tracking
+#define CMD_ACK_TIMEOUT_MS        10000  // wait for ACK before retry
+#define CMD_MAX_RETRIES           3      // max retransmissions
+
 #endif // BP_CONFIG_H
