@@ -1,7 +1,7 @@
 /*
   Bluepaws V4 — Hub Web GUI
   Leaflet.js map with SSE real-time updates
-  Left sidebar, dark/light theme, map-based measure tool
+  Left sidebar, dark/light theme, enhanced device cards with avatar, follow, trail controls
 */
 
 (function () {
@@ -19,6 +19,26 @@
     let measureLabels = [];
     let measureMarkers = [];
     let darkMode = true;
+    let followedDeviceId = null;
+
+    // Emoji + color palette for distinguishing animals
+    const AVATARS = [
+        { emoji: '\u{1F431}', color: '#1d9bf0', label: 'Cat'     },
+        { emoji: '\u{1F436}', color: '#ff6b35', label: 'Dog'     },
+        { emoji: '\u{1F430}', color: '#a855f7', label: 'Rabbit'  },
+        { emoji: '\u{1F43E}', color: '#22c55e', label: 'Paw'     },
+        { emoji: '\u{1F98A}', color: '#f97316', label: 'Fox'     },
+        { emoji: '\u{1F426}', color: '#06b6d4', label: 'Bird'    },
+        { emoji: '\u{1F422}', color: '#84cc16', label: 'Turtle'  },
+        { emoji: '\u{1F439}', color: '#ec4899', label: 'Hamster' }
+    ];
+
+    const TRAIL_COLORS = [
+        '#1d9bf0', '#ff6b35', '#a855f7', '#22c55e',
+        '#f97316', '#06b6d4', '#84cc16', '#ec4899'
+    ];
+
+    let avatarIndex = 0;
 
     // ═══════════════════════════════════════════════
     // Map Initialisation
@@ -30,7 +50,6 @@
             zoomControl: false
         });
 
-        // Layer options
         var street = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '&copy; OpenStreetMap',
             maxZoom: 19
@@ -48,7 +67,6 @@
 
         street.addTo(map);
 
-        // Layer control (top-right)
         L.control.layers({
             'Street': street,
             'Satellite': satellite,
@@ -58,9 +76,7 @@
         // Zoom control (top-left, below hamburger)
         L.control.zoom({ position: 'topleft' }).addTo(map);
 
-        // ── Custom map controls (bottomleft) ──
-
-        // Theme toggle (crescent moon)
+        // Theme toggle (crescent moon / sun)
         var ThemeControl = L.Control.extend({
             options: { position: 'topleft' },
             onAdd: function () {
@@ -106,16 +122,13 @@
         darkMode = !darkMode;
         document.body.classList.toggle('light', !darkMode);
 
-        // Update moon/sun icon
         var btn = document.getElementById('btnTheme');
         if (btn) {
             if (darkMode) {
-                // Moon icon (dark mode active)
                 btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">' +
                     '<path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z"/>' +
                     '</svg>';
             } else {
-                // Sun icon (light mode active)
                 btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">' +
                     '<circle cx="12" cy="12" r="5"/>' +
                     '<path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>' +
@@ -123,7 +136,6 @@
             }
         }
 
-        // Save preference
         try { localStorage.setItem('bp_theme', darkMode ? 'dark' : 'light'); } catch (e) {}
     }
 
@@ -144,7 +156,6 @@
         var panel = document.getElementById('panel');
         var isOpen = panel.classList.toggle('open');
         document.body.classList.toggle('panel-open', isOpen);
-        // Invalidate map size after transition
         setTimeout(function () { map.invalidateSize(); }, 300);
     }
 
@@ -189,13 +200,19 @@
         var dev = devices[id];
 
         if (!dev) {
+            var av = AVATARS[avatarIndex % AVATARS.length];
+            var tc = TRAIL_COLORS[avatarIndex % TRAIL_COLORS.length];
             dev = {
                 id: id,
                 name: data.name,
                 marker: null,
                 trail: [],
-                trailLine: null
+                trailLine: null,
+                showTrail: true,
+                avatar: av,
+                trailColor: tc
             };
+            avatarIndex++;
             devices[id] = dev;
         }
 
@@ -208,9 +225,9 @@
             if (!dev.marker) {
                 var icon = L.divIcon({
                     className: '',
-                    html: '<div class="bp-marker" id="marker-' + id + '">&#128062;</div>',
-                    iconSize: [28, 28],
-                    iconAnchor: [14, 14]
+                    html: '<div class="bp-marker" id="marker-' + id + '" style="border-color:' + dev.avatar.color + '">' + dev.avatar.emoji + '</div>',
+                    iconSize: [32, 32],
+                    iconAnchor: [16, 16]
                 });
                 dev.marker = L.marker(latlng, { icon: icon }).addTo(map);
                 dev.marker.bindPopup('');
@@ -229,42 +246,52 @@
                 }
             }
 
-            dev.marker.setPopupContent(buildPopup(data));
+            dev.marker.setPopupContent(buildPopup(dev));
 
             var markerEl = document.getElementById('marker-' + id);
             if (markerEl) {
                 markerEl.className = 'bp-marker';
+                markerEl.style.borderColor = dev.avatar.color;
                 if (data.status === 'Home') markerEl.classList.add('status-home');
                 if (data.status === 'LostTimeout') markerEl.classList.add('status-lost');
             }
 
-            dev.trail.push(latlng);
-            if (dev.trail.length > 100) dev.trail.shift();
-            if (dev.trailLine) {
-                dev.trailLine.setLatLngs(dev.trail);
-            } else {
-                dev.trailLine = L.polyline(dev.trail, {
-                    color: '#1d9bf0',
-                    weight: 2,
-                    opacity: 0.5,
-                    dashArray: '4 4'
-                }).addTo(map);
+            // Trail line
+            if (dev.showTrail) {
+                dev.trail.push(latlng);
+                if (dev.trail.length > 100) dev.trail.shift();
+                if (dev.trailLine) {
+                    dev.trailLine.setLatLngs(dev.trail);
+                } else {
+                    dev.trailLine = L.polyline(dev.trail, {
+                        color: dev.trailColor,
+                        weight: 2,
+                        opacity: 0.6,
+                        dashArray: '4 4'
+                    }).addTo(map);
+                }
+            }
+
+            // Follow mode: auto-center
+            if (followedDeviceId === id) {
+                map.setView(latlng);
             }
         }
 
         renderDeviceCard(dev);
     }
 
-    function buildPopup(data) {
+    function buildPopup(dev) {
+        var data = dev.data;
         return '<div style="font-size:13px;line-height:1.6">' +
+            '<span style="font-size:20px">' + dev.avatar.emoji + '</span> ' +
             '<strong>' + data.name + '</strong><br>' +
             'Status: ' + data.status + '<br>' +
             'Profile: ' + data.profile + '<br>' +
             'Battery: ' + data.batt + ' mV<br>' +
-            'RSSI: ' + data.rssi + ' dBm<br>' +
-            'SNR: ' + data.snr + ' dB<br>' +
-            'Accuracy: ' + data.acc + ' m<br>' +
-            'Fix age: ' + data.fixAge + ' s' +
+            'RSSI: ' + data.rssi + ' dBm / SNR: ' + data.snr + ' dB<br>' +
+            (data.hasGps ? 'Lat: ' + data.lat.toFixed(6) + '  Lon: ' + data.lon.toFixed(6) + '<br>' : '') +
+            'Accuracy: ' + data.acc + ' m' +
             '</div>';
     }
 
@@ -275,20 +302,14 @@
         var data = dev.data;
         var container = document.getElementById('deviceCards');
         var card = document.getElementById('card-' + dev.id);
+        var isNew = false;
 
         if (!card) {
             card = document.createElement('div');
             card.id = 'card-' + dev.id;
             card.className = 'device-card';
             container.appendChild(card);
-
-            card.addEventListener('click', function (e) {
-                if (e.target.tagName === 'BUTTON') return;
-                if (dev.marker) {
-                    map.setView(dev.marker.getLatLng(), 17);
-                    dev.marker.openPopup();
-                }
-            });
+            isNew = true;
         }
 
         var age = Math.floor((Date.now() - dev.lastUpdate) / 1000);
@@ -297,25 +318,80 @@
 
         var statusClass = 'status-' + data.status.toLowerCase().replace('timeout', '');
         var battPct = Math.min(100, Math.max(0, Math.round((data.batt - 3000) / 12)));
+        var isFollowed = (followedDeviceId === dev.id);
+
+        // Coordinate display
+        var coordStr = '---, ---';
+        if (data.hasGps && data.lat !== 0 && data.lon !== 0) {
+            coordStr = data.lat.toFixed(5) + ', ' + data.lon.toFixed(5);
+        }
 
         card.innerHTML =
+            // Header: avatar + name + coords + status
             '<div class="card-header">' +
-                '<span class="card-name">' + data.name + '</span>' +
+                '<div class="card-avatar" style="border-color:' + dev.avatar.color + '">' + dev.avatar.emoji + '</div>' +
+                '<div class="card-identity">' +
+                    '<span class="card-name">' + data.name + '</span>' +
+                    '<span class="card-coords">' + coordStr + '</span>' +
+                '</div>' +
                 '<span class="card-status ' + statusClass + '">' + data.status + '</span>' +
             '</div>' +
+
+            // Telemetry grid
             '<div class="card-grid">' +
                 '<span class="label">Profile</span><span class="value">' + data.profile + '</span>' +
-                '<span class="label">Battery</span><span class="value">' + data.batt + ' mV (' + battPct + '%)</span>' +
-                '<span class="label">RSSI</span><span class="value">' + data.rssi + ' dBm</span>' +
-                '<span class="label">SNR</span><span class="value">' + data.snr + ' dB</span>' +
+                '<span class="label">Battery</span><span class="value">' + battPct + '% (' + data.batt + ' mV)</span>' +
+                '<span class="label">Signal</span><span class="value">' + data.rssi + ' dBm / ' + data.snr + ' dB</span>' +
                 '<span class="label">GPS Acc</span><span class="value">' + data.acc + ' m</span>' +
                 '<span class="label">Fix Age</span><span class="value">' + data.fixAge + ' s</span>' +
                 '<span class="label">Last seen</span><span class="value">' + formatAge(age) + '</span>' +
             '</div>' +
+
+            // Action buttons
             '<div class="card-actions">' +
-                '<button onclick="BP.sendModeCmd(' + dev.id + ',\'' + data.name + '\')">Change Mode</button>' +
-                '<button onclick="BP.focusDevice(' + dev.id + ')">Locate</button>' +
+                '<button class="btn-action btn-jump" data-action="jump" title="Jump to location">' +
+                    '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0l3 6H5l3-6zm0 16l-3-6h6l-3 6z"/></svg>' +
+                    ' Jump' +
+                '</button>' +
+                '<button class="btn-action btn-follow' + (isFollowed ? ' active' : '') + '" data-action="follow" title="Auto-follow on map">' +
+                    '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0a5.5 5.5 0 00-5.5 5.5C2.5 10 8 16 8 16s5.5-6 5.5-10.5A5.5 5.5 0 008 0zm0 8a2.5 2.5 0 110-5 2.5 2.5 0 010 5z"/></svg>' +
+                    (isFollowed ? ' Following' : ' Follow') +
+                '</button>' +
+                '<button class="btn-action btn-trail' + (dev.showTrail ? ' active' : '') + '" data-action="trail" title="Toggle breadcrumb trail">' +
+                    '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M2 14l4-4 3 3 5-7v2l-5 7-3-3-4 4v-2z"/></svg>' +
+                    ' Trail' +
+                '</button>' +
+                '<button class="btn-action btn-cmd" data-action="cmd" title="Command & Control">' +
+                    '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M6 1h4v2h3v4h-2V5H5v2H3V3h3V1zm4 14H6v-2H3v-4h2v2h6v-2h2v4h-3v2z"/></svg>' +
+                    ' Cmd' +
+                '</button>' +
             '</div>';
+
+        // Wire up action buttons
+        var buttons = card.querySelectorAll('.btn-action');
+        buttons.forEach(function (btn) {
+            btn.addEventListener('click', function (e) {
+                e.stopPropagation();
+                var action = btn.getAttribute('data-action');
+                if (action === 'jump') focusDevice(dev.id);
+                if (action === 'follow') toggleFollow(dev.id);
+                if (action === 'trail') toggleTrail(dev.id);
+                if (action === 'cmd') sendModeCmd(dev.id, data.name);
+            });
+        });
+
+        // Sheen animation on update
+        if (!isNew) {
+            card.classList.remove('sheen');
+            void card.offsetWidth;
+            card.classList.add('sheen');
+        }
+
+        // Click card body to jump
+        card.onclick = function (e) {
+            if (e.target.closest('.btn-action')) return;
+            focusDevice(dev.id);
+        };
     }
 
     function formatAge(seconds) {
@@ -325,11 +401,55 @@
         return Math.floor(seconds / 3600) + 'h ago';
     }
 
+    // Periodically refresh card ages
     setInterval(function () {
         for (var id in devices) {
             renderDeviceCard(devices[id]);
         }
     }, 5000);
+
+    // ═══════════════════════════════════════════════
+    // Follow Mode
+    // ═══════════════════════════════════════════════
+    function toggleFollow(deviceId) {
+        if (followedDeviceId === deviceId) {
+            followedDeviceId = null;
+        } else {
+            followedDeviceId = deviceId;
+            var dev = devices[deviceId];
+            if (dev && dev.marker) {
+                map.setView(dev.marker.getLatLng());
+            }
+        }
+        // Re-render all cards to update follow button state
+        for (var id in devices) {
+            renderDeviceCard(devices[id]);
+        }
+    }
+
+    // ═══════════════════════════════════════════════
+    // Trail Toggle
+    // ═══════════════════════════════════════════════
+    function toggleTrail(deviceId) {
+        var dev = devices[deviceId];
+        if (!dev) return;
+
+        dev.showTrail = !dev.showTrail;
+
+        if (!dev.showTrail && dev.trailLine) {
+            map.removeLayer(dev.trailLine);
+            dev.trailLine = null;
+        } else if (dev.showTrail && dev.trail.length > 1) {
+            dev.trailLine = L.polyline(dev.trail, {
+                color: dev.trailColor,
+                weight: 2,
+                opacity: 0.6,
+                dashArray: '4 4'
+            }).addTo(map);
+        }
+
+        renderDeviceCard(dev);
+    }
 
     // ═══════════════════════════════════════════════
     // Measurement Tool (on map)
@@ -552,10 +672,12 @@
         setTimeout(function () { map.invalidateSize(); }, 350);
     }
 
-    // Public API for inline onclick handlers
+    // Public API
     window.BP = {
         sendModeCmd: sendModeCmd,
-        focusDevice: focusDevice
+        focusDevice: focusDevice,
+        toggleFollow: toggleFollow,
+        toggleTrail: toggleTrail
     };
 
     if (document.readyState === 'loading') {
