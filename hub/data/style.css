@@ -1,6 +1,24 @@
 /*
   Bluepaws V4 — Hub Web GUI Styles
-  Left sidebar with hamburger, dark/light theme, enhanced device cards
+  ══════════════════════════════════════════════════
+
+  Layout: Fixed sidebar (left) + flex map (right).
+  Theme: Dark by default, light theme via body.light class.
+  All colors use CSS custom properties (--bg-*, --text-*, --accent).
+
+  Key sections:
+   - Reset & Base styles
+   - Dark/Light theme variables
+   - Layout: sidebar + map
+   - Hamburger button, status banner
+   - Device cards (header, telemetry grid, action buttons)
+   - Sheen animation (update indicator on cards)
+   - Leaflet map controls (custom buttons: theme, measure)
+   - Modals (settings, command, find)
+   - Map marker styles (emoji avatar, status colors, pulse animation)
+   - Measure tool overlay label
+   - Responsive breakpoint (768px for mobile)
+   - Custom scrollbar
 */
 
 /* ── Reset & Base ── */
@@ -10,7 +28,9 @@
     padding: 0;
 }
 
-/* ── Dark Theme (default) ── */
+/* ── Dark Theme (default) ──
+   All colours are defined as CSS custom properties so the light
+   theme can override them in a single block below. */
 :root {
     --bg-primary: #0f1923;
     --bg-card: #1a2733;
@@ -30,7 +50,9 @@
     --panel-width: 340px;
 }
 
-/* ── Light Theme ── */
+/* ── Light Theme ──
+   Toggle via body.light class. Only overrides the colour variables;
+   all component styles remain the same. */
 body.light {
     --bg-primary: #f0f2f5;
     --bg-card: #ffffff;
@@ -212,7 +234,9 @@ body.light #statusBanner {
     opacity: 0.5;
 }
 
-/* ── Sheen animation on update ── */
+/* ── Sheen animation on update ──
+   A subtle blue gradient sweeps across the card when new telemetry
+   arrives, giving visual feedback that data just updated. */
 .device-card.sheen::after {
     content: '';
     position: absolute;
@@ -569,7 +593,10 @@ body.light .measure-label {
     background: rgba(255, 255, 255, 0.9);
 }
 
-/* ── Marker Icons ── */
+/* ── Map Marker Icons ──
+   Custom circular markers with emoji avatar inside.
+   Border colour matches the device's assigned colour.
+   Special states: green border for Home, red pulse for Lost. */
 .bp-marker {
     width: 32px;
     height: 32px;
@@ -605,7 +632,9 @@ body.light .measure-label {
     50%      { box-shadow: 0 0 16px rgba(255,23,68,0.8); }
 }
 
-/* ── Responsive: mobile ── */
+/* ── Responsive: mobile (< 768px) ──
+   On mobile, the sidebar overlays the map instead of pushing it aside.
+   Panel width shrinks to 280px. */
 @media (max-width: 768px) {
     :root {
         --panel-width: 280px;
