@@ -56,9 +56,9 @@ struct bp_profile_config_t {
 static const bp_profile_config_t BP_PROFILES[] = {
     //                        power  sleep   led  beacon  gps_cont  cell_ratio
     { PROFILE_NORMAL,          19,    600,    5,  false,  false,    10 },  // 10 min, cell 1:10
-    { PROFILE_POWERSAVE,       10,   1200,    3,  false,  false,    20 },  // 20 min, cell 1:20
-    { PROFILE_ACTIVE,          19,     60,    5,  false,  false,     5 },  //  1 min, cell 1:5
-    { PROFILE_LOST,            22,      0,   10,  true,   true,      3 },  // no sleep, cell 1:3
+    { PROFILE_POWERSAVE,       10,   1800,    3,  false,  false,    30 },  // 30 min, cell 1:30
+    { PROFILE_ACTIVE,          19,     60,    5,  false,  false,     5 },  // Active Find: 1 min, cell 1:5
+    { PROFILE_LOST,            22,      0,   10,  true,   true,      3 },  // Emergency Lost: no sleep, cell 1:3
 };
 
 #define BP_PROFILE_COUNT  (sizeof(BP_PROFILES) / sizeof(BP_PROFILES[0]))
@@ -107,7 +107,7 @@ static inline const bp_profile_config_t *bp_profile_config(bp_profile_t p) {
 // ═══════════════════════════════════════════════
 #define CELLULAR_BAUD_RATE        115200
 
-// BG77 Power Saving Mode (PSM) — collar sleep periods
+// Sequans Monarch 2 GM02SP Power Saving Mode (PSM) — collar sleep periods
 // TAU (T3412): periodic tracking area update timer
 // Active timer (T3324): time modem stays reachable after TAU
 #define CELLULAR_PSM_TAU          "10100010"  // 12 hours (binary coded)

@@ -442,7 +442,7 @@ static void handlePacket(const uint8_t *buf, uint8_t len, int16_t rssi, float sn
     updateDeviceState(buf, rssi, snr);
 
     // Log to storage
-    logToStorage(buf, len, rssi);
+    logToStorage(buf, len, rssi, snr);
 
     // Queue for cloud relay
     cloud_entry_t ce;
@@ -529,7 +529,7 @@ static device_state_t *findDevice(uint16_t id) {
 // Storage — CSV Log
 // ═══════════════════════════════════════════════
 
-static void logToStorage(const uint8_t *buf, uint8_t len, int16_t rssi) {
+static void logToStorage(const uint8_t *buf, uint8_t len, int16_t rssi, float snr) {
     File f = LittleFS.open(LOG_FILE_PATH, "a");
     if (!f) return;
 
@@ -537,16 +537,22 @@ static void logToStorage(const uint8_t *buf, uint8_t len, int16_t rssi) {
     uint16_t flags = pkt_flags(buf);
     bool hasGps    = (flags & FLAG_HAS_GPS) != 0;
 
-    // CSV: timestamp,device_id,status,lat,lon,batt,rssi,profile
-    f.printf("%u,%u,%u,%.7f,%.7f,%u,%d,%u\n",
+    // Extract profile from TLV (0 if not present)
+    uint8_t profile = 0;
+    pkt_tlv_get_u8(buf, TLV_PROFILE, &profile);
+
+    // CSV: timestamp,device_id,msg_seq,status,lat,lon,batt,rssi,snr,profile
+    f.printf("%u,%u,%u,%u,%.7f,%.7f,%u,%d,%.1f,%u\n",
         pkt_time_unix(buf),
         devId,
+        pkt_msg_seq(buf),
         pkt_status(buf),
         hasGps ? pkt_lat_e7(buf) / 1e7 : 0.0,
         hasGps ? pkt_lon_e7(buf) / 1e7 : 0.0,
         pkt_batt_mV(buf),
         rssi,
-        0  // profile filled below
+        snr,
+        profile
     );
     f.close();
 
