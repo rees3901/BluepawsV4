@@ -160,14 +160,26 @@
     }
 
     // ═══════════════════════════════════════════════
-    // SSE Connection
+    // SSE Connection with heartbeat watchdog
     // ═══════════════════════════════════════════════
+    var heartbeatTimer = null;
+    var HEARTBEAT_TIMEOUT_MS = 10000;  // mark disconnected if no event in 10s
+
+    function resetHeartbeatWatchdog() {
+        clearTimeout(heartbeatTimer);
+        setStatus('connected', 'Connected');
+        heartbeatTimer = setTimeout(function () {
+            setStatus('disconnected', 'No heartbeat');
+        }, HEARTBEAT_TIMEOUT_MS);
+    }
+
     function connectSSE() {
         if (evtSource) evtSource.close();
 
         evtSource = new EventSource('/events');
 
         evtSource.addEventListener('telemetry', function (e) {
+            resetHeartbeatWatchdog();
             try {
                 var data = JSON.parse(e.data);
                 updateDevice(data);
@@ -176,11 +188,16 @@
             }
         });
 
+        evtSource.addEventListener('heartbeat', function () {
+            resetHeartbeatWatchdog();
+        });
+
         evtSource.onopen = function () {
-            setStatus('connected', 'Connected');
+            resetHeartbeatWatchdog();
         };
 
         evtSource.onerror = function () {
+            clearTimeout(heartbeatTimer);
             setStatus('disconnected', 'Disconnected');
         };
     }

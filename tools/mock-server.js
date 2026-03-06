@@ -61,6 +61,11 @@ function sseBroadcast(eventName, data) {
     }
 }
 
+// Heartbeat every 5 seconds so the browser knows the connection is alive
+setInterval(function () {
+    sseBroadcast('heartbeat', '{}');
+}, 5000);
+
 // Send a random animal update every 2 seconds
 setInterval(function () {
     const a = animals[Math.floor(Math.random() * animals.length)];
