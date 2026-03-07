@@ -212,12 +212,12 @@ body.light #statusBanner {
     50% { opacity: 0.3; }
 }
 
-/* ── Device Card ── */
+/* ── Device Card (collapsible) ── */
 .device-card {
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    padding: 12px;
+    padding: 0;
     cursor: pointer;
     transition: border-color 0.2s, transform 0.1s, box-shadow 0.2s;
     position: relative;
@@ -230,8 +230,33 @@ body.light #statusBanner {
     box-shadow: 0 4px 16px rgba(29, 155, 240, 0.15);
 }
 
+.device-card.expanded {
+    border-color: var(--accent);
+}
+
 .device-card.stale {
     opacity: 0.5;
+}
+
+/* ── Compact summary row (always visible) ── */
+.card-summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+}
+
+.card-chevron {
+    font-size: 0.6rem;
+    color: var(--text-dim);
+    margin-left: auto;
+    flex-shrink: 0;
+}
+
+/* ── Expanded detail section ── */
+.card-detail {
+    padding: 0 12px 12px;
+    border-top: 1px solid var(--border);
 }
 
 /* ── Sheen animation on update ──
@@ -254,12 +279,9 @@ body.light #statusBanner {
     100% { left: 100%; }
 }
 
-/* ── Card Header: Avatar + Name + Status ── */
-.card-header {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 8px;
+/* ── Push Leaflet top-left controls below the hamburger button ── */
+.leaflet-top.leaflet-left {
+    top: 54px;
 }
 
 .card-avatar {
@@ -320,9 +342,7 @@ body.light #statusBanner {
     grid-template-columns: auto 1fr;
     gap: 3px 12px;
     font-size: 0.75rem;
-    padding: 6px 0;
-    border-top: 1px solid var(--border);
-    border-bottom: 1px solid var(--border);
+    padding: 8px 0;
     margin-bottom: 8px;
 }
 
