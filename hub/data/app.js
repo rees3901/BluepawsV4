@@ -34,6 +34,8 @@
     let measureMarkers = [];       // Circle markers at each measure point
     let darkMode = true;           // Current theme (persisted to localStorage)
     let followedDeviceId = null;   // Device ID being auto-followed on map (null = none)
+    var consoleLog = [];           // Ring buffer of log entries (max 200)
+    var MAX_LOG_ENTRIES = 200;
 
     // Each new device gets assigned an emoji avatar and a trail color
     // from these palettes. Cycles if more than 8 devices are tracked.
@@ -205,6 +207,32 @@
     }
 
     // ═══════════════════════════════════════════════
+    // Console Log — captures SSE events for debugging
+    // ═══════════════════════════════════════════════
+    function logEvent(type, msg) {
+        var ts = new Date().toLocaleTimeString();
+        consoleLog.push('[' + ts + '] ' + type + ': ' + msg);
+        if (consoleLog.length > MAX_LOG_ENTRIES) consoleLog.shift();
+        updateConsoleDisplay();
+    }
+
+    function updateConsoleDisplay() {
+        var el = document.getElementById('consoleLogContent');
+        if (el && !el.parentElement.classList.contains('hidden')) {
+            el.textContent = consoleLog.join('\n');
+            el.scrollTop = el.scrollHeight;
+        }
+    }
+
+    function toggleConsoleLog() {
+        var panel = document.getElementById('consoleLogPanel');
+        panel.classList.toggle('hidden');
+        if (!panel.classList.contains('hidden')) {
+            updateConsoleDisplay();
+        }
+    }
+
+    // ═══════════════════════════════════════════════
     // Map Initialisation
     // Creates a Leaflet map with 3 tile layer options.
     // Default center is London — will auto-recenter when first device data arrives.
@@ -281,23 +309,6 @@
         });
         new FitAllControl().addTo(map);
 
-        // Theme toggle (crescent moon / sun)
-        var ThemeControl = L.Control.extend({
-            options: { position: 'topleft' },
-            onAdd: function () {
-                var btn = L.DomUtil.create('div', 'leaflet-map-btn');
-                btn.id = 'btnTheme';
-                btn.title = 'Toggle dark/light theme';
-                btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">' +
-                    '<path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z"/>' +
-                    '</svg>';
-                L.DomEvent.disableClickPropagation(btn);
-                L.DomEvent.on(btn, 'click', function () { toggleTheme(); });
-                return btn;
-            }
-        });
-        new ThemeControl().addTo(map);
-
         // Measure tool (ruler icon)
         var MeasureControl = L.Control.extend({
             options: { position: 'topleft' },
@@ -305,9 +316,8 @@
                 var btn = L.DomUtil.create('div', 'leaflet-map-btn');
                 btn.id = 'btnMeasure';
                 btn.title = 'Measure distance (click points on map)';
-                btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
-                    '<path d="M2 22L22 2"/>' +
-                    '<path d="M6 18l2-2"/><path d="M10 14l2-2"/><path d="M14 10l2-2"/><path d="M18 6l2-2"/>' +
+                btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">' +
+                    '<path d="M1.39 18.36l3.16-3.16 1.41 1.42-3.16 3.16a1 1 0 01-1.41-1.42zM22.61 5.64l-3.16 3.16-1.42-1.41 3.16-3.16a1 1 0 011.42 1.41zM5.64 22.61l16.97-16.97-2.12-2.12L3.52 20.49l2.12 2.12zM7.76 7.07l1.42 1.41M10.59 9.9l1.41 1.42M13.41 12.73l1.42 1.41M16.24 15.56l1.41 1.42"/>' +
                     '</svg>';
                 L.DomEvent.disableClickPropagation(btn);
                 L.DomEvent.on(btn, 'click', function () { toggleMeasure(); });
@@ -318,6 +328,12 @@
 
         // Click handler for measurement mode
         map.on('click', onMapClick);
+
+        // Wire action buttons inside popups when they open
+        map.on('popupopen', function (e) {
+            var container = e.popup.getElement();
+            if (container) wireActionButtons(container);
+        });
     }
 
     // ═══════════════════════════════════════════════
@@ -327,18 +343,12 @@
         darkMode = !darkMode;
         document.body.classList.toggle('light', !darkMode);
 
+        // Update sidebar theme button icon (moon = dark, sun = light)
         var btn = document.getElementById('btnTheme');
         if (btn) {
-            if (darkMode) {
-                btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">' +
-                    '<path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z"/>' +
-                    '</svg>';
-            } else {
-                btn.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">' +
-                    '<circle cx="12" cy="12" r="5"/>' +
-                    '<path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>' +
-                    '</svg>';
-            }
+            btn.innerHTML = darkMode
+                ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z"/></svg>'
+                : '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="5"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>';
         }
 
         try { localStorage.setItem('bp_theme', darkMode ? 'dark' : 'light'); } catch (e) {}
@@ -395,8 +405,10 @@
             resetHeartbeatWatchdog();
             try {
                 var data = JSON.parse(e.data);
-                updateDevice(data);  // Update map marker + device card
+                logEvent('RX', data.name + ' id=' + data.id + ' lat=' + (data.lat||0).toFixed(5) + ' lon=' + (data.lon||0).toFixed(5) + ' rssi=' + data.rssi + ' batt=' + data.batt + 'mV');
+                updateDevice(data);
             } catch (err) {
+                logEvent('ERR', 'SSE parse: ' + err.message);
                 console.error('SSE parse error:', err);
             }
         });
@@ -407,13 +419,14 @@
         });
 
         evtSource.onopen = function () {
+            logEvent('SYS', 'SSE connected');
             resetHeartbeatWatchdog();
         };
 
         evtSource.onerror = function () {
+            logEvent('SYS', 'SSE disconnected');
             clearTimeout(heartbeatTimer);
             setStatus('disconnected', 'Disconnected');
-            // EventSource will auto-reconnect after a short delay
         };
     }
 
@@ -517,6 +530,29 @@
             // Update the popup content with latest telemetry
             dev.marker.setPopupContent(buildPopup(dev));
 
+            // ── GPS accuracy radius circle ──
+            // Shows a translucent ring around the marker when GPS accuracy > 15m,
+            // similar to Google Maps' blue accuracy circle.
+            if (data.acc && data.acc > 15) {
+                if (!dev.accCircle) {
+                    dev.accCircle = L.circle(latlng, {
+                        radius: data.acc,
+                        color: dev.avatar.color,
+                        fillColor: dev.avatar.color,
+                        fillOpacity: 0.08,
+                        weight: 1,
+                        opacity: 0.3,
+                        interactive: false
+                    }).addTo(map);
+                } else {
+                    dev.accCircle.setLatLng(latlng);
+                    dev.accCircle.setRadius(data.acc);
+                }
+            } else if (dev.accCircle) {
+                map.removeLayer(dev.accCircle);
+                dev.accCircle = null;
+            }
+
             // Apply status-based marker styles (green border for home, red pulse for lost)
             var markerEl = document.getElementById('marker-' + id);
             if (markerEl) {
@@ -560,16 +596,20 @@
         var data = dev.data;
         var batt = getBatteryLevel(data.batt);
         var sig = getSignalQuality(data.rssi, data.snr);
+        var isFollowed = (followedDeviceId === dev.id);
         var distStr = (data.hasGps && data.lat !== 0 && data.lon !== 0)
             ? formatDistFromHub(data.lat, data.lon) : '--';
-        return '<div style="font-size:13px;line-height:1.6">' +
-            '<span style="font-size:20px">' + dev.avatar.emoji + '</span> ' +
-            '<strong>' + data.name + '</strong><br>' +
-            'Status: ' + data.status + '<br>' +
-            'Battery: ' + batt.label + '<br>' +
-            'Signal: ' + sig.label + '<br>' +
-            (data.hasGps ? 'Lat: ' + data.lat.toFixed(6) + '  Lon: ' + data.lon.toFixed(6) + '<br>' : '') +
-            'From Hub: ' + distStr +
+        return '<div class="popup-content">' +
+            '<div style="font-size:13px;line-height:1.6;margin-bottom:6px">' +
+                '<span style="font-size:20px">' + dev.avatar.emoji + '</span> ' +
+                '<strong>' + data.name + '</strong><br>' +
+                'Status: ' + data.status + '<br>' +
+                'Battery: ' + batt.label + ' | Signal: ' + sig.label + '<br>' +
+                'Dist From Hub: ' + distStr +
+            '</div>' +
+            '<div class="card-actions popup-actions">' +
+                buildActionButtons(dev, isFollowed) +
+            '</div>' +
             '</div>';
     }
 
@@ -584,6 +624,49 @@
     //
     // Clicking the compact header area toggles expand/collapse.
     // ═══════════════════════════════════════════════
+    // Shared action buttons HTML used in both card detail and map popup
+    function buildActionButtons(dev, isFollowed) {
+        return '<button class="btn-action btn-jump" data-action="jump" data-id="' + dev.id + '" title="Jump to location">' +
+                '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0l3 6H5l3-6zm0 16l-3-6h6l-3 6z"/></svg>' +
+                ' Jump' +
+            '</button>' +
+            '<button class="btn-action btn-follow' + (isFollowed ? ' active' : '') + '" data-action="follow" data-id="' + dev.id + '" title="Auto-follow on map">' +
+                '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0a5.5 5.5 0 00-5.5 5.5C2.5 10 8 16 8 16s5.5-6 5.5-10.5A5.5 5.5 0 008 0zm0 8a2.5 2.5 0 110-5 2.5 2.5 0 010 5z"/></svg>' +
+                (isFollowed ? ' Following' : ' Follow') +
+            '</button>' +
+            '<button class="btn-action btn-trail' + (dev.showTrail ? ' active' : '') + '" data-action="trail" data-id="' + dev.id + '" title="Toggle breadcrumb trail">' +
+                '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M2 14l4-4 3 3 5-7v2l-5 7-3-3-4 4v-2z"/></svg>' +
+                ' Trail' +
+            '</button>' +
+            '<button class="btn-action btn-find" data-action="find" data-id="' + dev.id + '" title="Find Alert — trigger buzzer + LED">' +
+                '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a4 4 0 00-4 4c0 1.2.4 2 1 3l-2 5h10l-2-5c.6-1 1-1.8 1-3a4 4 0 00-4-4zm0 13a2 2 0 01-2-2h4a2 2 0 01-2 2z"/></svg>' +
+                ' Find Alert' +
+            '</button>' +
+            '<button class="btn-action btn-cmd" data-action="cmd" data-id="' + dev.id + '" title="Command & Control">' +
+                '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M6 1h4v2h3v4h-2V5H5v2H3V3h3V1zm4 14H6v-2H3v-4h2v2h6v-2h2v4h-3v2z"/></svg>' +
+                ' Cmd' +
+            '</button>';
+    }
+
+    // Wire action button clicks (works for both card and popup contexts)
+    function wireActionButtons(container) {
+        var buttons = container.querySelectorAll('.btn-action');
+        buttons.forEach(function (btn) {
+            btn.addEventListener('click', function (e) {
+                e.stopPropagation();
+                var action = btn.getAttribute('data-action');
+                var devId = parseInt(btn.getAttribute('data-id'), 10);
+                var dev = devices[devId];
+                if (!dev) return;
+                if (action === 'jump') focusDevice(devId);
+                if (action === 'follow') toggleFollow(devId);
+                if (action === 'trail') toggleTrail(devId);
+                if (action === 'find') openFindModal(devId, dev.data.name);
+                if (action === 'cmd') sendModeCmd(devId, dev.data.name);
+            });
+        });
+    }
+
     var expandedCardId = null;  // Only one card expanded at a time
 
     function toggleCardExpand(deviceId) {
@@ -629,12 +712,7 @@
             coordStr = data.lat.toFixed(5) + ', ' + data.lon.toFixed(5);
             var gmapsUrl = 'https://www.google.com/maps?q=' + data.lat.toFixed(6) + ',' + data.lon.toFixed(6);
             coordHtml =
-                '<span class="card-coords-row">' +
-                    '<button class="btn-coords" data-url="' + gmapsUrl + '" data-name="' + data.name + '" title="Share location on Google Maps">' +
-                        '<span class="card-coords card-coords-link">' + coordStr + '</span>' +
-                        '<svg class="coords-share-icon" width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M13.5 1a2.5 2.5 0 00-2.4 3.2L5.7 7.4a2.5 2.5 0 100 1.2l5.4 3.2a2.5 2.5 0 101-1.7L6.7 6.9a2.5 2.5 0 000-1.8l5.4-3.2A2.5 2.5 0 1013.5 1z"/></svg>' +
-                    '</button>' +
-                '</span>';
+                '<a href="' + gmapsUrl + '" target="_blank" rel="noopener" class="card-coords card-coords-link" title="Open in Google Maps">' + coordStr + '</a>';
         }
 
         // ── Compact summary (always visible) ──
@@ -658,34 +736,15 @@
             html +=
                 '<div class="card-detail">' +
                     '<div class="card-grid">' +
-                        '<span class="label">Profile</span><span class="value">' + data.profile + '</span>' +
+                        '<span class="label">Power Profile</span><span class="value">' + data.profile + '</span>' +
                         '<span class="label">Battery</span><span class="value">' + renderBatteryBars(data.batt) + '</span>' +
                         '<span class="label">GPS Acc</span><span class="value">' + data.acc + ' m</span>' +
-                        '<span class="label">From Hub</span><span class="value">' + distStr + '</span>' +
+                        '<span class="label">Dist From Hub</span><span class="value">' + distStr + '</span>' +
                         '<span class="label">Last seen</span><span class="value">' + formatAge(age) + '</span>' +
                     '</div>' +
 
                     '<div class="card-actions">' +
-                        '<button class="btn-action btn-jump" data-action="jump" title="Jump to location">' +
-                            '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0l3 6H5l3-6zm0 16l-3-6h6l-3 6z"/></svg>' +
-                            ' Jump' +
-                        '</button>' +
-                        '<button class="btn-action btn-follow' + (isFollowed ? ' active' : '') + '" data-action="follow" title="Auto-follow on map">' +
-                            '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0a5.5 5.5 0 00-5.5 5.5C2.5 10 8 16 8 16s5.5-6 5.5-10.5A5.5 5.5 0 008 0zm0 8a2.5 2.5 0 110-5 2.5 2.5 0 010 5z"/></svg>' +
-                            (isFollowed ? ' Following' : ' Follow') +
-                        '</button>' +
-                        '<button class="btn-action btn-trail' + (dev.showTrail ? ' active' : '') + '" data-action="trail" title="Toggle breadcrumb trail">' +
-                            '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M2 14l4-4 3 3 5-7v2l-5 7-3-3-4 4v-2z"/></svg>' +
-                            ' Trail' +
-                        '</button>' +
-                        '<button class="btn-action btn-find" data-action="find" title="Find collar (buzzer + LED)">' +
-                            '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M11.7 1.3a1 1 0 011.4 1.4L4.4 11.4a1 1 0 01-1.4-1.4l8.7-8.7zM3 13a2 2 0 100-4 2 2 0 000 4z"/></svg>' +
-                            ' Find' +
-                        '</button>' +
-                        '<button class="btn-action btn-cmd" data-action="cmd" title="Command & Control">' +
-                            '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M6 1h4v2h3v4h-2V5H5v2H3V3h3V1zm4 14H6v-2H3v-4h2v2h6v-2h2v4h-3v2z"/></svg>' +
-                            ' Cmd' +
-                        '</button>' +
+                        buildActionButtons(dev, isFollowed) +
                     '</div>' +
                 '</div>';
         }
@@ -694,18 +753,7 @@
 
         // Wire up action buttons (only present when expanded)
         if (isExpanded) {
-            var buttons = card.querySelectorAll('.btn-action');
-            buttons.forEach(function (btn) {
-                btn.addEventListener('click', function (e) {
-                    e.stopPropagation();
-                    var action = btn.getAttribute('data-action');
-                    if (action === 'jump') focusDevice(dev.id);
-                    if (action === 'follow') toggleFollow(dev.id);
-                    if (action === 'trail') toggleTrail(dev.id);
-                    if (action === 'find') openFindModal(dev.id, data.name);
-                    if (action === 'cmd') sendModeCmd(dev.id, data.name);
-                });
-            });
+            wireActionButtons(card);
         }
 
         // Sheen animation on update
@@ -715,35 +763,11 @@
             card.classList.add('sheen');
         }
 
-        // Wire up coords button — opens share dialog with Google Maps link
-        var coordsBtn = card.querySelector('.btn-coords');
-        if (coordsBtn) {
-            coordsBtn.addEventListener('click', function (e) {
-                e.stopPropagation();
-                var url = coordsBtn.getAttribute('data-url');
-                var name = coordsBtn.getAttribute('data-name');
-                var text = name + ' is here: ' + url;
-
-                if (navigator.share) {
-                    navigator.share({ title: name + ' Location', text: text, url: url }).catch(function () {});
-                } else {
-                    // Desktop fallback: copy to clipboard, then open Google Maps
-                    if (navigator.clipboard) {
-                        navigator.clipboard.writeText(text).then(function () {
-                            coordsBtn.classList.add('shared');
-                            setTimeout(function () { coordsBtn.classList.remove('shared'); }, 1500);
-                        });
-                    }
-                    window.open(url, '_blank', 'noopener');
-                }
-            });
-        }
-
-        // Click card summary to toggle expand/collapse
+        // Click card summary to toggle expand/collapse (ignore link clicks)
         var summary = card.querySelector('.card-summary');
         if (summary) {
             summary.addEventListener('click', function (e) {
-                if (e.target.closest('.btn-action') || e.target.closest('.btn-coords')) return;
+                if (e.target.closest('.btn-action') || e.target.closest('a')) return;
                 toggleCardExpand(dev.id);
             });
         }
@@ -1093,9 +1117,11 @@
 
         // Wire up all UI button event handlers
         document.getElementById('btnHamburger').addEventListener('click', toggleSidebar);
+        document.getElementById('btnTheme').addEventListener('click', toggleTheme);
         document.getElementById('btnSettings').addEventListener('click', openSettings);
         document.getElementById('btnCloseSettings').addEventListener('click', closeSettings);
         document.getElementById('btnSaveConfig').addEventListener('click', saveConfig);
+        document.getElementById('btnConsoleLog').addEventListener('click', toggleConsoleLog);
         document.getElementById('btnSendCmd').addEventListener('click', sendCommand);
         document.getElementById('btnCloseCmd').addEventListener('click', closeCommand);
         document.getElementById('btnSendFind').addEventListener('click', sendFind);
