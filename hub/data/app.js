@@ -133,31 +133,24 @@
         });
 
         // Base tile layers — user can switch between them via the layer control.
-        // Includes a variety of styles: general-purpose, satellite, terrain,
-        // dark-themed, humanitarian, and transport-focused maps.
         var street = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '&copy; OpenStreetMap',
             maxZoom: 19
         });
 
         var satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-            attribution: '&copy; Esri',
+            attribution: '&copy; Esri World Imagery',
+            maxZoom: 19
+        });
+
+        var esriClarity = L.tileLayer('https://clarity.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            attribution: '&copy; Esri Clarity',
             maxZoom: 19
         });
 
         var topo = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
             attribution: '&copy; OpenTopoMap',
             maxZoom: 17
-        });
-
-        var darkMap = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-            attribution: '&copy; OpenStreetMap &copy; CARTO',
-            maxZoom: 20
-        });
-
-        var lightMap = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-            attribution: '&copy; OpenStreetMap &copy; CARTO',
-            maxZoom: 20
         });
 
         var humanitarian = L.tileLayer('https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png', {
@@ -170,27 +163,37 @@
             maxZoom: 19
         });
 
-        var transport = L.tileLayer('https://tile.thunderforest.com/transport/{z}/{x}/{y}.png?apikey=', {
-            attribution: '&copy; Thunderforest &copy; OpenStreetMap',
-            maxZoom: 22
-        });
-
         street.addTo(map);  // Street map is the default
 
         // Layer switcher control (top-right corner)
         L.control.layers({
             'Street': street,
             'Satellite': satellite,
+            'Satellite HD': esriClarity,
             'Topographic': topo,
-            'Dark': darkMap,
-            'Light': lightMap,
             'Humanitarian': humanitarian,
-            'Esri Topo': esriTopo,
-            'Transport': transport
+            'Esri Topo': esriTopo
         }, null, { position: 'topright', collapsed: true }).addTo(map);
 
-        // Zoom control (top-left, below hamburger)
-        L.control.zoom({ position: 'topleft' }).addTo(map);
+        // Zoom control (bottom-left to avoid hamburger overlap)
+        L.control.zoom({ position: 'bottomleft' }).addTo(map);
+
+        // Fit All Markers button (map overlay)
+        var FitAllControl = L.Control.extend({
+            options: { position: 'topleft' },
+            onAdd: function () {
+                var btn = L.DomUtil.create('div', 'leaflet-map-btn');
+                btn.id = 'btnFitAllMap';
+                btn.title = 'Fit all markers into view';
+                btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">' +
+                    '<path d="M2 2h4V0H0v6h2V2zm12 0h-4V0h6v6h-2V2zM2 14h4v2H0v-6h2v4zm12 0h-4v2h6v-6h-2v4z"/>' +
+                    '</svg>';
+                L.DomEvent.disableClickPropagation(btn);
+                L.DomEvent.on(btn, 'click', function () { fitAllMarkers(); });
+                return btn;
+            }
+        });
+        new FitAllControl().addTo(map);
 
         // Theme toggle (crescent moon / sun)
         var ThemeControl = L.Control.extend({
@@ -459,15 +462,30 @@
     }
 
     // ═══════════════════════════════════════════════
-    // Device Cards — Sidebar UI
+    // Device Cards — Sidebar UI (Collapsible)
     //
-    // Each device gets a card in the sidebar showing:
-    //  - Avatar emoji + device name + GPS coordinates
-    //  - Status badge (Out, Home, Lost, etc.)
-    //  - Telemetry grid: profile, battery, signal, accuracy, fix age, last seen
-    //  - Action buttons: Jump, Follow, Trail, Find, Cmd
-    // Cards are re-rendered on every telemetry update.
+    // Cards have two states:
+    //  Collapsed (default): compact summary — avatar, name, status badge,
+    //                       signal indicator, and coordinates
+    //  Expanded (on click):  full telemetry grid + action buttons (Jump,
+    //                        Follow, Trail, Find, Cmd)
+    //
+    // Clicking the compact header area toggles expand/collapse.
     // ═══════════════════════════════════════════════
+    var expandedCardId = null;  // Only one card expanded at a time
+
+    function toggleCardExpand(deviceId) {
+        if (expandedCardId === deviceId) {
+            expandedCardId = null;  // Collapse
+        } else {
+            expandedCardId = deviceId;  // Expand this one
+        }
+        // Re-render all cards to update expanded state
+        for (var id in devices) {
+            renderDeviceCard(devices[id]);
+        }
+    }
+
     function renderDeviceCard(dev) {
         var data = dev.data;
         var container = document.getElementById('deviceCards');
@@ -486,11 +504,10 @@
         // Calculate time since last update — cards older than 10 minutes get dimmed
         var age = Math.floor((Date.now() - dev.lastUpdate) / 1000);
         var stale = age > 600;  // 10 minutes
-        card.className = 'device-card' + (stale ? ' stale' : '');
+        var isExpanded = (expandedCardId === dev.id);
+        card.className = 'device-card' + (stale ? ' stale' : '') + (isExpanded ? ' expanded' : '');
 
         var statusClass = 'status-' + data.status.toLowerCase().replace('timeout', '');
-        // Battery percentage: rough estimate from voltage (3000mV = 0%, 4200mV = 100%)
-        var battPct = Math.min(100, Math.max(0, Math.round((data.batt - 3000) / 12)));
         var isFollowed = (followedDeviceId === dev.id);
 
         // Coordinate display
@@ -499,64 +516,75 @@
             coordStr = data.lat.toFixed(5) + ', ' + data.lon.toFixed(5);
         }
 
-        card.innerHTML =
-            // Header: avatar + name + coords + status
-            '<div class="card-header">' +
+        // ── Compact summary (always visible) ──
+        var html =
+            '<div class="card-summary">' +
                 '<div class="card-avatar" style="border-color:' + dev.avatar.color + '">' + dev.avatar.emoji + '</div>' +
                 '<div class="card-identity">' +
                     '<span class="card-name">' + data.name + '</span>' +
                     '<span class="card-coords">' + coordStr + '</span>' +
                 '</div>' +
+                renderSignalBars(data.rssi, data.snr) +
                 '<span class="card-status ' + statusClass + '">' + data.status + '</span>' +
-            '</div>' +
-
-            // Telemetry grid
-            '<div class="card-grid">' +
-                '<span class="label">Profile</span><span class="value">' + data.profile + '</span>' +
-                '<span class="label">Battery</span><span class="value">' + battPct + '% (' + data.batt + ' mV)</span>' +
-                '<span class="label">Signal</span><span class="value">' + renderSignalBars(data.rssi, data.snr) + '</span>' +
-                '<span class="label">GPS Acc</span><span class="value">' + data.acc + ' m</span>' +
-                '<span class="label">Fix Age</span><span class="value">' + data.fixAge + ' s</span>' +
-                '<span class="label">Last seen</span><span class="value">' + formatAge(age) + '</span>' +
-            '</div>' +
-
-            // Action buttons
-            '<div class="card-actions">' +
-                '<button class="btn-action btn-jump" data-action="jump" title="Jump to location">' +
-                    '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0l3 6H5l3-6zm0 16l-3-6h6l-3 6z"/></svg>' +
-                    ' Jump' +
-                '</button>' +
-                '<button class="btn-action btn-follow' + (isFollowed ? ' active' : '') + '" data-action="follow" title="Auto-follow on map">' +
-                    '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0a5.5 5.5 0 00-5.5 5.5C2.5 10 8 16 8 16s5.5-6 5.5-10.5A5.5 5.5 0 008 0zm0 8a2.5 2.5 0 110-5 2.5 2.5 0 010 5z"/></svg>' +
-                    (isFollowed ? ' Following' : ' Follow') +
-                '</button>' +
-                '<button class="btn-action btn-trail' + (dev.showTrail ? ' active' : '') + '" data-action="trail" title="Toggle breadcrumb trail">' +
-                    '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M2 14l4-4 3 3 5-7v2l-5 7-3-3-4 4v-2z"/></svg>' +
-                    ' Trail' +
-                '</button>' +
-                '<button class="btn-action btn-find" data-action="find" title="Find collar (buzzer + LED)">' +
-                    '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M11.7 1.3a1 1 0 011.4 1.4L4.4 11.4a1 1 0 01-1.4-1.4l8.7-8.7zM3 13a2 2 0 100-4 2 2 0 000 4z"/></svg>' +
-                    ' Find' +
-                '</button>' +
-                '<button class="btn-action btn-cmd" data-action="cmd" title="Command & Control">' +
-                    '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M6 1h4v2h3v4h-2V5H5v2H3V3h3V1zm4 14H6v-2H3v-4h2v2h6v-2h2v4h-3v2z"/></svg>' +
-                    ' Cmd' +
-                '</button>' +
+                '<span class="card-chevron">' + (isExpanded ? '&#9650;' : '&#9660;') + '</span>' +
             '</div>';
 
-        // Wire up action buttons
-        var buttons = card.querySelectorAll('.btn-action');
-        buttons.forEach(function (btn) {
-            btn.addEventListener('click', function (e) {
-                e.stopPropagation();
-                var action = btn.getAttribute('data-action');
-                if (action === 'jump') focusDevice(dev.id);
-                if (action === 'follow') toggleFollow(dev.id);
-                if (action === 'trail') toggleTrail(dev.id);
-                if (action === 'find') openFindModal(dev.id, data.name);
-                if (action === 'cmd') sendModeCmd(dev.id, data.name);
+        // ── Expanded detail (shown only when card is expanded) ──
+        if (isExpanded) {
+            var battPct = Math.min(100, Math.max(0, Math.round((data.batt - 3000) / 12)));
+
+            html +=
+                '<div class="card-detail">' +
+                    '<div class="card-grid">' +
+                        '<span class="label">Profile</span><span class="value">' + data.profile + '</span>' +
+                        '<span class="label">Battery</span><span class="value">' + battPct + '% (' + data.batt + ' mV)</span>' +
+                        '<span class="label">GPS Acc</span><span class="value">' + data.acc + ' m</span>' +
+                        '<span class="label">Fix Age</span><span class="value">' + data.fixAge + ' s</span>' +
+                        '<span class="label">Last seen</span><span class="value">' + formatAge(age) + '</span>' +
+                    '</div>' +
+
+                    '<div class="card-actions">' +
+                        '<button class="btn-action btn-jump" data-action="jump" title="Jump to location">' +
+                            '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0l3 6H5l3-6zm0 16l-3-6h6l-3 6z"/></svg>' +
+                            ' Jump' +
+                        '</button>' +
+                        '<button class="btn-action btn-follow' + (isFollowed ? ' active' : '') + '" data-action="follow" title="Auto-follow on map">' +
+                            '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0a5.5 5.5 0 00-5.5 5.5C2.5 10 8 16 8 16s5.5-6 5.5-10.5A5.5 5.5 0 008 0zm0 8a2.5 2.5 0 110-5 2.5 2.5 0 010 5z"/></svg>' +
+                            (isFollowed ? ' Following' : ' Follow') +
+                        '</button>' +
+                        '<button class="btn-action btn-trail' + (dev.showTrail ? ' active' : '') + '" data-action="trail" title="Toggle breadcrumb trail">' +
+                            '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M2 14l4-4 3 3 5-7v2l-5 7-3-3-4 4v-2z"/></svg>' +
+                            ' Trail' +
+                        '</button>' +
+                        '<button class="btn-action btn-find" data-action="find" title="Find collar (buzzer + LED)">' +
+                            '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M11.7 1.3a1 1 0 011.4 1.4L4.4 11.4a1 1 0 01-1.4-1.4l8.7-8.7zM3 13a2 2 0 100-4 2 2 0 000 4z"/></svg>' +
+                            ' Find' +
+                        '</button>' +
+                        '<button class="btn-action btn-cmd" data-action="cmd" title="Command & Control">' +
+                            '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M6 1h4v2h3v4h-2V5H5v2H3V3h3V1zm4 14H6v-2H3v-4h2v2h6v-2h2v4h-3v2z"/></svg>' +
+                            ' Cmd' +
+                        '</button>' +
+                    '</div>' +
+                '</div>';
+        }
+
+        card.innerHTML = html;
+
+        // Wire up action buttons (only present when expanded)
+        if (isExpanded) {
+            var buttons = card.querySelectorAll('.btn-action');
+            buttons.forEach(function (btn) {
+                btn.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    var action = btn.getAttribute('data-action');
+                    if (action === 'jump') focusDevice(dev.id);
+                    if (action === 'follow') toggleFollow(dev.id);
+                    if (action === 'trail') toggleTrail(dev.id);
+                    if (action === 'find') openFindModal(dev.id, data.name);
+                    if (action === 'cmd') sendModeCmd(dev.id, data.name);
+                });
             });
-        });
+        }
 
         // Sheen animation on update
         if (!isNew) {
@@ -565,11 +593,14 @@
             card.classList.add('sheen');
         }
 
-        // Click card body to jump
-        card.onclick = function (e) {
-            if (e.target.closest('.btn-action')) return;
-            focusDevice(dev.id);
-        };
+        // Click card summary to toggle expand/collapse
+        var summary = card.querySelector('.card-summary');
+        if (summary) {
+            summary.addEventListener('click', function (e) {
+                if (e.target.closest('.btn-action')) return;
+                toggleCardExpand(dev.id);
+            });
+        }
     }
 
     // Human-friendly time display (e.g. "just now", "5s ago", "3m ago", "2h ago")
@@ -915,7 +946,6 @@
 
         // Wire up all UI button event handlers
         document.getElementById('btnHamburger').addEventListener('click', toggleSidebar);
-        document.getElementById('btnFitAll').addEventListener('click', fitAllMarkers);
         document.getElementById('btnSettings').addEventListener('click', openSettings);
         document.getElementById('btnCloseSettings').addEventListener('click', closeSettings);
         document.getElementById('btnSaveConfig').addEventListener('click', saveConfig);
