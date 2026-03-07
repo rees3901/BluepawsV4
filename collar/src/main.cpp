@@ -9,6 +9,8 @@
     1. Wake from deep sleep (only RTC running)
     2. BLE scan for home beacon (10s)
     3. If home → go back to sleep (no GPS, no TX)
+       Exception: every Nth home cycle, send a heartbeat
+       (battery + status, no GPS, no LED — quiet at night)
     4. If NOT home → GPS two-phase acquisition:
        a) Phase 1: TTFF — wait up to 20s for initial fix
        b) Phase 2: Stabilisation — wait 10s for accuracy
@@ -154,7 +156,8 @@ static void     sendTelemetry();           // Build + send PKT_TELEMETRY
 static void     sendModeAck(uint32_t cmdMsgSeq);        // ACK a mode change command
 static void     sendStatusResponse(uint32_t cmdMsgSeq); // Respond to status query
 static void     sendLostModeAlert();       // Alert: lost mode 2hr timeout expired
-static void     transmitPacket(uint8_t *buf, uint8_t len);  // Encrypt + LoRa TX
+static void     sendHeartbeat();              // Home heartbeat (no GPS, no LED)
+static void     transmitPacket(uint8_t *buf, uint8_t len, bool suppressLed = false);  // Encrypt + LoRa TX
 
 // Command handling
 static void     handleReceivedCommand(const uint8_t *buf, uint8_t len);
@@ -338,7 +341,19 @@ static void cycleTask(void *param) {
 
         if (atHome) {
             homeCycleCount++;
-            Serial.printf("[CYCLE] Home (x%d). Skipping GPS/TX.\n", homeCycleCount);
+
+            // Periodic heartbeat: send a lightweight packet so the hub
+            // knows the collar is alive and the cat is still home.
+            // No GPS, no LED flash (quiet at night).
+            uint8_t hbRatio = currentConfig->heartbeat_ratio;
+            if (hbRatio > 0 && (homeCycleCount % hbRatio == 0)) {
+                Serial.printf("[CYCLE] Home (x%d). Heartbeat (ratio 1:%d).\n",
+                              homeCycleCount, hbRatio);
+                sendHeartbeat();
+            } else {
+                Serial.printf("[CYCLE] Home (x%d). Skipping GPS/TX.\n", homeCycleCount);
+            }
+
             peripheralsSleep();
             enterDeepSleep();
             continue;
@@ -653,6 +668,45 @@ static void sendTelemetry() {
 }
 
 // ═══════════════════════════════════════════════
+// Send Home Heartbeat (no GPS, no LED)
+//
+// Lightweight telemetry sent periodically while the collar
+// detects the home beacon. Lets the hub know the collar is
+// alive and the cat is still home. No GPS acquisition (cat
+// is home, position isn't useful), no LED flash (quiet at
+// night), just battery level + profile + home cycle count.
+// ═══════════════════════════════════════════════
+static void sendHeartbeat() {
+    messageSeq++;
+
+    uint8_t buf[BP_MAX_PACKET_SIZE];
+    pkt_init(buf, MY_DEVICE_ID, messageSeq, 0,
+             STATUS_BLE_HOME, PKT_TELEMETRY);  // No FLAG_HAS_GPS
+
+    // Battery only — no GPS accuracy or fix age
+    uint16_t batt_mV = 3700;  // TODO: Read actual battery voltage via ADC
+    pkt_set_quality(buf, batt_mV, 0, 0);
+
+    // TLV payload
+    pkt_add_tlv_u8(buf,  TLV_PROFILE,        currentProfile);
+    pkt_add_tlv_i8(buf,  TLV_TX_POWER,       currentConfig->tx_power_dBm);
+    pkt_add_tlv_u16(buf, TLV_SLEEP_INTERVAL,  currentConfig->sleep_interval_s);
+    pkt_add_tlv_u8(buf,  TLV_HOME_CYCLES,     homeCycleCount);
+
+    uint8_t pktLen = pkt_finalize(buf);
+
+    Serial.printf("[TX] HEARTBEAT seq=%lu homeCycles=%d size=%dB\n",
+                  messageSeq, homeCycleCount, pktLen);
+    pkt_print_hex(buf, pktLen);
+
+    transmitPacket(buf, pktLen, /*suppressLed=*/true);
+
+    // Save copy for cellular (though heartbeat won't trigger cellular)
+    memcpy(lastTxPacket, buf, pktLen);
+    lastTxPacketLen = pktLen;
+}
+
+// ═══════════════════════════════════════════════
 // Send Mode ACK (PKT_MODE_ACK)
 // ═══════════════════════════════════════════════
 static void sendModeAck(uint32_t cmdMsgSeq) {
@@ -731,7 +785,7 @@ static void sendLostModeAlert() {
 // LED pattern tells you the result: normal flashes = OK,
 // 2 slow flashes = timeout, 6 rapid flashes = error.
 // ═══════════════════════════════════════════════
-static void transmitPacket(uint8_t *buf, uint8_t len) {
+static void transmitPacket(uint8_t *buf, uint8_t len, bool suppressLed) {
     // Encrypt the packet in-place (byte 0 = version stays cleartext)
     if (!bp_aes_key_is_zero(aesKey)) {
         bp_aes_ctr_apply(buf, len, aesKey);
@@ -742,13 +796,15 @@ static void transmitPacket(uint8_t *buf, uint8_t len) {
 
     if (state == RADIOLIB_ERR_NONE) {
         Serial.printf("[LORA] TX OK (%d bytes)\n", len);
-        ledFlicker(currentConfig->led_flashes, 50, 50);  // Success: profile-defined flash count
+        if (!suppressLed) {
+            ledFlicker(currentConfig->led_flashes, 50, 50);  // Success: profile-defined flash count
+        }
     } else if (state == RADIOLIB_ERR_TX_TIMEOUT) {
         Serial.println("[LORA] TX timeout");
-        ledFlicker(2, 200, 200);  // Slow double-flash = timeout
+        ledFlicker(2, 200, 200);  // Slow double-flash = timeout (always show errors)
     } else {
         Serial.printf("[LORA] TX failed: %d\n", state);
-        ledFlicker(6, 80, 80);    // Rapid 6-flash = error
+        ledFlicker(6, 80, 80);    // Rapid 6-flash = error (always show errors)
     }
 }
 
