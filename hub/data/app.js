@@ -56,6 +56,71 @@
     let avatarIndex = 0;  // Increments as new devices are discovered
 
     // ═══════════════════════════════════════════════
+    // Signal Quality — 5-Stage Colour-Coded Indicator
+    //
+    // Combines RSSI (dBm) and SNR (dB) into a single quality score
+    // using LoRa best-practice thresholds.
+    //
+    // RSSI thresholds (LoRa SX1262):
+    //   > -80 dBm  = Excellent     -80 to -100 = Good
+    //   -100 to -110 = Fair        -110 to -120 = Poor
+    //   < -120 dBm = Very Poor
+    //
+    // SNR thresholds (LoRa):
+    //   > 7 dB = Excellent         5 to 7 = Good
+    //   0 to 5 = Fair              -5 to 0 = Poor
+    //   < -5 dB = Very Poor
+    //
+    // The combined score is a weighted average: 60% RSSI + 40% SNR,
+    // each normalised to a 0–4 scale. The result maps to 5 stages.
+    // ═══════════════════════════════════════════════
+    function getSignalQuality(rssi, snr) {
+        // Score RSSI on 0–4 scale
+        var rssiScore;
+        if (rssi > -80) rssiScore = 4;
+        else if (rssi > -100) rssiScore = 3;
+        else if (rssi > -110) rssiScore = 2;
+        else if (rssi > -120) rssiScore = 1;
+        else rssiScore = 0;
+
+        // Score SNR on 0–4 scale
+        var snrScore;
+        if (snr > 7) snrScore = 4;
+        else if (snr > 5) snrScore = 3;
+        else if (snr > 0) snrScore = 2;
+        else if (snr > -5) snrScore = 1;
+        else snrScore = 0;
+
+        // Weighted average (RSSI 60%, SNR 40%)
+        var combined = (rssiScore * 0.6) + (snrScore * 0.4);
+
+        // Map to 5 stages
+        if (combined >= 3.5) return { level: 5, label: 'Excellent', color: '#22c55e' };  // Green
+        if (combined >= 2.5) return { level: 4, label: 'Good',      color: '#84cc16' };  // Light green
+        if (combined >= 1.5) return { level: 3, label: 'Average',   color: '#f59e0b' };  // Amber
+        if (combined >= 0.8) return { level: 2, label: 'Poor',      color: '#f97316' };  // Orange
+        return                       { level: 1, label: 'Very Poor', color: '#ef4444' };  // Red
+    }
+
+    // Render signal quality as 5 bars with colour coding
+    function renderSignalBars(rssi, snr) {
+        var sig = getSignalQuality(rssi, snr);
+        var bars = '';
+        for (var i = 1; i <= 5; i++) {
+            var filled = i <= sig.level;
+            var height = 4 + (i * 3);  // Bars grow taller: 7, 10, 13, 16, 19px
+            bars += '<span class="sig-bar' + (filled ? ' filled' : '') + '" style="' +
+                'height:' + height + 'px;' +
+                (filled ? 'background:' + sig.color + ';' : '') +
+                '"></span>';
+        }
+        return '<span class="signal-indicator" title="RSSI: ' + rssi + ' dBm / SNR: ' + snr + ' dB — ' + sig.label + '">' +
+            bars +
+            '<span class="sig-label" style="color:' + sig.color + '">' + sig.label + '</span>' +
+            '</span>';
+    }
+
+    // ═══════════════════════════════════════════════
     // Map Initialisation
     // Creates a Leaflet map with 3 tile layer options.
     // Default center is London — will auto-recenter when first device data arrives.
@@ -67,7 +132,9 @@
             zoomControl: false        // We add our own zoom control below
         });
 
-        // Three base layers — user can switch between them via layer control
+        // Base tile layers — user can switch between them via the layer control.
+        // Includes a variety of styles: general-purpose, satellite, terrain,
+        // dark-themed, humanitarian, and transport-focused maps.
         var street = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '&copy; OpenStreetMap',
             maxZoom: 19
@@ -83,14 +150,44 @@
             maxZoom: 17
         });
 
+        var darkMap = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; OpenStreetMap &copy; CARTO',
+            maxZoom: 20
+        });
+
+        var lightMap = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; OpenStreetMap &copy; CARTO',
+            maxZoom: 20
+        });
+
+        var humanitarian = L.tileLayer('https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap, Tiles: HOT',
+            maxZoom: 19
+        });
+
+        var esriTopo = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', {
+            attribution: '&copy; Esri',
+            maxZoom: 19
+        });
+
+        var transport = L.tileLayer('https://tile.thunderforest.com/transport/{z}/{x}/{y}.png?apikey=', {
+            attribution: '&copy; Thunderforest &copy; OpenStreetMap',
+            maxZoom: 22
+        });
+
         street.addTo(map);  // Street map is the default
 
         // Layer switcher control (top-right corner)
         L.control.layers({
             'Street': street,
             'Satellite': satellite,
-            'Topographic': topo
-        }, null, { position: 'topright' }).addTo(map);
+            'Topographic': topo,
+            'Dark': darkMap,
+            'Light': lightMap,
+            'Humanitarian': humanitarian,
+            'Esri Topo': esriTopo,
+            'Transport': transport
+        }, null, { position: 'topright', collapsed: true }).addTo(map);
 
         // Zoom control (top-left, below hamburger)
         L.control.zoom({ position: 'topleft' }).addTo(map);
@@ -355,7 +452,7 @@
             'Status: ' + data.status + '<br>' +
             'Profile: ' + data.profile + '<br>' +
             'Battery: ' + data.batt + ' mV<br>' +
-            'RSSI: ' + data.rssi + ' dBm / SNR: ' + data.snr + ' dB<br>' +
+            'Signal: ' + getSignalQuality(data.rssi, data.snr).label + '<br>' +
             (data.hasGps ? 'Lat: ' + data.lat.toFixed(6) + '  Lon: ' + data.lon.toFixed(6) + '<br>' : '') +
             'Accuracy: ' + data.acc + ' m' +
             '</div>';
@@ -417,7 +514,7 @@
             '<div class="card-grid">' +
                 '<span class="label">Profile</span><span class="value">' + data.profile + '</span>' +
                 '<span class="label">Battery</span><span class="value">' + battPct + '% (' + data.batt + ' mV)</span>' +
-                '<span class="label">Signal</span><span class="value">' + data.rssi + ' dBm / ' + data.snr + ' dB</span>' +
+                '<span class="label">Signal</span><span class="value">' + renderSignalBars(data.rssi, data.snr) + '</span>' +
                 '<span class="label">GPS Acc</span><span class="value">' + data.acc + ' m</span>' +
                 '<span class="label">Fix Age</span><span class="value">' + data.fixAge + ' s</span>' +
                 '<span class="label">Last seen</span><span class="value">' + formatAge(age) + '</span>' +
