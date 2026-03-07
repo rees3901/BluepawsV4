@@ -199,6 +199,16 @@
         return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     }
 
+    // Convert decimal degrees to DMS format (e.g. 51°30'18.0"N)
+    function toDMS(dd, posChar, negChar) {
+        var dir = dd >= 0 ? posChar : negChar;
+        dd = Math.abs(dd);
+        var d = Math.floor(dd);
+        var m = Math.floor((dd - d) * 60);
+        var s = ((dd - d) * 60 - m) * 60;
+        return d + '\u00B0' + m.toString().padStart(2, '0') + '\'' + s.toFixed(1).padStart(4, '0') + '"' + dir;
+    }
+
     function formatDistFromHub(lat, lon) {
         if (hubHomeLat === null) return '--';
         var d = haversineDistance(hubHomeLat, hubHomeLon, lat, lon);
@@ -316,8 +326,13 @@
                 var btn = L.DomUtil.create('div', 'leaflet-map-btn');
                 btn.id = 'btnMeasure';
                 btn.title = 'Measure distance (click points on map)';
-                btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">' +
-                    '<path d="M1.39 18.36l3.16-3.16 1.41 1.42-3.16 3.16a1 1 0 01-1.41-1.42zM22.61 5.64l-3.16 3.16-1.42-1.41 3.16-3.16a1 1 0 011.42 1.41zM5.64 22.61l16.97-16.97-2.12-2.12L3.52 20.49l2.12 2.12zM7.76 7.07l1.42 1.41M10.59 9.9l1.41 1.42M13.41 12.73l1.42 1.41M16.24 15.56l1.41 1.42"/>' +
+                btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">' +
+                    '<rect x="1" y="7" width="22" height="10" rx="1"/>' +
+                    '<line x1="5" y1="7" x2="5" y2="12"/>' +
+                    '<line x1="9" y1="7" x2="9" y2="10"/>' +
+                    '<line x1="13" y1="7" x2="13" y2="12"/>' +
+                    '<line x1="17" y1="7" x2="17" y2="10"/>' +
+                    '<line x1="21" y1="7" x2="21" y2="12"/>' +
                     '</svg>';
                 L.DomEvent.disableClickPropagation(btn);
                 L.DomEvent.on(btn, 'click', function () { toggleMeasure(); });
@@ -325,6 +340,31 @@
             }
         });
         new MeasureControl().addTo(map);
+
+        // Scale bar (bottom-right, km + miles)
+        L.control.scale({ position: 'bottomright', imperial: true, metric: true }).addTo(map);
+
+        // Live cursor coordinate display (bottom-right)
+        var CoordsControl = L.Control.extend({
+            options: { position: 'bottomright' },
+            onAdd: function () {
+                var div = L.DomUtil.create('div', 'leaflet-cursor-coords');
+                div.id = 'cursorCoords';
+                div.innerHTML = '--';
+                return div;
+            }
+        });
+        new CoordsControl().addTo(map);
+
+        // Update cursor coords on mouse move — shows Lat/Lon (decimal) + DMS
+        map.on('mousemove', function (e) {
+            var el = document.getElementById('cursorCoords');
+            if (!el) return;
+            var lat = e.latlng.lat;
+            var lon = e.latlng.lng;
+            el.innerHTML = lat.toFixed(6) + ', ' + lon.toFixed(6) +
+                '<br>' + toDMS(lat, 'N', 'S') + ' ' + toDMS(lon, 'E', 'W');
+        });
 
         // Click handler for measurement mode
         map.on('click', onMapClick);
@@ -627,8 +667,8 @@
     // Shared action buttons HTML used in both card detail and map popup
     function buildActionButtons(dev, isFollowed) {
         return '<button class="btn-action btn-jump" data-action="jump" data-id="' + dev.id + '" title="Jump to location">' +
-                '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0l3 6H5l3-6zm0 16l-3-6h6l-3 6z"/></svg>' +
-                ' Jump' +
+                '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M1 8h11M8 4l4 4-4 4"/></svg>' +
+                ' Jump To' +
             '</button>' +
             '<button class="btn-action btn-follow' + (isFollowed ? ' active' : '') + '" data-action="follow" data-id="' + dev.id + '" title="Auto-follow on map">' +
                 '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0a5.5 5.5 0 00-5.5 5.5C2.5 10 8 16 8 16s5.5-6 5.5-10.5A5.5 5.5 0 008 0zm0 8a2.5 2.5 0 110-5 2.5 2.5 0 010 5z"/></svg>' +
@@ -944,8 +984,20 @@
     // Opens a dialog to configure WiFi SSID/password and cloud endpoint.
     // Also fetches and displays hub diagnostics (uptime, memory, etc.).
     // ═══════════════════════════════════════════════
+    // Validate SSID + password and enable/disable Save button
+    function validateConfigForm() {
+        var ssid = document.getElementById('cfgSSID').value.trim();
+        var pass = document.getElementById('cfgPass').value;
+        var btn = document.getElementById('btnSaveConfig');
+        // SSID: 1-32 chars, printable ASCII. Password: 8-63 chars (WPA2 spec) or empty (open network).
+        var ssidValid = ssid.length >= 1 && ssid.length <= 32 && /^[\x20-\x7E]+$/.test(ssid);
+        var passValid = pass.length === 0 || (pass.length >= 8 && pass.length <= 63);
+        btn.disabled = !(ssidValid && passValid);
+    }
+
     function openSettings() {
         document.getElementById('settingsModal').classList.remove('hidden');
+        validateConfigForm();  // Set initial button state
 
         // Fetch hub status to display diagnostics in the modal
         fetch('/api/status')
@@ -1122,6 +1174,8 @@
         document.getElementById('btnCloseSettings').addEventListener('click', closeSettings);
         document.getElementById('btnSaveConfig').addEventListener('click', saveConfig);
         document.getElementById('btnConsoleLog').addEventListener('click', toggleConsoleLog);
+        document.getElementById('cfgSSID').addEventListener('input', validateConfigForm);
+        document.getElementById('cfgPass').addEventListener('input', validateConfigForm);
         document.getElementById('btnSendCmd').addEventListener('click', sendCommand);
         document.getElementById('btnCloseCmd').addEventListener('click', closeCommand);
         document.getElementById('btnSendFind').addEventListener('click', sendFind);

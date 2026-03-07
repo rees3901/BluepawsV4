@@ -719,6 +719,44 @@ body.light .console-log {
     padding: 3px 6px;
 }
 
+/* ── Cursor Coordinate Display ── */
+.leaflet-cursor-coords {
+    background: rgba(15, 25, 35, 0.85);
+    backdrop-filter: blur(4px);
+    color: var(--text-primary);
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 0.65rem;
+    line-height: 1.4;
+    padding: 4px 8px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    pointer-events: none;
+}
+
+body.light .leaflet-cursor-coords {
+    background: rgba(255, 255, 255, 0.9);
+}
+
+/* ── Scale Bar Overrides ── */
+.leaflet-control-scale-line {
+    background: rgba(15, 25, 35, 0.8) !important;
+    color: var(--text-primary) !important;
+    border-color: var(--text-secondary) !important;
+    font-size: 0.6rem !important;
+}
+
+body.light .leaflet-control-scale-line {
+    background: rgba(255, 255, 255, 0.85) !important;
+    color: var(--text-primary) !important;
+}
+
+/* ── Disabled Save Button ── */
+.btn-primary:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
 /* ── Signal Quality Indicator ──
    5 vertical bars that grow in height, filled with a colour
    matching signal quality (green → amber → red). Hovering
