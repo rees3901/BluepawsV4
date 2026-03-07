@@ -707,6 +707,30 @@ body.light .console-log {
     background: #1a1a2e;
 }
 
+/* ── Popup Layout ── */
+.popup-header {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 6px;
+}
+
+.popup-grid {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 2px 8px;
+    font-size: 0.72rem;
+    margin-bottom: 6px;
+}
+
+.popup-grid .label {
+    color: var(--text-secondary);
+}
+
+.popup-grid .value {
+    color: var(--text-primary);
+}
+
 /* ── Popup Action Buttons ── */
 .popup-actions {
     border-top: 1px solid var(--border);
@@ -717,6 +741,11 @@ body.light .console-log {
 .popup-content .btn-action {
     font-size: 0.62rem;
     padding: 3px 6px;
+}
+
+.popup-content .signal-indicator {
+    transform: scale(0.85);
+    transform-origin: left center;
 }
 
 /* ── Cursor Coordinate Display ── */

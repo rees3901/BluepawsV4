@@ -42,7 +42,7 @@ function buildTelemetry(a) {
         lon:      parseFloat(a.lon.toFixed(7)),
         hasGps:   true,
         batt:     a.batt + Math.floor(Math.random() * 20 - 10),
-        acc:      Math.floor(Math.random() * 15) + 3,
+        acc:      Math.floor(Math.random() * 40) + 5,
         fixAge:   Math.floor(Math.random() * 30),
         rssi:     -80 - Math.floor(Math.random() * 30),
         snr:      (Math.random() * 10 + 2).toFixed(1),

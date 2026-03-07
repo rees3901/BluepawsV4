@@ -548,7 +548,7 @@
                     iconAnchor: [16, 16]  // Center the icon on the position
                 });
                 dev.marker = L.marker(latlng, { icon: icon }).addTo(map);
-                dev.marker.bindPopup('');  // Popup gets content below
+                dev.marker.bindPopup('', { minWidth: 240, autoPanPadding: [20, 20] });
 
                 // If this is the first device ever, auto-zoom to it
                 if (Object.keys(devices).length === 1) {
@@ -634,18 +634,21 @@
 
     function buildPopup(dev) {
         var data = dev.data;
-        var batt = getBatteryLevel(data.batt);
-        var sig = getSignalQuality(data.rssi, data.snr);
         var isFollowed = (followedDeviceId === dev.id);
         var distStr = (data.hasGps && data.lat !== 0 && data.lon !== 0)
             ? formatDistFromHub(data.lat, data.lon) : '--';
+        var statusClass = 'status-' + data.status.toLowerCase().replace('timeout', '');
         return '<div class="popup-content">' +
-            '<div style="font-size:13px;line-height:1.6;margin-bottom:6px">' +
+            '<div class="popup-header">' +
                 '<span style="font-size:20px">' + dev.avatar.emoji + '</span> ' +
-                '<strong>' + data.name + '</strong><br>' +
-                'Status: ' + data.status + '<br>' +
-                'Battery: ' + batt.label + ' | Signal: ' + sig.label + '<br>' +
-                'Dist From Hub: ' + distStr +
+                '<strong>' + data.name + '</strong>' +
+                '<span class="card-status ' + statusClass + '" style="margin-left:6px;font-size:10px">' + data.status + '</span>' +
+            '</div>' +
+            '<div class="popup-grid">' +
+                '<span class="label">Signal</span><span class="value">' + renderSignalBars(data.rssi, data.snr) + '</span>' +
+                '<span class="label">Battery</span><span class="value">' + renderBatteryBars(data.batt) + '</span>' +
+                '<span class="label">GPS Acc</span><span class="value">' + data.acc + ' m</span>' +
+                '<span class="label">Dist From Hub</span><span class="value">' + distStr + '</span>' +
             '</div>' +
             '<div class="card-actions popup-actions">' +
                 buildActionButtons(dev, isFollowed) +
