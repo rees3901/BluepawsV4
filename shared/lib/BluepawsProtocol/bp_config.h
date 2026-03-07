@@ -50,15 +50,16 @@ struct bp_profile_config_t {
     bool         beacon_enabled;     // LED beacon during active period
     bool         gps_continuous;     // keep GPS on between cycles
     uint8_t      cellular_ratio;     // 1 cellular per N cycles (0 = disabled)
+    uint8_t      heartbeat_ratio;   // 1 heartbeat per N home cycles (0 = disabled)
 };
 
 // Profile lookup table
 static const bp_profile_config_t BP_PROFILES[] = {
-    //                        power  sleep   led  beacon  gps_cont  cell_ratio
-    { PROFILE_NORMAL,          19,    600,    5,  false,  false,    10 },  // 10 min, cell 1:10
-    { PROFILE_POWERSAVE,       10,   1800,    3,  false,  false,    30 },  // 30 min, cell 1:30
-    { PROFILE_ACTIVE,          19,     60,    5,  false,  false,     5 },  // Active Find: 1 min, cell 1:5
-    { PROFILE_LOST,            22,      0,   10,  true,   true,      3 },  // Emergency Lost: no sleep, cell 1:3
+    //                        power  sleep   led  beacon  gps_cont  cell_ratio  heartbeat
+    { PROFILE_NORMAL,          19,    600,    5,  false,  false,    10,          6 },  // 10 min, hb ~1/hr
+    { PROFILE_POWERSAVE,       10,   1800,    3,  false,  false,    30,          2 },  // 30 min, hb ~1/hr
+    { PROFILE_ACTIVE,          19,     60,    5,  false,  false,     5,          0 },  // Active Find: no hb
+    { PROFILE_LOST,            22,      0,   10,  true,   true,      3,          0 },  // Emergency Lost: no hb
 };
 
 #define BP_PROFILE_COUNT  (sizeof(BP_PROFILES) / sizeof(BP_PROFILES[0]))
