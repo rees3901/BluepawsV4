@@ -309,12 +309,6 @@ body.panel-open .hamburger-btn {
     text-overflow: ellipsis;
 }
 
-.card-coords-row {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-}
-
 .card-coords {
     font-size: 0.7rem;
     color: var(--text-dim);
@@ -331,34 +325,6 @@ body.panel-open .hamburger-btn {
 .card-coords-link:hover {
     color: var(--accent-hover);
     text-decoration: underline;
-}
-
-.btn-coords {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    border: none;
-    background: transparent;
-    cursor: pointer;
-    padding: 0;
-    transition: opacity 0.15s;
-}
-
-.btn-coords:hover {
-    opacity: 0.8;
-}
-
-.btn-coords .coords-share-icon {
-    color: var(--text-dim);
-    transition: color 0.15s;
-}
-
-.btn-coords:hover .coords-share-icon {
-    color: var(--accent);
-}
-
-.btn-coords.shared .coords-share-icon {
-    color: var(--success);
 }
 
 .card-status {
@@ -628,6 +594,11 @@ body.panel-open .hamburger-btn {
     color: var(--text-primary) !important;
     border-radius: var(--radius) !important;
     box-shadow: var(--shadow) !important;
+    min-width: 240px;
+}
+
+.leaflet-popup-content {
+    margin: 10px 12px !important;
 }
 
 .leaflet-popup-tip {
@@ -714,6 +685,76 @@ body.light .measure-label {
         width: 95%;
         padding: 16px;
     }
+}
+
+/* ── Console Log ── */
+.console-log {
+    background: #0a0e14;
+    color: #22c55e;
+    font-family: 'SF Mono', 'Fira Code', 'Courier New', monospace;
+    font-size: 0.68rem;
+    line-height: 1.5;
+    padding: 8px;
+    border-radius: 4px;
+    max-height: 200px;
+    overflow-y: auto;
+    margin-top: 8px;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+body.light .console-log {
+    background: #1a1a2e;
+}
+
+/* ── Popup Action Buttons ── */
+.popup-actions {
+    border-top: 1px solid var(--border);
+    padding-top: 6px;
+    flex-wrap: wrap;
+}
+
+.popup-content .btn-action {
+    font-size: 0.62rem;
+    padding: 3px 6px;
+}
+
+/* ── Cursor Coordinate Display ── */
+.leaflet-cursor-coords {
+    background: rgba(15, 25, 35, 0.85);
+    backdrop-filter: blur(4px);
+    color: var(--text-primary);
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 0.65rem;
+    line-height: 1.4;
+    padding: 4px 8px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    pointer-events: none;
+}
+
+body.light .leaflet-cursor-coords {
+    background: rgba(255, 255, 255, 0.9);
+}
+
+/* ── Scale Bar Overrides ── */
+.leaflet-control-scale-line {
+    background: rgba(15, 25, 35, 0.8) !important;
+    color: var(--text-primary) !important;
+    border-color: var(--text-secondary) !important;
+    font-size: 0.6rem !important;
+}
+
+body.light .leaflet-control-scale-line {
+    background: rgba(255, 255, 255, 0.85) !important;
+    color: var(--text-primary) !important;
+}
+
+/* ── Disabled Save Button ── */
+.btn-primary:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    pointer-events: none;
 }
 
 /* ── Signal Quality Indicator ──
