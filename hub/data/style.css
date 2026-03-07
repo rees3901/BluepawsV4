@@ -333,28 +333,31 @@ body.panel-open .hamburger-btn {
     text-decoration: underline;
 }
 
-.btn-share {
+.btn-coords {
     display: inline-flex;
     align-items: center;
-    justify-content: center;
-    width: 20px;
-    height: 20px;
+    gap: 4px;
     border: none;
-    border-radius: 4px;
     background: transparent;
-    color: var(--text-dim);
     cursor: pointer;
     padding: 0;
-    flex-shrink: 0;
-    transition: color 0.15s, background 0.15s;
+    transition: opacity 0.15s;
 }
 
-.btn-share:hover {
+.btn-coords:hover {
+    opacity: 0.8;
+}
+
+.btn-coords .coords-share-icon {
+    color: var(--text-dim);
+    transition: color 0.15s;
+}
+
+.btn-coords:hover .coords-share-icon {
     color: var(--accent);
-    background: var(--bg-hover);
 }
 
-.btn-share.shared {
+.btn-coords.shared .coords-share-icon {
     color: var(--success);
 }
 
