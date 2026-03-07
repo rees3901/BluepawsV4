@@ -269,8 +269,10 @@
                 var btn = L.DomUtil.create('div', 'leaflet-map-btn');
                 btn.id = 'btnFitAllMap';
                 btn.title = 'Fit all markers into view';
-                btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">' +
-                    '<path d="M2 2h4V0H0v6h2V2zm12 0h-4V0h6v6h-2V2zM2 14h4v2H0v-6h2v4zm12 0h-4v2h6v-6h-2v4z"/>' +
+                btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">' +
+                    '<circle cx="8" cy="8" r="5"/>' +
+                    '<path d="M8 1v3m0 8v3M1 8h3m8 0h3"/>' +
+                    '<circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/>' +
                     '</svg>';
                 L.DomEvent.disableClickPropagation(btn);
                 L.DomEvent.on(btn, 'click', function () { fitAllMarkers(); });
@@ -628,9 +630,9 @@
             var gmapsUrl = 'https://www.google.com/maps?q=' + data.lat.toFixed(6) + ',' + data.lon.toFixed(6);
             coordHtml =
                 '<span class="card-coords-row">' +
-                    '<a href="' + gmapsUrl + '" target="_blank" rel="noopener" class="card-coords card-coords-link" title="Open in Google Maps">' + coordStr + '</a>' +
-                    '<button class="btn-share" data-url="' + gmapsUrl + '" data-name="' + data.name + '" title="Share location">' +
-                        '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M13.5 1a2.5 2.5 0 00-2.4 3.2L5.7 7.4a2.5 2.5 0 100 1.2l5.4 3.2a2.5 2.5 0 101-1.7L6.7 6.9a2.5 2.5 0 000-1.8l5.4-3.2A2.5 2.5 0 1013.5 1z"/></svg>' +
+                    '<button class="btn-coords" data-url="' + gmapsUrl + '" data-name="' + data.name + '" title="Share location on Google Maps">' +
+                        '<span class="card-coords card-coords-link">' + coordStr + '</span>' +
+                        '<svg class="coords-share-icon" width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M13.5 1a2.5 2.5 0 00-2.4 3.2L5.7 7.4a2.5 2.5 0 100 1.2l5.4 3.2a2.5 2.5 0 101-1.7L6.7 6.9a2.5 2.5 0 000-1.8l5.4-3.2A2.5 2.5 0 1013.5 1z"/></svg>' +
                     '</button>' +
                 '</span>';
         }
@@ -713,22 +715,26 @@
             card.classList.add('sheen');
         }
 
-        // Wire up share button (uses Web Share API or clipboard fallback)
-        var shareBtn = card.querySelector('.btn-share');
-        if (shareBtn) {
-            shareBtn.addEventListener('click', function (e) {
+        // Wire up coords button — opens share dialog with Google Maps link
+        var coordsBtn = card.querySelector('.btn-coords');
+        if (coordsBtn) {
+            coordsBtn.addEventListener('click', function (e) {
                 e.stopPropagation();
-                var url = shareBtn.getAttribute('data-url');
-                var name = shareBtn.getAttribute('data-name');
+                var url = coordsBtn.getAttribute('data-url');
+                var name = coordsBtn.getAttribute('data-name');
                 var text = name + ' is here: ' + url;
 
                 if (navigator.share) {
                     navigator.share({ title: name + ' Location', text: text, url: url }).catch(function () {});
-                } else if (navigator.clipboard) {
-                    navigator.clipboard.writeText(text).then(function () {
-                        shareBtn.classList.add('shared');
-                        setTimeout(function () { shareBtn.classList.remove('shared'); }, 1500);
-                    });
+                } else {
+                    // Desktop fallback: copy to clipboard, then open Google Maps
+                    if (navigator.clipboard) {
+                        navigator.clipboard.writeText(text).then(function () {
+                            coordsBtn.classList.add('shared');
+                            setTimeout(function () { coordsBtn.classList.remove('shared'); }, 1500);
+                        });
+                    }
+                    window.open(url, '_blank', 'noopener');
                 }
             });
         }
@@ -737,7 +743,7 @@
         var summary = card.querySelector('.card-summary');
         if (summary) {
             summary.addEventListener('click', function (e) {
-                if (e.target.closest('.btn-action') || e.target.closest('.btn-share') || e.target.closest('.card-coords-link')) return;
+                if (e.target.closest('.btn-action') || e.target.closest('.btn-coords')) return;
                 toggleCardExpand(dev.id);
             });
         }
