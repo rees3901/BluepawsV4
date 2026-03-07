@@ -121,6 +121,90 @@
     }
 
     // ═══════════════════════════════════════════════
+    // Battery Level — 5-Stage Indicator
+    //
+    // LiPo battery thresholds (single-cell 3.7V nominal):
+    //   >= 4.10V = Full (Level 5)
+    //   3.95–4.09V = Very Good (Level 4)
+    //   3.80–3.94V = Medium (Level 3)
+    //   3.65–3.79V = Low (Level 2)
+    //   < 3.65V = Nearly Empty (Level 1)
+    // ═══════════════════════════════════════════════
+    function getBatteryLevel(millivolts) {
+        var v = millivolts / 1000;  // Convert mV → V
+        if (v >= 4.10) return { level: 5, label: 'Full',         color: '#22c55e' };
+        if (v >= 3.95) return { level: 4, label: 'Very Good',    color: '#84cc16' };
+        if (v >= 3.80) return { level: 3, label: 'Medium',       color: '#f59e0b' };
+        if (v >= 3.65) return { level: 2, label: 'Low',          color: '#f97316' };
+        return                { level: 1, label: 'Nearly Empty', color: '#ef4444' };
+    }
+
+    function renderBatteryBars(millivolts) {
+        var batt = getBatteryLevel(millivolts);
+        var bars = '';
+        for (var i = 1; i <= 5; i++) {
+            var filled = i <= batt.level;
+            var height = 4 + (i * 3);
+            bars += '<span class="sig-bar' + (filled ? ' filled' : '') + '" style="' +
+                'height:' + height + 'px;' +
+                (filled ? 'background:' + batt.color + ';' : '') +
+                '"></span>';
+        }
+        return '<span class="signal-indicator" title="' + (millivolts / 1000).toFixed(2) + ' V — ' + batt.label + '">' +
+            bars +
+            '<span class="sig-label" style="color:' + batt.color + '">' + batt.label + '</span>' +
+            '</span>';
+    }
+
+    // ═══════════════════════════════════════════════
+    // Hub Home Position — Distance Calculation
+    //
+    // The hub's home position is set from the first GPS fix received,
+    // since the hub is stationary and the collar starts near it.
+    // Persisted to localStorage so it survives page refreshes.
+    // ═══════════════════════════════════════════════
+    var hubHomeLat = null;
+    var hubHomeLon = null;
+
+    function loadHubHome() {
+        try {
+            var lat = localStorage.getItem('bp_hub_lat');
+            var lon = localStorage.getItem('bp_hub_lon');
+            if (lat && lon) {
+                hubHomeLat = parseFloat(lat);
+                hubHomeLon = parseFloat(lon);
+            }
+        } catch (e) {}
+    }
+
+    function setHubHome(lat, lon) {
+        hubHomeLat = lat;
+        hubHomeLon = lon;
+        try {
+            localStorage.setItem('bp_hub_lat', lat.toString());
+            localStorage.setItem('bp_hub_lon', lon.toString());
+        } catch (e) {}
+    }
+
+    // Haversine distance between two lat/lon points (returns meters)
+    function haversineDistance(lat1, lon1, lat2, lon2) {
+        var R = 6371000;  // Earth radius in meters
+        var dLat = (lat2 - lat1) * Math.PI / 180;
+        var dLon = (lon2 - lon1) * Math.PI / 180;
+        var a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    function formatDistFromHub(lat, lon) {
+        if (hubHomeLat === null) return '--';
+        var d = haversineDistance(hubHomeLat, hubHomeLon, lat, lon);
+        if (d >= 2000) return (d / 1000).toFixed(1) + ' km';
+        return Math.round(d) + ' m';
+    }
+
+    // ═══════════════════════════════════════════════
     // Map Initialisation
     // Creates a Leaflet map with 3 tile layer options.
     // Default center is London — will auto-recenter when first device data arrives.
@@ -331,12 +415,30 @@
         };
     }
 
-    // Update the connection status pill (top-right corner)
+    // Update the connection status indicator (in sidebar header).
+    // Fades out after 20 seconds when connected; stays visible when disconnected.
+    var statusFadeTimer = null;
+    var lastStatusState = null;
+
     function setStatus(state, text) {
         var banner = document.getElementById('statusBanner');
         var textEl = document.getElementById('statusText');
-        banner.className = state;    // 'connected' or 'disconnected' — CSS styles the color
+        banner.className = state;
         textEl.textContent = text;
+
+        // Show on any state change
+        banner.classList.remove('faded');
+        clearTimeout(statusFadeTimer);
+
+        if (state === 'connected') {
+            // Auto-fade after 20 seconds when connected
+            statusFadeTimer = setTimeout(function () {
+                banner.classList.add('faded');
+            }, 20000);
+        }
+        // Disconnected stays visible (no fade)
+
+        lastStatusState = state;
     }
 
     // ═══════════════════════════════════════════════
@@ -375,6 +477,11 @@
         // Only update map if we have valid GPS coordinates
         if (data.hasGps && data.lat !== 0 && data.lon !== 0) {
             var latlng = [data.lat, data.lon];
+
+            // Set hub home position from first GPS fix (hub is near the collar at startup)
+            if (hubHomeLat === null) {
+                setHubHome(data.lat, data.lon);
+            }
 
             if (!dev.marker) {
                 // First GPS fix for this device — create a map marker
@@ -418,11 +525,11 @@
             }
 
             // ── Trail breadcrumb line ──
-            // Each GPS update adds a point. Max 100 points (oldest dropped).
+            // Each GPS update adds a point. Max 4 points to keep it clean.
             // Renders as a dashed polyline in the device's trail color.
             if (dev.showTrail) {
                 dev.trail.push(latlng);
-                if (dev.trail.length > 100) dev.trail.shift();  // Keep trail manageable
+                while (dev.trail.length > 4) dev.trail.shift();
                 if (dev.trailLine) {
                     dev.trailLine.setLatLngs(dev.trail);  // Update existing polyline
                 } else {
@@ -449,15 +556,18 @@
 
     function buildPopup(dev) {
         var data = dev.data;
+        var batt = getBatteryLevel(data.batt);
+        var sig = getSignalQuality(data.rssi, data.snr);
+        var distStr = (data.hasGps && data.lat !== 0 && data.lon !== 0)
+            ? formatDistFromHub(data.lat, data.lon) : '--';
         return '<div style="font-size:13px;line-height:1.6">' +
             '<span style="font-size:20px">' + dev.avatar.emoji + '</span> ' +
             '<strong>' + data.name + '</strong><br>' +
             'Status: ' + data.status + '<br>' +
-            'Profile: ' + data.profile + '<br>' +
-            'Battery: ' + data.batt + ' mV<br>' +
-            'Signal: ' + getSignalQuality(data.rssi, data.snr).label + '<br>' +
+            'Battery: ' + batt.label + '<br>' +
+            'Signal: ' + sig.label + '<br>' +
             (data.hasGps ? 'Lat: ' + data.lat.toFixed(6) + '  Lon: ' + data.lon.toFixed(6) + '<br>' : '') +
-            'Accuracy: ' + data.acc + ' m' +
+            'From Hub: ' + distStr +
             '</div>';
     }
 
@@ -540,15 +650,16 @@
 
         // ── Expanded detail (shown only when card is expanded) ──
         if (isExpanded) {
-            var battPct = Math.min(100, Math.max(0, Math.round((data.batt - 3000) / 12)));
+            var distStr = (data.hasGps && data.lat !== 0 && data.lon !== 0)
+                ? formatDistFromHub(data.lat, data.lon) : '--';
 
             html +=
                 '<div class="card-detail">' +
                     '<div class="card-grid">' +
                         '<span class="label">Profile</span><span class="value">' + data.profile + '</span>' +
-                        '<span class="label">Battery</span><span class="value">' + battPct + '% (' + data.batt + ' mV)</span>' +
+                        '<span class="label">Battery</span><span class="value">' + renderBatteryBars(data.batt) + '</span>' +
                         '<span class="label">GPS Acc</span><span class="value">' + data.acc + ' m</span>' +
-                        '<span class="label">Fix Age</span><span class="value">' + data.fixAge + ' s</span>' +
+                        '<span class="label">From Hub</span><span class="value">' + distStr + '</span>' +
                         '<span class="label">Last seen</span><span class="value">' + formatAge(age) + '</span>' +
                     '</div>' +
 
@@ -955,6 +1066,7 @@
     // ═══════════════════════════════════════════════
     function init() {
         loadTheme();     // Restore dark/light preference from localStorage
+        loadHubHome();   // Restore hub home position from localStorage
         initMap();       // Create Leaflet map with tile layers
         connectSSE();    // Open SSE connection for real-time updates
 
