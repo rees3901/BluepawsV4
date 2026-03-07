@@ -655,6 +655,35 @@ body.light .measure-label {
     }
 }
 
+/* ── Signal Quality Indicator ──
+   5 vertical bars that grow in height, filled with a colour
+   matching signal quality (green → amber → red). Hovering
+   shows the raw RSSI/SNR values in a tooltip. */
+.signal-indicator {
+    display: inline-flex;
+    align-items: flex-end;
+    gap: 2px;
+    vertical-align: middle;
+}
+
+.sig-bar {
+    width: 4px;
+    border-radius: 1px;
+    background: var(--border);
+    transition: background 0.3s;
+}
+
+.sig-bar.filled {
+    /* colour is set inline via JS */
+}
+
+.sig-label {
+    font-size: 0.68rem;
+    font-weight: 600;
+    margin-left: 4px;
+    letter-spacing: 0.02em;
+}
+
 /* ── Scrollbar ── */
 #deviceCards::-webkit-scrollbar {
     width: 4px;
