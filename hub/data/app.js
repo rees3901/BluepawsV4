@@ -510,10 +510,19 @@
         var statusClass = 'status-' + data.status.toLowerCase().replace('timeout', '');
         var isFollowed = (followedDeviceId === dev.id);
 
-        // Coordinate display
+        // Coordinate display — hyperlinked to Google Maps with share button
         var coordStr = '---, ---';
+        var coordHtml = '<span class="card-coords">---, ---</span>';
         if (data.hasGps && data.lat !== 0 && data.lon !== 0) {
             coordStr = data.lat.toFixed(5) + ', ' + data.lon.toFixed(5);
+            var gmapsUrl = 'https://www.google.com/maps?q=' + data.lat.toFixed(6) + ',' + data.lon.toFixed(6);
+            coordHtml =
+                '<span class="card-coords-row">' +
+                    '<a href="' + gmapsUrl + '" target="_blank" rel="noopener" class="card-coords card-coords-link" title="Open in Google Maps">' + coordStr + '</a>' +
+                    '<button class="btn-share" data-url="' + gmapsUrl + '" data-name="' + data.name + '" title="Share location">' +
+                        '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M13.5 1a2.5 2.5 0 00-2.4 3.2L5.7 7.4a2.5 2.5 0 100 1.2l5.4 3.2a2.5 2.5 0 101-1.7L6.7 6.9a2.5 2.5 0 000-1.8l5.4-3.2A2.5 2.5 0 1013.5 1z"/></svg>' +
+                    '</button>' +
+                '</span>';
         }
 
         // ── Compact summary (always visible) ──
@@ -522,7 +531,7 @@
                 '<div class="card-avatar" style="border-color:' + dev.avatar.color + '">' + dev.avatar.emoji + '</div>' +
                 '<div class="card-identity">' +
                     '<span class="card-name">' + data.name + '</span>' +
-                    '<span class="card-coords">' + coordStr + '</span>' +
+                    coordHtml +
                 '</div>' +
                 renderSignalBars(data.rssi, data.snr) +
                 '<span class="card-status ' + statusClass + '">' + data.status + '</span>' +
@@ -593,11 +602,31 @@
             card.classList.add('sheen');
         }
 
+        // Wire up share button (uses Web Share API or clipboard fallback)
+        var shareBtn = card.querySelector('.btn-share');
+        if (shareBtn) {
+            shareBtn.addEventListener('click', function (e) {
+                e.stopPropagation();
+                var url = shareBtn.getAttribute('data-url');
+                var name = shareBtn.getAttribute('data-name');
+                var text = name + ' is here: ' + url;
+
+                if (navigator.share) {
+                    navigator.share({ title: name + ' Location', text: text, url: url }).catch(function () {});
+                } else if (navigator.clipboard) {
+                    navigator.clipboard.writeText(text).then(function () {
+                        shareBtn.classList.add('shared');
+                        setTimeout(function () { shareBtn.classList.remove('shared'); }, 1500);
+                    });
+                }
+            });
+        }
+
         // Click card summary to toggle expand/collapse
         var summary = card.querySelector('.card-summary');
         if (summary) {
             summary.addEventListener('click', function (e) {
-                if (e.target.closest('.btn-action')) return;
+                if (e.target.closest('.btn-action') || e.target.closest('.btn-share') || e.target.closest('.card-coords-link')) return;
                 toggleCardExpand(dev.id);
             });
         }
