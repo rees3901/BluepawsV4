@@ -647,7 +647,6 @@
             '<div class="popup-grid">' +
                 '<span class="label">Signal</span><span class="value">' + renderSignalBars(data.rssi, data.snr) + '</span>' +
                 '<span class="label">Battery</span><span class="value">' + renderBatteryBars(data.batt) + '</span>' +
-                '<span class="label">GPS Acc</span><span class="value">' + data.acc + ' m</span>' +
                 '<span class="label">Dist From Hub</span><span class="value">' + distStr + '</span>' +
             '</div>' +
             '<div class="card-actions popup-actions">' +
@@ -781,7 +780,6 @@
                     '<div class="card-grid">' +
                         '<span class="label">Power Profile</span><span class="value">' + data.profile + '</span>' +
                         '<span class="label">Battery</span><span class="value">' + renderBatteryBars(data.batt) + '</span>' +
-                        '<span class="label">GPS Acc</span><span class="value">' + data.acc + ' m</span>' +
                         '<span class="label">Dist From Hub</span><span class="value">' + distStr + '</span>' +
                         '<span class="label">Last seen</span><span class="value">' + formatAge(age) + '</span>' +
                     '</div>' +
@@ -1098,24 +1096,52 @@
     // then sends it via POST /api/find. The collar will beep
     // and flash its LED so you can locate it.
     // ═══════════════════════════════════════════════
-    var findTargetId = 0;  // Device ID for the find modal
+    var findTargetId = 0;      // Device ID for the find modal
+    var findDuration = 5;      // Alert duration in minutes (1–60)
 
     function openFindModal(deviceId, deviceName) {
         findTargetId = deviceId;
         document.getElementById('findDeviceName').textContent = deviceName;
         document.getElementById('findModal').classList.remove('hidden');
+        updateFindToggles();
+        updateFindDurDisplay();
     }
 
     function closeFind() {
         document.getElementById('findModal').classList.add('hidden');
     }
 
+    // Show/hide pattern selectors based on toggle state
+    function updateFindToggles() {
+        var buzzerOn = document.getElementById('findBuzzerEnabled').checked;
+        var ledOn = document.getElementById('findLedEnabled').checked;
+        document.getElementById('buzzerPatternGroup').style.display = buzzerOn ? '' : 'none';
+        document.getElementById('ledPatternGroup').style.display = ledOn ? '' : 'none';
+        // Require at least one to be enabled
+        document.getElementById('btnSendFind').disabled = !buzzerOn && !ledOn;
+    }
+
+    function updateFindDurDisplay() {
+        document.getElementById('findDurValue').textContent = findDuration;
+    }
+
+    function adjustFindDuration(delta) {
+        findDuration = Math.max(1, Math.min(60, findDuration + delta));
+        updateFindDurDisplay();
+    }
+
     function sendFind() {
-        var pattern = document.getElementById('findPattern').value;
-        var flash = document.getElementById('findFlash').value;
+        var buzzerOn = document.getElementById('findBuzzerEnabled').checked;
+        var ledOn = document.getElementById('findLedEnabled').checked;
+        var pattern = buzzerOn ? document.getElementById('findPattern').value : 'off';
+        var flash = ledOn ? document.getElementById('findFlash').value : '0';
+
         var body = 'device=' + findTargetId.toString(16).padStart(4, '0') +
                    '&pattern=' + pattern +
-                   '&flash=' + flash;
+                   '&flash=' + flash +
+                   '&duration=' + findDuration +
+                   '&buzzer=' + (buzzerOn ? '1' : '0') +
+                   '&led=' + (ledOn ? '1' : '0');
 
         fetch('/api/find', {
             method: 'POST',
@@ -1183,6 +1209,10 @@
         document.getElementById('btnCloseCmd').addEventListener('click', closeCommand);
         document.getElementById('btnSendFind').addEventListener('click', sendFind);
         document.getElementById('btnCloseFind').addEventListener('click', closeFind);
+        document.getElementById('findBuzzerEnabled').addEventListener('change', updateFindToggles);
+        document.getElementById('findLedEnabled').addEventListener('change', updateFindToggles);
+        document.getElementById('findDurUp').addEventListener('click', function () { adjustFindDuration(1); });
+        document.getElementById('findDurDown').addEventListener('click', function () { adjustFindDuration(-1); });
 
         // After sidebar CSS transition completes, tell Leaflet to recalculate map size
         setTimeout(function () { map.invalidateSize(); }, 350);

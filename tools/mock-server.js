@@ -137,6 +137,13 @@ const server = http.createServer(function (req, res) {
         return;
     }
 
+    // REST: find alert (stub)
+    if (req.url === '/api/find' && req.method === 'POST') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+        return;
+    }
+
     // REST: config (stub)
     if (req.url === '/api/config' && req.method === 'POST') {
         res.writeHead(200, { 'Content-Type': 'application/json' });

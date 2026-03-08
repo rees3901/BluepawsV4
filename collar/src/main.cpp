@@ -1,7 +1,7 @@
 /*
   ┌──────────────────────────────────────────────────────────┐
   │  BLUEPAWS V4 — COLLAR FIRMWARE                           │
-  │  nRF52840 + SX1262 LoRa + L76K GNSS + BG77 NB-IoT      │
+  │  RAK4630 (nRF52840 + SX1262) + Sequans GM02SP           │
   │  FreeRTOS task-based architecture                        │
   └──────────────────────────────────────────────────────────┘
 
