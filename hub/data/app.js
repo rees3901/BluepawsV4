@@ -105,6 +105,14 @@
     }
 
     // Render signal quality as 5 bars with colour coding
+    // Inline SVG icons for card indicators
+    var ICON_ANTENNA = '<svg class="indicator-icon" width="10" height="10" viewBox="0 0 24 24" fill="currentColor">' +
+        '<path d="M12 5c-3.87 0-7 3.13-7 7h2c0-2.76 2.24-5 5-5s5 2.24 5 5h2c0-3.87-3.13-7-7-7zm0-4C5.93 1 1 5.93 1 12h2c0-4.97 4.03-9 9-9s9 4.03 9 9h2c0-6.07-4.93-11-11-11zm0 8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>' +
+        '</svg>';
+    var ICON_BATTERY = '<svg class="indicator-icon" width="12" height="10" viewBox="0 0 24 24" fill="currentColor">' +
+        '<path d="M15.67 4H14V2h-4v2H8.33C7.6 4 7 4.6 7 5.33v15.34C7 21.4 7.6 22 8.33 22h7.34c.73 0 1.33-.6 1.33-1.33V5.33C17 4.6 16.4 4 15.67 4z"/>' +
+        '</svg>';
+
     function renderSignalBars(rssi, snr) {
         var sig = getSignalQuality(rssi, snr);
         var bars = '';
@@ -117,6 +125,7 @@
                 '"></span>';
         }
         return '<span class="signal-indicator" title="RSSI: ' + rssi + ' dBm / SNR: ' + snr + ' dB — ' + sig.label + '">' +
+            ICON_ANTENNA +
             bars +
             '<span class="sig-label" style="color:' + sig.color + '">' + sig.label + '</span>' +
             '</span>';
@@ -153,6 +162,7 @@
                 '"></span>';
         }
         return '<span class="signal-indicator" title="' + (millivolts / 1000).toFixed(2) + ' V — ' + batt.label + '">' +
+            ICON_BATTERY +
             bars +
             '<span class="sig-label" style="color:' + batt.color + '">' + batt.label + '</span>' +
             '</span>';
@@ -747,39 +757,43 @@
         var statusClass = 'status-' + data.status.toLowerCase().replace('timeout', '');
         var isFollowed = (followedDeviceId === dev.id);
 
-        // Coordinate display — hyperlinked to Google Maps with share button
-        var coordStr = '---, ---';
-        var coordHtml = '<span class="card-coords">---, ---</span>';
-        if (data.hasGps && data.lat !== 0 && data.lon !== 0) {
-            coordStr = data.lat.toFixed(5) + ', ' + data.lon.toFixed(5);
-            var gmapsUrl = 'https://www.google.com/maps?q=' + data.lat.toFixed(6) + ',' + data.lon.toFixed(6);
-            coordHtml =
-                '<a href="' + gmapsUrl + '" target="_blank" rel="noopener" class="card-coords card-coords-link" title="Open in Google Maps">' + coordStr + '</a>';
-        }
+        // Distance from hub (used in both collapsed and expanded views)
+        var distStr = (data.hasGps && data.lat !== 0 && data.lon !== 0)
+            ? formatDistFromHub(data.lat, data.lon) : '--';
 
         // ── Compact summary (always visible) ──
+        // Shows: avatar, name, battery, signal, distance, status, chevron
         var html =
             '<div class="card-summary">' +
                 '<div class="card-avatar" style="border-color:' + dev.avatar.color + '">' + dev.avatar.emoji + '</div>' +
                 '<div class="card-identity">' +
                     '<span class="card-name">' + data.name + '</span>' +
-                    coordHtml +
+                    '<div class="card-indicators">' +
+                        renderBatteryBars(data.batt) +
+                        renderSignalBars(data.rssi, data.snr) +
+                        '<span class="card-dist" title="Distance from hub">' + distStr + '</span>' +
+                    '</div>' +
                 '</div>' +
-                renderSignalBars(data.rssi, data.snr) +
                 '<span class="card-status ' + statusClass + '">' + data.status + '</span>' +
                 '<span class="card-chevron">' + (isExpanded ? '&#9650;' : '&#9660;') + '</span>' +
             '</div>';
 
         // ── Expanded detail (shown only when card is expanded) ──
         if (isExpanded) {
-            var distStr = (data.hasGps && data.lat !== 0 && data.lon !== 0)
-                ? formatDistFromHub(data.lat, data.lon) : '--';
+            // Coordinate display — hyperlinked to Google Maps
+            var coordHtml = '<span class="card-coords">---, ---</span>';
+            if (data.hasGps && data.lat !== 0 && data.lon !== 0) {
+                var coordStr = data.lat.toFixed(5) + ', ' + data.lon.toFixed(5);
+                var gmapsUrl = 'https://www.google.com/maps?q=' + data.lat.toFixed(6) + ',' + data.lon.toFixed(6);
+                coordHtml =
+                    '<a href="' + gmapsUrl + '" target="_blank" rel="noopener" class="card-coords card-coords-link" title="Open in Google Maps">' + coordStr + '</a>';
+            }
 
             html +=
                 '<div class="card-detail">' +
                     '<div class="card-grid">' +
+                        '<span class="label">Coordinates</span><span class="value">' + coordHtml + '</span>' +
                         '<span class="label">Power Profile</span><span class="value">' + data.profile + '</span>' +
-                        '<span class="label">Battery</span><span class="value">' + renderBatteryBars(data.batt) + '</span>' +
                         '<span class="label">Dist From Hub</span><span class="value">' + distStr + '</span>' +
                         '<span class="label">Last seen</span><span class="value">' + formatAge(age) + '</span>' +
                     '</div>' +

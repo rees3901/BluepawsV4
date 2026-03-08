@@ -309,6 +309,32 @@ body.panel-open .hamburger-btn {
     text-overflow: ellipsis;
 }
 
+.card-indicators {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 2px;
+}
+
+.card-indicators .signal-indicator {
+    transform: scale(0.8);
+    transform-origin: left center;
+}
+
+.card-dist {
+    font-size: 0.65rem;
+    color: var(--text-secondary);
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.indicator-icon {
+    color: var(--text-secondary);
+    flex-shrink: 0;
+    margin-right: 2px;
+    vertical-align: middle;
+}
+
 .card-coords {
     font-size: 0.7rem;
     color: var(--text-dim);
