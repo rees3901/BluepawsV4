@@ -650,17 +650,57 @@
         renderDeviceCard(dev);
     }
 
+    // ═══════════════════════════════════════════════
+    // Collar Status — emoji + label + offline detection
+    // ═══════════════════════════════════════════════
+    var STATUS_MAP = {
+        'home':  { emoji: '\u{1F3E0}', label: 'Home',    css: 'status-home'  },
+        'out':   { emoji: '\u{1F43E}', label: 'Out',     css: 'status-out'   },
+        'error': { emoji: '\u2753',    label: 'Error',   css: 'status-error' },
+        'lost':  { emoji: '\u2757\u2757', label: 'Lost', css: 'status-lost'  }
+    };
+    var STATUS_OFFLINE = { emoji: '\u26AB', label: 'Offline', css: 'status-offline' };
+    var OFFLINE_THRESHOLD_MS = 3600000;  // 1 hour
+
+    function getCollarStatus(dev) {
+        var age = Date.now() - dev.lastUpdate;
+        if (age > OFFLINE_THRESHOLD_MS) return STATUS_OFFLINE;
+        var key = (dev.data.status || '').toLowerCase();
+        return STATUS_MAP[key] || STATUS_MAP['error'];
+    }
+
+    // Format elapsed time compactly for the stopwatch: 23s, 1m 10s, 2h 5m
+    function formatLastSeen(seconds) {
+        if (seconds < 60) return seconds + 's';
+        if (seconds < 3600) {
+            var m = Math.floor(seconds / 60);
+            var s = seconds % 60;
+            return m + 'm ' + s + 's';
+        }
+        var h = Math.floor(seconds / 3600);
+        var rm = Math.floor((seconds % 3600) / 60);
+        return h + 'h ' + rm + 'm';
+    }
+
+    // Stopwatch SVG icon (small, inline)
+    var ICON_STOPWATCH = '<svg class="indicator-icon icon-stopwatch" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+        '<circle cx="12" cy="13" r="8"/>' +
+        '<line x1="12" y1="9" x2="12" y2="13"/>' +
+        '<line x1="9" y1="1" x2="15" y2="1"/>' +
+        '<line x1="12" y1="1" x2="12" y2="5"/>' +
+        '</svg>';
+
     function buildPopup(dev) {
         var data = dev.data;
         var isFollowed = (followedDeviceId === dev.id);
         var distStr = (data.hasGps && data.lat !== 0 && data.lon !== 0)
             ? formatDistFromHub(data.lat, data.lon) : '--';
-        var statusClass = 'status-' + data.status.toLowerCase().replace('timeout', '');
+        var st = getCollarStatus(dev);
         return '<div class="popup-content">' +
             '<div class="popup-header">' +
                 '<span style="font-size:20px">' + dev.avatar.emoji + '</span> ' +
                 '<strong>' + data.name + '</strong>' +
-                '<span class="card-status ' + statusClass + '" style="margin-left:6px;font-size:10px">' + data.status + '</span>' +
+                '<span class="card-status ' + st.css + '" style="margin-left:6px;font-size:10px">' + st.emoji + ' ' + st.label + '</span>' +
             '</div>' +
             '<div class="popup-grid">' +
                 '<span class="label">Signal</span><span class="value">' + renderSignalBars(data.rssi, data.snr) + '</span>' +
@@ -762,12 +802,15 @@
         var isExpanded = (expandedCardId === dev.id);
         card.className = 'device-card' + (stale ? ' stale' : '') + (isExpanded ? ' expanded' : '');
 
-        var statusClass = 'status-' + data.status.toLowerCase().replace('timeout', '');
+        var st = getCollarStatus(dev);
         var isFollowed = (followedDeviceId === dev.id);
 
         // Distance from hub (used in both collapsed and expanded views)
         var distStr = (data.hasGps && data.lat !== 0 && data.lon !== 0)
             ? formatDistFromHub(data.lat, data.lon) : '--';
+
+        // Last seen compact time
+        var lastSeenStr = formatLastSeen(age);
 
         // Profile badge — colour-coded with optional emoji prefix
         var profileLower = data.profile.toLowerCase();
@@ -777,14 +820,14 @@
 
         // ── Compact summary (always visible) ──
         // Row 1: avatar, name, status badge, profile badge, chevron
-        // Row 2 (inside card-identity): battery | signal | distance from home
+        // Row 2 (inside card-identity): battery | signal | distance | last seen
         var html =
             '<div class="card-summary">' +
                 '<div class="card-avatar" style="border-color:' + dev.avatar.color + '">' + dev.avatar.emoji + '</div>' +
                 '<div class="card-identity">' +
                     '<div class="card-name-row">' +
                         '<span class="card-name">' + data.name + '</span>' +
-                        '<span class="card-status ' + statusClass + '">' + data.status + '</span>' +
+                        '<span class="card-status ' + st.css + '">' + st.emoji + ' ' + st.label + '</span>' +
                         '<span class="card-profile ' + profileClass + '">' + profileLabel + '</span>' +
                     '</div>' +
                     '<div class="card-indicators">' +
@@ -793,6 +836,10 @@
                         '<span class="card-indicator-group card-dist-group" title="Distance from home">' +
                             ICON_HOME_DIST +
                             '<span class="card-dist-value">' + distStr + '</span>' +
+                        '</span>' +
+                        '<span class="card-indicator-group card-lastseen-group" title="Last seen">' +
+                            ICON_STOPWATCH +
+                            '<span class="card-lastseen-value">' + lastSeenStr + '</span>' +
                         '</span>' +
                     '</div>' +
                 '</div>' +

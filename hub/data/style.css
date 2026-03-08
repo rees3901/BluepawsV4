@@ -435,7 +435,28 @@ body.panel-open .hamburger-btn {
 .card-status.status-home  { background: var(--success); color: #000; }
 .card-status.status-error { background: var(--danger); color: #fff; }
 .card-status.status-lost  { background: var(--warning); color: #000; }
-.card-status.status-ok    { background: var(--success); color: #000; }
+.card-status.status-ok      { background: var(--success); color: #000; }
+.card-status.status-offline { background: #555; color: #ccc; }
+
+/* ── Stopwatch / Last Seen indicator ── */
+.icon-stopwatch {
+    width: 13px;
+    height: 13px;
+    color: var(--text-secondary);
+}
+
+.card-lastseen-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.card-lastseen-value {
+    font-size: 0.68rem;
+    color: var(--text-secondary);
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+}
 
 /* ── Telemetry Grid ── */
 .card-grid {
