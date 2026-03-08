@@ -827,10 +827,33 @@ body.light .console-log {
     background: #1a1a2e;
 }
 
+/* ── Log Button Row (shared by console + device logs) ── */
+.log-btn-row {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.btn-log-export {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 0.82rem;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    line-height: 1;
+}
+
+.btn-log-export:hover {
+    background: var(--accent);
+    color: #fff;
+}
+
 /* ── Per-Device Message Log ── */
 .btn-device-log {
-    width: 100%;
-    margin-top: 8px;
+    flex: 1;
     font-size: 0.72rem;
     padding: 5px 0;
 }

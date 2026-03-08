@@ -34,9 +34,11 @@
     let measureMarkers = [];       // Circle markers at each measure point
     let darkMode = true;           // Current theme (persisted to localStorage)
     let followedDeviceId = null;   // Device ID being auto-followed on map (null = none)
-    var consoleLog = [];           // Ring buffer of log entries (max 200)
+    var consoleLog = [];           // Ring buffer of display strings (max 200)
+    var consoleLogData = [];       // Structured entries for CSV export
     var MAX_LOG_ENTRIES = 200;
-    var deviceLogs = {};           // Per-device log: device_id → array of log strings
+    var deviceLogs = {};           // Per-device display strings: id → string[]
+    var deviceLogData = {};        // Per-device structured entries: id → object[]
     var MAX_DEVICE_LOG = 50;       // Keep last 50 messages per collar
 
     // Each new device gets assigned an emoji avatar and a trail color
@@ -239,19 +241,56 @@
     // ═══════════════════════════════════════════════
     // Console Log — captures SSE events for debugging
     // ═══════════════════════════════════════════════
-    function logEvent(type, msg) {
+    function logEvent(type, msg, structured) {
         var ts = new Date().toLocaleTimeString();
         consoleLog.push('[' + ts + '] ' + type + ': ' + msg);
         if (consoleLog.length > MAX_LOG_ENTRIES) consoleLog.shift();
+        if (structured) {
+            consoleLogData.push(structured);
+            if (consoleLogData.length > MAX_LOG_ENTRIES) consoleLogData.shift();
+        }
         updateConsoleDisplay();
     }
 
-    // Per-device log — stores formatted lines keyed by device ID
-    function logDeviceEvent(deviceId, line) {
+    // Per-device log — stores formatted lines + structured data keyed by device ID
+    function logDeviceEvent(deviceId, line, structured) {
         if (!deviceLogs[deviceId]) deviceLogs[deviceId] = [];
         deviceLogs[deviceId].push(line);
         if (deviceLogs[deviceId].length > MAX_DEVICE_LOG) deviceLogs[deviceId].shift();
+        if (structured) {
+            if (!deviceLogData[deviceId]) deviceLogData[deviceId] = [];
+            deviceLogData[deviceId].push(structured);
+            if (deviceLogData[deviceId].length > MAX_DEVICE_LOG) deviceLogData[deviceId].shift();
+        }
         updateDeviceLogDisplay(deviceId);
+    }
+
+    // ── CSV Export helpers ──
+    function toCsvRow(values) {
+        return values.map(function (v) {
+            var s = String(v == null ? '' : v);
+            if (s.indexOf(',') !== -1 || s.indexOf('"') !== -1) {
+                return '"' + s.replace(/"/g, '""') + '"';
+            }
+            return s;
+        }).join(',');
+    }
+
+    var CSV_HEADER = ['timestamp', 'device_id', 'name', 'lat', 'lon', 'rssi', 'snr', 'batt_mV', 'status', 'profile'];
+
+    function exportLogCsv(entries, filename) {
+        if (!entries || !entries.length) return;
+        var lines = [toCsvRow(CSV_HEADER)];
+        for (var i = 0; i < entries.length; i++) {
+            var e = entries[i];
+            lines.push(toCsvRow([e.ts, e.id, e.name, e.lat, e.lon, e.rssi, e.snr, e.batt, e.status, e.profile]));
+        }
+        var blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(a.href);
     }
 
     function updateDeviceLogDisplay(deviceId) {
@@ -481,10 +520,12 @@
             resetHeartbeatWatchdog();
             try {
                 var data = JSON.parse(e.data);
-                var logLine = data.name + ' id=' + data.id + ' lat=' + (data.lat||0).toFixed(5) + ' lon=' + (data.lon||0).toFixed(5) + ' rssi=' + data.rssi + ' batt=' + data.batt + 'mV';
-                logEvent('RX', logLine);
-                var ts = new Date().toLocaleTimeString();
-                logDeviceEvent(data.id, '[' + ts + '] ' + logLine + ' snr=' + data.snr + ' status=' + data.status + ' profile=' + data.profile);
+                var ts = new Date().toISOString();
+                var tsShort = new Date().toLocaleTimeString();
+                var structured = { ts: ts, id: data.id, name: data.name, lat: (data.lat||0).toFixed(5), lon: (data.lon||0).toFixed(5), rssi: data.rssi, snr: data.snr, batt: data.batt, status: data.status, profile: data.profile };
+                var logLine = data.name + ' id=' + data.id + ' lat=' + structured.lat + ' lon=' + structured.lon + ' rssi=' + data.rssi + ' batt=' + data.batt + 'mV';
+                logEvent('RX', logLine, structured);
+                logDeviceEvent(data.id, '[' + tsShort + '] ' + logLine + ' snr=' + data.snr + ' status=' + data.status + ' profile=' + data.profile, structured);
                 updateDevice(data);
             } catch (err) {
                 logEvent('ERR', 'SSE parse: ' + err.message);
@@ -897,7 +938,10 @@
                         buildActionButtons(dev, isFollowed) +
                     '</div>' +
 
-                    '<button class="btn-device-log btn-secondary" data-logid="' + dev.id + '">Message Log</button>' +
+                    '<div class="log-btn-row">' +
+                        '<button class="btn-device-log btn-secondary" data-logid="' + dev.id + '">Message Log</button>' +
+                        '<button class="btn-log-export btn-export-device" data-logid="' + dev.id + '" data-name="' + data.name + '" title="Export log as CSV">&#11015;</button>' +
+                    '</div>' +
                     '<div id="deviceLogPanel-' + dev.id + '" class="device-log-panel hidden">' +
                         '<pre id="deviceLog-' + dev.id + '" class="console-log device-log">' + logContent + '</pre>' +
                     '</div>' +
@@ -919,6 +963,15 @@
                     if (!panel.classList.contains('hidden')) {
                         updateDeviceLogDisplay(parseInt(did, 10));
                     }
+                });
+            }
+            var exportBtn = card.querySelector('.btn-export-device');
+            if (exportBtn) {
+                exportBtn.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    var did = parseInt(exportBtn.getAttribute('data-logid'), 10);
+                    var dname = exportBtn.getAttribute('data-name') || 'device';
+                    exportLogCsv(deviceLogData[did] || [], 'bluepaws_' + dname + '_' + new Date().toISOString().slice(0, 10) + '.csv');
                 });
             }
         }
@@ -1329,6 +1382,9 @@
         document.getElementById('btnCloseSettings').addEventListener('click', closeSettings);
         document.getElementById('btnSaveConfig').addEventListener('click', saveConfig);
         document.getElementById('btnConsoleLog').addEventListener('click', toggleConsoleLog);
+        document.getElementById('btnExportConsoleLog').addEventListener('click', function () {
+            exportLogCsv(consoleLogData, 'bluepaws_console_' + new Date().toISOString().slice(0, 10) + '.csv');
+        });
         document.getElementById('cfgSSID').addEventListener('input', validateConfigForm);
         document.getElementById('cfgPass').addEventListener('input', validateConfigForm);
         document.getElementById('btnSendCmd').addEventListener('click', sendCommand);
