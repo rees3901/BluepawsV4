@@ -105,12 +105,16 @@
     }
 
     // Render signal quality as 5 bars with colour coding
-    // Inline SVG icons for card indicators
-    var ICON_ANTENNA = '<svg class="indicator-icon" width="10" height="10" viewBox="0 0 24 24" fill="currentColor">' +
-        '<path d="M12 5c-3.87 0-7 3.13-7 7h2c0-2.76 2.24-5 5-5s5 2.24 5 5h2c0-3.87-3.13-7-7-7zm0-4C5.93 1 1 5.93 1 12h2c0-4.97 4.03-9 9-9s9 4.03 9 9h2c0-6.07-4.93-11-11-11zm0 8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>' +
+    // Inline SVG icons for card indicators — sized for clarity at a glance
+    var ICON_ANTENNA = '<svg class="indicator-icon icon-antenna" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+        '<path d="M2 12a10 10 0 0 1 10-10"/><path d="M2 12a7 7 0 0 1 7-7"/><path d="M2 12a4 4 0 0 1 4-4"/>' +
+        '<circle cx="2" cy="12" r="1" fill="currentColor" stroke="none"/>' +
         '</svg>';
-    var ICON_BATTERY = '<svg class="indicator-icon" width="12" height="10" viewBox="0 0 24 24" fill="currentColor">' +
-        '<path d="M15.67 4H14V2h-4v2H8.33C7.6 4 7 4.6 7 5.33v15.34C7 21.4 7.6 22 8.33 22h7.34c.73 0 1.33-.6 1.33-1.33V5.33C17 4.6 16.4 4 15.67 4z"/>' +
+    var ICON_BATTERY = '<svg class="indicator-icon icon-battery" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+        '<rect x="2" y="6" width="18" height="12" rx="2"/><line x1="22" y1="10" x2="22" y2="14"/>' +
+        '</svg>';
+    var ICON_HOME_DIST = '<svg class="indicator-icon icon-home" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+        '<path d="M3 12l9-9 9 9"/><path d="M5 10v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V10"/>' +
         '</svg>';
 
     function renderSignalBars(rssi, snr) {
@@ -761,20 +765,31 @@
         var distStr = (data.hasGps && data.lat !== 0 && data.lon !== 0)
             ? formatDistFromHub(data.lat, data.lon) : '--';
 
+        // Profile badge colour — matches the status badge styling approach
+        var profileLower = data.profile.toLowerCase();
+        var profileClass = 'profile-' + profileLower.replace('save', '');
+
         // ── Compact summary (always visible) ──
-        // Shows: avatar, name, battery, signal, distance, status, chevron
+        // Row 1: avatar, name, status badge, profile badge, chevron
+        // Row 2 (inside card-identity): battery | signal | distance from home
         var html =
             '<div class="card-summary">' +
                 '<div class="card-avatar" style="border-color:' + dev.avatar.color + '">' + dev.avatar.emoji + '</div>' +
                 '<div class="card-identity">' +
-                    '<span class="card-name">' + data.name + '</span>' +
+                    '<div class="card-name-row">' +
+                        '<span class="card-name">' + data.name + '</span>' +
+                        '<span class="card-status ' + statusClass + '">' + data.status + '</span>' +
+                        '<span class="card-profile ' + profileClass + '">' + data.profile + '</span>' +
+                    '</div>' +
                     '<div class="card-indicators">' +
-                        renderBatteryBars(data.batt) +
-                        renderSignalBars(data.rssi, data.snr) +
-                        '<span class="card-dist" title="Distance from hub">' + distStr + '</span>' +
+                        '<span class="card-indicator-group">' + renderBatteryBars(data.batt) + '</span>' +
+                        '<span class="card-indicator-group">' + renderSignalBars(data.rssi, data.snr) + '</span>' +
+                        '<span class="card-indicator-group card-dist-group" title="Distance from home">' +
+                            ICON_HOME_DIST +
+                            '<span class="card-dist-value">' + distStr + '</span>' +
+                        '</span>' +
                     '</div>' +
                 '</div>' +
-                '<span class="card-status ' + statusClass + '">' + data.status + '</span>' +
                 '<span class="card-chevron">' + (isExpanded ? '&#9650;' : '&#9660;') + '</span>' +
             '</div>';
 

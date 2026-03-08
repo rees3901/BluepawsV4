@@ -309,31 +309,80 @@ body.panel-open .hamburger-btn {
     text-overflow: ellipsis;
 }
 
+.card-name-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
 .card-indicators {
     display: flex;
     align-items: center;
-    gap: 8px;
-    margin-top: 2px;
+    gap: 10px;
+    margin-top: 4px;
+}
+
+.card-indicator-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
 }
 
 .card-indicators .signal-indicator {
-    transform: scale(0.8);
+    transform: scale(0.85);
     transform-origin: left center;
 }
 
-.card-dist {
-    font-size: 0.65rem;
+.card-dist-group {
+    gap: 3px;
+}
+
+.card-dist-value {
+    font-size: 0.7rem;
     color: var(--text-secondary);
-    font-weight: 500;
+    font-weight: 600;
     white-space: nowrap;
 }
 
+/* ── Indicator Icons ── */
 .indicator-icon {
-    color: var(--text-secondary);
     flex-shrink: 0;
-    margin-right: 2px;
     vertical-align: middle;
 }
+
+.icon-antenna {
+    width: 16px;
+    height: 16px;
+    color: var(--text-secondary);
+}
+
+.icon-battery {
+    width: 18px;
+    height: 14px;
+    color: var(--text-secondary);
+}
+
+.icon-home {
+    width: 14px;
+    height: 14px;
+    color: var(--text-secondary);
+}
+
+/* ── Profile Badge ── */
+.card-profile {
+    font-size: 0.6rem;
+    padding: 1px 6px;
+    border-radius: 8px;
+    font-weight: 600;
+    text-transform: uppercase;
+    white-space: nowrap;
+    letter-spacing: 0.4px;
+}
+
+.card-profile.profile-normal    { background: var(--accent);  color: #fff; }
+.card-profile.profile-power     { background: #7c3aed;        color: #fff; }
+.card-profile.profile-active    { background: var(--warning);  color: #000; }
+.card-profile.profile-lost      { background: var(--danger);   color: #fff; }
 
 .card-coords {
     font-size: 0.7rem;
