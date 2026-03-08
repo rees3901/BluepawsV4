@@ -940,7 +940,7 @@
 
                     '<div class="log-btn-row">' +
                         '<button class="btn-device-log btn-secondary" data-logid="' + dev.id + '">Message Log</button>' +
-                        '<button class="btn-log-export btn-export-device" data-logid="' + dev.id + '" data-name="' + data.name + '" title="Export log as CSV">&#11015;</button>' +
+                        '<button class="btn-log-export btn-export-device" data-logid="' + dev.id + '" data-name="' + data.name + '" title="Export log as CSV"><svg class="icon-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M12 4v12m0 0l-4-4m4 4l4-4"/><path d="M5 20h14"/></svg></button>' +
                     '</div>' +
                     '<div id="deviceLogPanel-' + dev.id + '" class="device-log-panel hidden">' +
                         '<pre id="deviceLog-' + dev.id + '" class="console-log device-log">' + logContent + '</pre>' +

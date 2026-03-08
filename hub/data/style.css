@@ -851,6 +851,12 @@ body.light .console-log {
     color: #fff;
 }
 
+.icon-download {
+    width: 16px;
+    height: 16px;
+    display: block;
+}
+
 /* ── Per-Device Message Log ── */
 .btn-device-log {
     flex: 1;
