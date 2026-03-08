@@ -105,13 +105,21 @@
     }
 
     // Render signal quality as 5 bars with colour coding
-    // Inline SVG icons for card indicators — sized for clarity at a glance
-    var ICON_ANTENNA = '<svg class="indicator-icon icon-antenna" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
-        '<path d="M2 12a10 10 0 0 1 10-10"/><path d="M2 12a7 7 0 0 1 7-7"/><path d="M2 12a4 4 0 0 1 4-4"/>' +
-        '<circle cx="2" cy="12" r="1" fill="currentColor" stroke="none"/>' +
+    // Inline SVG icons for card indicators — styled to match reference graphics
+    // Antenna: classic Y-shaped broadcast tower (inverted triangle + vertical mast)
+    var ICON_ANTENNA = '<svg class="indicator-icon icon-antenna" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">' +
+        '<line x1="12" y1="24" x2="12" y2="10"/>' +
+        '<line x1="12" y1="10" x2="3" y2="2"/>' +
+        '<line x1="12" y1="10" x2="21" y2="2"/>' +
+        '<line x1="3" y1="2" x2="21" y2="2"/>' +
         '</svg>';
-    var ICON_BATTERY = '<svg class="indicator-icon icon-battery" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
-        '<rect x="2" y="6" width="18" height="12" rx="2"/><line x1="22" y1="10" x2="22" y2="14"/>' +
+    // Battery: horizontal rounded body with terminal nub and 3 fill bars
+    var ICON_BATTERY = '<svg class="indicator-icon icon-battery" viewBox="0 0 28 18" fill="none">' +
+        '<rect x="1" y="2" width="22" height="14" rx="2.5" ry="2.5" stroke="#607d8b" stroke-width="2.2"/>' +
+        '<rect x="23" y="6" width="3" height="6" rx="1" fill="#607d8b"/>' +
+        '<rect x="4.5" y="5.5" width="4" height="7" rx="1" fill="#4caf50"/>' +
+        '<rect x="10" y="5.5" width="4" height="7" rx="1" fill="#4caf50"/>' +
+        '<rect x="15.5" y="5.5" width="4" height="7" rx="1" fill="#4caf50"/>' +
         '</svg>';
     var ICON_HOME_DIST = '<svg class="indicator-icon icon-home" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
         '<path d="M3 12l9-9 9 9"/><path d="M5 10v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V10"/>' +
@@ -765,9 +773,11 @@
         var distStr = (data.hasGps && data.lat !== 0 && data.lon !== 0)
             ? formatDistFromHub(data.lat, data.lon) : '--';
 
-        // Profile badge colour — matches the status badge styling approach
+        // Profile badge — colour-coded with optional emoji prefix
         var profileLower = data.profile.toLowerCase();
         var profileClass = 'profile-' + profileLower.replace('save', '');
+        var profileLabel = data.profile;
+        if (profileLower === 'powersave') profileLabel = '\u{1F4A4} PowerSave';
 
         // ── Compact summary (always visible) ──
         // Row 1: avatar, name, status badge, profile badge, chevron
@@ -779,7 +789,7 @@
                     '<div class="card-name-row">' +
                         '<span class="card-name">' + data.name + '</span>' +
                         '<span class="card-status ' + statusClass + '">' + data.status + '</span>' +
-                        '<span class="card-profile ' + profileClass + '">' + data.profile + '</span>' +
+                        '<span class="card-profile ' + profileClass + '">' + profileLabel + '</span>' +
                     '</div>' +
                     '<div class="card-indicators">' +
                         '<span class="card-indicator-group">' + renderBatteryBars(data.batt) + '</span>' +

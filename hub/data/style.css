@@ -352,14 +352,13 @@ body.panel-open .hamburger-btn {
 
 .icon-antenna {
     width: 16px;
-    height: 16px;
+    height: 18px;
     color: var(--text-secondary);
 }
 
 .icon-battery {
-    width: 18px;
+    width: 22px;
     height: 14px;
-    color: var(--text-secondary);
 }
 
 .icon-home {
@@ -379,8 +378,8 @@ body.panel-open .hamburger-btn {
     letter-spacing: 0.4px;
 }
 
-.card-profile.profile-normal    { background: var(--accent);  color: #fff; }
-.card-profile.profile-power     { background: #7c3aed;        color: #fff; }
+.card-profile.profile-normal    { background: var(--success);  color: #000; }
+.card-profile.profile-power     { background: var(--accent);   color: #fff; }
 .card-profile.profile-active    { background: var(--warning);  color: #000; }
 .card-profile.profile-lost      { background: var(--danger);   color: #fff; }
 
