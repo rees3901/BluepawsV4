@@ -36,6 +36,8 @@
     let followedDeviceId = null;   // Device ID being auto-followed on map (null = none)
     var consoleLog = [];           // Ring buffer of log entries (max 200)
     var MAX_LOG_ENTRIES = 200;
+    var deviceLogs = {};           // Per-device log: device_id → array of log strings
+    var MAX_DEVICE_LOG = 50;       // Keep last 50 messages per collar
 
     // Each new device gets assigned an emoji avatar and a trail color
     // from these palettes. Cycles if more than 8 devices are tracked.
@@ -242,6 +244,22 @@
         consoleLog.push('[' + ts + '] ' + type + ': ' + msg);
         if (consoleLog.length > MAX_LOG_ENTRIES) consoleLog.shift();
         updateConsoleDisplay();
+    }
+
+    // Per-device log — stores formatted lines keyed by device ID
+    function logDeviceEvent(deviceId, line) {
+        if (!deviceLogs[deviceId]) deviceLogs[deviceId] = [];
+        deviceLogs[deviceId].push(line);
+        if (deviceLogs[deviceId].length > MAX_DEVICE_LOG) deviceLogs[deviceId].shift();
+        updateDeviceLogDisplay(deviceId);
+    }
+
+    function updateDeviceLogDisplay(deviceId) {
+        var el = document.getElementById('deviceLog-' + deviceId);
+        if (el && !el.parentElement.classList.contains('hidden')) {
+            el.textContent = (deviceLogs[deviceId] || []).join('\n');
+            el.scrollTop = el.scrollHeight;
+        }
     }
 
     function updateConsoleDisplay() {
@@ -463,7 +481,10 @@
             resetHeartbeatWatchdog();
             try {
                 var data = JSON.parse(e.data);
-                logEvent('RX', data.name + ' id=' + data.id + ' lat=' + (data.lat||0).toFixed(5) + ' lon=' + (data.lon||0).toFixed(5) + ' rssi=' + data.rssi + ' batt=' + data.batt + 'mV');
+                var logLine = data.name + ' id=' + data.id + ' lat=' + (data.lat||0).toFixed(5) + ' lon=' + (data.lon||0).toFixed(5) + ' rssi=' + data.rssi + ' batt=' + data.batt + 'mV';
+                logEvent('RX', logLine);
+                var ts = new Date().toLocaleTimeString();
+                logDeviceEvent(data.id, '[' + ts + '] ' + logLine + ' snr=' + data.snr + ' status=' + data.status + ' profile=' + data.profile);
                 updateDevice(data);
             } catch (err) {
                 logEvent('ERR', 'SSE parse: ' + err.message);
@@ -860,6 +881,9 @@
                     '<a href="' + gmapsUrl + '" target="_blank" rel="noopener" class="card-coords card-coords-link" title="Open in Google Maps">' + coordStr + '</a>';
             }
 
+            var logEntries = deviceLogs[dev.id] || [];
+            var logContent = logEntries.length ? logEntries.join('\n') : 'No messages yet.';
+
             html +=
                 '<div class="card-detail">' +
                     '<div class="card-grid">' +
@@ -872,14 +896,31 @@
                     '<div class="card-actions">' +
                         buildActionButtons(dev, isFollowed) +
                     '</div>' +
+
+                    '<button class="btn-device-log btn-secondary" data-logid="' + dev.id + '">Message Log</button>' +
+                    '<div id="deviceLogPanel-' + dev.id + '" class="device-log-panel hidden">' +
+                        '<pre id="deviceLog-' + dev.id + '" class="console-log device-log">' + logContent + '</pre>' +
+                    '</div>' +
                 '</div>';
         }
 
         card.innerHTML = html;
 
-        // Wire up action buttons (only present when expanded)
+        // Wire up action buttons and message log toggle (only present when expanded)
         if (isExpanded) {
             wireActionButtons(card);
+            var logBtn = card.querySelector('.btn-device-log');
+            if (logBtn) {
+                logBtn.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    var did = logBtn.getAttribute('data-logid');
+                    var panel = document.getElementById('deviceLogPanel-' + did);
+                    panel.classList.toggle('hidden');
+                    if (!panel.classList.contains('hidden')) {
+                        updateDeviceLogDisplay(parseInt(did, 10));
+                    }
+                });
+            }
         }
 
         // Sheen animation on update
