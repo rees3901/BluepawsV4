@@ -820,7 +820,8 @@
 
         // ── Compact summary (always visible) ──
         // Row 1: avatar, name, status badge, profile badge, chevron
-        // Row 2 (inside card-identity): battery | signal | distance | last seen
+        // Row 2: battery | signal
+        // Row 3: distance from home | last seen
         var html =
             '<div class="card-summary">' +
                 '<div class="card-avatar" style="border-color:' + dev.avatar.color + '">' + dev.avatar.emoji + '</div>' +
@@ -833,6 +834,8 @@
                     '<div class="card-indicators">' +
                         '<span class="card-indicator-group">' + renderBatteryBars(data.batt) + '</span>' +
                         '<span class="card-indicator-group">' + renderSignalBars(data.rssi, data.snr) + '</span>' +
+                    '</div>' +
+                    '<div class="card-indicators card-indicators-row3">' +
                         '<span class="card-indicator-group card-dist-group" title="Distance from home">' +
                             ICON_HOME_DIST +
                             '<span class="card-dist-value">' + distStr + '</span>' +

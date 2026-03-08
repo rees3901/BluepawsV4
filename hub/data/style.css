@@ -318,9 +318,13 @@ body.panel-open .hamburger-btn {
 .card-indicators {
     display: flex;
     align-items: center;
-    gap: 6px 10px;
+    gap: 10px;
     margin-top: 4px;
-    flex-wrap: wrap;
+}
+
+.card-indicators-row3 {
+    margin-top: 2px;
+    gap: 14px;
 }
 
 .card-indicator-group {
