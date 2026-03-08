@@ -85,7 +85,10 @@
                 <div id="hubStatus" class="status-info">Loading...</div>
             </div>
             <div class="form-group">
-                <button id="btnConsoleLog" class="btn-secondary" style="width:100%">Console Log</button>
+                <div class="log-btn-row">
+                    <button id="btnConsoleLog" class="btn-secondary" style="flex:1">Console Log</button>
+                    <button id="btnExportConsoleLog" class="btn-log-export" title="Export log as CSV"><svg class="icon-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M12 4v12m0 0l-4-4m4 4l4-4"/><path d="M5 20h14"/></svg></button>
+                </div>
                 <div id="consoleLogPanel" class="hidden">
                     <pre id="consoleLogContent" class="console-log"></pre>
                 </div>

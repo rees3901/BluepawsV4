@@ -34,8 +34,12 @@
     let measureMarkers = [];       // Circle markers at each measure point
     let darkMode = true;           // Current theme (persisted to localStorage)
     let followedDeviceId = null;   // Device ID being auto-followed on map (null = none)
-    var consoleLog = [];           // Ring buffer of log entries (max 200)
+    var consoleLog = [];           // Ring buffer of display strings (max 200)
+    var consoleLogData = [];       // Structured entries for CSV export
     var MAX_LOG_ENTRIES = 200;
+    var deviceLogs = {};           // Per-device display strings: id → string[]
+    var deviceLogData = {};        // Per-device structured entries: id → object[]
+    var MAX_DEVICE_LOG = 50;       // Keep last 50 messages per collar
 
     // Each new device gets assigned an emoji avatar and a trail color
     // from these palettes. Cycles if more than 8 devices are tracked.
@@ -105,12 +109,16 @@
     }
 
     // Render signal quality as 5 bars with colour coding
-    // Inline SVG icons for card indicators
-    var ICON_ANTENNA = '<svg class="indicator-icon" width="10" height="10" viewBox="0 0 24 24" fill="currentColor">' +
-        '<path d="M12 5c-3.87 0-7 3.13-7 7h2c0-2.76 2.24-5 5-5s5 2.24 5 5h2c0-3.87-3.13-7-7-7zm0-4C5.93 1 1 5.93 1 12h2c0-4.97 4.03-9 9-9s9 4.03 9 9h2c0-6.07-4.93-11-11-11zm0 8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>' +
+    // Inline SVG icons for card indicators — styled to match reference graphics
+    // Antenna: classic Y-shaped broadcast tower (inverted triangle + vertical mast)
+    var ICON_ANTENNA = '<svg class="indicator-icon icon-antenna" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">' +
+        '<line x1="12" y1="24" x2="12" y2="10"/>' +
+        '<line x1="12" y1="10" x2="3" y2="2"/>' +
+        '<line x1="12" y1="10" x2="21" y2="2"/>' +
+        '<line x1="3" y1="2" x2="21" y2="2"/>' +
         '</svg>';
-    var ICON_BATTERY = '<svg class="indicator-icon" width="12" height="10" viewBox="0 0 24 24" fill="currentColor">' +
-        '<path d="M15.67 4H14V2h-4v2H8.33C7.6 4 7 4.6 7 5.33v15.34C7 21.4 7.6 22 8.33 22h7.34c.73 0 1.33-.6 1.33-1.33V5.33C17 4.6 16.4 4 15.67 4z"/>' +
+    var ICON_HOME_DIST = '<svg class="indicator-icon icon-home" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+        '<path d="M3 12l9-9 9 9"/><path d="M5 10v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V10"/>' +
         '</svg>';
 
     function renderSignalBars(rssi, snr) {
@@ -152,18 +160,22 @@
 
     function renderBatteryBars(millivolts) {
         var batt = getBatteryLevel(millivolts);
-        var bars = '';
-        for (var i = 1; i <= 5; i++) {
-            var filled = i <= batt.level;
-            var height = 4 + (i * 3);
-            bars += '<span class="sig-bar' + (filled ? ' filled' : '') + '" style="' +
-                'height:' + height + 'px;' +
-                (filled ? 'background:' + batt.color + ';' : '') +
-                '"></span>';
+        // Build 5 bars inside the battery body — each bar is a rect
+        // Battery body inner area: x 4–21, y 4.5–13.5 → 17px wide, 9px tall
+        // 5 bars with gaps: each bar 2.6px wide, gap 0.8px
+        var barRects = '';
+        for (var i = 0; i < 5; i++) {
+            var x = 4 + i * 3.4;
+            var fill = (i < batt.level) ? batt.color : '#2f3e4e';
+            barRects += '<rect x="' + x + '" y="4.5" width="2.6" height="9" rx="0.6" fill="' + fill + '"/>';
         }
-        return '<span class="signal-indicator" title="' + (millivolts / 1000).toFixed(2) + ' V — ' + batt.label + '">' +
-            ICON_BATTERY +
-            bars +
+        var svg = '<svg class="indicator-icon icon-battery" viewBox="0 0 28 18" fill="none">' +
+            '<rect x="1" y="1" width="23" height="16" rx="3" ry="3" stroke="#607d8b" stroke-width="2"/>' +
+            '<rect x="24" y="5.5" width="3" height="7" rx="1.2" fill="#607d8b"/>' +
+            barRects +
+            '</svg>';
+        return '<span class="battery-indicator" title="' + (millivolts / 1000).toFixed(2) + ' V — ' + batt.label + '">' +
+            svg +
             '<span class="sig-label" style="color:' + batt.color + '">' + batt.label + '</span>' +
             '</span>';
     }
@@ -229,11 +241,64 @@
     // ═══════════════════════════════════════════════
     // Console Log — captures SSE events for debugging
     // ═══════════════════════════════════════════════
-    function logEvent(type, msg) {
+    function logEvent(type, msg, structured) {
         var ts = new Date().toLocaleTimeString();
         consoleLog.push('[' + ts + '] ' + type + ': ' + msg);
         if (consoleLog.length > MAX_LOG_ENTRIES) consoleLog.shift();
+        if (structured) {
+            consoleLogData.push(structured);
+            if (consoleLogData.length > MAX_LOG_ENTRIES) consoleLogData.shift();
+        }
         updateConsoleDisplay();
+    }
+
+    // Per-device log — stores formatted lines + structured data keyed by device ID
+    function logDeviceEvent(deviceId, line, structured) {
+        if (!deviceLogs[deviceId]) deviceLogs[deviceId] = [];
+        deviceLogs[deviceId].push(line);
+        if (deviceLogs[deviceId].length > MAX_DEVICE_LOG) deviceLogs[deviceId].shift();
+        if (structured) {
+            if (!deviceLogData[deviceId]) deviceLogData[deviceId] = [];
+            deviceLogData[deviceId].push(structured);
+            if (deviceLogData[deviceId].length > MAX_DEVICE_LOG) deviceLogData[deviceId].shift();
+        }
+        updateDeviceLogDisplay(deviceId);
+    }
+
+    // ── CSV Export helpers ──
+    function toCsvRow(values) {
+        return values.map(function (v) {
+            var s = String(v == null ? '' : v);
+            if (s.indexOf(',') !== -1 || s.indexOf('"') !== -1) {
+                return '"' + s.replace(/"/g, '""') + '"';
+            }
+            return s;
+        }).join(',');
+    }
+
+    var CSV_HEADER = ['timestamp', 'device_id', 'name', 'lat', 'lon', 'rssi', 'snr', 'batt_mV', 'status', 'profile'];
+
+    function exportLogCsv(entries, filename) {
+        if (!entries || !entries.length) return;
+        var lines = [toCsvRow(CSV_HEADER)];
+        for (var i = 0; i < entries.length; i++) {
+            var e = entries[i];
+            lines.push(toCsvRow([e.ts, e.id, e.name, e.lat, e.lon, e.rssi, e.snr, e.batt, e.status, e.profile]));
+        }
+        var blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(a.href);
+    }
+
+    function updateDeviceLogDisplay(deviceId) {
+        var el = document.getElementById('deviceLog-' + deviceId);
+        if (el && !el.parentElement.classList.contains('hidden')) {
+            el.textContent = (deviceLogs[deviceId] || []).join('\n');
+            el.scrollTop = el.scrollHeight;
+        }
     }
 
     function updateConsoleDisplay() {
@@ -455,7 +520,12 @@
             resetHeartbeatWatchdog();
             try {
                 var data = JSON.parse(e.data);
-                logEvent('RX', data.name + ' id=' + data.id + ' lat=' + (data.lat||0).toFixed(5) + ' lon=' + (data.lon||0).toFixed(5) + ' rssi=' + data.rssi + ' batt=' + data.batt + 'mV');
+                var ts = new Date().toISOString();
+                var tsShort = new Date().toLocaleTimeString();
+                var structured = { ts: ts, id: data.id, name: data.name, lat: (data.lat||0).toFixed(5), lon: (data.lon||0).toFixed(5), rssi: data.rssi, snr: data.snr, batt: data.batt, status: data.status, profile: data.profile };
+                var logLine = data.name + ' id=' + data.id + ' lat=' + structured.lat + ' lon=' + structured.lon + ' rssi=' + data.rssi + ' batt=' + data.batt + 'mV';
+                logEvent('RX', logLine, structured);
+                logDeviceEvent(data.id, '[' + tsShort + '] ' + logLine + ' snr=' + data.snr + ' status=' + data.status + ' profile=' + data.profile, structured);
                 updateDevice(data);
             } catch (err) {
                 logEvent('ERR', 'SSE parse: ' + err.message);
@@ -642,17 +712,57 @@
         renderDeviceCard(dev);
     }
 
+    // ═══════════════════════════════════════════════
+    // Collar Status — emoji + label + offline detection
+    // ═══════════════════════════════════════════════
+    var STATUS_MAP = {
+        'home':  { emoji: '\u{1F3E0}', label: 'Home',    css: 'status-home'  },
+        'out':   { emoji: '\u{1F43E}', label: 'Out',     css: 'status-out'   },
+        'error': { emoji: '\u2753',    label: 'Error',   css: 'status-error' },
+        'lost':  { emoji: '\u2757\u2757', label: 'Lost', css: 'status-lost'  }
+    };
+    var STATUS_OFFLINE = { emoji: '\u26AB', label: 'Offline', css: 'status-offline' };
+    var OFFLINE_THRESHOLD_MS = 3600000;  // 1 hour
+
+    function getCollarStatus(dev) {
+        var age = Date.now() - dev.lastUpdate;
+        if (age > OFFLINE_THRESHOLD_MS) return STATUS_OFFLINE;
+        var key = (dev.data.status || '').toLowerCase();
+        return STATUS_MAP[key] || STATUS_MAP['error'];
+    }
+
+    // Format elapsed time compactly for the stopwatch: 23s, 1m 10s, 2h 5m
+    function formatLastSeen(seconds) {
+        if (seconds < 60) return seconds + 's';
+        if (seconds < 3600) {
+            var m = Math.floor(seconds / 60);
+            var s = seconds % 60;
+            return m + 'm ' + s + 's';
+        }
+        var h = Math.floor(seconds / 3600);
+        var rm = Math.floor((seconds % 3600) / 60);
+        return h + 'h ' + rm + 'm';
+    }
+
+    // Stopwatch SVG icon (small, inline)
+    var ICON_STOPWATCH = '<svg class="indicator-icon icon-stopwatch" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+        '<circle cx="12" cy="13" r="8"/>' +
+        '<line x1="12" y1="9" x2="12" y2="13"/>' +
+        '<line x1="9" y1="1" x2="15" y2="1"/>' +
+        '<line x1="12" y1="1" x2="12" y2="5"/>' +
+        '</svg>';
+
     function buildPopup(dev) {
         var data = dev.data;
         var isFollowed = (followedDeviceId === dev.id);
         var distStr = (data.hasGps && data.lat !== 0 && data.lon !== 0)
             ? formatDistFromHub(data.lat, data.lon) : '--';
-        var statusClass = 'status-' + data.status.toLowerCase().replace('timeout', '');
+        var st = getCollarStatus(dev);
         return '<div class="popup-content">' +
             '<div class="popup-header">' +
                 '<span style="font-size:20px">' + dev.avatar.emoji + '</span> ' +
                 '<strong>' + data.name + '</strong>' +
-                '<span class="card-status ' + statusClass + '" style="margin-left:6px;font-size:10px">' + data.status + '</span>' +
+                '<span class="card-status ' + st.css + '" style="margin-left:6px;font-size:10px">' + st.emoji + ' ' + st.label + '</span>' +
             '</div>' +
             '<div class="popup-grid">' +
                 '<span class="label">Signal</span><span class="value">' + renderSignalBars(data.rssi, data.snr) + '</span>' +
@@ -754,27 +864,50 @@
         var isExpanded = (expandedCardId === dev.id);
         card.className = 'device-card' + (stale ? ' stale' : '') + (isExpanded ? ' expanded' : '');
 
-        var statusClass = 'status-' + data.status.toLowerCase().replace('timeout', '');
+        var st = getCollarStatus(dev);
         var isFollowed = (followedDeviceId === dev.id);
 
         // Distance from hub (used in both collapsed and expanded views)
         var distStr = (data.hasGps && data.lat !== 0 && data.lon !== 0)
             ? formatDistFromHub(data.lat, data.lon) : '--';
 
+        // Last seen compact time
+        var lastSeenStr = formatLastSeen(age);
+
+        // Profile badge — colour-coded with optional emoji prefix
+        var profileLower = data.profile.toLowerCase();
+        var profileClass = 'profile-' + profileLower.replace('save', '');
+        var profileLabel = data.profile;
+        if (profileLower === 'powersave') profileLabel = '\u{1F4A4} PowerSave';
+
         // ── Compact summary (always visible) ──
-        // Shows: avatar, name, battery, signal, distance, status, chevron
+        // Row 1: avatar, name, status badge, profile badge, chevron
+        // Row 2: battery | signal
+        // Row 3: distance from home | last seen
         var html =
             '<div class="card-summary">' +
                 '<div class="card-avatar" style="border-color:' + dev.avatar.color + '">' + dev.avatar.emoji + '</div>' +
                 '<div class="card-identity">' +
-                    '<span class="card-name">' + data.name + '</span>' +
+                    '<div class="card-name-row">' +
+                        '<span class="card-name">' + data.name + '</span>' +
+                        '<span class="card-status ' + st.css + '">' + st.emoji + ' ' + st.label + '</span>' +
+                        '<span class="card-profile ' + profileClass + '">' + profileLabel + '</span>' +
+                    '</div>' +
                     '<div class="card-indicators">' +
-                        renderBatteryBars(data.batt) +
-                        renderSignalBars(data.rssi, data.snr) +
-                        '<span class="card-dist" title="Distance from hub">' + distStr + '</span>' +
+                        '<span class="card-indicator-group">' + renderBatteryBars(data.batt) + '</span>' +
+                        '<span class="card-indicator-group">' + renderSignalBars(data.rssi, data.snr) + '</span>' +
+                    '</div>' +
+                    '<div class="card-indicators card-indicators-row3">' +
+                        '<span class="card-indicator-group card-dist-group" title="Distance from home">' +
+                            ICON_HOME_DIST +
+                            '<span class="card-dist-value">' + distStr + '</span>' +
+                        '</span>' +
+                        '<span class="card-indicator-group card-lastseen-group" title="Last seen">' +
+                            ICON_STOPWATCH +
+                            '<span class="card-lastseen-value">' + lastSeenStr + '</span>' +
+                        '</span>' +
                     '</div>' +
                 '</div>' +
-                '<span class="card-status ' + statusClass + '">' + data.status + '</span>' +
                 '<span class="card-chevron">' + (isExpanded ? '&#9650;' : '&#9660;') + '</span>' +
             '</div>';
 
@@ -789,6 +922,9 @@
                     '<a href="' + gmapsUrl + '" target="_blank" rel="noopener" class="card-coords card-coords-link" title="Open in Google Maps">' + coordStr + '</a>';
             }
 
+            var logEntries = deviceLogs[dev.id] || [];
+            var logContent = logEntries.length ? logEntries.join('\n') : 'No messages yet.';
+
             html +=
                 '<div class="card-detail">' +
                     '<div class="card-grid">' +
@@ -801,14 +937,43 @@
                     '<div class="card-actions">' +
                         buildActionButtons(dev, isFollowed) +
                     '</div>' +
+
+                    '<div class="log-btn-row">' +
+                        '<button class="btn-device-log btn-secondary" data-logid="' + dev.id + '">Message Log</button>' +
+                        '<button class="btn-log-export btn-export-device" data-logid="' + dev.id + '" data-name="' + data.name + '" title="Export log as CSV"><svg class="icon-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M12 4v12m0 0l-4-4m4 4l4-4"/><path d="M5 20h14"/></svg></button>' +
+                    '</div>' +
+                    '<div id="deviceLogPanel-' + dev.id + '" class="device-log-panel hidden">' +
+                        '<pre id="deviceLog-' + dev.id + '" class="console-log device-log">' + logContent + '</pre>' +
+                    '</div>' +
                 '</div>';
         }
 
         card.innerHTML = html;
 
-        // Wire up action buttons (only present when expanded)
+        // Wire up action buttons and message log toggle (only present when expanded)
         if (isExpanded) {
             wireActionButtons(card);
+            var logBtn = card.querySelector('.btn-device-log');
+            if (logBtn) {
+                logBtn.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    var did = logBtn.getAttribute('data-logid');
+                    var panel = document.getElementById('deviceLogPanel-' + did);
+                    panel.classList.toggle('hidden');
+                    if (!panel.classList.contains('hidden')) {
+                        updateDeviceLogDisplay(parseInt(did, 10));
+                    }
+                });
+            }
+            var exportBtn = card.querySelector('.btn-export-device');
+            if (exportBtn) {
+                exportBtn.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    var did = parseInt(exportBtn.getAttribute('data-logid'), 10);
+                    var dname = exportBtn.getAttribute('data-name') || 'device';
+                    exportLogCsv(deviceLogData[did] || [], 'bluepaws_' + dname + '_' + new Date().toISOString().slice(0, 10) + '.csv');
+                });
+            }
         }
 
         // Sheen animation on update
@@ -1217,6 +1382,9 @@
         document.getElementById('btnCloseSettings').addEventListener('click', closeSettings);
         document.getElementById('btnSaveConfig').addEventListener('click', saveConfig);
         document.getElementById('btnConsoleLog').addEventListener('click', toggleConsoleLog);
+        document.getElementById('btnExportConsoleLog').addEventListener('click', function () {
+            exportLogCsv(consoleLogData, 'bluepaws_console_' + new Date().toISOString().slice(0, 10) + '.csv');
+        });
         document.getElementById('cfgSSID').addEventListener('input', validateConfigForm);
         document.getElementById('cfgPass').addEventListener('input', validateConfigForm);
         document.getElementById('btnSendCmd').addEventListener('click', sendCommand);

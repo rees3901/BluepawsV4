@@ -309,31 +309,104 @@ body.panel-open .hamburger-btn {
     text-overflow: ellipsis;
 }
 
+.card-name-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
 .card-indicators {
     display: flex;
     align-items: center;
-    gap: 8px;
-    margin-top: 2px;
+    gap: 10px;
+    margin-top: 4px;
 }
 
-.card-indicators .signal-indicator {
-    transform: scale(0.8);
+.card-indicators-row3 {
+    margin-top: 2px;
+    gap: 14px;
+}
+
+.card-indicator-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.card-indicators .signal-indicator,
+.card-indicators .battery-indicator {
+    transform: scale(0.85);
     transform-origin: left center;
 }
 
-.card-dist {
-    font-size: 0.65rem;
+.card-dist-group {
+    gap: 3px;
+}
+
+.card-dist-value {
+    font-size: 0.7rem;
     color: var(--text-secondary);
-    font-weight: 500;
+    font-weight: 600;
     white-space: nowrap;
 }
 
+/* ── Indicator Icons ── */
 .indicator-icon {
-    color: var(--text-secondary);
     flex-shrink: 0;
-    margin-right: 2px;
     vertical-align: middle;
 }
+
+.icon-antenna {
+    width: 16px;
+    height: 18px;
+    color: var(--text-secondary);
+}
+
+.icon-battery {
+    width: 28px;
+    height: 16px;
+}
+
+/* ── Battery Indicator (icon with built-in bars) ── */
+.battery-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    vertical-align: middle;
+}
+
+.battery-indicator .sig-label {
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
+.popup-content .battery-indicator {
+    transform: scale(0.85);
+    transform-origin: left center;
+}
+
+.icon-home {
+    width: 14px;
+    height: 14px;
+    color: var(--text-secondary);
+}
+
+/* ── Profile Badge ── */
+.card-profile {
+    font-size: 0.6rem;
+    padding: 1px 6px;
+    border-radius: 8px;
+    font-weight: 600;
+    text-transform: uppercase;
+    white-space: nowrap;
+    letter-spacing: 0.4px;
+}
+
+.card-profile.profile-normal    { background: var(--success);  color: #000; }
+.card-profile.profile-power     { background: var(--accent);   color: #fff; }
+.card-profile.profile-active    { background: var(--warning);  color: #000; }
+.card-profile.profile-lost      { background: var(--danger);   color: #fff; }
 
 .card-coords {
     font-size: 0.7rem;
@@ -367,7 +440,28 @@ body.panel-open .hamburger-btn {
 .card-status.status-home  { background: var(--success); color: #000; }
 .card-status.status-error { background: var(--danger); color: #fff; }
 .card-status.status-lost  { background: var(--warning); color: #000; }
-.card-status.status-ok    { background: var(--success); color: #000; }
+.card-status.status-ok      { background: var(--success); color: #000; }
+.card-status.status-offline { background: #555; color: #ccc; }
+
+/* ── Stopwatch / Last Seen indicator ── */
+.icon-stopwatch {
+    width: 13px;
+    height: 13px;
+    color: var(--text-secondary);
+}
+
+.card-lastseen-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.card-lastseen-value {
+    font-size: 0.68rem;
+    color: var(--text-secondary);
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+}
 
 /* ── Telemetry Grid ── */
 .card-grid {
@@ -731,6 +825,57 @@ body.light .measure-label {
 
 body.light .console-log {
     background: #1a1a2e;
+}
+
+/* ── Log Button Row (shared by console + device logs) ── */
+.log-btn-row {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.btn-log-export {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 0.82rem;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    line-height: 1;
+}
+
+.btn-log-export:hover {
+    background: var(--accent);
+    color: #fff;
+}
+
+.icon-download {
+    width: 16px;
+    height: 16px;
+    display: block;
+}
+
+/* ── Per-Device Message Log ── */
+.btn-device-log {
+    flex: 1;
+    font-size: 0.72rem;
+    padding: 5px 0;
+}
+
+.device-log-panel {
+    margin-top: 4px;
+}
+
+.device-log-panel.hidden {
+    display: none;
+}
+
+.device-log {
+    max-height: 160px;
+    font-size: 0.62rem;
+    margin-top: 4px;
 }
 
 /* ── Popup Layout ── */
