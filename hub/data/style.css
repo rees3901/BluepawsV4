@@ -328,7 +328,8 @@ body.panel-open .hamburger-btn {
     gap: 2px;
 }
 
-.card-indicators .signal-indicator {
+.card-indicators .signal-indicator,
+.card-indicators .battery-indicator {
     transform: scale(0.85);
     transform-origin: left center;
 }
@@ -357,8 +358,27 @@ body.panel-open .hamburger-btn {
 }
 
 .icon-battery {
-    width: 22px;
-    height: 14px;
+    width: 28px;
+    height: 16px;
+}
+
+/* ── Battery Indicator (icon with built-in bars) ── */
+.battery-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    vertical-align: middle;
+}
+
+.battery-indicator .sig-label {
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
+.popup-content .battery-indicator {
+    transform: scale(0.85);
+    transform-origin: left center;
 }
 
 .icon-home {

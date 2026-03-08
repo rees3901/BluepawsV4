@@ -113,14 +113,6 @@
         '<line x1="12" y1="10" x2="21" y2="2"/>' +
         '<line x1="3" y1="2" x2="21" y2="2"/>' +
         '</svg>';
-    // Battery: horizontal rounded body with terminal nub and 3 fill bars
-    var ICON_BATTERY = '<svg class="indicator-icon icon-battery" viewBox="0 0 28 18" fill="none">' +
-        '<rect x="1" y="2" width="22" height="14" rx="2.5" ry="2.5" stroke="#607d8b" stroke-width="2.2"/>' +
-        '<rect x="23" y="6" width="3" height="6" rx="1" fill="#607d8b"/>' +
-        '<rect x="4.5" y="5.5" width="4" height="7" rx="1" fill="#4caf50"/>' +
-        '<rect x="10" y="5.5" width="4" height="7" rx="1" fill="#4caf50"/>' +
-        '<rect x="15.5" y="5.5" width="4" height="7" rx="1" fill="#4caf50"/>' +
-        '</svg>';
     var ICON_HOME_DIST = '<svg class="indicator-icon icon-home" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
         '<path d="M3 12l9-9 9 9"/><path d="M5 10v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V10"/>' +
         '</svg>';
@@ -164,18 +156,22 @@
 
     function renderBatteryBars(millivolts) {
         var batt = getBatteryLevel(millivolts);
-        var bars = '';
-        for (var i = 1; i <= 5; i++) {
-            var filled = i <= batt.level;
-            var height = 4 + (i * 3);
-            bars += '<span class="sig-bar' + (filled ? ' filled' : '') + '" style="' +
-                'height:' + height + 'px;' +
-                (filled ? 'background:' + batt.color + ';' : '') +
-                '"></span>';
+        // Build 5 bars inside the battery body — each bar is a rect
+        // Battery body inner area: x 4–21, y 4.5–13.5 → 17px wide, 9px tall
+        // 5 bars with gaps: each bar 2.6px wide, gap 0.8px
+        var barRects = '';
+        for (var i = 0; i < 5; i++) {
+            var x = 4 + i * 3.4;
+            var fill = (i < batt.level) ? batt.color : '#2f3e4e';
+            barRects += '<rect x="' + x + '" y="4.5" width="2.6" height="9" rx="0.6" fill="' + fill + '"/>';
         }
-        return '<span class="signal-indicator" title="' + (millivolts / 1000).toFixed(2) + ' V — ' + batt.label + '">' +
-            ICON_BATTERY +
-            bars +
+        var svg = '<svg class="indicator-icon icon-battery" viewBox="0 0 28 18" fill="none">' +
+            '<rect x="1" y="1" width="23" height="16" rx="3" ry="3" stroke="#607d8b" stroke-width="2"/>' +
+            '<rect x="24" y="5.5" width="3" height="7" rx="1.2" fill="#607d8b"/>' +
+            barRects +
+            '</svg>';
+        return '<span class="battery-indicator" title="' + (millivolts / 1000).toFixed(2) + ' V — ' + batt.label + '">' +
+            svg +
             '<span class="sig-label" style="color:' + batt.color + '">' + batt.label + '</span>' +
             '</span>';
     }
