@@ -309,6 +309,32 @@ body.panel-open .hamburger-btn {
     text-overflow: ellipsis;
 }
 
+.card-indicators {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 2px;
+}
+
+.card-indicators .signal-indicator {
+    transform: scale(0.8);
+    transform-origin: left center;
+}
+
+.card-dist {
+    font-size: 0.65rem;
+    color: var(--text-secondary);
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.indicator-icon {
+    color: var(--text-secondary);
+    flex-shrink: 0;
+    margin-right: 2px;
+    vertical-align: middle;
+}
+
 .card-coords {
     font-size: 0.7rem;
     color: var(--text-dim);
@@ -707,6 +733,30 @@ body.light .console-log {
     background: #1a1a2e;
 }
 
+/* ── Popup Layout ── */
+.popup-header {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 6px;
+}
+
+.popup-grid {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 2px 8px;
+    font-size: 0.72rem;
+    margin-bottom: 6px;
+}
+
+.popup-grid .label {
+    color: var(--text-secondary);
+}
+
+.popup-grid .value {
+    color: var(--text-primary);
+}
+
 /* ── Popup Action Buttons ── */
 .popup-actions {
     border-top: 1px solid var(--border);
@@ -717,6 +767,11 @@ body.light .console-log {
 .popup-content .btn-action {
     font-size: 0.62rem;
     padding: 3px 6px;
+}
+
+.popup-content .signal-indicator {
+    transform: scale(0.85);
+    transform-origin: left center;
 }
 
 /* ── Cursor Coordinate Display ── */
@@ -798,4 +853,93 @@ body.light .leaflet-control-scale-line {
 #deviceCards::-webkit-scrollbar-thumb {
     background: var(--border);
     border-radius: 2px;
+}
+
+/* ── Toggle Switch ── */
+.toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 40px;
+    height: 22px;
+    cursor: pointer;
+}
+
+.toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.toggle-slider {
+    position: absolute;
+    inset: 0;
+    background: var(--border);
+    border-radius: 11px;
+    transition: background 0.2s;
+}
+
+.toggle-slider::before {
+    content: '';
+    position: absolute;
+    width: 16px;
+    height: 16px;
+    left: 3px;
+    bottom: 3px;
+    background: var(--text-primary);
+    border-radius: 50%;
+    transition: transform 0.2s;
+}
+
+.toggle-switch input:checked + .toggle-slider {
+    background: var(--accent);
+}
+
+.toggle-switch input:checked + .toggle-slider::before {
+    transform: translateX(18px);
+}
+
+/* ── Duration Selector ── */
+.duration-selector {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.btn-inc {
+    width: 28px;
+    height: 28px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-card);
+    color: var(--text-primary);
+    font-size: 0.7rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s;
+}
+
+.btn-inc:hover {
+    background: var(--accent);
+    color: #fff;
+}
+
+.dur-value {
+    font-size: 1.2rem;
+    font-weight: 700;
+    min-width: 32px;
+    text-align: center;
+    color: var(--text-primary);
+}
+
+.dur-unit {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
 }

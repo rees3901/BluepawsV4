@@ -118,31 +118,65 @@
         </div>
     </div>
 
-    <!-- Find Modal — "Find My Pet" buzzer pattern + LED flash control -->
+    <!-- Find Alert Modal — "Find My Pet" with buzzer + LED controls -->
     <div id="findModal" class="modal hidden">
         <div class="modal-content">
             <h2>Find Alert</h2>
             <p>Device: <strong id="findDeviceName"></strong></p>
+
+            <!-- Buzzer toggle + pattern -->
             <div class="form-group">
+                <div class="toggle-row">
+                    <label>Buzzer</label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="findBuzzerEnabled" checked>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+            </div>
+            <div class="form-group" id="buzzerPatternGroup">
                 <label>Buzzer Pattern</label>
                 <select id="findPattern">
-                    <option value="chirp">Chirp (3 beeps)</option>
-                    <option value="trill">Trill (rising)</option>
-                    <option value="siren">Siren (two-tone)</option>
+                    <option value="chirp">Chirp (3 short beeps)</option>
+                    <option value="trill">Trill (rising tone)</option>
+                    <option value="siren">Siren (two-tone alternating)</option>
                     <option value="melody_a">Melody A</option>
                     <option value="melody_b">Melody B</option>
                 </select>
             </div>
+
+            <!-- LED toggle + pattern -->
             <div class="form-group">
-                <label>LED Flashes</label>
+                <div class="toggle-row">
+                    <label>LED Flash</label>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="findLedEnabled" checked>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+            </div>
+            <div class="form-group" id="ledPatternGroup">
+                <label>LED Pattern</label>
                 <select id="findFlash">
-                    <option value="3">3 flashes</option>
-                    <option value="5" selected>5 flashes</option>
-                    <option value="10">10 flashes</option>
+                    <option value="3">3 flashes per cycle</option>
+                    <option value="5" selected>5 flashes per cycle</option>
+                    <option value="10">10 flashes per cycle (rapid)</option>
                 </select>
             </div>
+
+            <!-- Alert duration -->
+            <div class="form-group">
+                <label>Alert Duration</label>
+                <div class="duration-selector">
+                    <button id="findDurDown" class="btn-inc" title="Decrease">&#9660;</button>
+                    <span id="findDurValue" class="dur-value">5</span>
+                    <span class="dur-unit">min</span>
+                    <button id="findDurUp" class="btn-inc" title="Increase">&#9650;</button>
+                </div>
+            </div>
+
             <div class="modal-actions">
-                <button id="btnSendFind" class="btn-primary btn-find-send">Find</button>
+                <button id="btnSendFind" class="btn-primary btn-find-send">Send Alert</button>
                 <button id="btnCloseFind" class="btn-secondary">Cancel</button>
             </div>
         </div>
