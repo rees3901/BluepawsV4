@@ -42,8 +42,7 @@
 
 // GPS is provided by the Sequans GM02SP's integrated GNSS receiver.
 // No separate GPS module or UART — positioning is accessed via AT+SQNGNSS.
-// The GPS_SLEEP pin controls the GM02SP's GNSS subsystem power.
-#define PIN_GPS_SLEEP  PIN_CELL_PWR   // GNSS shares modem power control
+// GNSS power is controlled via AT commands, not a dedicated GPIO.
 
 // ── User Interface ──
 #define PIN_LED        LED_BUILTIN    // Green LED on RAK4630
