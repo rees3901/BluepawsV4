@@ -236,7 +236,7 @@ static void initWebServer();
 // Packet handling pipeline
 static void handlePacket(const uint8_t *buf, uint8_t len, int16_t rssi, float snr);
 static void updateDeviceState(const uint8_t *buf, int16_t rssi, float snr);
-static void logToStorage(const uint8_t *buf, uint8_t len, int16_t rssi);
+static void logToStorage(const uint8_t *buf, uint8_t len, int16_t rssi, float snr);
 static void sseBroadcast(const char *event, const char *data);
 static device_state_t *findDevice(uint16_t id);
 
