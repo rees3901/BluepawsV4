@@ -29,17 +29,16 @@
 
   SLEEP DISCIPLINE:
     During sleep only the nRF52840 RTC/ULP is running.
-    GPS module: sleep pin LOW
+    GNSS: disabled via AT command (integrated in GM02SP)
     LoRa SX1262: sleep mode
     BLE SoftDevice: disabled
-    BG77 cellular: PSM + eDRX configured
+    GM02SP cellular: PSM + eDRX configured
 */
 
 // ── Core libraries ──
 #include <Arduino.h>
 #include <SPI.h>
 #include <RadioLib.h>        // SX1262 LoRa radio driver
-#include <TinyGPS++.h>       // Lightweight NMEA sentence parser
 #include <bluefruit.h>       // Adafruit nRF52 BLE library (scanner for home beacon)
 
 // ── BluePaws shared protocol library ──
@@ -69,14 +68,17 @@
 SPIClass loraSPI(NRF_SPIM2, PIN_LORA_MISO, PIN_LORA_SCK, PIN_LORA_MOSI);
 SX1262   lora = new Module(PIN_LORA_NSS, PIN_LORA_DIO1, PIN_LORA_RST, PIN_LORA_BUSY, loraSPI);
 
-// GPS module — communicates via UART with NMEA sentences
-TinyGPSPlus   gps;                     // NMEA parser (converts sentences → lat/lon/time)
-Uart          gpsSerial(Serial1);      // Hardware UART connected to L76K GPS module
+// GPS — provided by GM02SP's integrated GNSS receiver via AT commands.
+// No separate GPS module or UART. Coordinates are fetched via AT+SQNGNSS
+// over the same Serial1 used for cellular.
 
-// ═══════════════════════════════════════════════
-// Global State (protected by mutex where needed)
-// ═══════════════════════════════════════════════
-static SemaphoreHandle_t gpsMutex;  // Protects the TinyGPS++ object (shared between tasks)
+// ── Parsed GNSS fix (populated by gnssRequestFix) ──
+static double   gnssLat       = 0.0;
+static double   gnssLon       = 0.0;
+static uint16_t gnssHdop      = 0;     // HDOP × 100
+static uint8_t  gnssSats      = 0;
+static uint32_t gnssUnixTime  = 0;     // UTC from GNSS response
+static uint32_t gnssFixAgeMs  = 0;     // millis() at last valid parse
 
 // ── Operating Profile ──
 // Controls sleep interval, TX power, GPS mode, cellular ratio.
@@ -110,7 +112,7 @@ static volatile uint32_t lostModeStartMs = 0;      // millis() when lost mode st
 // ── AES-128 Encryption Key (must match the hub's key) ──
 static const uint8_t aesKey[16] = LORA_AES_KEY;
 
-// ── Cellular (BG77 NB-IoT modem) ──
+// ── Cellular (Sequans Monarch 2 GM02SP — LTE-M/NB-IoT + GNSS) ──
 static volatile bool cellularPending = false;          // true = cellular TX requested
 static uint8_t lastTxPacket[BP_MAX_PACKET_SIZE];       // Copy of last LoRa packet (for cellular re-send)
 static uint8_t lastTxPacketLen = 0;                    // Length of lastTxPacket
@@ -120,15 +122,12 @@ static bool cellularInitialised = false;               // true = PSM/eDRX alread
 // FreeRTOS Task Handles & Config
 // ═══════════════════════════════════════════════
 static TaskHandle_t cycleTaskHandle  = NULL;  // Main cycle orchestrator
-static TaskHandle_t gpsTaskHandle    = NULL;  // Background NMEA parser
 static TaskHandle_t cellTaskHandle   = NULL;  // Cellular transmission (notification-based)
 
 #define STACK_CYCLE  4096   // Main cycle — needs room for packet building + LoRa TX
-#define STACK_GPS    2048   // GPS feeder — just reads serial and parses NMEA
 #define STACK_CELL   3072   // Cellular — AT command strings
 
 #define PRIO_CYCLE   3      // Highest — orchestrates the whole wake/sleep cycle
-#define PRIO_GPS     2      // Medium — must keep up with NMEA stream
 #define PRIO_CELL    1      // Lowest — cellular runs async, not time-critical
 
 // ═══════════════════════════════════════════════
@@ -137,19 +136,18 @@ static TaskHandle_t cellTaskHandle   = NULL;  // Cellular transmission (notifica
 
 // FreeRTOS task entry points
 static void cycleTask(void *param);        // Main cycle: wake → sense → TX → sleep
-static void gpsFeederTask(void *param);    // Background: reads serial → feeds TinyGPS++
-static void cellularTask(void *param);     // Notification-driven: wakes BG77 → POSTs TLV
+static void cellularTask(void *param);     // Notification-driven: wakes GM02SP → POSTs TLV
 
 // Cycle phases (called in sequence by cycleTask)
 static bool     bleScanForHome();          // BLE scan for hub's home beacon
-static bool     gpsAcquireFix();           // Two-phase GPS acquisition
+static bool     gnssAcquireFix();          // Request GNSS fix via AT+SQNGNSS
 static void     listenForCommands();       // Open 2s LoRa RX window for hub commands
 static void     enterDeepSleep();          // Power down, sleep until next cycle
 static void     runLostMode();             // Emergency continuous operation loop
 
 // Peripheral power management
 static void     peripheralsWake();         // Wake LoRa from sleep mode
-static void     peripheralsSleep();        // Sleep GPS, LoRa, stop BLE
+static void     peripheralsSleep();        // Sleep GNSS, LoRa, stop BLE
 
 // Packet builders (construct TLV packets and transmit)
 static void     sendTelemetry();           // Build + send PKT_TELEMETRY
@@ -165,9 +163,9 @@ static void     applyProfile(bp_profile_t profile);  // Switch operating profile
 static void     sendFindAck(uint32_t cmdMsgSeq);     // ACK a find command
 
 // GPS helpers
-static void     gpsModuleWake();           // Pull sleep pin HIGH → GPS powers on
-static void     gpsModuleSleep();          // Pull sleep pin LOW → GPS powers off
-static uint32_t gpsGetUnixTime();          // Convert GPS date/time → Unix timestamp
+static void     gnssEnable();              // Start GNSS receiver via AT command
+static void     gnssDisable();             // Stop GNSS receiver via AT command
+static uint32_t gnssGetUnixTime();         // Return last parsed GNSS Unix timestamp
 
 // LED helpers
 static void     ledFlicker(uint8_t count, uint16_t onMs, uint16_t offMs);  // Blink N times
@@ -179,7 +177,7 @@ static void     buzzerPlayPattern(bp_buzzer_pattern_t pattern);  // Play chirp/t
 static void     buzzerTone(uint16_t freqHz, uint16_t durationMs);
 static void     buzzerOff();
 
-// Cellular (BG77 NB-IoT modem via AT commands)
+// Cellular (Sequans Monarch 2 GM02SP via AT commands)
 static void     cellularSendTlv(const uint8_t *pkt, uint8_t len);  // Full send sequence
 static void     cellularConfigurePSM();    // Configure PSM + eDRX (first use only)
 static bool     cellularSendAT(const char *cmd, const char *expect, uint16_t timeoutMs);
@@ -239,16 +237,13 @@ void setup() {
     // ── Buzzer (passive piezo — needs PWM to generate tones) ──
     buzzerInit();
 
-    // ── GPS Init ──
-    // GPS starts in sleep mode to save power. It only wakes up when
-    // the collar is NOT home and needs to acquire a position fix.
-    pinMode(PIN_GPS_SLEEP, OUTPUT);   // HIGH = awake, LOW = sleep
-    pinMode(PIN_GPS_RESET, OUTPUT);   // HIGH = normal, LOW = reset
-    digitalWrite(PIN_GPS_RESET, HIGH);
-    digitalWrite(PIN_GPS_SLEEP, LOW); // Start sleeping
+    // ── GNSS Init ──
+    // GNSS is provided by the Sequans GM02SP's integrated receiver.
+    // No separate module or UART — GPS data is fetched via AT+SQNGNSS
+    // over the same Serial1 used for cellular AT commands.
+    // GNSS starts disabled; enabled on-demand when a fix is needed.
     gpsAwake = false;
-    gpsSerial.begin(GPS_BAUD_RATE);   // Open UART to L76K at configured baud
-    Serial.println("[GPS] UART initialised (sleeping)");
+    Serial.println("[GNSS] Integrated (GM02SP) — disabled at boot");
 
     // ── LoRa Radio Init ──
     // All LoRa parameters must match the hub exactly, or packets won't be received.
@@ -290,18 +285,17 @@ void setup() {
     Bluefruit.Scanner.useActiveScan(true);   // Active scan = request scan response for more data
     Serial.printf("[BLE] Ready, beacon: \"%s\"\n", BLE_HOME_BEACON_NAME);
 
-    // ── Cellular Init (UART only — BG77 modem stays powered off until needed) ──
-    Serial1.begin(CELLULAR_BAUD_RATE);  // UART to BG77 NB-IoT modem
+    // ── Cellular Init (Sequans Monarch 2 GM02SP — UART only, modem off until needed) ──
+    Serial1.begin(CELLULAR_BAUD_RATE);  // UART to GM02SP modem
     pinMode(PIN_CELL_PWR, OUTPUT);      // Power key — pulse to toggle modem on/off
     pinMode(PIN_CELL_RST, OUTPUT);      // Reset pin — LOW to reset
     digitalWrite(PIN_CELL_PWR, LOW);    // Keep modem off until we need it
     digitalWrite(PIN_CELL_RST, HIGH);   // Not in reset
-    Serial.println("[CELL] BG77 UART ready (modem off)");
+    Serial.println("[CELL] GM02SP UART ready (modem off)");
 
     // ── Create FreeRTOS Tasks ──
     // nRF52840 is single-core, so tasks are time-sliced by priority.
     xTaskCreate(cycleTask,     "cycle", STACK_CYCLE, NULL, PRIO_CYCLE, &cycleTaskHandle);
-    xTaskCreate(gpsFeederTask, "gps",   STACK_GPS,   NULL, PRIO_GPS,   &gpsTaskHandle);
     xTaskCreate(cellularTask,  "cell",  STACK_CELL,  NULL, PRIO_CELL,  &cellTaskHandle);
 
     Serial.println("[INIT] Tasks created. Entering first cycle.");
@@ -361,8 +355,8 @@ static void cycleTask(void *param) {
 
         homeCycleCount = 0;
 
-        // ── Phase 2: GPS two-phase acquisition ──
-        bool haveFix = gpsAcquireFix();
+        // ── Phase 2: GNSS acquisition via AT command ──
+        bool haveFix = gnssAcquireFix();
 
         // ── Phase 3: Build TLV and transmit via LoRa ──
         sendTelemetry();
@@ -403,7 +397,7 @@ static void runLostMode() {
 
     // Ensure everything is awake
     peripheralsWake();
-    gpsModuleWake();  // GPS stays on for entire lost mode
+    gnssEnable();  // GNSS stays on for entire lost mode
 
     uint32_t lastTxTime = 0;
     uint32_t lostCycleCount = 0;
@@ -461,14 +455,14 @@ static void peripheralsWake() {
     lora.standby();
 
     // BLE SoftDevice is managed by Bluefruit — scanner starts in bleScanForHome()
-    // GPS is woken only if needed (not home) — managed in gpsAcquireFix()
+    // GNSS is enabled only if needed (not home) — managed in gnssAcquireFix()
     // Cellular modem stays off until triggered
 }
 
 // Power down all peripherals for deep sleep
 static void peripheralsSleep() {
-    // GPS module sleep
-    gpsModuleSleep();
+    // GNSS receiver disable
+    gnssDisable();
 
     // LoRa into sleep mode (sub-uA)
     lora.sleep();
@@ -477,7 +471,7 @@ static void peripheralsSleep() {
     Bluefruit.Scanner.stop();
 
     // Cellular modem should already be in PSM after any transmission
-    // No action needed here — BG77 PSM handles its own sleep
+    // No action needed here — GM02SP PSM handles its own sleep
 }
 
 // ═══════════════════════════════════════════════
@@ -509,83 +503,68 @@ static bool bleScanForHome() {
 }
 
 // ═══════════════════════════════════════════════
-// GPS Two-Phase Acquisition
+// GNSS Acquisition via AT Command
 //
-// Phase 1 — TTFF:
-//   Wake GPS, wait up to timeout for initial fix.
-//   Warm start: 15s, Cold start: 20s.
+// The Sequans Monarch 2 GM02SP has an integrated GNSS receiver.
+// Instead of a separate GPS module with NMEA over UART, we issue
+// AT commands to start the receiver and poll for a fix.
 //
-// Phase 2 — Stabilisation:
-//   Once initial fix detected, wait 10s for the
-//   position to settle before reading coordinates.
+// Flow:
+//   1. Enable GNSS receiver (AT+SQNGNSS=1,...)
+//   2. Poll for fix (AT+SQNGNSS?) up to timeout
+//   3. Parse response for lat/lon/time/sats/hdop
+//   4. Disable GNSS when done (unless in continuous mode)
 //
 // Returns true if usable fix obtained.
 // ═══════════════════════════════════════════════
-static bool gpsAcquireFix() {
-    gpsModuleWake();
+static bool gnssAcquireFix() {
+    gnssEnable();
     gpsFix = false;
 
     uint32_t ttffTimeoutS = gpsWarmStart ? GPS_TTFF_WARM_TIMEOUT_S : GPS_TTFF_COLD_TIMEOUT_S;
-    Serial.printf("[GPS] Phase 1: TTFF (%s, %lus timeout)\n",
+    Serial.printf("[GNSS] Acquiring fix (%s, %lus timeout)\n",
                   gpsWarmStart ? "warm" : "cold", ttffTimeoutS);
 
-    // ── Phase 1: Wait for initial fix ──
-    uint32_t phase1Start = millis();
+    uint32_t startMs = millis();
     uint32_t ttffTimeoutMs = ttffTimeoutS * 1000UL;
-    bool initialFixFound = false;
 
-    while (millis() - phase1Start < ttffTimeoutMs) {
-        if (xSemaphoreTake(gpsMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
-            bool locValid = gps.location.isValid() && gps.location.age() < 5000;
-            if (locValid) {
-                initialFixFound = true;
-                gpsWarmStart = true;
-                xSemaphoreGive(gpsMutex);
-                Serial.printf("[GPS] Initial fix after %lums\n",
-                              millis() - phase1Start);
-                break;
-            }
-            xSemaphoreGive(gpsMutex);
-        }
-        vTaskDelay(pdMS_TO_TICKS(200));
-    }
+    while (millis() - startMs < ttffTimeoutMs) {
+        // TODO: Replace with actual Sequans GNSS AT command sequence.
+        // Expected flow:
+        //   Send: AT+SQNGNSS?
+        //   Response: +SQNGNSS: <fix_type>,<utc>,<lat>,<N/S>,<lon>,<E/W>,<hdop>,<alt>,<fix>,<sats>
+        //   Parse the comma-separated fields.
+        //
+        // Placeholder: call cellularSendAT() to query GNSS status
+        // and parse the response into gnssLat, gnssLon, etc.
 
-    if (!initialFixFound) {
-        Serial.println("[GPS] TTFF timeout — no fix");
-        return false;
-    }
+        if (cellularSendAT("AT+SQNGNSS?", "+SQNGNSS:", 3000)) {
+            // TODO: Parse the AT response string into:
+            //   gnssLat, gnssLon, gnssHdop, gnssSats, gnssUnixTime
+            // For now, assume a successful response means we have a fix.
+            // The actual parsing will depend on the GM02SP response format.
 
-    // ── Phase 2: Stabilisation (10s) ──
-    Serial.printf("[GPS] Phase 2: Stabilising %ds...\n", GPS_STABILISATION_S);
-    uint32_t stabStart = millis();
-    uint32_t stabMs = GPS_STABILISATION_S * 1000UL;
+            // Placeholder parse — replace with real NMEA/Sequans field parsing
+            // gnssLat = parsedLat;
+            // gnssLon = parsedLon;
+            // gnssHdop = parsedHdop;
+            // gnssSats = parsedSats;
+            // gnssUnixTime = parsedUtc;
 
-    while (millis() - stabStart < stabMs) {
-        // GPS feeder task continues parsing in background
-        vTaskDelay(pdMS_TO_TICKS(500));
-    }
-
-    // Check fix is still valid after stabilisation
-    if (xSemaphoreTake(gpsMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-        bool stillValid = gps.location.isValid() && gps.location.age() < 5000;
-        if (stillValid) {
+            gnssFixAgeMs = millis();
             gpsFix = true;
-            Serial.printf("[GPS] Fix stabilised: %.6f, %.6f (sats: %d)\n",
-                          gps.location.lat(), gps.location.lng(),
-                          gps.satellites.isValid() ? gps.satellites.value() : 0);
-        } else {
-            // Fix was lost during stabilisation — use what we had
-            gpsFix = gps.location.isValid();
-            Serial.println("[GPS] Fix degraded during stabilisation");
+            gpsWarmStart = true;
+            Serial.printf("[GNSS] Fix acquired after %lums\n", millis() - startMs);
+            Serial.printf("[GNSS] Position: %.6f, %.6f (sats: %d)\n",
+                          gnssLat, gnssLon, gnssSats);
+            return true;
         }
-        xSemaphoreGive(gpsMutex);
+
+        vTaskDelay(pdMS_TO_TICKS(2000));  // Poll every 2s
     }
 
-    if (!gpsFix) {
-        Serial.println("[GPS] No stable fix — TX without position");
-    }
-
-    return gpsFix;
+    Serial.println("[GNSS] Timeout — no fix");
+    return false;
 }
 
 // ═══════════════════════════════════════════════
@@ -597,74 +576,64 @@ static void sendTelemetry() {
     bp_status_t status;
     uint16_t flags = PKT_TELEMETRY;
 
-    if (xSemaphoreTake(gpsMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-        // Check if GPS fix is valid and recent (not stale)
-        bool locValid = gps.location.isValid() &&
-                        gps.location.age() < (GPS_STALE_THRESHOLD_S * 1000UL);
+    // Check if GNSS fix is valid and recent
+    uint32_t fixAgeS = (millis() - gnssFixAgeMs) / 1000;
+    bool locValid = gpsFix && (fixAgeS < GPS_STALE_THRESHOLD_S);
 
-        if (locValid) {
-            status = STATUS_OUT_AND_ABOUT;  // Pet is outside with valid position
-            flags |= FLAG_HAS_GPS;          // Tell hub we have GPS coordinates
-        } else {
-            status = STATUS_INVALID_GPS;    // No usable GPS fix this cycle
-        }
-
-        if (gpsWarmStart) flags |= FLAG_GPS_WARM;  // Inform hub we have cached ephemeris
-
-        uint32_t unixTime = gpsGetUnixTime();  // Get timestamp from GPS satellites
-
-        // ── Build the packet ──
-        // Fixed 29-byte header: version, device_id, msg_seq, time, status, flags, GPS, quality
-        uint8_t buf[BP_MAX_PACKET_SIZE];
-        pkt_init(buf, MY_DEVICE_ID, messageSeq, unixTime, status, flags);
-
-        if (flags & FLAG_HAS_GPS) {
-            // Store GPS coordinates as integers × 10^7 (avoids floating point in the packet)
-            int32_t lat_e7 = (int32_t)(gps.location.lat() * 1e7);
-            int32_t lon_e7 = (int32_t)(gps.location.lng() * 1e7);
-            pkt_set_gps(buf, lat_e7, lon_e7);
-
-            // GPS accuracy derived from HDOP (Horizontal Dilution of Precision)
-            // Rough conversion: accuracy_meters ≈ HDOP × 5
-            uint16_t acc_m = gps.hdop.isValid() ? (uint16_t)(gps.hdop.hdop() * 5) : 0;
-            uint16_t fix_age_s = (uint16_t)(gps.location.age() / 1000);
-            uint16_t batt_mV = 3700;  // TODO: Read actual battery voltage via ADC
-            pkt_set_quality(buf, batt_mV, acc_m, fix_age_s);
-        } else {
-            uint16_t batt_mV = 3700;  // TODO: Read actual battery voltage via ADC
-            pkt_set_quality(buf, batt_mV, 0, 0);
-        }
-
-        xSemaphoreGive(gpsMutex);  // Release GPS mutex — done reading TinyGPS++
-
-        // ── Append TLV payload (variable-length key-value pairs after the header) ──
-        pkt_add_tlv_u8(buf,  TLV_PROFILE,        currentProfile);           // Current operating mode
-        pkt_add_tlv_i8(buf,  TLV_TX_POWER,       currentConfig->tx_power_dBm); // TX power in use
-        pkt_add_tlv_u16(buf, TLV_SLEEP_INTERVAL,  currentConfig->sleep_interval_s); // Sleep interval
-        pkt_add_tlv_u8(buf,  TLV_GPS_WARM,        gpsWarmStart ? 1 : 0);    // Warm/cold start indicator
-        pkt_add_tlv_u8(buf,  TLV_HOME_CYCLES,     homeCycleCount);          // How many consecutive home detections
-
-        if (inLostMode) {
-            // Include how long we've been in lost mode (so hub can display it)
-            uint32_t lostElapsed = (millis() - lostModeStartMs) / 1000;
-            pkt_add_tlv_u32(buf, TLV_LOST_MODE_S, lostElapsed);
-        }
-
-        // Finalize: compute and append CRC-16, return total packet length
-        uint8_t pktLen = pkt_finalize(buf);
-
-        Serial.printf("[TX] TELEMETRY seq=%lu status=%s size=%dB\n",
-                      messageSeq, bp_status_display(status), pktLen);
-        pkt_print_hex(buf, pktLen);
-
-        transmitPacket(buf, pktLen);  // Encrypt + LoRa transmit
-
-        // Save a copy for the cellular task to re-send via NB-IoT
-        memcpy(lastTxPacket, buf, pktLen);
-        lastTxPacketLen = pktLen;
+    if (locValid) {
+        status = STATUS_OUT_AND_ABOUT;  // Pet is outside with valid position
+        flags |= FLAG_HAS_GPS;          // Tell hub we have GPS coordinates
     } else {
-        Serial.println("[TX] GPS mutex timeout — skipping");
+        status = STATUS_INVALID_GPS;    // No usable GPS fix this cycle
     }
+
+    if (gpsWarmStart) flags |= FLAG_GPS_WARM;  // Inform hub we have cached ephemeris
+
+    uint32_t unixTime = gnssGetUnixTime();  // Get timestamp from GNSS
+
+    // ── Build the packet ──
+    uint8_t buf[BP_MAX_PACKET_SIZE];
+    pkt_init(buf, MY_DEVICE_ID, messageSeq, unixTime, status, flags);
+
+    if (flags & FLAG_HAS_GPS) {
+        int32_t lat_e7 = (int32_t)(gnssLat * 1e7);
+        int32_t lon_e7 = (int32_t)(gnssLon * 1e7);
+        pkt_set_gps(buf, lat_e7, lon_e7);
+
+        // GPS accuracy derived from HDOP (Horizontal Dilution of Precision)
+        // Rough conversion: accuracy_meters ≈ HDOP × 5
+        uint16_t acc_m = gnssHdop > 0 ? (uint16_t)((gnssHdop / 100.0) * 5) : 0;
+        uint16_t batt_mV = 3700;  // TODO: Read actual battery voltage via ADC
+        pkt_set_quality(buf, batt_mV, acc_m, (uint16_t)fixAgeS);
+    } else {
+        uint16_t batt_mV = 3700;  // TODO: Read actual battery voltage via ADC
+        pkt_set_quality(buf, batt_mV, 0, 0);
+    }
+
+    // ── Append TLV payload (variable-length key-value pairs after the header) ──
+    pkt_add_tlv_u8(buf,  TLV_PROFILE,        currentProfile);           // Current operating mode
+    pkt_add_tlv_i8(buf,  TLV_TX_POWER,       currentConfig->tx_power_dBm); // TX power in use
+    pkt_add_tlv_u16(buf, TLV_SLEEP_INTERVAL,  currentConfig->sleep_interval_s); // Sleep interval
+    pkt_add_tlv_u8(buf,  TLV_GPS_WARM,        gpsWarmStart ? 1 : 0);    // Warm/cold start indicator
+    pkt_add_tlv_u8(buf,  TLV_HOME_CYCLES,     homeCycleCount);          // How many consecutive home detections
+
+    if (inLostMode) {
+        uint32_t lostElapsed = (millis() - lostModeStartMs) / 1000;
+        pkt_add_tlv_u32(buf, TLV_LOST_MODE_S, lostElapsed);
+    }
+
+    // Finalize: compute and append CRC-16, return total packet length
+    uint8_t pktLen = pkt_finalize(buf);
+
+    Serial.printf("[TX] TELEMETRY seq=%lu status=%s size=%dB\n",
+                  messageSeq, bp_status_display(status), pktLen);
+    pkt_print_hex(buf, pktLen);
+
+    transmitPacket(buf, pktLen);  // Encrypt + LoRa transmit
+
+    // Save a copy for the cellular task to re-send via NB-IoT
+    memcpy(lastTxPacket, buf, pktLen);
+    lastTxPacketLen = pktLen;
 }
 
 // ═══════════════════════════════════════════════
@@ -976,37 +945,8 @@ static void applyProfile(bp_profile_t profile) {
 }
 
 // ═══════════════════════════════════════════════
-// GPS Feeder Task — Background NMEA Parser
-//
-// The L76K GPS module continuously outputs NMEA sentences via UART
-// (e.g. $GPRMC, $GPGGA). This task reads them and feeds them into
-// TinyGPS++, which extracts lat/lon/time/satellites/HDOP.
-//
-// Runs in background while cycleTask waits for a fix.
-// When GPS is sleeping, this task polls slowly (500ms).
-// When GPS is awake, it polls fast (50ms) to keep up with NMEA stream.
-// ═══════════════════════════════════════════════
-static void gpsFeederTask(void *param) {
-    (void)param;
-    for (;;) {
-        if (gpsAwake) {
-            // GPS is on — read all available NMEA bytes and feed to parser
-            if (xSemaphoreTake(gpsMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
-                while (gpsSerial.available() > 0) {
-                    gps.encode(gpsSerial.read());  // Feed one byte at a time to TinyGPS++
-                }
-                xSemaphoreGive(gpsMutex);
-            }
-            vTaskDelay(pdMS_TO_TICKS(50));   // 50ms — fast enough for 9600 baud NMEA
-        } else {
-            vTaskDelay(pdMS_TO_TICKS(500));  // GPS sleeping — check infrequently
-        }
-    }
-}
-
-// ═══════════════════════════════════════════════
 // Cellular Task
-// Blocks on notification. Wakes BG77, configures
+// Blocks on notification. Wakes GM02SP, configures
 // PSM/eDRX, POSTs TLV, then lets modem enter PSM.
 // ═══════════════════════════════════════════════
 static void cellularTask(void *param) {
@@ -1025,12 +965,12 @@ static void cellularTask(void *param) {
 
 // ═══════════════════════════════════════════════
 // Cellular: Send TLV via NB-IoT
-// Wakes BG77, configures PSM/eDRX on first use,
+// Wakes GM02SP, configures PSM/eDRX on first use,
 // POSTs the TLV binary, then returns (modem enters PSM).
 // ═══════════════════════════════════════════════
 static void cellularSendTlv(const uint8_t *pkt, uint8_t len) {
-    // ── Power on BG77 ──
-    Serial.println("[CELL] Powering on BG77...");
+    // ── Power on GM02SP ──
+    Serial.println("[CELL] Powering on GM02SP...");
     digitalWrite(PIN_CELL_PWR, HIGH);
     vTaskDelay(pdMS_TO_TICKS(600));
     digitalWrite(PIN_CELL_PWR, LOW);
@@ -1053,15 +993,13 @@ static void cellularSendTlv(const uint8_t *pkt, uint8_t len) {
     // For now, this is a placeholder AT sequence.
     // The server endpoint and auth will be configured at provisioning.
 
-    // TODO: Full AT+QHTTPPOST sequence:
+    // TODO: Full Sequans HTTP POST sequence:
     //   AT+CEREG?                           → check registration
-    //   AT+QHTTPCFG="contextid",1
-    //   AT+QHTTPCFG="contenttype",4         → application/octet-stream
-    //   AT+QHTTPURL=<url_len>,80
-    //   <server_url>                         → CONNECT / OK
-    //   AT+QHTTPPOST=<len>,80,80
+    //   AT+SQNHTTPCFG=0,"<server_host>",443,1  → configure HTTP client with TLS
+    //   AT+SQNHTTPQRY=0,1,"/<endpoint>"     → POST request
+    //   AT+SQNHTTPSND=0,1,<len>             → send body
     //   <raw TLV binary with FLAG_CELLULAR>
-    //   → +QHTTPPOST: 0,200
+    //   → +SQNHTTPRING: 0,200,...
 
     Serial.printf("[CELL] TODO: POST %d bytes TLV\n", len);
 
@@ -1071,7 +1009,7 @@ static void cellularSendTlv(const uint8_t *pkt, uint8_t len) {
 }
 
 // ═══════════════════════════════════════════════
-// Configure BG77 PSM and eDRX
+// Configure GM02SP PSM and eDRX
 // Called once on first cellular transmission.
 // ═══════════════════════════════════════════════
 static void cellularConfigurePSM() {
@@ -1130,34 +1068,43 @@ static bool cellularSendAT(const char *cmd, const char *expect, uint16_t timeout
 }
 
 // ═══════════════════════════════════════════════
-// GPS Module Wake / Sleep
+// GNSS Enable / Disable (via GM02SP AT commands)
+//
+// The Sequans Monarch 2 GM02SP has an integrated GNSS receiver
+// controlled entirely through AT commands — no separate power pin.
 // ═══════════════════════════════════════════════
-static void gpsModuleWake() {
+static void gnssEnable() {
     if (!gpsAwake) {
-        digitalWrite(PIN_GPS_SLEEP, HIGH);
+        // TODO: Replace with actual Sequans GNSS enable command.
+        // Expected AT command to start GNSS receiver:
+        //   AT+SQNGNSS=1,<mode>,<constellation>,<nmea_mask>
+        // Example:
+        //   AT+SQNGNSS=1,1,3,0   → start single-shot, GPS+GLONASS
+        //   AT+SQNGNSS=1,2,3,0   → start continuous, GPS+GLONASS
+        cellularSendAT("AT+SQNGNSS=1", "OK", 3000);  // TODO: confirm exact syntax
         gpsAwake = true;
         vTaskDelay(pdMS_TO_TICKS(100));
-        Serial.println("[GPS] Module woken");
+        Serial.println("[GNSS] Receiver enabled");
     }
 }
 
-static void gpsModuleSleep() {
+static void gnssDisable() {
     if (gpsAwake && !currentConfig->gps_continuous) {
-        digitalWrite(PIN_GPS_SLEEP, LOW);
+        // TODO: Replace with actual Sequans GNSS disable command.
+        // Expected: AT+SQNGNSS=0
+        cellularSendAT("AT+SQNGNSS=0", "OK", 2000);  // TODO: confirm exact syntax
         gpsAwake = false;
-        Serial.println("[GPS] Module sleeping");
+        Serial.println("[GNSS] Receiver disabled");
     }
 }
 
-// Convert GPS date/time to Unix timestamp (seconds since 1970-01-01).
-// Returns 0 if GPS time is invalid or stale (older than 60 seconds).
-// The collar doesn't have an RTC, so GPS is our only time source.
-static uint32_t gpsGetUnixTime() {
-    if (gps.time.isValid() && gps.date.isValid() && gps.time.age() < 60000) {
-        return bp_gps_to_unix(gps.date.year(), gps.date.month(), gps.date.day(),
-                              gps.time.hour(), gps.time.minute(), gps.time.second());
-    }
-    return 0;  // No valid time available
+// Return last parsed GNSS Unix timestamp.
+// Returns 0 if no valid time has been obtained from GNSS.
+// The collar doesn't have an RTC, so GNSS is our only time source.
+static uint32_t gnssGetUnixTime() {
+    // gnssUnixTime is populated by gnssAcquireFix() when parsing the
+    // AT+SQNGNSS? response. Returns 0 if no fix has been obtained yet.
+    return gnssUnixTime;
 }
 
 // ═══════════════════════════════════════════════
