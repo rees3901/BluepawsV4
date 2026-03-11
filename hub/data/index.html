@@ -81,6 +81,14 @@
                 <input type="url" id="cfgCloud" placeholder="https://...">
             </div>
             <div class="form-group">
+                <label>Hub Mode</label>
+                <div class="toggle-row">
+                    <button id="btnHomeMode" class="mode-btn active">Home</button>
+                    <button id="btnPortableMode" class="mode-btn">Portable Locator</button>
+                </div>
+                <small class="form-hint">Portable mode stops the home beacon and scans for collar BLE signals.</small>
+            </div>
+            <div class="form-group">
                 <label>Hub Status</label>
                 <div id="hubStatus" class="status-info">Loading...</div>
             </div>
