@@ -1088,3 +1088,76 @@ body.light .leaflet-control-scale-line {
     font-size: 0.75rem;
     color: var(--text-secondary);
 }
+
+/* ── Hub Mode Toggle Buttons ── */
+.mode-btn {
+    flex: 1;
+    padding: 6px 12px;
+    border: 1px solid var(--border);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s;
+}
+.mode-btn:first-child { border-radius: 6px 0 0 6px; }
+.mode-btn:last-child  { border-radius: 0 6px 6px 0; }
+.mode-btn.active {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+}
+.form-hint {
+    display: block;
+    margin-top: 4px;
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    opacity: 0.7;
+}
+
+/* ── Error Badge (on device cards) ── */
+.error-badge {
+    display: inline-block;
+    background: #ef4444;
+    color: #fff;
+    font-size: 0.6rem;
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 8px;
+    margin-left: 4px;
+    vertical-align: middle;
+    letter-spacing: 0.3px;
+}
+
+/* ── BLE Proximity Signal Bars (portable mode) ── */
+.ble-proximity {
+    display: inline-flex;
+    align-items: flex-end;
+    gap: 2px;
+    margin-left: 6px;
+    vertical-align: middle;
+}
+.ble-proximity .ble-bar {
+    width: 4px;
+    background: #334155;
+    border-radius: 1px;
+}
+.ble-proximity .ble-bar.filled {
+    background: #06b6d4;
+}
+.ble-proximity-label {
+    font-size: 0.65rem;
+    color: #06b6d4;
+    margin-left: 3px;
+}
+
+/* ── Portable Mode Banner ── */
+.portable-banner {
+    background: #06b6d4;
+    color: #fff;
+    text-align: center;
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 3px 8px;
+    letter-spacing: 0.5px;
+}

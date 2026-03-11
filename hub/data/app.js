@@ -34,6 +34,9 @@
     let measureMarkers = [];       // Circle markers at each measure point
     let darkMode = true;           // Current theme (persisted to localStorage)
     let followedDeviceId = null;   // Device ID being auto-followed on map (null = none)
+    var hubPortableMode = false;   // true when hub is in portable (BLE scanner) mode
+    var bleResults = {};           // Map of device_id → { rssi, age_ms }
+    var blePollingTimer = null;    // Interval ID for BLE result polling
     var consoleLog = [];           // Ring buffer of display strings (max 200)
     var consoleLogData = [];       // Structured entries for CSV export
     var MAX_LOG_ENTRIES = 200;
@@ -177,6 +180,35 @@
         return '<span class="battery-indicator" title="' + (millivolts / 1000).toFixed(2) + ' V — ' + batt.label + '">' +
             svg +
             '<span class="sig-label" style="color:' + batt.color + '">' + batt.label + '</span>' +
+            '</span>';
+    }
+
+    // ═══════════════════════════════════════════════
+    // BLE Proximity Bars (Portable Mode)
+    //
+    // When hub is in portable mode, shows signal strength bars
+    // based on BLE RSSI from collar find beacons.
+    //   >= -50 dBm → 4 bars (very close)
+    //   >= -65 dBm → 3 bars (close)
+    //   >= -80 dBm → 2 bars (medium)
+    //   <  -80 dBm → 1 bar (far)
+    // ═══════════════════════════════════════════════
+    function renderBleProximity(rssi) {
+        var level;
+        var label;
+        if (rssi >= -50) { level = 4; label = 'Very Close'; }
+        else if (rssi >= -65) { level = 3; label = 'Close'; }
+        else if (rssi >= -80) { level = 2; label = 'Medium'; }
+        else { level = 1; label = 'Far'; }
+
+        var bars = '';
+        for (var i = 1; i <= 4; i++) {
+            var h = 4 + (i * 3);
+            bars += '<span class="ble-bar' + (i <= level ? ' filled' : '') + '" style="height:' + h + 'px"></span>';
+        }
+        return '<span class="ble-proximity" title="BLE RSSI: ' + rssi + ' dBm — ' + label + '">' +
+            bars +
+            '<span class="ble-proximity-label">' + label + '</span>' +
             '</span>';
     }
 
@@ -522,7 +554,7 @@
                 var data = JSON.parse(e.data);
                 var ts = new Date().toISOString();
                 var tsShort = new Date().toLocaleTimeString();
-                var structured = { ts: ts, id: data.id, name: data.name, lat: (data.lat||0).toFixed(5), lon: (data.lon||0).toFixed(5), rssi: data.rssi, snr: data.snr, batt: data.batt, status: data.status, profile: data.profile };
+                var structured = { ts: ts, id: data.id, name: data.name, lat: (data.lat||0).toFixed(5), lon: (data.lon||0).toFixed(5), rssi: data.rssi, snr: data.snr, batt: data.batt, status: data.status, profile: data.profile, error: data.error || 'None' };
                 var logLine = data.name + ' id=' + data.id + ' lat=' + structured.lat + ' lon=' + structured.lon + ' rssi=' + data.rssi + ' batt=' + data.batt + 'mV';
                 logEvent('RX', logLine, structured);
                 logDeviceEvent(data.id, '[' + tsShort + '] ' + logLine + ' snr=' + data.snr + ' status=' + data.status + ' profile=' + data.profile, structured);
@@ -892,10 +924,12 @@
                         '<span class="card-name">' + data.name + '</span>' +
                         '<span class="card-status ' + st.css + '">' + st.emoji + ' ' + st.label + '</span>' +
                         '<span class="card-profile ' + profileClass + '">' + profileLabel + '</span>' +
+                        (data.error && data.error !== 'None' ? '<span class="error-badge">' + data.error + '</span>' : '') +
                     '</div>' +
                     '<div class="card-indicators">' +
                         '<span class="card-indicator-group">' + renderBatteryBars(data.batt) + '</span>' +
                         '<span class="card-indicator-group">' + renderSignalBars(data.rssi, data.snr) + '</span>' +
+                        (hubPortableMode && bleResults[id] ? '<span class="card-indicator-group">' + renderBleProximity(bleResults[id].rssi) + '</span>' : '') +
                     '</div>' +
                     '<div class="card-indicators card-indicators-row3">' +
                         '<span class="card-indicator-group card-dist-group" title="Distance from home">' +
@@ -1193,6 +1227,10 @@
                     'Free heap: ' + (s.freeHeap / 1024).toFixed(1) + ' KB<br>' +
                     'WiFi STA: ' + (s.staConnected ? s.staIP : 'Not connected') + '<br>' +
                     'AP IP: ' + s.apIP;
+                // Sync hub mode state from server
+                hubPortableMode = (s.hubMode === 'portable');
+                updateHubModeUI();
+                if (hubPortableMode && !blePollingTimer) startBlePolling();
             })
             .catch(function () {
                 document.getElementById('hubStatus').textContent = 'Failed to load status';
@@ -1222,6 +1260,86 @@
         }).catch(function () {
             alert('Failed to save configuration.');
         });
+    }
+
+    // ═══════════════════════════════════════════════
+    // Hub Mode Toggle (Home / Portable)
+    //
+    // In Portable mode, the hub stops its BLE home beacon and starts
+    // scanning for collar BLE find beacons. We poll GET /api/ble every
+    // 2 seconds to get RSSI proximity data for the device cards.
+    // ═══════════════════════════════════════════════
+    function setHubMode(mode) {
+        fetch('/api/hub-mode', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: 'mode=' + mode
+        }).then(function (r) { return r.json(); })
+          .then(function (d) {
+              hubPortableMode = (d.mode === 'portable');
+              updateHubModeUI();
+              if (hubPortableMode) {
+                  startBlePolling();
+              } else {
+                  stopBlePolling();
+              }
+          })
+          .catch(function () {
+              logEvent('ERR', 'Failed to set hub mode');
+          });
+    }
+
+    function updateHubModeUI() {
+        var btnHome = document.getElementById('btnHomeMode');
+        var btnPortable = document.getElementById('btnPortableMode');
+        if (btnHome && btnPortable) {
+            btnHome.classList.toggle('active', !hubPortableMode);
+            btnPortable.classList.toggle('active', hubPortableMode);
+        }
+
+        // Show/hide portable banner in sidebar header
+        var banner = document.getElementById('portableBanner');
+        if (!banner && hubPortableMode) {
+            banner = document.createElement('div');
+            banner.id = 'portableBanner';
+            banner.className = 'portable-banner';
+            banner.textContent = 'PORTABLE MODE';
+            var panel = document.getElementById('panelHeader');
+            if (panel) panel.after(banner);
+        }
+        if (banner) {
+            banner.style.display = hubPortableMode ? '' : 'none';
+        }
+    }
+
+    function startBlePolling() {
+        stopBlePolling();
+        pollBle();
+        blePollingTimer = setInterval(pollBle, 2000);
+    }
+
+    function stopBlePolling() {
+        if (blePollingTimer) {
+            clearInterval(blePollingTimer);
+            blePollingTimer = null;
+        }
+        bleResults = {};
+    }
+
+    function pollBle() {
+        fetch('/api/ble')
+            .then(function (r) { return r.json(); })
+            .then(function (results) {
+                bleResults = {};
+                results.forEach(function (r) {
+                    bleResults[r.id] = { rssi: r.rssi, age_ms: r.age_ms };
+                });
+                // Re-render cards to show BLE proximity
+                for (var id in devices) {
+                    renderDeviceCard(devices[id]);
+                }
+            })
+            .catch(function () { /* silently ignore polling failures */ });
     }
 
     // ═══════════════════════════════════════════════
@@ -1385,6 +1503,8 @@
         document.getElementById('btnExportConsoleLog').addEventListener('click', function () {
             exportLogCsv(consoleLogData, 'bluepaws_console_' + new Date().toISOString().slice(0, 10) + '.csv');
         });
+        document.getElementById('btnHomeMode').addEventListener('click', function () { setHubMode('home'); });
+        document.getElementById('btnPortableMode').addEventListener('click', function () { setHubMode('portable'); });
         document.getElementById('cfgSSID').addEventListener('input', validateConfigForm);
         document.getElementById('cfgPass').addEventListener('input', validateConfigForm);
         document.getElementById('btnSendCmd').addEventListener('click', sendCommand);

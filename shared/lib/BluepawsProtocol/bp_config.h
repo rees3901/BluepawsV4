@@ -103,6 +103,12 @@ static inline const bp_profile_config_t *bp_profile_config(bp_profile_t p) {
 #define BLE_HOME_BEACON_NAME      "BLUEPAWS_HOME"
 #define BLE_HOME_CYCLE_THRESHOLD  5   // consecutive detections to confirm "home"
 
+// BLE Active Find — collar advertises, hub scans in portable mode
+#define BLE_FIND_BEACON_PREFIX    "BP_FIND_"     // Collar advertises "BP_FIND_0001" etc.
+#define BLE_FIND_ADV_INTERVAL_MS  200            // Fast advertising for easy detection
+#define BLE_FIND_SCAN_INTERVAL_MS 100            // Hub scan interval in portable mode
+#define BLE_FIND_SCAN_WINDOW_MS   80             // Hub scan window in portable mode
+
 // ═══════════════════════════════════════════════
 // NB-IoT Cellular
 // ═══════════════════════════════════════════════

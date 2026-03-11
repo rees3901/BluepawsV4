@@ -88,7 +88,7 @@
 // ═══════════════════════════════════════════════
 #define STACK_LORA   4096   // LoRa RX/TX — moderate stack (radio + crypto)
 #define STACK_WEB    8192   // Web server — large stack (JSON building, string ops)
-#define STACK_BLE    2048   // BLE beacon — minimal work
+#define STACK_BLE    4096   // BLE beacon + scanning in portable mode
 #define STACK_CLOUD  4096   // Cloud relay — HTTP client needs decent stack
 
 #define PRIO_LORA    3      // Highest — LoRa packets are time-sensitive
@@ -182,6 +182,25 @@ static String staSSID = WIFI_STA_SSID;        // Current STA SSID (may be loaded
 static String staPass = WIFI_STA_PASS;        // Current STA password
 static String cloudEndpoint = CLOUD_ENDPOINT; // Cloud POST URL
 
+// ── Hub Mode (Home vs Portable) ──
+// Home mode: BLE beacon advertising (tells collars they're home)
+// Portable mode: BLE scanning for collar find beacons (RSSI proximity)
+static bool portableMode = false;
+
+// ── BLE Scan Results (Portable Mode) ──
+#define MAX_BLE_DEVICES 8
+struct ble_scan_result_t {
+    uint16_t device_id;
+    int      rssi;
+    uint32_t last_seen_ms;
+};
+static ble_scan_result_t bleScanResults[MAX_BLE_DEVICES];
+static uint8_t bleScanCount = 0;
+static SemaphoreHandle_t bleMutex = NULL;
+
+#include <BLEScan.h>
+static BLEScan *pBLEScan = nullptr;
+
 // ── Storage ──
 static uint32_t logEntryCount = 0;  // Number of CSV rows in the log file
 
@@ -206,6 +225,7 @@ struct device_state_t {
     uint16_t fix_age_s;      // How old the GPS fix is, in seconds
     uint8_t  status;         // bp_status_t — OK, OUT_AND_ABOUT, LOST, etc.
     uint8_t  profile;        // bp_profile_t — NORMAL, POWERSAVE, ACTIVE, LOST
+    uint8_t  error;          // bp_error_t — active subsystem fault (0 = none)
     int16_t  rssi;           // LoRa RSSI when hub received the packet (dBm)
     float    snr;            // LoRa SNR when hub received the packet (dB)
     uint32_t local_millis;   // millis() on the hub when this packet arrived
@@ -248,6 +268,12 @@ static void sendCommandFind(uint16_t target_id, bp_pkt_type_t type,
 static void checkPendingAcks();
 static void handleAck(const uint8_t *buf);
 
+// Portable mode (BLE scanning for collar find beacons)
+static void enterPortableMode();
+static void enterHomeMode();
+static void handleApiBle();
+static void handleApiHubMode();
+
 // ── DIO1 Interrupt Service Routine ──
 // The SX1262 fires DIO1 when a packet is fully received.
 // This ISR just sets a flag — actual processing happens in loraTask.
@@ -275,6 +301,7 @@ void setup() {
     sseMutex     = xSemaphoreCreateMutex();   // Guards SSE client list
     deviceMutex  = xSemaphoreCreateMutex();   // Guards device state table
     pendingMutex = xSemaphoreCreateMutex();   // Guards pending command slots
+    bleMutex     = xSemaphoreCreateMutex();   // Guards BLE scan results (portable mode)
     cmdQueue     = xQueueCreate(CMD_QUEUE_SIZE,   sizeof(cmd_entry_t));   // Web→LoRa command pipe
     cloudQueue   = xQueueCreate(CLOUD_QUEUE_SIZE, sizeof(cloud_entry_t)); // LoRa→Cloud relay pipe
 
@@ -387,9 +414,15 @@ static void initBLE() {
     advData.setFlags(ESP_BLE_ADV_FLAG_GEN_DISC | ESP_BLE_ADV_FLAG_BREDR_NOT_SPT);
     advData.setName(BLE_HOME_BEACON_NAME);  // This is what the collar scans for
     pAdv->setAdvertisementData(advData);
-    pAdv->start();  // Begin broadcasting — runs autonomously in background
 
-    Serial.printf("[BLE] Beacon advertising: %s\n", BLE_HOME_BEACON_NAME);
+    if (portableMode) {
+        // Portable mode was persisted — start scanning instead of advertising
+        Serial.println("[BLE] Portable mode restored from config");
+        enterPortableMode();
+    } else {
+        pAdv->start();  // Begin broadcasting — runs autonomously in background
+        Serial.printf("[BLE] Beacon advertising: %s\n", BLE_HOME_BEACON_NAME);
+    }
 }
 
 static void initStorage() {
@@ -430,6 +463,7 @@ static void initStorage() {
                 if (key == "sta_ssid")  staSSID = val;        // Home WiFi name
                 if (key == "sta_pass")  staPass = val;        // Home WiFi password
                 if (key == "cloud_url") cloudEndpoint = val;  // Cloud POST endpoint
+                if (key == "hub_mode")  portableMode = (val == "portable");
             }
             f.close();
             Serial.println("[FS] Config loaded");
@@ -676,10 +710,12 @@ static void buildDeviceJson(const uint8_t *buf, int16_t rssi, float snr,
     double lon        = hasGps ? pkt_lon_e7(buf) / 1e7 : 0.0;
     uint8_t profile   = 0;
     pkt_tlv_get_u8(buf, TLV_PROFILE, &profile);  // Extract profile from TLV payload
+    uint8_t error     = 0;
+    pkt_tlv_get_u8(buf, TLV_ERROR_TYPE, &error);  // Extract error from TLV payload
 
     snprintf(out, outLen,
         "{\"id\":%u,\"name\":\"%s\",\"seq\":%u,\"time\":%u,"
-        "\"status\":\"%s\",\"profile\":\"%s\","
+        "\"status\":\"%s\",\"profile\":\"%s\",\"error\":\"%s\","
         "\"lat\":%.7f,\"lon\":%.7f,\"hasGps\":%s,"
         "\"batt\":%u,\"acc\":%u,\"fixAge\":%u,"
         "\"rssi\":%d,\"snr\":%.1f,"
@@ -687,6 +723,7 @@ static void buildDeviceJson(const uint8_t *buf, int16_t rssi, float snr,
         devId, bp_device_name(devId), pkt_msg_seq(buf), pkt_time_unix(buf),
         bp_status_display((bp_status_t)pkt_status(buf)),
         bp_profile_name((bp_profile_t)profile),
+        bp_error_display((bp_error_t)error),
         lat, lon, hasGps ? "true" : "false",
         pkt_batt_mV(buf), pkt_acc_m(buf), pkt_fix_age_s(buf),
         rssi, snr,
@@ -725,6 +762,8 @@ static void updateDeviceState(const uint8_t *buf, int16_t rssi, float snr) {
                 dev->lon_e7 = pkt_lon_e7(buf);
             }
             pkt_tlv_get_u8(buf, TLV_PROFILE, &dev->profile);
+            dev->error = 0;
+            pkt_tlv_get_u8(buf, TLV_ERROR_TYPE, &dev->error);
         }
         xSemaphoreGive(deviceMutex);
     }
@@ -958,18 +997,19 @@ static void handleApiDevices() {
 // Returns hub diagnostic info: uptime, packet counts, memory, WiFi state.
 // Displayed in the Settings modal in the web GUI.
 static void handleApiStatus() {
-    char buf[256];
+    char buf[320];
     snprintf(buf, sizeof(buf),
         "{\"uptime\":%u,\"rxCount\":%u,\"txCount\":%u,"
         "\"crcFails\":%u,\"devices\":%u,\"logEntries\":%u,"
         "\"staConnected\":%s,\"staIP\":\"%s\",\"apIP\":\"%s\","
-        "\"freeHeap\":%u}",
+        "\"freeHeap\":%u,\"hubMode\":\"%s\"}",
         millis() / 1000, rxCount, txCount,
         crcFailCount, deviceCount, logEntryCount,
         staConnected ? "true" : "false",
         staConnected ? WiFi.localIP().toString().c_str() : "",
         WiFi.softAPIP().toString().c_str(),
-        ESP.getFreeHeap()
+        ESP.getFreeHeap(),
+        portableMode ? "portable" : "home"
     );
     httpServer.send(200, "application/json", buf);
 }
@@ -1103,6 +1143,7 @@ static void handleApiConfig() {
         if (newSSID.length() > 0)  f.printf("sta_ssid=%s\n", newSSID.c_str());
         if (newPass.length() > 0)  f.printf("sta_pass=%s\n", newPass.c_str());
         if (newCloud.length() > 0) f.printf("cloud_url=%s\n", newCloud.c_str());
+        f.printf("hub_mode=%s\n", portableMode ? "portable" : "home");
         f.close();
     }
 
@@ -1153,6 +1194,8 @@ static void initWebServer() {
     httpServer.on("/api/command",  HTTP_POST, handleApiCommand);  // Send mode command
     httpServer.on("/api/find",     HTTP_POST, handleApiFind);     // Trigger find (buzzer+LED)
     httpServer.on("/api/config",   HTTP_POST, handleApiConfig);   // Save WiFi/cloud config
+    httpServer.on("/api/ble",      HTTP_GET,  handleApiBle);       // BLE scan results (portable mode)
+    httpServer.on("/api/hub-mode", HTTP_POST, handleApiHubMode);   // Toggle home/portable mode
     httpServer.onNotFound(handleNotFound);                        // Serve other files from flash
     httpServer.begin();
     Serial.printf("[WEB] HTTP server on port %d\n", HTTP_PORT);
@@ -1184,22 +1227,179 @@ static void webTask(void *param) {
 }
 
 // ═══════════════════════════════════════════════
-// BLE Task — Home Beacon Keepalive
+// BLE Portable Mode — Scan Callback
 //
-// BLE advertising runs autonomously in the ESP32's radio stack.
-// This task just periodically calls start() as a safety measure
-// in case the advertising ever stops unexpectedly. Runs at lowest
-// priority since it does almost nothing.
+// In Portable Mode, the hub stops advertising its home beacon and
+// instead scans for collar BLE find beacons ("BP_FIND_XXXX").
+// Each detected beacon is stored with RSSI for proximity display.
+// ═══════════════════════════════════════════════
+
+class FindBeaconCallbacks : public BLEAdvertisedDeviceCallbacks {
+    void onResult(BLEAdvertisedDevice advertisedDevice) override {
+        if (!advertisedDevice.haveName()) return;
+        String name = advertisedDevice.getName().c_str();
+        if (!name.startsWith(BLE_FIND_BEACON_PREFIX)) return;
+
+        uint16_t devId = (uint16_t)strtoul(
+            name.c_str() + strlen(BLE_FIND_BEACON_PREFIX), NULL, 16);
+        if (devId == 0) return;
+
+        int rssi = advertisedDevice.getRSSI();
+
+        if (xSemaphoreTake(bleMutex, pdMS_TO_TICKS(10))) {
+            ble_scan_result_t *slot = nullptr;
+            for (uint8_t i = 0; i < bleScanCount; i++) {
+                if (bleScanResults[i].device_id == devId) {
+                    slot = &bleScanResults[i];
+                    break;
+                }
+            }
+            if (!slot && bleScanCount < MAX_BLE_DEVICES) {
+                slot = &bleScanResults[bleScanCount++];
+                slot->device_id = devId;
+            }
+            if (slot) {
+                slot->rssi = rssi;
+                slot->last_seen_ms = millis();
+            }
+            xSemaphoreGive(bleMutex);
+        }
+    }
+};
+
+static FindBeaconCallbacks findBeaconCb;
+
+// ═══════════════════════════════════════════════
+// Portable Mode — Enter / Exit
+// ═══════════════════════════════════════════════
+
+static void enterPortableMode() {
+    if (portableMode) return;
+
+    // Stop home beacon
+    BLEDevice::getAdvertising()->stop();
+    Serial.println("[BLE] Home beacon stopped");
+
+    // Start BLE scanning for collar find beacons
+    pBLEScan = BLEDevice::getScan();
+    pBLEScan->setAdvertisedDeviceCallbacks(&findBeaconCb, true);
+    pBLEScan->setActiveScan(true);
+    pBLEScan->setInterval(160);   // 100ms in 0.625ms units
+    pBLEScan->setWindow(128);     // 80ms in 0.625ms units
+
+    portableMode = true;
+    Serial.println("[HUB] Entered PORTABLE mode — scanning for collars");
+}
+
+static void enterHomeMode() {
+    if (!portableMode) return;
+
+    // Stop BLE scanning
+    if (pBLEScan) {
+        pBLEScan->stop();
+        pBLEScan->clearResults();
+    }
+
+    if (xSemaphoreTake(bleMutex, pdMS_TO_TICKS(50))) {
+        bleScanCount = 0;
+        xSemaphoreGive(bleMutex);
+    }
+
+    // Restart home beacon
+    BLEDevice::getAdvertising()->start();
+
+    portableMode = false;
+    Serial.println("[HUB] Entered HOME mode — beacon advertising");
+}
+
+// ═══════════════════════════════════════════════
+// API: GET /api/ble — BLE scan results (portable mode)
+// ═══════════════════════════════════════════════
+
+static void handleApiBle() {
+    String json = "[";
+    if (xSemaphoreTake(bleMutex, pdMS_TO_TICKS(50))) {
+        uint32_t now = millis();
+        for (uint8_t i = 0; i < bleScanCount; i++) {
+            if (i > 0) json += ",";
+            char entry[128];
+            snprintf(entry, sizeof(entry),
+                "{\"id\":%u,\"name\":\"%s\",\"rssi\":%d,\"age_ms\":%u}",
+                bleScanResults[i].device_id,
+                bp_device_name(bleScanResults[i].device_id),
+                bleScanResults[i].rssi,
+                now - bleScanResults[i].last_seen_ms);
+            json += entry;
+        }
+        xSemaphoreGive(bleMutex);
+    }
+    json += "]";
+    httpServer.send(200, "application/json", json);
+}
+
+// ═══════════════════════════════════════════════
+// API: POST /api/hub-mode — Toggle home/portable mode
+// Body: mode=portable or mode=home
+// ═══════════════════════════════════════════════
+
+static void handleApiHubMode() {
+    if (httpServer.method() != HTTP_POST) {
+        httpServer.send(405, "text/plain", "POST only");
+        return;
+    }
+
+    String body = httpServer.arg("plain");
+    if (body.indexOf("mode=portable") >= 0) {
+        enterPortableMode();
+    } else if (body.indexOf("mode=home") >= 0) {
+        enterHomeMode();
+    } else {
+        httpServer.send(400, "text/plain", "Bad request: mode=portable|home");
+        return;
+    }
+
+    char resp[32];
+    snprintf(resp, sizeof(resp), "{\"mode\":\"%s\"}", portableMode ? "portable" : "home");
+    httpServer.send(200, "application/json", resp);
+}
+
+// ═══════════════════════════════════════════════
+// BLE Task — Home Beacon / Portable Scanner
+//
+// In Home mode: periodically restarts BLE advertising as a keepalive.
+// In Portable mode: runs BLE scans and expires stale results.
 // ═══════════════════════════════════════════════
 
 static void bleTask(void *param) {
     (void)param;
     for (;;) {
-        BLEAdvertising *pAdv = BLEDevice::getAdvertising();
-        if (pAdv) {
-            pAdv->start();  // No-op if already running, restarts if stopped
+        if (portableMode) {
+            // Run a 5-second scan cycle
+            if (pBLEScan) {
+                pBLEScan->start(5, false);
+                pBLEScan->clearResults();  // Free BLE memory after each cycle
+            }
+
+            // Expire stale results (>10s old)
+            if (xSemaphoreTake(bleMutex, pdMS_TO_TICKS(50))) {
+                uint32_t now = millis();
+                for (uint8_t i = 0; i < bleScanCount; ) {
+                    if (now - bleScanResults[i].last_seen_ms > 10000) {
+                        bleScanResults[i] = bleScanResults[--bleScanCount];
+                    } else {
+                        i++;
+                    }
+                }
+                xSemaphoreGive(bleMutex);
+            }
+
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        } else {
+            // Home mode — just keep beacon alive
+            BLEAdvertising *pAdv = BLEDevice::getAdvertising();
+            if (pAdv) pAdv->start();
+            vTaskDelay(pdMS_TO_TICKS(30000));
         }
-        vTaskDelay(pdMS_TO_TICKS(30000));  // Check every 30 seconds
     }
 }
 

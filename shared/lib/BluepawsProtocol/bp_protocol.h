@@ -43,6 +43,19 @@ enum bp_status_t : uint8_t {
 };
 
 // ═══════════════════════════════════════════════
+// Error Type Enum (u8) — subsystem fault code
+// Sent in TLV_ERROR_TYPE when non-zero.
+// Auto-clears when the faulty subsystem succeeds.
+// ═══════════════════════════════════════════════
+enum bp_error_t : uint8_t {
+    ERROR_NONE      = 0x00,  // No active error
+    ERROR_GPS       = 0x01,  // GNSS timeout or no fix within allowed time
+    ERROR_RF        = 0x02,  // LoRa transmission failure
+    ERROR_CELLULAR  = 0x03,  // Modem not responding or registration failed
+    ERROR_MODULE    = 0x04,  // Peripheral init failure or hardware error
+};
+
+// ═══════════════════════════════════════════════
 // Flags Bitfield (u16)
 // Bits 0-3: packet type, Bits 4-15: boolean flags
 // ═══════════════════════════════════════════════
@@ -94,6 +107,7 @@ enum bp_tlv_type_t : uint8_t {
     TLV_CMD_MSG_ID     = 0x0B,  // u32  — msg_seq of command being ACK'd
     TLV_LED_FLASH      = 0x0C,  // u8   — LED flash count (0 = skip)
     TLV_BUZZER_PATTERN = 0x0D,  // u8   — buzzer melody ID (0 = off, 1-N = patterns)
+    TLV_ERROR_TYPE     = 0x0E,  // u8   — bp_error_t (omitted when ERROR_NONE)
 };
 
 // ═══════════════════════════════════════════════
@@ -156,6 +170,16 @@ static inline const char *bp_status_display(bp_status_t s) {
     case STATUS_OK:            return "OK";
     case STATUS_LOST_TIMEOUT:  return "LostTimeout";
     default:                   return "Unknown";
+    }
+}
+
+static inline const char *bp_error_display(bp_error_t e) {
+    switch (e) {
+    case ERROR_GPS:      return "GPS";
+    case ERROR_RF:       return "RF";
+    case ERROR_CELLULAR: return "Cellular";
+    case ERROR_MODULE:   return "Module";
+    default:             return "None";
     }
 }
 

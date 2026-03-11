@@ -98,6 +98,11 @@ static volatile bool gpsFix       = false;   // true = valid fix obtained this c
 
 // ── BLE State ──
 static volatile bool bleHomeFound = false;   // Set by BLE scan callback when home beacon found
+static bool bleAdvertising = false;          // true = BLE find beacon is advertising
+
+// ── Error State ──
+// Tracks the most recent subsystem fault. Auto-clears on success.
+static volatile bp_error_t lastError = ERROR_NONE;
 
 // ── Command Deduplication ──
 // The hub retries commands up to 3 times if no ACK received.
@@ -161,6 +166,10 @@ static void     transmitPacket(uint8_t *buf, uint8_t len, bool suppressLed = fal
 static void     handleReceivedCommand(const uint8_t *buf, uint8_t len);
 static void     applyProfile(bp_profile_t profile);  // Switch operating profile
 static void     sendFindAck(uint32_t cmdMsgSeq);     // ACK a find command
+
+// BLE Active Find beacon (collar advertises when in PROFILE_ACTIVE)
+static void     bleFindBeaconStart();
+static void     bleFindBeaconStop();
 
 // GPS helpers
 static void     gnssEnable();              // Start GNSS receiver via AT command
@@ -277,7 +286,7 @@ void setup() {
     // ── BLE Init ──
     // We use BLE in "central" mode (scanner only) — NOT advertising.
     // The collar scans for the hub's BLE beacon to detect if pet is home.
-    Bluefruit.begin(0, 1);  // 0 peripheral connections, 1 central connection
+    Bluefruit.begin(1, 1);  // 1 peripheral (find beacon) + 1 central (home scanner)
     Bluefruit.setName("BP_COLLAR");
     Bluefruit.Scanner.setRxCallback(bleScanCallback);  // Called for each advertisement seen
     Bluefruit.Scanner.restartOnDisconnect(false);       // Don't auto-restart after scan stops
@@ -554,6 +563,7 @@ static bool gnssAcquireFix() {
             gnssFixAgeMs = millis();
             gpsFix = true;
             gpsWarmStart = true;
+            if (lastError == ERROR_GPS) lastError = ERROR_NONE;  // Clear GPS error on success
             Serial.printf("[GNSS] Fix acquired after %lums\n", millis() - startMs);
             Serial.printf("[GNSS] Position: %.6f, %.6f (sats: %d)\n",
                           gnssLat, gnssLon, gnssSats);
@@ -564,6 +574,7 @@ static bool gnssAcquireFix() {
     }
 
     Serial.println("[GNSS] Timeout — no fix");
+    lastError = ERROR_GPS;
     return false;
 }
 
@@ -622,6 +633,11 @@ static void sendTelemetry() {
         pkt_add_tlv_u32(buf, TLV_LOST_MODE_S, lostElapsed);
     }
 
+    // Append error code if a subsystem fault is active
+    if (lastError != ERROR_NONE) {
+        pkt_add_tlv_u8(buf, TLV_ERROR_TYPE, lastError);
+    }
+
     // Finalize: compute and append CRC-16, return total packet length
     uint8_t pktLen = pkt_finalize(buf);
 
@@ -661,6 +677,11 @@ static void sendHeartbeat() {
     pkt_add_tlv_i8(buf,  TLV_TX_POWER,       currentConfig->tx_power_dBm);
     pkt_add_tlv_u16(buf, TLV_SLEEP_INTERVAL,  currentConfig->sleep_interval_s);
     pkt_add_tlv_u8(buf,  TLV_HOME_CYCLES,     homeCycleCount);
+
+    // Append error code if a subsystem fault is active
+    if (lastError != ERROR_NONE) {
+        pkt_add_tlv_u8(buf, TLV_ERROR_TYPE, lastError);
+    }
 
     uint8_t pktLen = pkt_finalize(buf);
 
@@ -765,14 +786,17 @@ static void transmitPacket(uint8_t *buf, uint8_t len, bool suppressLed) {
 
     if (state == RADIOLIB_ERR_NONE) {
         Serial.printf("[LORA] TX OK (%d bytes)\n", len);
+        if (lastError == ERROR_RF) lastError = ERROR_NONE;  // Clear RF error on success
         if (!suppressLed) {
             ledFlicker(currentConfig->led_flashes, 50, 50);  // Success: profile-defined flash count
         }
     } else if (state == RADIOLIB_ERR_TX_TIMEOUT) {
         Serial.println("[LORA] TX timeout");
+        lastError = ERROR_RF;
         ledFlicker(2, 200, 200);  // Slow double-flash = timeout (always show errors)
     } else {
         Serial.printf("[LORA] TX failed: %d\n", state);
+        lastError = ERROR_RF;
         ledFlicker(6, 80, 80);    // Rapid 6-flash = error (always show errors)
     }
 }
@@ -913,6 +937,40 @@ static void handleReceivedCommand(const uint8_t *buf, uint8_t len) {
 // ═══════════════════════════════════════════════
 // Apply Operating Profile
 // ═══════════════════════════════════════════════
+// ═══════════════════════════════════════════════
+// BLE Active Find Beacon
+//
+// When the collar enters PROFILE_ACTIVE (Active Find mode),
+// it starts advertising a BLE beacon named "BP_FIND_XXXX"
+// (where XXXX is the device ID in hex). The hub in Portable
+// Mode scans for these beacons and shows RSSI-based proximity.
+// nRF52840 supports simultaneous central + peripheral roles,
+// so home beacon scanning continues to work in parallel.
+// ═══════════════════════════════════════════════
+static void bleFindBeaconStart() {
+    if (bleAdvertising) return;
+
+    char name[16];
+    snprintf(name, sizeof(name), "%s%04X", BLE_FIND_BEACON_PREFIX, MY_DEVICE_ID);
+
+    Bluefruit.Advertising.clearData();
+    Bluefruit.Advertising.addFlags(BLE_GAP_ADV_FLAGS_LE_ONLY_GENERAL_DISC_MODE);
+    Bluefruit.setName(name);
+    Bluefruit.Advertising.addName();
+    Bluefruit.Advertising.setInterval(32, 48);  // 20-30ms fast advertising
+    Bluefruit.Advertising.start(0);             // Advertise indefinitely
+    bleAdvertising = true;
+    Serial.printf("[BLE] Find beacon started: %s\n", name);
+}
+
+static void bleFindBeaconStop() {
+    if (!bleAdvertising) return;
+    Bluefruit.Advertising.stop();
+    Bluefruit.setName("BP_COLLAR");
+    bleAdvertising = false;
+    Serial.println("[BLE] Find beacon stopped");
+}
+
 static void applyProfile(bp_profile_t profile) {
     Serial.printf("[MODE] %s → %s\n",
                   bp_profile_name(currentProfile), bp_profile_name(profile));
@@ -921,6 +979,13 @@ static void applyProfile(bp_profile_t profile) {
     currentConfig  = bp_profile_config(profile);
 
     lora.setOutputPower(currentConfig->tx_power_dBm);
+
+    // BLE find beacon: advertise when in Active Find, stop otherwise
+    if (profile == PROFILE_ACTIVE) {
+        bleFindBeaconStart();
+    } else {
+        bleFindBeaconStop();
+    }
 
     // Lost mode tracking
     if (profile == PROFILE_LOST) {
@@ -979,8 +1044,10 @@ static void cellularSendTlv(const uint8_t *pkt, uint8_t len) {
     // Wait for modem ready
     if (!cellularSendAT("AT", "OK", 5000)) {
         Serial.println("[CELL] Modem not responding — aborting");
+        lastError = ERROR_CELLULAR;
         return;
     }
+    if (lastError == ERROR_CELLULAR) lastError = ERROR_NONE;  // Modem responded OK
 
     // ── First-time PSM/eDRX configuration ──
     if (!cellularInitialised) {
