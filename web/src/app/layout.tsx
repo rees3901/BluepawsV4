@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import "leaflet/dist/leaflet.css";
-import "../../../hub/data/style.css";
+import "./parity.css";
 import "./web.css";
 
 export const metadata: Metadata = {

@@ -1,0 +1,1163 @@
+/*
+  Bluepaws V4 — Hub Web GUI Styles
+  ══════════════════════════════════════════════════
+
+  Layout: Fixed sidebar (left) + flex map (right).
+  Theme: Dark by default, light theme via body.light class.
+  All colors use CSS custom properties (--bg-*, --text-*, --accent).
+
+  Key sections:
+   - Reset & Base styles
+   - Dark/Light theme variables
+   - Layout: sidebar + map
+   - Hamburger button, status banner
+   - Device cards (header, telemetry grid, action buttons)
+   - Sheen animation (update indicator on cards)
+   - Leaflet map controls (custom buttons: theme, measure)
+   - Modals (settings, command, find)
+   - Map marker styles (emoji avatar, status colors, pulse animation)
+   - Measure tool overlay label
+   - Responsive breakpoint (768px for mobile)
+   - Custom scrollbar
+*/
+
+/* ── Reset & Base ── */
+*, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+/* ── Dark Theme (default) ──
+   All colours are defined as CSS custom properties so the light
+   theme can override them in a single block below. */
+:root {
+    --bg-primary: #0f1923;
+    --bg-card: #1a2733;
+    --bg-panel: #15202b;
+    --bg-hover: #243447;
+    --text-primary: #e8edf2;
+    --text-secondary: #8899a6;
+    --text-dim: #5b6f82;
+    --accent: #1d9bf0;
+    --accent-hover: #1a8cd8;
+    --success: #00c853;
+    --warning: #ffab00;
+    --danger: #ff1744;
+    --border: #2f3e4e;
+    --radius: 8px;
+    --shadow: 0 2px 8px rgba(0,0,0,0.3);
+    --panel-width: 340px;
+}
+
+/* ── Light Theme ──
+   Toggle via body.light class. Only overrides the colour variables;
+   all component styles remain the same. */
+body.light {
+    --bg-primary: #f0f2f5;
+    --bg-card: #ffffff;
+    --bg-panel: #f8f9fa;
+    --bg-hover: #e5e7eb;
+    --text-primary: #1a1a2e;
+    --text-secondary: #6b7280;
+    --text-dim: #9ca3af;
+    --accent: #1d9bf0;
+    --accent-hover: #1a8cd8;
+    --success: #16a34a;
+    --warning: #d97706;
+    --danger: #dc2626;
+    --border: #d1d5db;
+    --shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+html, body {
+    height: 100%;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    overflow: hidden;
+}
+
+/* ── Layout: sidebar left + map right ── */
+body {
+    display: flex;
+    flex-direction: row;
+}
+
+#map {
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    z-index: 1;
+}
+
+/* ── Sidebar Panel (left) ── */
+#panel {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: var(--panel-width);
+    height: 100%;
+    background: var(--bg-panel);
+    border-right: 1px solid var(--border);
+    z-index: 500;
+    display: flex;
+    flex-direction: column;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    overflow: hidden;
+}
+
+#panel.open {
+    transform: translateX(0);
+}
+
+body.panel-open #map {
+    margin-left: var(--panel-width);
+}
+
+#panelHeader {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.panel-title {
+    font-weight: 700;
+    font-size: 0.95rem;
+    letter-spacing: 0.02em;
+}
+
+.panel-header-btns {
+    display: flex;
+    gap: 6px;
+}
+
+#deviceCards {
+    flex: 1;
+    overflow-y: auto;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+/* ── Hamburger Button ── */
+.hamburger-btn {
+    position: fixed;
+    top: 10px;
+    left: 10px;
+    z-index: 1000;
+    width: 38px;
+    height: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-card);
+    color: var(--text-primary);
+    cursor: pointer;
+    box-shadow: var(--shadow);
+    transition: background 0.15s;
+}
+
+.hamburger-btn:hover {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+
+body.panel-open .hamburger-btn {
+    left: calc(var(--panel-width) + 10px);
+}
+
+/* ── Status Banner (inline in sidebar header) ── */
+#statusBanner {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    border-radius: 12px;
+    font-size: 0.7rem;
+    font-weight: 500;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    transition: opacity 0.6s ease;
+}
+
+#statusBanner.faded {
+    opacity: 0;
+    pointer-events: none;
+}
+
+#statusBanner.connected #statusIcon {
+    color: var(--success);
+}
+
+#statusBanner.disconnected #statusIcon {
+    color: var(--danger);
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+}
+
+/* ── Device Card (collapsible) ── */
+.device-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0;
+    cursor: pointer;
+    transition: border-color 0.2s, transform 0.1s, box-shadow 0.2s;
+    position: relative;
+    overflow: hidden;
+}
+
+.device-card:hover {
+    border-color: var(--accent);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 16px rgba(29, 155, 240, 0.15);
+}
+
+.device-card.expanded {
+    border-color: var(--accent);
+}
+
+.device-card.stale {
+    opacity: 0.5;
+}
+
+/* ── Compact summary row (always visible) ── */
+.card-summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+}
+
+.card-chevron {
+    font-size: 0.6rem;
+    color: var(--text-dim);
+    margin-left: auto;
+    flex-shrink: 0;
+}
+
+/* ── Expanded detail section ── */
+.card-detail {
+    padding: 0 12px 12px;
+    border-top: 1px solid var(--border);
+}
+
+/* ── Sheen animation on update ──
+   A subtle blue gradient sweeps across the card when new telemetry
+   arrives, giving visual feedback that data just updated. */
+.device-card.sheen::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(29,155,240,0.08), transparent);
+    animation: sheen 0.8s ease-out forwards;
+    pointer-events: none;
+}
+
+@keyframes sheen {
+    0%   { left: -100%; }
+    100% { left: 100%; }
+}
+
+/* ── Push Leaflet top-left controls below the hamburger button ── */
+.leaflet-top.leaflet-left {
+    top: 54px;
+}
+
+.card-avatar {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    border-radius: 50%;
+    border: 2.5px solid var(--accent);
+    background: var(--bg-primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    box-shadow: 0 0 8px rgba(29,155,240,0.3);
+}
+
+.card-identity {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.card-name {
+    font-weight: 600;
+    font-size: 0.95rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.card-name-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.card-indicators {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 4px;
+}
+
+.card-indicators-row3 {
+    margin-top: 2px;
+    gap: 14px;
+}
+
+.card-indicator-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.card-indicators .signal-indicator,
+.card-indicators .battery-indicator {
+    transform: scale(0.85);
+    transform-origin: left center;
+}
+
+.card-dist-group {
+    gap: 3px;
+}
+
+.card-dist-value {
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+/* ── Indicator Icons ── */
+.indicator-icon {
+    flex-shrink: 0;
+    vertical-align: middle;
+}
+
+.icon-antenna {
+    width: 16px;
+    height: 18px;
+    color: var(--text-secondary);
+}
+
+.icon-battery {
+    width: 28px;
+    height: 16px;
+}
+
+/* ── Battery Indicator (icon with built-in bars) ── */
+.battery-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    vertical-align: middle;
+}
+
+.battery-indicator .sig-label {
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
+.popup-content .battery-indicator {
+    transform: scale(0.85);
+    transform-origin: left center;
+}
+
+.icon-home {
+    width: 14px;
+    height: 14px;
+    color: var(--text-secondary);
+}
+
+/* ── Profile Badge ── */
+.card-profile {
+    font-size: 0.6rem;
+    padding: 1px 6px;
+    border-radius: 8px;
+    font-weight: 600;
+    text-transform: uppercase;
+    white-space: nowrap;
+    letter-spacing: 0.4px;
+}
+
+.card-profile.profile-normal    { background: var(--success);  color: #000; }
+.card-profile.profile-power     { background: var(--accent);   color: #fff; }
+.card-profile.profile-active    { background: var(--warning);  color: #000; }
+.card-profile.profile-lost      { background: var(--danger);   color: #fff; }
+
+.card-coords {
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    letter-spacing: 0.3px;
+}
+
+.card-coords-link {
+    text-decoration: none;
+    color: var(--accent);
+    transition: color 0.15s;
+}
+
+.card-coords-link:hover {
+    color: var(--accent-hover);
+    text-decoration: underline;
+}
+
+.card-status {
+    font-size: 0.65rem;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    white-space: nowrap;
+    letter-spacing: 0.5px;
+}
+
+.card-status.status-out   { background: var(--accent); color: #fff; }
+.card-status.status-home  { background: var(--success); color: #000; }
+.card-status.status-error { background: var(--danger); color: #fff; }
+.card-status.status-lost  { background: var(--warning); color: #000; }
+.card-status.status-ok      { background: var(--success); color: #000; }
+.card-status.status-offline { background: #555; color: #ccc; }
+
+/* ── Stopwatch / Last Seen indicator ── */
+.icon-stopwatch {
+    width: 13px;
+    height: 13px;
+    color: var(--text-secondary);
+}
+
+.card-lastseen-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.card-lastseen-value {
+    font-size: 0.68rem;
+    color: var(--text-secondary);
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+}
+
+/* ── Telemetry Grid ── */
+.card-grid {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 3px 12px;
+    font-size: 0.75rem;
+    padding: 8px 0;
+    margin-bottom: 8px;
+}
+
+.card-grid .label {
+    color: var(--text-secondary);
+}
+
+.card-grid .value {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+/* ── Action Buttons ── */
+.card-actions {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+
+.btn-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 4px 8px;
+    font-size: 0.68rem;
+    font-weight: 500;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+}
+
+.btn-action:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+    border-color: var(--text-secondary);
+}
+
+.btn-action.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+
+.btn-action.active:hover {
+    background: var(--accent-hover);
+}
+
+.btn-jump:hover   { border-color: var(--accent); color: var(--accent); }
+.btn-follow:hover { border-color: var(--success); color: var(--success); }
+.btn-trail:hover  { border-color: var(--warning); color: var(--warning); }
+.btn-find:hover   { border-color: #f97316; color: #f97316; }
+.btn-cmd:hover    { border-color: #a855f7; color: #a855f7; }
+
+.btn-follow.active { background: var(--success); border-color: var(--success); color: #000; }
+.btn-trail.active  { background: var(--warning); border-color: var(--warning); color: #000; }
+
+.btn-find-send { background: #f97316; }
+.btn-find-send:hover { background: #ea580c; }
+
+/* ── Control Buttons (shared) ── */
+.ctrl-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-card);
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.ctrl-btn:hover {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+
+.ctrl-btn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+
+/* ── Leaflet Map Controls (custom buttons) ── */
+.leaflet-map-btn {
+    width: 34px;
+    height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-card);
+    color: var(--text-primary);
+    cursor: pointer;
+    box-shadow: var(--shadow);
+    transition: background 0.15s;
+    margin-bottom: 6px;
+}
+
+.leaflet-map-btn:hover {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+
+.leaflet-map-btn.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+}
+
+/* ── Modals ── */
+.modal {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+}
+
+.modal.hidden {
+    display: none;
+}
+
+.modal-content {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    width: 90%;
+    max-width: 420px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.modal-content h2 {
+    font-size: 1.1rem;
+    margin-bottom: 16px;
+}
+
+.form-group {
+    margin-bottom: 12px;
+}
+
+.form-group label {
+    display: block;
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+}
+
+.form-group input,
+.form-group select {
+    width: 100%;
+    padding: 8px 10px;
+    font-size: 0.85rem;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-primary);
+    outline: none;
+}
+
+.form-group input:focus,
+.form-group select:focus {
+    border-color: var(--accent);
+}
+
+.status-info {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    padding: 6px 0;
+    line-height: 1.6;
+}
+
+.modal-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 16px;
+}
+
+.btn-primary,
+.btn-secondary {
+    flex: 1;
+    padding: 8px;
+    font-size: 0.85rem;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 500;
+}
+
+.btn-primary {
+    background: var(--accent);
+    color: #fff;
+}
+
+.btn-primary:hover {
+    background: var(--accent-hover);
+}
+
+.btn-secondary {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+}
+
+.btn-secondary:hover {
+    background: var(--bg-primary);
+}
+
+/* ── Leaflet Overrides (dark theme) ── */
+.leaflet-control-zoom a {
+    background: var(--bg-card) !important;
+    color: var(--text-primary) !important;
+    border-color: var(--border) !important;
+}
+
+.leaflet-control-layers {
+    background: var(--bg-card) !important;
+    color: var(--text-primary) !important;
+    border-color: var(--border) !important;
+    border-radius: var(--radius) !important;
+}
+
+.leaflet-control-layers label {
+    color: var(--text-primary);
+}
+
+.leaflet-popup-content-wrapper {
+    background: var(--bg-card) !important;
+    color: var(--text-primary) !important;
+    border-radius: var(--radius) !important;
+    box-shadow: var(--shadow) !important;
+    min-width: 240px;
+}
+
+.leaflet-popup-content {
+    margin: 10px 12px !important;
+}
+
+.leaflet-popup-tip {
+    background: var(--bg-card) !important;
+}
+
+.leaflet-popup-close-button {
+    color: var(--text-secondary) !important;
+}
+
+/* ── Measure Overlay ── */
+.measure-label {
+    background: rgba(15, 25, 35, 0.85);
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    padding: 2px 6px;
+    color: var(--text-primary);
+    font-size: 0.72rem;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+body.light .measure-label {
+    background: rgba(255, 255, 255, 0.9);
+}
+
+/* ── Map Marker Icons ──
+   Custom circular markers with emoji avatar inside.
+   Border colour matches the device's assigned colour.
+   Special states: green border for Home, red pulse for Lost. */
+.bp-marker {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 3px solid var(--accent);
+    background: var(--bg-card);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    transition: transform 0.3s ease;
+}
+
+.bp-marker.updated {
+    animation: marker-pop 0.4s ease-out;
+}
+
+@keyframes marker-pop {
+    0%   { transform: scale(1); }
+    50%  { transform: scale(1.3); }
+    100% { transform: scale(1); }
+}
+
+.bp-marker.status-home { border-color: var(--success); }
+.bp-marker.status-lost {
+    border-color: var(--danger);
+    animation: marker-lost-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes marker-lost-pulse {
+    0%, 100% { box-shadow: 0 0 4px rgba(255,23,68,0.4); }
+    50%      { box-shadow: 0 0 16px rgba(255,23,68,0.8); }
+}
+
+/* ── Responsive: mobile (< 768px) ──
+   On mobile, the sidebar overlays the map instead of pushing it aside.
+   Panel width shrinks to 280px. */
+@media (max-width: 768px) {
+    :root {
+        --panel-width: 280px;
+    }
+
+    /* On mobile, panel overlays the map */
+    body.panel-open #map {
+        margin-left: 0;
+    }
+
+    .device-card {
+        max-width: none;
+    }
+
+    .modal-content {
+        width: 95%;
+        padding: 16px;
+    }
+}
+
+/* ── Console Log ── */
+.console-log {
+    background: #0a0e14;
+    color: #22c55e;
+    font-family: 'SF Mono', 'Fira Code', 'Courier New', monospace;
+    font-size: 0.68rem;
+    line-height: 1.5;
+    padding: 8px;
+    border-radius: 4px;
+    max-height: 200px;
+    overflow-y: auto;
+    margin-top: 8px;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+body.light .console-log {
+    background: #1a1a2e;
+}
+
+/* ── Log Button Row (shared by console + device logs) ── */
+.log-btn-row {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+}
+
+.btn-log-export {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 0.82rem;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    line-height: 1;
+}
+
+.btn-log-export:hover {
+    background: var(--accent);
+    color: #fff;
+}
+
+.icon-download {
+    width: 16px;
+    height: 16px;
+    display: block;
+}
+
+/* ── Per-Device Message Log ── */
+.btn-device-log {
+    flex: 1;
+    font-size: 0.72rem;
+    padding: 5px 0;
+}
+
+.device-log-panel {
+    margin-top: 4px;
+}
+
+.device-log-panel.hidden {
+    display: none;
+}
+
+.device-log {
+    max-height: 160px;
+    font-size: 0.62rem;
+    margin-top: 4px;
+}
+
+/* ── Popup Layout ── */
+.popup-header {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 6px;
+}
+
+.popup-grid {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 2px 8px;
+    font-size: 0.72rem;
+    margin-bottom: 6px;
+}
+
+.popup-grid .label {
+    color: var(--text-secondary);
+}
+
+.popup-grid .value {
+    color: var(--text-primary);
+}
+
+/* ── Popup Action Buttons ── */
+.popup-actions {
+    border-top: 1px solid var(--border);
+    padding-top: 6px;
+    flex-wrap: wrap;
+}
+
+.popup-content .btn-action {
+    font-size: 0.62rem;
+    padding: 3px 6px;
+}
+
+.popup-content .signal-indicator {
+    transform: scale(0.85);
+    transform-origin: left center;
+}
+
+/* ── Cursor Coordinate Display ── */
+.leaflet-cursor-coords {
+    background: rgba(15, 25, 35, 0.85);
+    backdrop-filter: blur(4px);
+    color: var(--text-primary);
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 0.65rem;
+    line-height: 1.4;
+    padding: 4px 8px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    pointer-events: none;
+}
+
+body.light .leaflet-cursor-coords {
+    background: rgba(255, 255, 255, 0.9);
+}
+
+/* ── Scale Bar Overrides ── */
+.leaflet-control-scale-line {
+    background: rgba(15, 25, 35, 0.8) !important;
+    color: var(--text-primary) !important;
+    border-color: var(--text-secondary) !important;
+    font-size: 0.6rem !important;
+}
+
+body.light .leaflet-control-scale-line {
+    background: rgba(255, 255, 255, 0.85) !important;
+    color: var(--text-primary) !important;
+}
+
+/* ── Disabled Save Button ── */
+.btn-primary:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+/* ── Signal Quality Indicator ──
+   5 vertical bars that grow in height, filled with a colour
+   matching signal quality (green → amber → red). Hovering
+   shows the raw RSSI/SNR values in a tooltip. */
+.signal-indicator {
+    display: inline-flex;
+    align-items: flex-end;
+    gap: 2px;
+    vertical-align: middle;
+}
+
+.sig-bar {
+    width: 4px;
+    border-radius: 1px;
+    background: var(--border);
+    transition: background 0.3s;
+}
+
+.sig-bar.filled {
+    /* colour is set inline via JS */
+}
+
+.sig-label {
+    font-size: 0.68rem;
+    font-weight: 600;
+    margin-left: 4px;
+    letter-spacing: 0.02em;
+}
+
+/* ── Scrollbar ── */
+#deviceCards::-webkit-scrollbar {
+    width: 4px;
+}
+
+#deviceCards::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+#deviceCards::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 2px;
+}
+
+/* ── Toggle Switch ── */
+.toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 40px;
+    height: 22px;
+    cursor: pointer;
+}
+
+.toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.toggle-slider {
+    position: absolute;
+    inset: 0;
+    background: var(--border);
+    border-radius: 11px;
+    transition: background 0.2s;
+}
+
+.toggle-slider::before {
+    content: '';
+    position: absolute;
+    width: 16px;
+    height: 16px;
+    left: 3px;
+    bottom: 3px;
+    background: var(--text-primary);
+    border-radius: 50%;
+    transition: transform 0.2s;
+}
+
+.toggle-switch input:checked + .toggle-slider {
+    background: var(--accent);
+}
+
+.toggle-switch input:checked + .toggle-slider::before {
+    transform: translateX(18px);
+}
+
+/* ── Duration Selector ── */
+.duration-selector {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.btn-inc {
+    width: 28px;
+    height: 28px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-card);
+    color: var(--text-primary);
+    font-size: 0.7rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s;
+}
+
+.btn-inc:hover {
+    background: var(--accent);
+    color: #fff;
+}
+
+.dur-value {
+    font-size: 1.2rem;
+    font-weight: 700;
+    min-width: 32px;
+    text-align: center;
+    color: var(--text-primary);
+}
+
+.dur-unit {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+/* ── Hub Mode Toggle Buttons ── */
+.mode-btn {
+    flex: 1;
+    padding: 6px 12px;
+    border: 1px solid var(--border);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: background 0.2s, color 0.2s;
+}
+.mode-btn:first-child { border-radius: 6px 0 0 6px; }
+.mode-btn:last-child  { border-radius: 0 6px 6px 0; }
+.mode-btn.active {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+}
+.form-hint {
+    display: block;
+    margin-top: 4px;
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    opacity: 0.7;
+}
+
+/* ── Error Badge (on device cards) ── */
+.error-badge {
+    display: inline-block;
+    background: #ef4444;
+    color: #fff;
+    font-size: 0.6rem;
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 8px;
+    margin-left: 4px;
+    vertical-align: middle;
+    letter-spacing: 0.3px;
+}
+
+/* ── BLE Proximity Signal Bars (portable mode) ── */
+.ble-proximity {
+    display: inline-flex;
+    align-items: flex-end;
+    gap: 2px;
+    margin-left: 6px;
+    vertical-align: middle;
+}
+.ble-proximity .ble-bar {
+    width: 4px;
+    background: #334155;
+    border-radius: 1px;
+}
+.ble-proximity .ble-bar.filled {
+    background: #06b6d4;
+}
+.ble-proximity-label {
+    font-size: 0.65rem;
+    color: #06b6d4;
+    margin-left: 3px;
+}
+
+/* ── Portable Mode Banner ── */
+.portable-banner {
+    background: #06b6d4;
+    color: #fff;
+    text-align: center;
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 3px 8px;
+    letter-spacing: 0.5px;
+}
