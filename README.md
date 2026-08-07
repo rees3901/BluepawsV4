@@ -97,15 +97,18 @@ node tools/mock-server.js
 dashboard. It preserves the embedded GUI in `hub/data/` and currently uses a
 typed mock telemetry source for visual and interaction parity.
 
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Frees3901%2FBluepawsV4&root-directory=web)
+
 ```bash
 cd web
 npm install
 npm run dev
 ```
 
-For Vercel, import this repository and select `web` as the project Root
-Directory. See `web/README.md` for the planned HTTPS Edge Function -> Supabase
--> Realtime data path.
+For Vercel, import this repository and select `web` as the project **Root
+Directory**. Leave the Install, Build, and Output settings at their detected
+Next.js defaults. See `web/README.md` for the exact deployment settings and the
+planned HTTPS Edge Function -> Supabase -> Realtime data path.
 
 ## TLV Protocol v2
 
