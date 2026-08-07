@@ -14,8 +14,9 @@ npm run dev
 ```
 
 Open <http://localhost:3000>. The dashboard starts in **Live Mode** with no
-sample animals or generated telemetry. Open Settings and enable **Demo Mode**
-to run the typed in-browser simulator with the five reference animals.
+sample animals or generated telemetry. Open Settings and enable **Tutorial
+Mode** to run the typed in-browser simulator with the five reference animals
+and a short guided product tour.
 
 ## Verification
 
@@ -40,7 +41,8 @@ application. Use these settings:
 The app is self-contained inside `web/`; its build does not read files from the
 firmware directories. No Supabase environment variables are required yet. Live
 Mode intentionally waits with an empty dashboard until the Supabase adapter is
-connected; Demo Mode is an opt-in, locally persisted preference.
+connected; Tutorial Mode is an opt-in, locally persisted preference. Its
+seven-step spotlight tour can be skipped, completed, or replayed from Settings.
 
 ## Planned data path
 
@@ -56,7 +58,7 @@ Hub/collar service
 
 `src/lib/telemetry.ts` is the only data-source selection point. It selects
 exactly one provider at a time: the idle live provider (the future Supabase
-adapter) or the demo simulator. A future Supabase adapter will implement the
+adapter) or the tutorial simulator. A future Supabase adapter will implement the
 existing `TelemetrySource` interface, so database integration does not require
 UI rewrites and simulated records cannot be merged into live customer data.
 

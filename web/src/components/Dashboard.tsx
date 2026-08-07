@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DeviceCard, DownloadIcon } from "@/components/DeviceCard";
+import { GuidedTour } from "@/components/GuidedTour";
 import { getTelemetrySource } from "@/lib/telemetry";
 import type { DeviceAction, DeviceAvatar, MapCommand, TelemetryDevice } from "@/types/telemetry";
 
@@ -14,7 +15,8 @@ const TrackingMap = dynamic(() => import("@/components/TrackingMap"), {
 const EMOJIS = ["🐱", "🐶", "🐰", "🐾", "🦊", "🐹", "🦉", "🐼"];
 const COLORS = ["#1d9bf0", "#ff6b35", "#a855f7", "#22c55e", "#f97316", "#06b6d4", "#84cc16", "#ec4899"];
 const HOME = { lat: 51.5055, lon: -0.09 };
-const DEMO_MODE_STORAGE_KEY = "bp_demo_mode";
+const TUTORIAL_MODE_STORAGE_KEY = "bp_tutorial_mode";
+const TUTORIAL_COMPLETE_STORAGE_KEY = "bp_tutorial_complete";
 
 interface SelectedDevice {
   id: number;
@@ -24,7 +26,8 @@ interface SelectedDevice {
 export function Dashboard() {
   const [devices, setDevices] = useState<TelemetryDevice[]>([]);
   const [connected, setConnected] = useState(false);
-  const [demoMode, setDemoMode] = useState(false);
+  const [tutorialMode, setTutorialMode] = useState(false);
+  const [tutorialOpen, setTutorialOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [darkMode, setDarkMode] = useState(true);
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -46,7 +49,9 @@ export function Dashboard() {
     const restorePreferences = window.setTimeout(() => {
       try {
         setDarkMode(localStorage.getItem("bp_theme") !== "light");
-        setDemoMode(localStorage.getItem(DEMO_MODE_STORAGE_KEY) === "true");
+        const tutorialEnabled = localStorage.getItem(TUTORIAL_MODE_STORAGE_KEY) === "true";
+        setTutorialMode(tutorialEnabled);
+        setTutorialOpen(tutorialEnabled && localStorage.getItem(TUTORIAL_COMPLETE_STORAGE_KEY) !== "true");
       } catch { /* localStorage can be unavailable in privacy modes */ }
     }, 0);
     const clock = window.setInterval(() => setNow(Date.now()), 1000);
@@ -57,7 +62,7 @@ export function Dashboard() {
   }, []);
 
   useEffect(() => {
-    const source = getTelemetrySource(demoMode ? "demo" : "live");
+    const source = getTelemetrySource(tutorialMode ? "tutorial" : "live");
     const unsubscribe = source.subscribe((incoming) => {
       setConnected(true);
       setDevices(incoming);
@@ -71,7 +76,7 @@ export function Dashboard() {
       if (newLines.length) setLogs((current) => [...newLines, ...current].slice(0, 200));
     });
     return unsubscribe;
-  }, [demoMode]);
+  }, [tutorialMode]);
 
   useEffect(() => {
     document.body.classList.toggle("panel-open", sidebarOpen);
@@ -97,8 +102,12 @@ export function Dashboard() {
     if (action === "command") setCommandDevice({ id: device.id, name: device.name });
   }, []);
 
-  const handleDemoModeChange = useCallback((enabled: boolean) => {
-    try { localStorage.setItem(DEMO_MODE_STORAGE_KEY, String(enabled)); } catch { /* non-critical preference */ }
+  const handleTutorialModeChange = useCallback((enabled: boolean) => {
+    try {
+      localStorage.setItem(TUTORIAL_MODE_STORAGE_KEY, String(enabled));
+      localStorage.removeItem("bp_demo_mode");
+      if (enabled) localStorage.removeItem(TUTORIAL_COMPLETE_STORAGE_KEY);
+    } catch { /* non-critical preference */ }
     setConnected(false);
     setDevices([]);
     setLogs([]);
@@ -106,11 +115,35 @@ export function Dashboard() {
     setExpandedId(null);
     setFollowedId(null);
     setTrailIds(new Set());
-    setDemoMode(enabled);
+    setSettingsOpen(false);
+    setSidebarOpen(true);
+    setTutorialMode(enabled);
+    setTutorialOpen(enabled);
   }, []);
 
-  const statusClass = connected ? (demoMode ? "demo" : "connected") : "waiting";
-  const statusText = connected ? (demoMode ? "Demo data" : "Connected") : "Waiting";
+  const finishTutorial = useCallback((completed: boolean) => {
+    try { localStorage.setItem(TUTORIAL_COMPLETE_STORAGE_KEY, "true"); } catch { /* non-critical preference */ }
+    setTutorialOpen(false);
+    setToast(completed ? "Tutorial complete" : "Tutorial skipped — replay it from Settings anytime");
+  }, []);
+
+  const replayTutorial = useCallback(() => {
+    setSettingsOpen(false);
+    setSidebarOpen(true);
+    setExpandedId(null);
+    setTutorialOpen(true);
+  }, []);
+
+  const firstTutorialDeviceId = devices[0]?.id;
+  const handleTutorialStepChange = useCallback((step: number) => {
+    if (step >= 1 && step <= 3) setSidebarOpen(true);
+    if (step === 3 && firstTutorialDeviceId !== undefined) setExpandedId(firstTutorialDeviceId);
+  }, [firstTutorialDeviceId]);
+  const completeTutorial = useCallback(() => finishTutorial(true), [finishTutorial]);
+  const skipTutorial = useCallback(() => finishTutorial(false), [finishTutorial]);
+
+  const statusClass = connected ? (tutorialMode ? "tutorial" : "connected") : "waiting";
+  const statusText = connected ? (tutorialMode ? "Tutorial" : "Connected") : "Waiting";
 
   return (
     <>
@@ -128,10 +161,10 @@ export function Dashboard() {
             <button className="ctrl-btn" title="Toggle dark/light theme" aria-label="Toggle theme" onClick={() => setDarkMode((dark) => !dark)}>
               {darkMode ? <MoonIcon /> : <SunIcon />}
             </button>
-            <button className="ctrl-btn" title="Settings" aria-label="Settings" onClick={() => setSettingsOpen(true)}><SettingsIcon /></button>
+            <button className="ctrl-btn" data-tour="settings" title="Settings" aria-label="Settings" onClick={() => setSettingsOpen(true)}><SettingsIcon /></button>
           </div>
         </div>
-        {demoMode && <div className="demo-mode-banner">DEMO MODE — SIMULATED DATA</div>}
+        {tutorialMode && <div className="tutorial-mode-banner">TUTORIAL MODE — SIMULATED DATA</div>}
         {portableMode && <div className="portable-banner">PORTABLE MODE</div>}
         <div id="deviceCards">
           {devices.length === 0 && (
@@ -167,16 +200,24 @@ export function Dashboard() {
           logs={logs}
           portableMode={portableMode}
           devices={devices.length}
-          demoMode={demoMode}
+          tutorialMode={tutorialMode}
           connected={connected}
-          onDemoModeChange={handleDemoModeChange}
+          onTutorialModeChange={handleTutorialModeChange}
+          onReplayTutorial={replayTutorial}
           onModeChange={setPortableMode}
           onClose={() => setSettingsOpen(false)}
         />
       )}
-      {commandDevice && <CommandModal device={commandDevice} onClose={() => setCommandDevice(null)} onSend={(mode) => { setCommandDevice(null); setToast(`Demo command queued: ${mode}`); }} />}
-      {findDevice && <FindModal device={findDevice} onClose={() => setFindDevice(null)} onSend={() => { setFindDevice(null); setToast("Demo Find Alert queued"); }} />}
-      {toast && <div className="demo-toast" role="status">{toast}</div>}
+      {commandDevice && <CommandModal device={commandDevice} onClose={() => setCommandDevice(null)} onSend={(mode) => { setCommandDevice(null); setToast(`Tutorial command preview: ${mode}`); }} />}
+      {findDevice && <FindModal device={findDevice} onClose={() => setFindDevice(null)} onSend={() => { setFindDevice(null); setToast("Tutorial Find Alert previewed"); }} />}
+      {tutorialOpen && tutorialMode && (
+        <GuidedTour
+          onFinish={completeTutorial}
+          onSkip={skipTutorial}
+          onStepChange={handleTutorialStepChange}
+        />
+      )}
+      {toast && <div className="tutorial-toast" role="status">{toast}</div>}
     </>
   );
 }
@@ -185,22 +226,24 @@ interface SettingsModalProps {
   logs: string[];
   portableMode: boolean;
   devices: number;
-  demoMode: boolean;
+  tutorialMode: boolean;
   connected: boolean;
-  onDemoModeChange: (enabled: boolean) => void;
+  onTutorialModeChange: (enabled: boolean) => void;
+  onReplayTutorial: () => void;
   onModeChange: (portable: boolean) => void;
   onClose: () => void;
 }
 
-function SettingsModal({ logs, portableMode, devices, demoMode, connected, onDemoModeChange, onModeChange, onClose }: SettingsModalProps) {
+function SettingsModal({ logs, portableMode, devices, tutorialMode, connected, onTutorialModeChange, onReplayTutorial, onModeChange, onClose }: SettingsModalProps) {
   const [consoleOpen, setConsoleOpen] = useState(false);
   return (
     <div className="modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
       <div className="modal-content">
         <h2 id="settings-title">Hub Settings</h2>
-        <div className="demo-mode-setting">
-          <Toggle label="Demo Mode" checked={demoMode} onChange={onDemoModeChange} />
-          <p className="form-hint">Off by default. Simulated animals run only when this switch is enabled and never mix with live data.</p>
+        <div className="tutorial-mode-setting">
+          <Toggle label="Tutorial Mode" checked={tutorialMode} onChange={onTutorialModeChange} />
+          <p className="form-hint">Off by default. Loads simulated animals and a guided tour without mixing in live data.</p>
+          {tutorialMode && <button className="tutorial-replay-btn" type="button" onClick={onReplayTutorial}>Replay tutorial</button>}
         </div>
         <div className="form-group"><label htmlFor="cfgSSID">WiFi SSID</label><input id="cfgSSID" type="text" placeholder="Home network name" /></div>
         <div className="form-group"><label htmlFor="cfgPass">WiFi Password</label><input id="cfgPass" type="password" placeholder="Password" /></div>
@@ -213,7 +256,7 @@ function SettingsModal({ logs, portableMode, devices, demoMode, connected, onDem
           </div>
           <small className="form-hint">Portable mode stops the home beacon and scans for collar BLE signals.</small>
         </div>
-        <div className="form-group"><label>Hub Status</label><div className="status-info">{demoMode ? "Demo mode" : "Live mode"}<br />Devices: {devices}<br />Data source: {demoMode ? "Simulated telemetry" : "Live telemetry"}<br />Cloud: {demoMode ? "Disabled in Demo Mode" : connected ? "Connected" : "Waiting for Supabase"}</div></div>
+        <div className="form-group"><label>Hub Status</label><div className="status-info">{tutorialMode ? "Tutorial mode" : "Live mode"}<br />Devices: {devices}<br />Data source: {tutorialMode ? "Simulated tutorial telemetry" : "Live telemetry"}<br />Cloud: {tutorialMode ? "Disabled in Tutorial Mode" : connected ? "Connected" : "Waiting for Supabase"}</div></div>
         <div className="form-group">
           <div className="log-btn-row">
             <button className="btn-secondary" style={{ flex: 1 }} onClick={() => setConsoleOpen((open) => !open)}>Console Log</button>
@@ -221,7 +264,7 @@ function SettingsModal({ logs, portableMode, devices, demoMode, connected, onDem
           </div>
           {consoleOpen && <div><pre className="console-log">{logs.join("\n") || "No messages yet."}</pre></div>}
         </div>
-        <p className="demo-note">These hub-specific fields are preserved for interface parity. Live mode is intentionally empty until Supabase connectivity is introduced in a later integration phase.</p>
+        <p className="tutorial-note">These hub-specific fields are preserved for interface parity. Live mode is intentionally empty until Supabase connectivity is introduced in a later integration phase.</p>
         <div className="modal-actions"><button className="btn-primary" disabled>Save &amp; Restart</button><button className="btn-secondary" onClick={onClose}>Close</button></div>
       </div>
     </div>
