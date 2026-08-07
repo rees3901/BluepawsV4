@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DeviceCard, DownloadIcon } from "@/components/DeviceCard";
-import { telemetrySource } from "@/lib/telemetry";
+import { getTelemetrySource } from "@/lib/telemetry";
 import type { DeviceAction, DeviceAvatar, MapCommand, TelemetryDevice } from "@/types/telemetry";
 
 const TrackingMap = dynamic(() => import("@/components/TrackingMap"), {
@@ -14,6 +14,7 @@ const TrackingMap = dynamic(() => import("@/components/TrackingMap"), {
 const EMOJIS = ["🐱", "🐶", "🐰", "🐾", "🦊", "🐹", "🦉", "🐼"];
 const COLORS = ["#1d9bf0", "#ff6b35", "#a855f7", "#22c55e", "#f97316", "#06b6d4", "#84cc16", "#ec4899"];
 const HOME = { lat: 51.5055, lon: -0.09 };
+const DEMO_MODE_STORAGE_KEY = "bp_demo_mode";
 
 interface SelectedDevice {
   id: number;
@@ -23,6 +24,7 @@ interface SelectedDevice {
 export function Dashboard() {
   const [devices, setDevices] = useState<TelemetryDevice[]>([]);
   const [connected, setConnected] = useState(false);
+  const [demoMode, setDemoMode] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [darkMode, setDarkMode] = useState(true);
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -41,10 +43,22 @@ export function Dashboard() {
   const avatars = useMemo<Record<number, DeviceAvatar>>(() => Object.fromEntries(devices.map((device, index) => [device.id, { emoji: EMOJIS[index % EMOJIS.length], color: COLORS[index % COLORS.length] }])), [devices]);
 
   useEffect(() => {
-    const restoreTheme = window.setTimeout(() => {
-      try { setDarkMode(localStorage.getItem("bp_theme") !== "light"); } catch { /* localStorage can be unavailable in privacy modes */ }
+    const restorePreferences = window.setTimeout(() => {
+      try {
+        setDarkMode(localStorage.getItem("bp_theme") !== "light");
+        setDemoMode(localStorage.getItem(DEMO_MODE_STORAGE_KEY) === "true");
+      } catch { /* localStorage can be unavailable in privacy modes */ }
     }, 0);
-    const unsubscribe = telemetrySource.subscribe((incoming) => {
+    const clock = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => {
+      window.clearTimeout(restorePreferences);
+      window.clearInterval(clock);
+    };
+  }, []);
+
+  useEffect(() => {
+    const source = getTelemetrySource(demoMode ? "demo" : "live");
+    const unsubscribe = source.subscribe((incoming) => {
       setConnected(true);
       setDevices(incoming);
       const newLines: string[] = [];
@@ -56,13 +70,8 @@ export function Dashboard() {
       });
       if (newLines.length) setLogs((current) => [...newLines, ...current].slice(0, 200));
     });
-    const clock = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => {
-      unsubscribe();
-      window.clearTimeout(restoreTheme);
-      window.clearInterval(clock);
-    };
-  }, []);
+    return unsubscribe;
+  }, [demoMode]);
 
   useEffect(() => {
     document.body.classList.toggle("panel-open", sidebarOpen);
@@ -88,6 +97,21 @@ export function Dashboard() {
     if (action === "command") setCommandDevice({ id: device.id, name: device.name });
   }, []);
 
+  const handleDemoModeChange = useCallback((enabled: boolean) => {
+    try { localStorage.setItem(DEMO_MODE_STORAGE_KEY, String(enabled)); } catch { /* non-critical preference */ }
+    setConnected(false);
+    setDevices([]);
+    setLogs([]);
+    sequences.current.clear();
+    setExpandedId(null);
+    setFollowedId(null);
+    setTrailIds(new Set());
+    setDemoMode(enabled);
+  }, []);
+
+  const statusClass = connected ? (demoMode ? "demo" : "connected") : "waiting";
+  const statusText = connected ? (demoMode ? "Demo data" : "Connected") : "Waiting";
+
   return (
     <>
       <button className="hamburger-btn" title="Toggle sidebar" aria-label="Toggle sidebar" onClick={() => setSidebarOpen((open) => !open)}>
@@ -98,8 +122,8 @@ export function Dashboard() {
         <div id="panelHeader">
           <span className="panel-title">Bluepaws V4</span>
           <div className="panel-header-btns">
-            <span id="statusBanner" className={connected ? "connected" : "disconnected"}>
-              <span id="statusIcon">●</span><span id="statusText">{connected ? "Connected" : "Connecting…"}</span>
+            <span id="statusBanner" className={statusClass}>
+              <span id="statusIcon">●</span><span id="statusText">{statusText}</span>
             </span>
             <button className="ctrl-btn" title="Toggle dark/light theme" aria-label="Toggle theme" onClick={() => setDarkMode((dark) => !dark)}>
               {darkMode ? <MoonIcon /> : <SunIcon />}
@@ -107,8 +131,17 @@ export function Dashboard() {
             <button className="ctrl-btn" title="Settings" aria-label="Settings" onClick={() => setSettingsOpen(true)}><SettingsIcon /></button>
           </div>
         </div>
+        {demoMode && <div className="demo-mode-banner">DEMO MODE — SIMULATED DATA</div>}
         {portableMode && <div className="portable-banner">PORTABLE MODE</div>}
         <div id="deviceCards">
+          {devices.length === 0 && (
+            <div className="telemetry-empty-state" role="status">
+              <span className="telemetry-empty-icon" aria-hidden="true">⌁</span>
+              <strong>Waiting for live telemetry</strong>
+              <span>No devices have reported yet.</span>
+              <button type="button" onClick={() => setSettingsOpen(true)}>Open Settings</button>
+            </div>
+          )}
           {devices.map((device) => (
             <DeviceCard
               key={device.id}
@@ -134,6 +167,9 @@ export function Dashboard() {
           logs={logs}
           portableMode={portableMode}
           devices={devices.length}
+          demoMode={demoMode}
+          connected={connected}
+          onDemoModeChange={handleDemoModeChange}
           onModeChange={setPortableMode}
           onClose={() => setSettingsOpen(false)}
         />
@@ -145,12 +181,27 @@ export function Dashboard() {
   );
 }
 
-function SettingsModal({ logs, portableMode, devices, onModeChange, onClose }: { logs: string[]; portableMode: boolean; devices: number; onModeChange: (portable: boolean) => void; onClose: () => void }) {
+interface SettingsModalProps {
+  logs: string[];
+  portableMode: boolean;
+  devices: number;
+  demoMode: boolean;
+  connected: boolean;
+  onDemoModeChange: (enabled: boolean) => void;
+  onModeChange: (portable: boolean) => void;
+  onClose: () => void;
+}
+
+function SettingsModal({ logs, portableMode, devices, demoMode, connected, onDemoModeChange, onModeChange, onClose }: SettingsModalProps) {
   const [consoleOpen, setConsoleOpen] = useState(false);
   return (
     <div className="modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
       <div className="modal-content">
         <h2 id="settings-title">Hub Settings</h2>
+        <div className="demo-mode-setting">
+          <Toggle label="Demo Mode" checked={demoMode} onChange={onDemoModeChange} />
+          <p className="form-hint">Off by default. Simulated animals run only when this switch is enabled and never mix with live data.</p>
+        </div>
         <div className="form-group"><label htmlFor="cfgSSID">WiFi SSID</label><input id="cfgSSID" type="text" placeholder="Home network name" /></div>
         <div className="form-group"><label htmlFor="cfgPass">WiFi Password</label><input id="cfgPass" type="password" placeholder="Password" /></div>
         <div className="form-group"><label htmlFor="cfgCloud">Cloud Endpoint</label><input id="cfgCloud" type="url" placeholder="https://..." /></div>
@@ -162,7 +213,7 @@ function SettingsModal({ logs, portableMode, devices, onModeChange, onClose }: {
           </div>
           <small className="form-hint">Portable mode stops the home beacon and scans for collar BLE signals.</small>
         </div>
-        <div className="form-group"><label>Hub Status</label><div className="status-info">Live demo<br />Devices: {devices}<br />Data source: Mock telemetry<br />Cloud: Not connected</div></div>
+        <div className="form-group"><label>Hub Status</label><div className="status-info">{demoMode ? "Demo mode" : "Live mode"}<br />Devices: {devices}<br />Data source: {demoMode ? "Simulated telemetry" : "Live telemetry"}<br />Cloud: {demoMode ? "Disabled in Demo Mode" : connected ? "Connected" : "Waiting for Supabase"}</div></div>
         <div className="form-group">
           <div className="log-btn-row">
             <button className="btn-secondary" style={{ flex: 1 }} onClick={() => setConsoleOpen((open) => !open)}>Console Log</button>
@@ -170,7 +221,7 @@ function SettingsModal({ logs, portableMode, devices, onModeChange, onClose }: {
           </div>
           {consoleOpen && <div><pre className="console-log">{logs.join("\n") || "No messages yet."}</pre></div>}
         </div>
-        <p className="demo-note">These hub-specific fields are preserved for interface parity. Customer configuration and Supabase connectivity will be introduced in a later integration phase.</p>
+        <p className="demo-note">These hub-specific fields are preserved for interface parity. Live mode is intentionally empty until Supabase connectivity is introduced in a later integration phase.</p>
         <div className="modal-actions"><button className="btn-primary" disabled>Save &amp; Restart</button><button className="btn-secondary" onClick={onClose}>Close</button></div>
       </div>
     </div>
@@ -210,7 +261,7 @@ function FindModal({ device, onClose, onSend }: { device: SelectedDevice; onClos
 }
 
 function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }) {
-  return <div className="form-group"><div className="toggle-row"><label>{label}</label><label className="toggle-switch"><input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} /><span className="toggle-slider" /></label></div></div>;
+  return <div className="form-group"><div className="toggle-row"><label>{label}</label><label className="toggle-switch"><input type="checkbox" aria-label={label} checked={checked} onChange={(event) => onChange(event.target.checked)} /><span className="toggle-slider" /></label></div></div>;
 }
 
 function MoonIcon() { return <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z" /></svg>; }
