@@ -20,11 +20,11 @@ body.panel-open .map-loading {
   color: var(--text-secondary);
 }
 
-#statusBanner.demo #statusIcon {
+#statusBanner.tutorial #statusIcon {
   color: #f59e0b;
 }
 
-.demo-mode-banner {
+.tutorial-mode-banner {
   flex-shrink: 0;
   padding: 5px 10px;
   background: #f59e0b;
@@ -80,7 +80,7 @@ body.panel-open .map-loading {
   color: var(--accent);
 }
 
-.demo-mode-setting {
+.tutorial-mode-setting {
   margin-bottom: 14px;
   padding: 10px;
   border: 1px solid #f59e0b;
@@ -88,17 +88,33 @@ body.panel-open .map-loading {
   background: color-mix(in srgb, #f59e0b 9%, transparent);
 }
 
-.demo-mode-setting .form-group {
+.tutorial-mode-setting .form-group {
   margin-bottom: 0;
 }
 
-.demo-mode-setting .form-hint {
+.tutorial-mode-setting .form-hint {
   margin: 7px 0 0;
   line-height: 1.4;
   opacity: 1;
 }
 
-.demo-toast {
+.tutorial-replay-btn {
+  width: 100%;
+  margin-top: 9px;
+  padding: 6px 8px;
+  border: 1px solid #f59e0b;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 0.74rem;
+}
+
+.tutorial-replay-btn:hover {
+  background: color-mix(in srgb, #f59e0b 16%, transparent);
+}
+
+.tutorial-toast {
   position: fixed;
   left: 50%;
   bottom: 24px;
@@ -113,7 +129,7 @@ body.panel-open .map-loading {
   font-size: 0.78rem;
 }
 
-.demo-note {
+.tutorial-note {
   color: var(--text-secondary);
   font-size: 0.72rem;
   line-height: 1.45;
@@ -121,4 +137,146 @@ body.panel-open .map-loading {
 
 .card-actions button {
   font-family: inherit;
+}
+
+.tutorial-tour {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+}
+
+.tutorial-scrim {
+  position: fixed;
+  inset: 0;
+  background: rgb(2 8 23 / 72%);
+}
+
+.tutorial-scrim.has-target {
+  background: transparent;
+}
+
+.tutorial-spotlight {
+  position: fixed;
+  z-index: 3001;
+  border: 2px solid #fbbf24;
+  border-radius: 10px;
+  box-shadow: 0 0 0 9999px rgb(2 8 23 / 72%), 0 0 0 5px rgb(251 191 36 / 20%);
+  pointer-events: none;
+  transition: left 180ms ease, top 180ms ease, width 180ms ease, height 180ms ease;
+}
+
+.tutorial-callout {
+  position: fixed;
+  z-index: 3002;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  padding: 18px;
+  border: 1px solid #f59e0b;
+  border-radius: 12px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  box-shadow: 0 18px 55px rgb(0 0 0 / 42%);
+}
+
+.tutorial-callout.centered {
+  top: 50%;
+  left: 50%;
+  width: min(390px, calc(100vw - 32px));
+  transform: translate(-50%, -50%);
+}
+
+.tutorial-callout h2 {
+  margin: 5px 28px 8px 0;
+  font-size: 1.02rem;
+}
+
+.tutorial-callout p,
+.tutorial-callout li {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.tutorial-callout p {
+  margin: 0;
+}
+
+.tutorial-callout ul {
+  margin: 10px 0 0;
+  padding-left: 18px;
+}
+
+.tutorial-callout li + li {
+  margin-top: 5px;
+}
+
+.tutorial-progress {
+  color: #f59e0b;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.tutorial-skip-icon {
+  position: absolute;
+  top: 9px;
+  right: 10px;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 1.3rem;
+}
+
+.tutorial-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.tutorial-actions > div {
+  display: flex;
+  gap: 7px;
+}
+
+.tutorial-actions .btn-primary,
+.tutorial-actions .btn-secondary {
+  min-width: 70px;
+  padding: 7px 10px;
+}
+
+.tutorial-skip-text {
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.72rem;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+@media (max-width: 520px) {
+  .tutorial-callout.targeted {
+    right: 12px;
+    bottom: 12px;
+    left: 12px !important;
+    top: auto !important;
+    width: auto !important;
+  }
+
+  .tutorial-actions {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .tutorial-actions > div {
+    align-self: stretch;
+    justify-content: flex-end;
+  }
 }
