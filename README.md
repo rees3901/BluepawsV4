@@ -47,6 +47,11 @@ BluepawsV4/
 │       └── app.js
 ├── tools/
 │   └── mock-server.js                # Node.js mock hub for local GUI dev
+├── web/                              # Next.js + TypeScript customer dashboard
+│   ├── src/app/                      # App Router entry point
+│   ├── src/components/               # React dashboard and Leaflet map
+│   ├── src/data/                     # Typed development telemetry
+│   └── src/lib/telemetry.ts          # Future Supabase adapter boundary
 └── mock_server.py                    # Python mock server (legacy)
 ```
 
@@ -85,6 +90,22 @@ node tools/mock-server.js
 # → http://localhost:3000
 # Streams position updates every 2s + heartbeat every 5s
 ```
+
+## Customer Web App
+
+`web/` contains the Vercel-ready Next.js and TypeScript refactor of the hub
+dashboard. It preserves the embedded GUI in `hub/data/` and currently uses a
+typed mock telemetry source for visual and interaction parity.
+
+```bash
+cd web
+npm install
+npm run dev
+```
+
+For Vercel, import this repository and select `web` as the project Root
+Directory. See `web/README.md` for the planned HTTPS Edge Function -> Supabase
+-> Realtime data path.
 
 ## TLV Protocol v2
 

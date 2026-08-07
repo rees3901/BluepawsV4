@@ -1,0 +1,42 @@
+/* Web-only additions. The parity styling is imported unchanged from hub/data/style.css. */
+button, input, select {
+  font: inherit;
+}
+
+.map-loading {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+}
+
+body.panel-open .map-loading {
+  margin-left: var(--panel-width);
+}
+
+.demo-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  z-index: 2000;
+  transform: translateX(-50%);
+  padding: 9px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  box-shadow: var(--shadow);
+  font-size: 0.78rem;
+}
+
+.demo-note {
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.card-actions button {
+  font-family: inherit;
+}
