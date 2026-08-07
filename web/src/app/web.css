@@ -16,6 +16,88 @@ body.panel-open .map-loading {
   margin-left: var(--panel-width);
 }
 
+#statusBanner.waiting #statusIcon {
+  color: var(--text-secondary);
+}
+
+#statusBanner.demo #statusIcon {
+  color: #f59e0b;
+}
+
+.demo-mode-banner {
+  flex-shrink: 0;
+  padding: 5px 10px;
+  background: #f59e0b;
+  color: #1f2937;
+  text-align: center;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
+.telemetry-empty-state {
+  display: flex;
+  flex: 1;
+  min-height: 240px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 28px 18px;
+  color: var(--text-secondary);
+  text-align: center;
+  font-size: 0.76rem;
+}
+
+.telemetry-empty-state strong {
+  color: var(--text-primary);
+  font-size: 0.9rem;
+}
+
+.telemetry-empty-icon {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  color: var(--accent);
+  font-size: 1.3rem;
+}
+
+.telemetry-empty-state button {
+  margin-top: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.telemetry-empty-state button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.demo-mode-setting {
+  margin-bottom: 14px;
+  padding: 10px;
+  border: 1px solid #f59e0b;
+  border-radius: 6px;
+  background: color-mix(in srgb, #f59e0b 9%, transparent);
+}
+
+.demo-mode-setting .form-group {
+  margin-bottom: 0;
+}
+
+.demo-mode-setting .form-hint {
+  margin: 7px 0 0;
+  line-height: 1.4;
+  opacity: 1;
+}
+
 .demo-toast {
   position: fixed;
   left: 50%;

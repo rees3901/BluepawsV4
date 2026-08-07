@@ -13,9 +13,9 @@ npm install
 npm run dev
 ```
 
-Open <http://localhost:3000>. The current data source is a typed in-browser
-mock that simulates the five reference animals and emits updates every two
-seconds.
+Open <http://localhost:3000>. The dashboard starts in **Live Mode** with no
+sample animals or generated telemetry. Open Settings and enable **Demo Mode**
+to run the typed in-browser simulator with the five reference animals.
 
 ## Verification
 
@@ -38,8 +38,9 @@ application. Use these settings:
 - Output Directory: leave at the framework default (`.next`)
 
 The app is self-contained inside `web/`; its build does not read files from the
-firmware directories. No Supabase environment variables are required while the
-mock telemetry source is active.
+firmware directories. No Supabase environment variables are required yet. Live
+Mode intentionally waits with an empty dashboard until the Supabase adapter is
+connected; Demo Mode is an opt-in, locally persisted preference.
 
 ## Planned data path
 
@@ -53,9 +54,11 @@ Hub/collar service
     -> dashboard components
 ```
 
-`src/lib/telemetry.ts` is the only data-source selection point. A future
-Supabase adapter will implement the existing `TelemetrySource` interface, so
-database integration does not require UI rewrites.
+`src/lib/telemetry.ts` is the only data-source selection point. It selects
+exactly one provider at a time: the idle live provider (the future Supabase
+adapter) or the demo simulator. A future Supabase adapter will implement the
+existing `TelemetrySource` interface, so database integration does not require
+UI rewrites and simulated records cannot be merged into live customer data.
 
 When that phase starts:
 

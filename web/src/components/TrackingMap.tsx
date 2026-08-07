@@ -137,6 +137,19 @@ export default function TrackingMap(props: TrackingMapProps) {
     const map = mapRef.current;
     if (!map) return;
 
+    const activeDeviceIds = new Set(devices.map((device) => device.id));
+    markersRef.current.forEach((marker, deviceId) => {
+      if (activeDeviceIds.has(deviceId)) return;
+      map.removeLayer(marker);
+      markersRef.current.delete(deviceId);
+    });
+    trailsRef.current.forEach((trail, deviceId) => {
+      if (activeDeviceIds.has(deviceId)) return;
+      if (map.hasLayer(trail)) map.removeLayer(trail);
+      trailsRef.current.delete(deviceId);
+      trailPointsRef.current.delete(deviceId);
+    });
+
     devices.forEach((device) => {
       const avatar = avatars[device.id];
       const latLng: L.LatLngExpression = [device.lat, device.lon];
