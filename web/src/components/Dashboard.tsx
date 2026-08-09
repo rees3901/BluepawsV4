@@ -24,9 +24,15 @@ interface SelectedDevice {
   name: string;
 }
 
-export function Dashboard() {
+interface DashboardProps {
+  initialLiveDevices: TelemetryDevice[];
+  liveTelemetryError: string | null;
+}
+
+export function Dashboard({ initialLiveDevices, liveTelemetryError }: DashboardProps) {
   const [devices, setDevices] = useState<TelemetryDevice[]>([]);
   const [connected, setConnected] = useState(false);
+  const [preferencesReady, setPreferencesReady] = useState(false);
   const [tutorialMode, setTutorialMode] = useState(false);
   const [tutorialOpen, setTutorialOpen] = useState(false);
   const [tutorialPromptOpen, setTutorialPromptOpen] = useState(false);
@@ -57,6 +63,7 @@ export function Dashboard() {
         setTutorialOpen(tutorialEnabled && !tutorialComplete);
         setTutorialPromptOpen(!tutorialEnabled && !tutorialComplete && localStorage.getItem(TUTORIAL_PROMPT_STORAGE_KEY) !== "true");
       } catch { /* localStorage can be unavailable in privacy modes */ }
+      setPreferencesReady(true);
     }, 0);
     const clock = window.setInterval(() => setNow(Date.now()), 1000);
     return () => {
@@ -66,21 +73,32 @@ export function Dashboard() {
   }, []);
 
   useEffect(() => {
-    const source = getTelemetrySource(tutorialMode ? "tutorial" : "live");
+    if (!preferencesReady) return;
+
+    if (!tutorialMode && liveTelemetryError) return;
+
+    let fittedInitialPayload = false;
+    const source = getTelemetrySource(tutorialMode ? "tutorial" : "live", initialLiveDevices);
     const unsubscribe = source.subscribe((incoming) => {
       setConnected(true);
       setDevices(incoming);
+      if (!fittedInitialPayload && incoming.length > 0) {
+        fittedInitialPayload = true;
+        setMapCommand({ type: "fit", nonce: Date.now() });
+      }
       const newLines: string[] = [];
       incoming.forEach((device) => {
         if (sequences.current.get(device.id) !== device.seq) {
           sequences.current.set(device.id, device.seq);
-          newLines.push(`[${new Date().toLocaleTimeString()}] RX ${device.name} id=${device.id} lat=${device.lat.toFixed(5)} lon=${device.lon.toFixed(5)} rssi=${device.rssi} batt=${device.batt}mV`);
+          const signal = device.rssi === null ? "not-reported" : `${device.rssi}dBm`;
+          const battery = device.batteryPercent === undefined || device.batteryPercent === null ? `${device.batt}mV` : `${device.batteryPercent}%`;
+          newLines.push(`[${new Date().toLocaleTimeString()}] RX ${device.name} id=${device.id} lat=${device.lat.toFixed(5)} lon=${device.lon.toFixed(5)} rssi=${signal} batt=${battery}`);
         }
       });
       if (newLines.length) setLogs((current) => [...newLines, ...current].slice(0, 200));
     });
     return unsubscribe;
-  }, [tutorialMode]);
+  }, [initialLiveDevices, liveTelemetryError, preferencesReady, tutorialMode]);
 
   useEffect(() => {
     document.body.classList.toggle("panel-open", sidebarOpen);
@@ -159,8 +177,11 @@ export function Dashboard() {
   const completeTutorial = useCallback(() => finishTutorial(true), [finishTutorial]);
   const skipTutorial = useCallback(() => finishTutorial(false), [finishTutorial]);
 
+  const liveUnavailable = !tutorialMode && liveTelemetryError !== null;
   const statusClass = connected ? (tutorialMode ? "tutorial" : "connected") : "waiting";
-  const statusText = connected ? (tutorialMode ? "Tutorial" : "Connected") : "Waiting";
+  const statusText = liveUnavailable ? "Unavailable" : connected ? (tutorialMode ? "Tutorial" : "Connected") : "Waiting";
+  const emptyTitle = liveUnavailable ? "Live telemetry unavailable" : connected ? "Connected to Supabase" : "Waiting for live telemetry";
+  const emptyMessage = liveUnavailable ? liveTelemetryError : "No devices have reported yet.";
 
   return (
     <>
@@ -187,8 +208,8 @@ export function Dashboard() {
           {devices.length === 0 && (
             <div className="telemetry-empty-state" role="status">
               <span className="telemetry-empty-icon" aria-hidden="true">⌁</span>
-              <strong>Waiting for live telemetry</strong>
-              <span>No devices have reported yet.</span>
+              <strong>{emptyTitle}</strong>
+              <span>{emptyMessage}</span>
               <button type="button" onClick={() => setSettingsOpen(true)}>Open Settings</button>
             </div>
           )}
@@ -219,6 +240,7 @@ export function Dashboard() {
           devices={devices.length}
           tutorialMode={tutorialMode}
           connected={connected}
+          liveTelemetryError={liveTelemetryError}
           onTutorialModeChange={handleTutorialModeChange}
           onReplayTutorial={replayTutorial}
           onModeChange={setPortableMode}
@@ -228,8 +250,8 @@ export function Dashboard() {
       {tutorialPromptOpen && (
         <TutorialWelcomeCard onStart={startTutorialFromPrompt} onDismiss={dismissTutorialPrompt} />
       )}
-      {commandDevice && <CommandModal device={commandDevice} onClose={() => setCommandDevice(null)} onSend={(mode) => { setCommandDevice(null); setToast(`Tutorial command preview: ${mode}`); }} />}
-      {findDevice && <FindModal device={findDevice} onClose={() => setFindDevice(null)} onSend={() => { setFindDevice(null); setToast("Tutorial Find Alert previewed"); }} />}
+      {commandDevice && <CommandModal device={commandDevice} onClose={() => setCommandDevice(null)} onSend={(mode) => { setCommandDevice(null); setToast(tutorialMode ? `Tutorial command preview: ${mode}` : "Command sending is not connected yet"); }} />}
+      {findDevice && <FindModal device={findDevice} onClose={() => setFindDevice(null)} onSend={() => { setFindDevice(null); setToast(tutorialMode ? "Tutorial Find Alert previewed" : "Find Alert sending is not connected yet"); }} />}
       {tutorialOpen && tutorialMode && (
         <GuidedTour
           onFinish={completeTutorial}
@@ -248,13 +270,14 @@ interface SettingsModalProps {
   devices: number;
   tutorialMode: boolean;
   connected: boolean;
+  liveTelemetryError: string | null;
   onTutorialModeChange: (enabled: boolean) => void;
   onReplayTutorial: () => void;
   onModeChange: (portable: boolean) => void;
   onClose: () => void;
 }
 
-function SettingsModal({ logs, portableMode, devices, tutorialMode, connected, onTutorialModeChange, onReplayTutorial, onModeChange, onClose }: SettingsModalProps) {
+function SettingsModal({ logs, portableMode, devices, tutorialMode, connected, liveTelemetryError, onTutorialModeChange, onReplayTutorial, onModeChange, onClose }: SettingsModalProps) {
   const [consoleOpen, setConsoleOpen] = useState(false);
   return (
     <div className="modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
@@ -271,7 +294,7 @@ function SettingsModal({ logs, portableMode, devices, tutorialMode, connected, o
           </div>
           <small className="form-hint">Portable mode stops the home beacon and scans for collar BLE signals.</small>
         </div>
-        <div className="form-group"><label>Hub Status</label><div className="status-info">{tutorialMode ? "Tutorial mode" : "Live mode"}<br />Devices: {devices}<br />Data source: {tutorialMode ? "Simulated tutorial telemetry" : "Live telemetry"}<br />Cloud: {tutorialMode ? "Disabled in Tutorial Mode" : connected ? "Connected" : "Waiting for Supabase"}</div></div>
+        <div className="form-group"><label>Hub Status</label><div className="status-info">{tutorialMode ? "Tutorial mode" : "Live mode"}<br />Devices: {devices}<br />Data source: {tutorialMode ? "Simulated tutorial telemetry" : "Supabase positions"}<br />Cloud: {tutorialMode ? "Disabled in Tutorial Mode" : liveTelemetryError ? "Unavailable" : connected ? "Connected" : "Waiting for Supabase"}</div></div>
         <div className="form-group">
           <div className="log-btn-row">
             <button className="btn-secondary" style={{ flex: 1 }} onClick={() => setConsoleOpen((open) => !open)}>Console Log</button>
@@ -279,7 +302,7 @@ function SettingsModal({ logs, portableMode, devices, tutorialMode, connected, o
           </div>
           {consoleOpen && <div><pre className="console-log">{logs.join("\n") || "No messages yet."}</pre></div>}
         </div>
-        <p className="tutorial-note">These hub-specific fields are preserved for interface parity. Live mode is intentionally empty until Supabase connectivity is introduced in a later integration phase.</p>
+        <p className="tutorial-note">These hub-specific fields are preserved for interface parity. Live mode reads the latest device reports from Supabase; Tutorial Mode remains isolated from customer data.</p>
         <div className="tutorial-mode-setting">
           <Toggle label="Tutorial Mode" checked={tutorialMode} onChange={onTutorialModeChange} />
           <p className="form-hint">Off by default. Loads simulated animals and a guided tour without mixing in live data.</p>

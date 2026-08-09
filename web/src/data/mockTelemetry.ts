@@ -1,6 +1,7 @@
 import type { TelemetryDevice, TelemetrySource } from "@/types/telemetry";
 
-type SeedDevice = Omit<TelemetryDevice, "seq" | "time" | "lastUpdate" | "error">;
+type TutorialTelemetryDevice = TelemetryDevice & { rssi: number; snr: number };
+type SeedDevice = Omit<TutorialTelemetryDevice, "seq" | "time" | "lastUpdate" | "error">;
 
 const seedDevices: SeedDevice[] = [
   { id: 0x0001, name: "Whiskers", lat: 51.5055, lon: -0.09, status: "Out", profile: "Normal", batt: 4050, rssi: -86, snr: 7.4, hasGps: true, bleHome: false, cellular: false },
@@ -14,7 +15,7 @@ function randomDrift() {
   return (Math.random() - 0.5) * 0.0004;
 }
 
-function initialDevices(): TelemetryDevice[] {
+function initialDevices(): TutorialTelemetryDevice[] {
   const now = Date.now();
   return seedDevices.map((device, index) => ({
     ...device,
