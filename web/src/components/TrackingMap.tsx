@@ -29,6 +29,9 @@ export default function TrackingMap(props: TrackingMapProps) {
   }, [devices, onAction]);
 
   useEffect(() => {
+    const markers = markersRef.current;
+    const trails = trailsRef.current;
+    const trailPoints = trailPointsRef.current;
     const map = L.map("map", { center: [51.505, -0.09], zoom: 13, zoomControl: false });
     mapRef.current = map;
 
@@ -124,6 +127,9 @@ export default function TrackingMap(props: TrackingMapProps) {
       mapContainer.removeEventListener("click", handlePopupAction);
       map.remove();
       mapRef.current = null;
+      markers.clear();
+      trails.clear();
+      trailPoints.clear();
     };
   }, []);
 
@@ -207,7 +213,10 @@ export default function TrackingMap(props: TrackingMapProps) {
 
 function popupHtml(device: TelemetryDevice, avatar: DeviceAvatar) {
   const name = escapeHtml(device.name);
-  return `<div class="popup-content"><div class="popup-header"><span style="font-size:20px">${avatar.emoji}</span><strong>${name}</strong><span class="card-status status-${device.status.toLowerCase()}" style="margin-left:6px;font-size:10px">${device.status}</span></div><div class="popup-grid"><span class="label">Signal</span><span class="value">${device.rssi} dBm / ${device.snr} dB</span><span class="label">Battery</span><span class="value">${(device.batt / 1000).toFixed(2)} V</span><span class="label">Profile</span><span class="value">${escapeHtml(device.profile)}</span></div><div class="card-actions popup-actions"><button class="btn-action btn-jump" data-map-action="jump" data-device-id="${device.id}">↗ Jump To</button><button class="btn-action btn-follow" data-map-action="follow" data-device-id="${device.id}">● Follow</button><button class="btn-action btn-trail" data-map-action="trail" data-device-id="${device.id}">⌁ Trail</button><button class="btn-action btn-find" data-map-action="find" data-device-id="${device.id}">♟ Find Alert</button><button class="btn-action btn-cmd" data-map-action="command" data-device-id="${device.id}">⌘ Cmd</button></div></div>`;
+  const signal = device.rssi === null || device.snr === null ? "Not reported" : `${device.rssi} dBm / ${device.snr} dB`;
+  const battery = device.batteryPercent === undefined || device.batteryPercent === null ? `${(device.batt / 1000).toFixed(2)} V` : `${device.batteryPercent}%`;
+  const source = device.source ? `<span class="label">Source</span><span class="value">${escapeHtml(device.source)}</span>` : "";
+  return `<div class="popup-content"><div class="popup-header"><span style="font-size:20px">${avatar.emoji}</span><strong>${name}</strong><span class="card-status status-${device.status.toLowerCase()}" style="margin-left:6px;font-size:10px">${device.status}</span></div><div class="popup-grid"><span class="label">Signal</span><span class="value">${signal}</span><span class="label">Battery</span><span class="value">${battery}</span><span class="label">Profile</span><span class="value">${escapeHtml(device.profile)}</span>${source}</div><div class="card-actions popup-actions"><button class="btn-action btn-jump" data-map-action="jump" data-device-id="${device.id}">↗ Jump To</button><button class="btn-action btn-follow" data-map-action="follow" data-device-id="${device.id}">● Follow</button><button class="btn-action btn-trail" data-map-action="trail" data-device-id="${device.id}">⌁ Trail</button><button class="btn-action btn-find" data-map-action="find" data-device-id="${device.id}">♟ Find Alert</button><button class="btn-action btn-cmd" data-map-action="command" data-device-id="${device.id}">⌘ Cmd</button></div></div>`;
 }
 
 function fitMarkers(map: L.Map, markers: Map<number, L.Marker>) {

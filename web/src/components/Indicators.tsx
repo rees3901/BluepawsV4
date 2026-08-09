@@ -20,14 +20,29 @@ function batteryLevel(millivolts: number) {
   return { level: 1, label: "Nearly Empty", color: "#ef4444" };
 }
 
-export function SignalIndicator({ rssi, snr }: { rssi: number; snr: number }) {
+function batteryPercentLevel(percent: number) {
+  if (percent >= 90) return { level: 5, label: "Full", color: "#22c55e" };
+  if (percent >= 70) return { level: 4, label: "Very Good", color: "#84cc16" };
+  if (percent >= 40) return { level: 3, label: "Medium", color: "#f59e0b" };
+  if (percent >= 15) return { level: 2, label: "Low", color: "#f97316" };
+  return { level: 1, label: "Nearly Empty", color: "#ef4444" };
+}
+
+export function SignalIndicator({ rssi, snr }: { rssi: number | null; snr: number | null }) {
+  if (rssi === null || snr === null) {
+    return (
+      <span className="signal-indicator" title="Radio signal was not included in this report">
+        <AntennaIcon />
+        {[1, 2, 3, 4, 5].map((bar) => <span key={bar} className="sig-bar" style={{ height: 4 + bar * 3 }} />)}
+        <span className="sig-label">Not reported</span>
+      </span>
+    );
+  }
+
   const signal = signalQuality(rssi, snr);
   return (
     <span className="signal-indicator" title={`RSSI: ${rssi} dBm / SNR: ${snr} dB — ${signal.label}`}>
-      <svg className="indicator-icon icon-antenna" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-        <line x1="12" y1="24" x2="12" y2="10" /><line x1="12" y1="10" x2="3" y2="2" />
-        <line x1="12" y1="10" x2="21" y2="2" /><line x1="3" y1="2" x2="21" y2="2" />
-      </svg>
+      <AntennaIcon />
       {[1, 2, 3, 4, 5].map((bar) => (
         <span key={bar} className={`sig-bar${bar <= signal.level ? " filled" : ""}`} style={{ height: 4 + bar * 3, background: bar <= signal.level ? signal.color : undefined }} />
       ))}
@@ -36,10 +51,12 @@ export function SignalIndicator({ rssi, snr }: { rssi: number; snr: number }) {
   );
 }
 
-export function BatteryIndicator({ millivolts }: { millivolts: number }) {
-  const battery = batteryLevel(millivolts);
+export function BatteryIndicator({ millivolts, percent }: { millivolts: number; percent?: number | null }) {
+  const hasPercent = percent !== undefined && percent !== null;
+  const battery = hasPercent ? batteryPercentLevel(percent) : batteryLevel(millivolts);
+  const measurement = hasPercent ? `${percent}%` : `${(millivolts / 1000).toFixed(2)} V`;
   return (
-    <span className="battery-indicator" title={`${(millivolts / 1000).toFixed(2)} V — ${battery.label}`}>
+    <span className="battery-indicator" title={`${measurement} — ${battery.label}`}>
       <svg className="indicator-icon icon-battery" viewBox="0 0 28 18" fill="none">
         <rect x="1" y="1" width="23" height="16" rx="3" stroke="#607d8b" strokeWidth="2" />
         <rect x="24" y="5.5" width="3" height="7" rx="1.2" fill="#607d8b" />
@@ -73,7 +90,16 @@ export function LastSeen({ children }: { children: ReactNode }) {
   );
 }
 
-export function BleProximity({ rssi }: { rssi: number }) {
+export function BleProximity({ rssi }: { rssi: number | null }) {
+  if (rssi === null) {
+    return (
+      <span className="ble-proximity" title="BLE proximity was not included in this report">
+        {[1, 2, 3, 4].map((bar) => <span key={bar} className="ble-bar" style={{ height: 4 + bar * 3 }} />)}
+        <span className="ble-proximity-label">Not reported</span>
+      </span>
+    );
+  }
+
   const level = rssi >= -50 ? 4 : rssi >= -65 ? 3 : rssi >= -80 ? 2 : 1;
   const label = level === 4 ? "Very Close" : level === 3 ? "Close" : level === 2 ? "Medium" : "Far";
   return (
@@ -81,5 +107,14 @@ export function BleProximity({ rssi }: { rssi: number }) {
       {[1, 2, 3, 4].map((bar) => <span key={bar} className={`ble-bar${bar <= level ? " filled" : ""}`} style={{ height: 4 + bar * 3 }} />)}
       <span className="ble-proximity-label">{label}</span>
     </span>
+  );
+}
+
+function AntennaIcon() {
+  return (
+    <svg className="indicator-icon icon-antenna" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="12" y1="24" x2="12" y2="10" /><line x1="12" y1="10" x2="3" y2="2" />
+      <line x1="12" y1="10" x2="21" y2="2" /><line x1="3" y1="2" x2="21" y2="2" />
+    </svg>
   );
 }

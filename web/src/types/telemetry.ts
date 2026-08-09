@@ -14,11 +14,13 @@ export interface TelemetryDevice {
   lon: number;
   hasGps: boolean;
   batt: number;
-  rssi: number;
-  snr: number;
+  batteryPercent?: number | null;
+  rssi: number | null;
+  snr: number | null;
   bleHome: boolean;
   cellular: boolean;
   lastUpdate: number;
+  source?: string | null;
 }
 
 export interface TelemetrySource {
