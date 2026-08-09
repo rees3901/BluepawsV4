@@ -3,6 +3,145 @@ button, input, select {
   font: inherit;
 }
 
+.login-shell {
+  display: grid;
+  min-height: 100%;
+  width: 100%;
+  place-items: center;
+  padding: 24px;
+  background:
+    radial-gradient(circle at 15% 15%, rgb(29 155 240 / 14%), transparent 35%),
+    var(--bg-primary);
+}
+
+.login-card {
+  width: min(410px, 100%);
+  padding: 28px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg-card);
+  box-shadow: 0 20px 60px rgb(0 0 0 / 32%);
+}
+
+.login-brand {
+  margin-bottom: 22px;
+  color: var(--accent);
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.login-card h1 {
+  margin-bottom: 8px;
+  font-size: 1.55rem;
+}
+
+.login-card > p,
+.login-card small {
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.login-card > p {
+  margin-bottom: 22px;
+  font-size: 0.82rem;
+}
+
+.login-card label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--text-primary);
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.login-card input {
+  width: 100%;
+  margin-bottom: 12px;
+  padding: 10px 11px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  outline: 0;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.login-card input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgb(29 155 240 / 14%);
+}
+
+.google-login-button,
+.login-submit {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 10px 12px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.google-login-button {
+  border: 1px solid var(--border);
+  background: #fff;
+  color: #202124;
+  font-weight: 600;
+}
+
+.google-login-button:disabled,
+.login-submit:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.login-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 18px 0;
+  color: var(--text-dim);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+}
+
+.login-divider::before,
+.login-divider::after {
+  height: 1px;
+  flex: 1;
+  background: var(--border);
+  content: "";
+}
+
+.login-back {
+  width: 100%;
+  margin: 10px 0 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.72rem;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.login-card .login-message {
+  margin: 14px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 0.74rem;
+}
+
+.account-signout {
+  width: 100%;
+  margin-top: 8px;
+}
+
 .map-loading {
   position: fixed;
   inset: 0;

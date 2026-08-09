@@ -42,11 +42,10 @@ application. Use these settings:
 - Output Directory: leave at the framework default (`.next`)
 
 The app is self-contained inside `web/`; its build does not read files from the
-firmware directories. Live Mode reads the latest provisioned-device positions
-from Supabase at request time. Tutorial Mode remains a separate, opt-in,
-locally persisted data source, so synthetic records cannot mix with live data.
-Its seven-step spotlight tour can be skipped, completed, or replayed from
-Settings.
+firmware directories. Live Mode requires Supabase Auth and reads only the
+signed-in user's household. Tutorial Mode remains a separate, opt-in, locally
+persisted data source, so synthetic records cannot mix with live data. Its
+seven-step spotlight tour can be skipped, completed, or replayed from Settings.
 
 ## Current data path
 
@@ -54,9 +53,10 @@ Settings.
 Hub/collar service
     -> authenticated HTTPS POST
     -> Supabase Edge Function (validation and normalization)
-    -> Postgres positions table
-    -> latest_positions view
-    -> web/src/lib/liveTelemetry.ts
+    -> append-only Postgres positions table
+    -> maintained device_latest_positions table
+    -> private household:<uuid> Realtime Broadcast channel
+    -> authenticated Next.js dashboard
     -> dashboard components
 ```
 
@@ -65,10 +65,38 @@ safe production defaults in `.env.production`; Vercel environment variables can
 override them. The service-role key and per-device bearer tokens must never be
 added to `NEXT_PUBLIC_` variables or committed.
 
-Before real customer location data is ingested:
+### Authentication launch checklist
 
-- add Supabase Auth to the customer dashboard;
-- replace the temporary anonymous read policy with customer/device-scoped RLS;
-- add Realtime or polling so an open dashboard updates without a page refresh.
+- Set the Supabase Site URL and allowed redirect URLs for production and Vercel previews.
+- Enable Google Auth and configure its OAuth client. Email OTP or magic-link login
+  remains available as a fallback.
+- Change the email template to include `{{ .Token }}` for six-digit OTP entry,
+  then configure production SMTP, CAPTCHA, and appropriate Auth rate limits.
+- Sign in with the project owner's account before sharing the preview. The first
+  account created becomes owner of the test household containing devices
+  `1001`–`1005`; subsequent users receive isolated customer households.
+- Validate private Realtime delivery, then apply
+  `20260809220003_cut_over_private_telemetry.sql` to remove the legacy anonymous
+  surface and activate seven-day retention.
+
+### Realtime recovery and load testing
+
+Healthy dashboards do not poll. They fetch an authoritative snapshot at page
+load, subscription/reconnect, and tab return. Polling starts at 30 seconds only
+while Realtime is degraded and backs off to 120 seconds.
+
+After obtaining a short-lived test-user access token, run the connection harness
+against a non-production household:
+
+```powershell
+$env:SUPABASE_URL='https://project-ref.supabase.co'
+$env:SUPABASE_PUBLISHABLE_KEY='sb_publishable_...'
+$env:SUPABASE_ACCESS_TOKEN='short-lived-user-jwt'
+$env:HOUSEHOLD_ID='household-uuid'
+npm run loadtest:realtime -- --clients 10 --duration 60
+```
+
+Repeat at 100, 500, and 1,000 clients only after the Supabase Realtime quota is
+raised appropriately. Never commit an access token.
 
 The expected public environment variables are documented in `.env.example`.
