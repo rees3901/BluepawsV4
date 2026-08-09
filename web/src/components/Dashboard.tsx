@@ -1,11 +1,14 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DeviceCard, DownloadIcon } from "@/components/DeviceCard";
 import { GuidedTour } from "@/components/GuidedTour";
-import { getTelemetrySource } from "@/lib/telemetry";
-import type { DeviceAction, DeviceAvatar, MapCommand, TelemetryDevice } from "@/types/telemetry";
+import { createRealtimeTelemetrySource, loadDeviceTrail } from "@/lib/realtimeTelemetry";
+import { createClient } from "@/lib/supabase/client";
+import { getTutorialTelemetrySource } from "@/lib/telemetry";
+import type { DeviceAction, DeviceAvatar, MapCommand, TelemetryConnectionStatus, TelemetryDevice, TrailPoint } from "@/types/telemetry";
 
 const TrackingMap = dynamic(() => import("@/components/TrackingMap"), {
   ssr: false,
@@ -25,13 +28,18 @@ interface SelectedDevice {
 }
 
 interface DashboardProps {
+  householdId: string | null;
   initialLiveDevices: TelemetryDevice[];
   liveTelemetryError: string | null;
+  userEmail: string | null;
 }
 
-export function Dashboard({ initialLiveDevices, liveTelemetryError }: DashboardProps) {
-  const [devices, setDevices] = useState<TelemetryDevice[]>([]);
+export function Dashboard({ householdId, initialLiveDevices, liveTelemetryError, userEmail }: DashboardProps) {
+  const router = useRouter();
+  const [devices, setDevices] = useState<TelemetryDevice[]>(initialLiveDevices);
   const [connected, setConnected] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<TelemetryConnectionStatus>("connecting");
+  const [connectionDetail, setConnectionDetail] = useState<string | null>(null);
   const [preferencesReady, setPreferencesReady] = useState(false);
   const [tutorialMode, setTutorialMode] = useState(false);
   const [tutorialOpen, setTutorialOpen] = useState(false);
@@ -41,6 +49,7 @@ export function Dashboard({ initialLiveDevices, liveTelemetryError }: DashboardP
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [followedId, setFollowedId] = useState<number | null>(null);
   const [trailIds, setTrailIds] = useState<Set<number>>(() => new Set());
+  const [trailHistory, setTrailHistory] = useState<Record<number, TrailPoint[]>>({});
   const [portableMode, setPortableMode] = useState(false);
   const [mapCommand, setMapCommand] = useState<MapCommand | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -75,12 +84,15 @@ export function Dashboard({ initialLiveDevices, liveTelemetryError }: DashboardP
   useEffect(() => {
     if (!preferencesReady) return;
 
-    if (!tutorialMode && liveTelemetryError) return;
+    if (!tutorialMode && !householdId) {
+      return;
+    }
 
     let fittedInitialPayload = false;
-    const source = getTelemetrySource(tutorialMode ? "tutorial" : "live", initialLiveDevices);
+    const source = tutorialMode
+      ? getTutorialTelemetrySource()
+      : createRealtimeTelemetrySource(householdId as string, initialLiveDevices);
     const unsubscribe = source.subscribe((incoming) => {
-      setConnected(true);
       setDevices(incoming);
       if (!fittedInitialPayload && incoming.length > 0) {
         fittedInitialPayload = true;
@@ -96,9 +108,13 @@ export function Dashboard({ initialLiveDevices, liveTelemetryError }: DashboardP
         }
       });
       if (newLines.length) setLogs((current) => [...newLines, ...current].slice(0, 200));
+    }, (status, detail) => {
+      setConnectionStatus(status);
+      setConnected(status === "connected");
+      setConnectionDetail(detail ?? null);
     });
     return unsubscribe;
-  }, [initialLiveDevices, liveTelemetryError, preferencesReady, tutorialMode]);
+  }, [householdId, initialLiveDevices, preferencesReady, tutorialMode]);
 
   useEffect(() => {
     document.body.classList.toggle("panel-open", sidebarOpen);
@@ -117,12 +133,21 @@ export function Dashboard({ initialLiveDevices, liveTelemetryError }: DashboardP
     if (action === "follow") setFollowedId((current) => current === device.id ? null : device.id);
     if (action === "trail") setTrailIds((current) => {
       const next = new Set(current);
-      if (next.has(device.id)) next.delete(device.id); else next.add(device.id);
+      if (next.has(device.id)) {
+        next.delete(device.id);
+      } else {
+        next.add(device.id);
+        if (!tutorialMode && !trailHistory[device.id]) {
+          void loadDeviceTrail(device.id)
+            .then((points) => setTrailHistory((history) => ({ ...history, [device.id]: points })))
+            .catch(() => setToast("Unable to load this device's seven-day trail"));
+        }
+      }
       return next;
     });
     if (action === "find") setFindDevice({ id: device.id, name: device.name });
     if (action === "command") setCommandDevice({ id: device.id, name: device.name });
-  }, []);
+  }, [trailHistory, tutorialMode]);
 
   const handleTutorialModeChange = useCallback((enabled: boolean) => {
     try {
@@ -140,6 +165,7 @@ export function Dashboard({ initialLiveDevices, liveTelemetryError }: DashboardP
     setExpandedId(null);
     setFollowedId(null);
     setTrailIds(new Set());
+    setTrailHistory({});
     setSettingsOpen(false);
     setTutorialPromptOpen(false);
     setSidebarOpen(true);
@@ -177,11 +203,35 @@ export function Dashboard({ initialLiveDevices, liveTelemetryError }: DashboardP
   const completeTutorial = useCallback(() => finishTutorial(true), [finishTutorial]);
   const skipTutorial = useCallback(() => finishTutorial(false), [finishTutorial]);
 
-  const liveUnavailable = !tutorialMode && liveTelemetryError !== null;
+  const effectiveError = connectionDetail ?? liveTelemetryError;
+  const liveUnavailable = !tutorialMode && effectiveError !== null && devices.length === 0;
   const statusClass = connected ? (tutorialMode ? "tutorial" : "connected") : "waiting";
-  const statusText = liveUnavailable ? "Unavailable" : connected ? (tutorialMode ? "Tutorial" : "Connected") : "Waiting";
-  const emptyTitle = liveUnavailable ? "Live telemetry unavailable" : connected ? "Connected to Supabase" : "Waiting for live telemetry";
-  const emptyMessage = liveUnavailable ? liveTelemetryError : "No devices have reported yet.";
+  const statusText = liveUnavailable
+    ? "Unavailable"
+    : connectionStatus === "degraded"
+      ? "Reconnecting"
+      : connected
+        ? (tutorialMode ? "Tutorial" : "Live")
+        : "Connecting";
+  const emptyTitle = !householdId && !tutorialMode
+    ? "Account setup incomplete"
+    : liveUnavailable
+      ? "Live telemetry unavailable"
+      : connected
+        ? "Connected to Supabase"
+        : "Waiting for live telemetry";
+  const emptyMessage = !householdId && !tutorialMode
+    ? "No household is assigned to this account yet."
+    : liveUnavailable
+      ? effectiveError
+      : "No devices have reported yet.";
+
+  const handleSignOut = useCallback(async () => {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    router.replace("/login");
+    router.refresh();
+  }, [router]);
 
   return (
     <>
@@ -231,7 +281,7 @@ export function Dashboard({ initialLiveDevices, liveTelemetryError }: DashboardP
         </div>
       </aside>
 
-      <TrackingMap devices={devices} avatars={avatars} sidebarOpen={sidebarOpen} followedId={followedId} trailIds={trailIds} command={mapCommand} onAction={handleAction} />
+      <TrackingMap devices={devices} avatars={avatars} sidebarOpen={sidebarOpen} followedId={followedId} trailIds={trailIds} trailHistory={trailHistory} command={mapCommand} onAction={handleAction} />
 
       {settingsOpen && (
         <SettingsModal
@@ -241,9 +291,12 @@ export function Dashboard({ initialLiveDevices, liveTelemetryError }: DashboardP
           tutorialMode={tutorialMode}
           connected={connected}
           liveTelemetryError={liveTelemetryError}
+          connectionDetail={connectionDetail}
+          userEmail={userEmail}
           onTutorialModeChange={handleTutorialModeChange}
           onReplayTutorial={replayTutorial}
           onModeChange={setPortableMode}
+          onSignOut={handleSignOut}
           onClose={() => setSettingsOpen(false)}
         />
       )}
@@ -271,13 +324,16 @@ interface SettingsModalProps {
   tutorialMode: boolean;
   connected: boolean;
   liveTelemetryError: string | null;
+  connectionDetail: string | null;
+  userEmail: string | null;
   onTutorialModeChange: (enabled: boolean) => void;
   onReplayTutorial: () => void;
   onModeChange: (portable: boolean) => void;
+  onSignOut: () => void;
   onClose: () => void;
 }
 
-function SettingsModal({ logs, portableMode, devices, tutorialMode, connected, liveTelemetryError, onTutorialModeChange, onReplayTutorial, onModeChange, onClose }: SettingsModalProps) {
+function SettingsModal({ logs, portableMode, devices, tutorialMode, connected, liveTelemetryError, connectionDetail, userEmail, onTutorialModeChange, onReplayTutorial, onModeChange, onSignOut, onClose }: SettingsModalProps) {
   const [consoleOpen, setConsoleOpen] = useState(false);
   return (
     <div className="modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
@@ -294,7 +350,8 @@ function SettingsModal({ logs, portableMode, devices, tutorialMode, connected, l
           </div>
           <small className="form-hint">Portable mode stops the home beacon and scans for collar BLE signals.</small>
         </div>
-        <div className="form-group"><label>Hub Status</label><div className="status-info">{tutorialMode ? "Tutorial mode" : "Live mode"}<br />Devices: {devices}<br />Data source: {tutorialMode ? "Simulated tutorial telemetry" : "Supabase positions"}<br />Cloud: {tutorialMode ? "Disabled in Tutorial Mode" : liveTelemetryError ? "Unavailable" : connected ? "Connected" : "Waiting for Supabase"}</div></div>
+        <div className="form-group"><label>Hub Status</label><div className="status-info">{tutorialMode ? "Tutorial mode" : "Live mode"}<br />Devices: {devices}<br />Data source: {tutorialMode ? "Simulated tutorial telemetry" : "Private Supabase household channel"}<br />Cloud: {tutorialMode ? "Disabled in Tutorial Mode" : connected ? "Realtime connected" : connectionDetail ?? liveTelemetryError ?? "Connecting to Supabase"}</div></div>
+        <div className="form-group"><label>Account</label><div className="status-info">{userEmail ?? "Signed-in Bluepaws user"}</div><button className="btn-secondary account-signout" type="button" onClick={onSignOut}>Sign out</button></div>
         <div className="form-group">
           <div className="log-btn-row">
             <button className="btn-secondary" style={{ flex: 1 }} onClick={() => setConsoleOpen((open) => !open)}>Console Log</button>

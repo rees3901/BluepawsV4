@@ -24,7 +24,18 @@ export interface TelemetryDevice {
 }
 
 export interface TelemetrySource {
-  subscribe(listener: (devices: TelemetryDevice[]) => void): () => void;
+  subscribe(
+    listener: (devices: TelemetryDevice[]) => void,
+    statusListener?: (status: TelemetryConnectionStatus, detail?: string) => void,
+  ): () => void;
+}
+
+export type TelemetryConnectionStatus = "connecting" | "connected" | "degraded";
+
+export interface TrailPoint {
+  lat: number;
+  lon: number;
+  recordedAt: string;
 }
 
 export interface MapCommand {

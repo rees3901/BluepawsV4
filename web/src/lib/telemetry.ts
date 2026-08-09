@@ -1,16 +1,5 @@
 import { mockTelemetrySource } from "@/data/mockTelemetry";
-import type { TelemetryDevice, TelemetrySource } from "@/types/telemetry";
-
-export type TelemetryMode = "live" | "tutorial";
-
-function createSnapshotTelemetrySource(devices: TelemetryDevice[]): TelemetrySource {
-  return {
-    subscribe(listener) {
-      listener(devices);
-      return () => undefined;
-    },
-  };
-}
+import type { TelemetrySource } from "@/types/telemetry";
 
 /**
  * The public dashboard depends only on TelemetrySource. A later integration can
@@ -19,6 +8,11 @@ function createSnapshotTelemetrySource(devices: TelemetryDevice[]): TelemetrySou
  * devices can never be merged into customer data.
  * HTTPS ingestion belongs in a Supabase Edge Function, not in the browser.
  */
-export function getTelemetrySource(mode: TelemetryMode, liveDevices: TelemetryDevice[] = []): TelemetrySource {
-  return mode === "tutorial" ? mockTelemetrySource : createSnapshotTelemetrySource(liveDevices);
+export function getTutorialTelemetrySource(): TelemetrySource {
+  return {
+    subscribe(listener, statusListener) {
+      statusListener?.("connected");
+      return mockTelemetrySource.subscribe(listener);
+    },
+  };
 }

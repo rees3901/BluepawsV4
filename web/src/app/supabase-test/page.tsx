@@ -1,19 +1,22 @@
 import { connection } from 'next/server'
+import { redirect } from 'next/navigation'
 
-import { createSupabaseClient } from '@/lib/supabase'
+import { createClient } from '@/lib/supabase/server'
 
 export default async function SupabaseTestPage() {
   await connection()
+  const supabase = await createClient()
+  const { data: identity } = await supabase.auth.getClaims()
+  if (!identity?.claims?.sub) redirect('/login')
 
   let data: unknown = null
   let errorMessage: string | null = null
 
   try {
-    const supabase = createSupabaseClient()
     const result = await supabase
       .from('positions')
       .select(
-        'id, device_uid, message_id, latitude, longitude, battery, source, recorded_at'
+        'id, household_id, device_uid, message_id, latitude, longitude, battery, source, recorded_at'
       )
       .order('recorded_at', { ascending: false })
       .limit(1)

@@ -2,7 +2,7 @@
 
 import L from "leaflet";
 import { useEffect, useRef } from "react";
-import type { DeviceAction, DeviceAvatar, MapCommand, TelemetryDevice } from "@/types/telemetry";
+import type { DeviceAction, DeviceAvatar, MapCommand, TelemetryDevice, TrailPoint } from "@/types/telemetry";
 
 interface TrackingMapProps {
   devices: TelemetryDevice[];
@@ -10,12 +10,13 @@ interface TrackingMapProps {
   sidebarOpen: boolean;
   followedId: number | null;
   trailIds: Set<number>;
+  trailHistory: Record<number, TrailPoint[]>;
   command: MapCommand | null;
   onAction: (device: TelemetryDevice, action: DeviceAction) => void;
 }
 
 export default function TrackingMap(props: TrackingMapProps) {
-  const { devices, avatars, sidebarOpen, followedId, trailIds, command, onAction } = props;
+  const { devices, avatars, sidebarOpen, followedId, trailIds, trailHistory, command, onAction } = props;
   const mapRef = useRef<L.Map | null>(null);
   const markersRef = useRef(new Map<number, L.Marker>());
   const trailsRef = useRef(new Map<number, L.Polyline>());
@@ -194,6 +195,34 @@ export default function TrackingMap(props: TrackingMapProps) {
       if (followed) map.panTo([followed.lat, followed.lon]);
     }
   }, [avatars, devices, followedId, trailIds]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    Object.entries(trailHistory).forEach(([deviceIdValue, historicalPoints]) => {
+      const deviceId = Number(deviceIdValue);
+      const device = devicesRef.current.find((item) => item.id === deviceId);
+      const avatar = avatars[deviceId];
+      if (!device || !avatar || historicalPoints.length === 0) return;
+
+      const points: L.LatLngExpression[] = historicalPoints.map((point) => [point.lat, point.lon]);
+      const lastPoint = historicalPoints.at(-1);
+      if (!lastPoint || lastPoint.lat !== device.lat || lastPoint.lon !== device.lon) {
+        points.push([device.lat, device.lon]);
+      }
+      trailPointsRef.current.set(deviceId, points);
+
+      let trail = trailsRef.current.get(deviceId);
+      if (!trail) {
+        trail = L.polyline(points, { color: avatar.color, weight: 2, opacity: 0.75, dashArray: "6,5" });
+        trailsRef.current.set(deviceId, trail);
+      } else {
+        trail.setLatLngs(points);
+      }
+      if (trailIds.has(deviceId) && !map.hasLayer(trail)) trail.addTo(map);
+    });
+  }, [avatars, trailHistory, trailIds]);
 
   useEffect(() => {
     const map = mapRef.current;

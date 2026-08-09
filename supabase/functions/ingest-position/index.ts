@@ -87,7 +87,7 @@ Deno.serve(async (request: Request) => {
         .maybeSingle(),
       supabase
         .from("devices")
-        .select("device_id")
+        .select("device_id,household_id")
         .eq("device_id", payload.device_id)
         .eq("enabled", true)
         .maybeSingle(),
@@ -108,6 +108,13 @@ Deno.serve(async (request: Request) => {
       );
     }
     if (!credentialResult.data || !deviceResult.data) return unauthorized(requestId);
+    if (!deviceResult.data.household_id) {
+      console.error("Provisioned device has no household", {
+        requestId,
+        deviceId: payload.device_id,
+      });
+      return serviceUnavailable(requestId, "device_provisioning");
+    }
 
     const row = {
       device_uid: payload.device_id,
@@ -203,8 +210,8 @@ function validatePayload(
   if (body.schema_version !== 1) {
     return { ok: false, error: "schema_version must be 1" };
   }
-  if (!integerInRange(body.device_id, 1, 65_534)) {
-    return { ok: false, error: "device_id must be an integer from 1 to 65534" };
+  if (!integerInRange(body.device_id, 1, 65_535)) {
+    return { ok: false, error: "device_id must be an integer from 1 to 65535" };
   }
   if (!integerInRange(body.message_id, 0, 2_147_483_647)) {
     return { ok: false, error: "message_id must be a non-negative 32-bit integer" };
