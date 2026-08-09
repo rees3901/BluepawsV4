@@ -1,8 +1,6 @@
 import { createSupabaseClient } from "@/lib/supabase";
 import type { TelemetryDevice } from "@/types/telemetry";
 
-const POSITION_QUERY_LIMIT = 500;
-
 interface PositionRow {
   id: number;
   device_uid: number;
@@ -23,21 +21,13 @@ export async function getLiveTelemetrySnapshot(): Promise<LiveTelemetrySnapshot>
   try {
     const supabase = createSupabaseClient();
     const { data, error } = await supabase
-      .from("positions")
-      .select("id,device_uid,message_id,latitude,longitude,battery,source,recorded_at")
-      .order("recorded_at", { ascending: false, nullsFirst: false })
-      .limit(POSITION_QUERY_LIMIT);
+      .from("latest_positions")
+      .select("id,device_uid,message_id,latitude,longitude,battery,source,recorded_at");
 
     if (error) throw error;
 
-    const latestByDevice = new Map<number, PositionRow>();
-    for (const candidate of data ?? []) {
-      if (!isPositionRow(candidate) || latestByDevice.has(candidate.device_uid)) continue;
-      latestByDevice.set(candidate.device_uid, candidate);
-    }
-
     return {
-      devices: [...latestByDevice.values()].map(positionToTelemetryDevice),
+      devices: (data ?? []).filter(isPositionRow).map(positionToTelemetryDevice),
       error: null,
     };
   } catch (error) {

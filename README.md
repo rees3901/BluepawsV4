@@ -46,7 +46,8 @@ BluepawsV4/
 │       ├── style.css
 │       └── app.js
 ├── tools/
-│   └── mock-server.js                # Node.js mock hub for local GUI dev
+│   ├── mock-server.js                # Node.js mock hub for local GUI dev
+│   └── vps_position_simulator.py     # External HTTPS multi-collar simulator
 ├── web/                              # Next.js + TypeScript customer dashboard
 │   ├── src/app/                      # App Router entry point
 │   ├── src/components/               # React dashboard and Leaflet map
@@ -94,8 +95,8 @@ node tools/mock-server.js
 ## Customer Web App
 
 `web/` contains the Vercel-ready Next.js and TypeScript refactor of the hub
-dashboard. It preserves the embedded GUI in `hub/data/` and currently uses a
-typed mock telemetry source for visual and interaction parity.
+dashboard. It preserves the embedded GUI in `hub/data/`, reads the latest live
+positions from Supabase by default, and confines mock telemetry to tutorial mode.
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Frees3901%2FBluepawsV4&root-directory=web)
 
@@ -109,6 +110,10 @@ For Vercel, import this repository and select `web` as the project **Root
 Directory**. Leave the Install, Build, and Output settings at their detected
 Next.js defaults. See `web/README.md` for the exact deployment settings and the
 planned HTTPS Edge Function -> Supabase -> Realtime data path.
+
+The cloud ingestion schema, device registry, and authenticated Edge Function are
+under `supabase/`. See `tools/VPS_SIMULATOR.md` for the Ubuntu VPS test client
+and versioned request contract.
 
 ## TLV Protocol v2
 

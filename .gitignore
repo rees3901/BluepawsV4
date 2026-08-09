@@ -1,0 +1,6 @@
+# Per-device ingestion credentials. Commit only the example file.
+tools/vps_devices.json
+
+# Python simulator/test artefacts.
+__pycache__/
+*.py[cod]
