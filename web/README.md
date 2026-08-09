@@ -16,7 +16,10 @@ npm run dev
 Open <http://localhost:3000>. The dashboard starts in **Live Mode** with no
 sample animals or generated telemetry. Open Settings and enable **Tutorial
 Mode** to run the typed in-browser simulator with the five reference animals
-and a short guided product tour.
+and a short guided product tour. On a customer's first visit, a compact,
+non-blocking card in the bottom-right offers to start the tutorial; choosing
+**Not now** is remembered, and the Tutorial Mode control remains available at
+the bottom of Settings.
 
 ## Verification
 

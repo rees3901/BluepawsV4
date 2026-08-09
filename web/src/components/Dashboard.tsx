@@ -17,6 +17,7 @@ const COLORS = ["#1d9bf0", "#ff6b35", "#a855f7", "#22c55e", "#f97316", "#06b6d4"
 const HOME = { lat: 51.5055, lon: -0.09 };
 const TUTORIAL_MODE_STORAGE_KEY = "bp_tutorial_mode";
 const TUTORIAL_COMPLETE_STORAGE_KEY = "bp_tutorial_complete";
+const TUTORIAL_PROMPT_STORAGE_KEY = "bp_tutorial_prompt_seen";
 
 interface SelectedDevice {
   id: number;
@@ -28,6 +29,7 @@ export function Dashboard() {
   const [connected, setConnected] = useState(false);
   const [tutorialMode, setTutorialMode] = useState(false);
   const [tutorialOpen, setTutorialOpen] = useState(false);
+  const [tutorialPromptOpen, setTutorialPromptOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [darkMode, setDarkMode] = useState(true);
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -50,8 +52,10 @@ export function Dashboard() {
       try {
         setDarkMode(localStorage.getItem("bp_theme") !== "light");
         const tutorialEnabled = localStorage.getItem(TUTORIAL_MODE_STORAGE_KEY) === "true";
+        const tutorialComplete = localStorage.getItem(TUTORIAL_COMPLETE_STORAGE_KEY) === "true";
         setTutorialMode(tutorialEnabled);
-        setTutorialOpen(tutorialEnabled && localStorage.getItem(TUTORIAL_COMPLETE_STORAGE_KEY) !== "true");
+        setTutorialOpen(tutorialEnabled && !tutorialComplete);
+        setTutorialPromptOpen(!tutorialEnabled && !tutorialComplete && localStorage.getItem(TUTORIAL_PROMPT_STORAGE_KEY) !== "true");
       } catch { /* localStorage can be unavailable in privacy modes */ }
     }, 0);
     const clock = window.setInterval(() => setNow(Date.now()), 1000);
@@ -106,7 +110,10 @@ export function Dashboard() {
     try {
       localStorage.setItem(TUTORIAL_MODE_STORAGE_KEY, String(enabled));
       localStorage.removeItem("bp_demo_mode");
-      if (enabled) localStorage.removeItem(TUTORIAL_COMPLETE_STORAGE_KEY);
+      if (enabled) {
+        localStorage.removeItem(TUTORIAL_COMPLETE_STORAGE_KEY);
+        localStorage.setItem(TUTORIAL_PROMPT_STORAGE_KEY, "true");
+      }
     } catch { /* non-critical preference */ }
     setConnected(false);
     setDevices([]);
@@ -116,10 +123,20 @@ export function Dashboard() {
     setFollowedId(null);
     setTrailIds(new Set());
     setSettingsOpen(false);
+    setTutorialPromptOpen(false);
     setSidebarOpen(true);
     setTutorialMode(enabled);
     setTutorialOpen(enabled);
   }, []);
+
+  const dismissTutorialPrompt = useCallback(() => {
+    try { localStorage.setItem(TUTORIAL_PROMPT_STORAGE_KEY, "true"); } catch { /* non-critical preference */ }
+    setTutorialPromptOpen(false);
+  }, []);
+
+  const startTutorialFromPrompt = useCallback(() => {
+    handleTutorialModeChange(true);
+  }, [handleTutorialModeChange]);
 
   const finishTutorial = useCallback((completed: boolean) => {
     try { localStorage.setItem(TUTORIAL_COMPLETE_STORAGE_KEY, "true"); } catch { /* non-critical preference */ }
@@ -208,6 +225,9 @@ export function Dashboard() {
           onClose={() => setSettingsOpen(false)}
         />
       )}
+      {tutorialPromptOpen && (
+        <TutorialWelcomeCard onStart={startTutorialFromPrompt} onDismiss={dismissTutorialPrompt} />
+      )}
       {commandDevice && <CommandModal device={commandDevice} onClose={() => setCommandDevice(null)} onSend={(mode) => { setCommandDevice(null); setToast(`Tutorial command preview: ${mode}`); }} />}
       {findDevice && <FindModal device={findDevice} onClose={() => setFindDevice(null)} onSend={() => { setFindDevice(null); setToast("Tutorial Find Alert previewed"); }} />}
       {tutorialOpen && tutorialMode && (
@@ -240,11 +260,6 @@ function SettingsModal({ logs, portableMode, devices, tutorialMode, connected, o
     <div className="modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
       <div className="modal-content">
         <h2 id="settings-title">Hub Settings</h2>
-        <div className="tutorial-mode-setting">
-          <Toggle label="Tutorial Mode" checked={tutorialMode} onChange={onTutorialModeChange} />
-          <p className="form-hint">Off by default. Loads simulated animals and a guided tour without mixing in live data.</p>
-          {tutorialMode && <button className="tutorial-replay-btn" type="button" onClick={onReplayTutorial}>Replay tutorial</button>}
-        </div>
         <div className="form-group"><label htmlFor="cfgSSID">WiFi SSID</label><input id="cfgSSID" type="text" placeholder="Home network name" /></div>
         <div className="form-group"><label htmlFor="cfgPass">WiFi Password</label><input id="cfgPass" type="password" placeholder="Password" /></div>
         <div className="form-group"><label htmlFor="cfgCloud">Cloud Endpoint</label><input id="cfgCloud" type="url" placeholder="https://..." /></div>
@@ -265,9 +280,30 @@ function SettingsModal({ logs, portableMode, devices, tutorialMode, connected, o
           {consoleOpen && <div><pre className="console-log">{logs.join("\n") || "No messages yet."}</pre></div>}
         </div>
         <p className="tutorial-note">These hub-specific fields are preserved for interface parity. Live mode is intentionally empty until Supabase connectivity is introduced in a later integration phase.</p>
+        <div className="tutorial-mode-setting">
+          <Toggle label="Tutorial Mode" checked={tutorialMode} onChange={onTutorialModeChange} />
+          <p className="form-hint">Off by default. Loads simulated animals and a guided tour without mixing in live data.</p>
+          {tutorialMode && <button className="tutorial-replay-btn" type="button" onClick={onReplayTutorial}>Replay tutorial</button>}
+        </div>
         <div className="modal-actions"><button className="btn-primary" disabled>Save &amp; Restart</button><button className="btn-secondary" onClick={onClose}>Close</button></div>
       </div>
     </div>
+  );
+}
+
+function TutorialWelcomeCard({ onStart, onDismiss }: { onStart: () => void; onDismiss: () => void }) {
+  return (
+    <aside className="tutorial-welcome-card" role="dialog" aria-labelledby="tutorial-welcome-title" aria-describedby="tutorial-welcome-description" onKeyDown={(event) => { if (event.key === "Escape") onDismiss(); }}>
+      <button className="tutorial-welcome-close" type="button" aria-label="Dismiss tutorial invitation" title="Dismiss" onClick={onDismiss}>×</button>
+      <span className="tutorial-welcome-eyebrow">New to Bluepaws?</span>
+      <h2 id="tutorial-welcome-title">Would you like a quick tour?</h2>
+      <p id="tutorial-welcome-description">Explore the dashboard with five simulated pets and learn the essential controls in about a minute.</p>
+      <p className="tutorial-welcome-hint">You can start it later from Settings.</p>
+      <div className="modal-actions">
+        <button className="btn-primary" type="button" onClick={onStart}>Start tutorial</button>
+        <button className="btn-secondary" type="button" onClick={onDismiss}>Not now</button>
+      </div>
+    </aside>
   );
 }
 
