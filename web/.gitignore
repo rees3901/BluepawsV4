@@ -4,5 +4,6 @@ out/
 .vercel/
 .env*
 !.env.example
+!.env.production
 *.tsbuildinfo
 next-env.d.ts

@@ -1,0 +1,10 @@
+[
+  {
+    "device_id": 1001,
+    "token": "replace-with-the-provisioned-token-for-device-1001"
+  },
+  {
+    "device_id": 1002,
+    "token": "replace-with-the-provisioned-token-for-device-1002"
+  }
+]

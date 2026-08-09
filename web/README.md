@@ -42,35 +42,33 @@ application. Use these settings:
 - Output Directory: leave at the framework default (`.next`)
 
 The app is self-contained inside `web/`; its build does not read files from the
-firmware directories. No Supabase environment variables are required yet. Live
-Mode intentionally waits with an empty dashboard until the Supabase adapter is
-connected; Tutorial Mode is an opt-in, locally persisted preference. Its
-seven-step spotlight tour can be skipped, completed, or replayed from Settings.
+firmware directories. Live Mode reads the latest provisioned-device positions
+from Supabase at request time. Tutorial Mode remains a separate, opt-in,
+locally persisted data source, so synthetic records cannot mix with live data.
+Its seven-step spotlight tour can be skipped, completed, or replayed from
+Settings.
 
-## Planned data path
+## Current data path
 
 ```text
 Hub/collar service
     -> authenticated HTTPS POST
     -> Supabase Edge Function (validation and normalization)
-    -> Postgres telemetry tables
-    -> Supabase Realtime
-    -> web/src/lib/telemetry.ts
+    -> Postgres positions table
+    -> latest_positions view
+    -> web/src/lib/liveTelemetry.ts
     -> dashboard components
 ```
 
-`src/lib/telemetry.ts` is the only data-source selection point. It selects
-exactly one provider at a time: the idle live provider (the future Supabase
-adapter) or the tutorial simulator. A future Supabase adapter will implement the
-existing `TelemetrySource` interface, so database integration does not require
-UI rewrites and simulated records cannot be merged into live customer data.
+The Supabase URL and publishable key are public browser configuration and have
+safe production defaults in `.env.production`; Vercel environment variables can
+override them. The service-role key and per-device bearer tokens must never be
+added to `NEXT_PUBLIC_` variables or committed.
 
-When that phase starts:
+Before real customer location data is ingested:
 
-- only the Supabase URL and publishable key may use `NEXT_PUBLIC_` variables;
-- secret or service-role keys must stay inside the Edge Function/server;
-- exposed tables must have Row Level Security and customer-scoped policies;
-- the Edge Function must authenticate devices, validate payloads, reject
-  replays, and use idempotency keys such as `(device_id, msg_seq)`.
+- add Supabase Auth to the customer dashboard;
+- replace the temporary anonymous read policy with customer/device-scoped RLS;
+- add Realtime or polling so an open dashboard updates without a page refresh.
 
 The expected public environment variables are documented in `.env.example`.

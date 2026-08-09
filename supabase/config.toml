@@ -1,0 +1,4 @@
+project_id = "ykcdaonkvwemedotdpdr"
+
+[functions.ingest-position]
+verify_jwt = false
