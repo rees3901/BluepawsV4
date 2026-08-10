@@ -10,8 +10,8 @@ Unified firmware repository for the Bluepaws animal tracker system. Both the tra
 | **Home Hub** | ESP32-S3 | SX1262 LoRa | WiFi, BLE beacon |
 
 **Data paths:**
-- Collar → LoRa → Home Hub → log + display → WiFi → Cloud
-- Collar → LTE-M/NB-IoT → Cloud (every Nth cycle per profile)
+- Collar -> LoRa -> Home Hub -> log + display -> WiFi -> Cloud
+- Collar -> LTE-M/NB-IoT -> Cloud via REST POST
 
 **Battery target:** 30+ days at 10-minute wake intervals.
 
@@ -20,20 +20,24 @@ Unified firmware repository for the Bluepaws animal tracker system. Both the tra
 | Part | Role | Key Specs |
 |------|------|-----------|
 | **nRF52840** (Seeed XIAO BLE Sense) | Collar MCU | ARM Cortex-M4F, BLE 5.0, 256KB RAM |
-| **SX1262** | LoRa transceiver | 150 MHz–960 MHz, +22 dBm, LoRa/FSK |
-| **[Sequans Monarch 2 GM02SP](https://sequans.com/products/monarch-2-gm02s/)** | Cellular + GNSS | LTE Cat M1/NB-IoT, integrated GNSS, 1µA deep sleep, 23 dBm TX, EAL5+ secure enclave, iSIM, single 2.2V rail, global bands |
+| **SX1262** | LoRa transceiver | 150 MHz-960 MHz, +22 dBm, LoRa/FSK |
+| **[Sequans Monarch 2 GM02SP](https://sequans.com/products/monarch-2-gm02s/)** | Cellular + GNSS | LTE Cat M1/NB-IoT, integrated GNSS, 1uA deep sleep, 23 dBm TX, EAL5+ secure enclave, iSIM, single 2.2V rail, global bands |
 | **ESP32-S3** (Seeed XIAO) | Hub MCU | Dual-core, WiFi, BLE 5.0, 512KB SRAM |
 
-The Sequans GM02SP replaces the previous BG77 + L76K combination — a single module handles both cellular IoT and GPS positioning, simplifying the collar BOM and reducing power draw.
+The Sequans GM02SP replaces the previous BG77 + L76K combination. A single module handles both cellular IoT and GPS positioning, simplifying the collar BOM and reducing power draw.
 
 ## Repository Structure
 
-```
+```text
 BluepawsV4/
+├── README.md                         # Repository overview
+├── docs/
+│   └── TLV_PROTOCOL_V1_1.md           # Canonical TLV packet specification
 ├── platformio.ini                    # Multi-environment build config
 ├── shared/lib/BluepawsProtocol/      # Shared protocol & config
+│   ├── README.md                     # Protocol implementation notes
 │   ├── library.json                  # PlatformIO library manifest
-│   ├── bp_protocol.h                 # TLV binary protocol v2
+│   ├── bp_protocol.h                 # Shared protocol implementation header
 │   └── bp_config.h                   # LoRa params, profiles, timing
 ├── collar/                           # nRF52840 collar firmware
 │   ├── src/main.cpp
@@ -60,43 +64,41 @@ BluepawsV4/
 
 The hub serves a real-time tracking dashboard over WiFi, built with Leaflet.js and Server-Sent Events (SSE).
 
-**Device Cards** — each tracked animal gets a card in the left sidebar showing:
+**Device Cards** - each tracked animal gets a card in the left sidebar showing:
 - Unique emoji avatar with colour-coded ring (auto-assigned per device)
 - Last GPS coordinates in monospace
-- Status badge (Home / Out / Lost)
-- Telemetry grid: profile, battery %, signal strength, GPS accuracy, fix age, last seen
-- **Jump** — centres map on the animal at zoom 17
-- **Follow** — auto-pans the map as new positions arrive (green when active)
-- **Trail** — toggles breadcrumb polyline on/off per device (amber when active)
-- **Cmd** — opens command modal (change mode: Normal / PowerSave / Active Find / Emergency Lost)
+- Status badge (Home / Out / Lost / Error)
+- Telemetry grid: profile, battery %, signal strength, GPS accuracy, distance from home, last seen
+- **Jump** - centres map on the animal at zoom 17
+- **Follow** - auto-pans the map as new positions arrive
+- **Trail** - toggles breadcrumb polyline on/off per device
+- **Cmd** - opens command modal
 
 **Map Features:**
 - Three base layers: Street (OSM), Satellite (Esri), Topographic
 - Per-device coloured trail lines with dashed polylines
 - Lost-mode markers pulse red
-- Measurement tool (click to measure distances)
-- Dark / light theme toggle (persisted to localStorage)
+- Measurement tool
+- Dark / light theme toggle
 
 **Connection Monitoring:**
 - Server sends SSE heartbeat every 5 seconds
 - Client watchdog flips to "No heartbeat" if 10 seconds pass without any event
-- Status banner shows Connected (green) or Disconnected (red, pulsing)
+- Status banner shows Connected or Disconnected
 
 ## Mock Server
 
-Simulates 5 animals with live SSE telemetry for local GUI development:
+Simulates animals with live SSE telemetry for local GUI development:
 
 ```bash
 node tools/mock-server.js
-# → http://localhost:3000
+# http://localhost:3000
 # Streams position updates every 2s + heartbeat every 5s
 ```
 
 ## Customer Web App
 
-`web/` contains the Vercel-ready Next.js and TypeScript refactor of the hub
-dashboard. It preserves the embedded GUI in `hub/data/`, reads the latest live
-positions from Supabase by default, and confines mock telemetry to tutorial mode.
+`web/` contains the Vercel-ready Next.js and TypeScript refactor of the hub dashboard. It preserves the embedded GUI in `hub/data/`, reads the latest live positions from Supabase by default, and confines mock telemetry to tutorial mode.
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Frees3901%2FBluepawsV4&root-directory=web)
 
@@ -106,49 +108,90 @@ npm install
 npm run dev
 ```
 
-For Vercel, import this repository and select `web` as the project **Root
-Directory**. Leave the Install, Build, and Output settings at their detected
-Next.js defaults. See `web/README.md` for the exact deployment settings and the
-planned HTTPS Edge Function -> Supabase -> Realtime data path.
+For Vercel, import this repository and select `web` as the project **Root Directory**. Leave the Install, Build, and Output settings at their detected Next.js defaults. See `web/README.md` for the exact deployment settings and the planned HTTPS Edge Function -> Supabase -> Realtime data path.
 
-The cloud ingestion schema, device registry, and authenticated Edge Function are
-under `supabase/`. See `tools/VPS_SIMULATOR.md` for the Ubuntu VPS test client
-and versioned request contract.
+The cloud ingestion schema, device registry, and authenticated Edge Function are under `supabase/`. See `tools/VPS_SIMULATOR.md` for the Ubuntu VPS test client and versioned request contract.
 
-## TLV Protocol v2
+## TLV Protocol v1.1
 
-64-byte maximum packet: 29-byte fixed header + up to 33 bytes TLV + 2-byte CRC-16.
+The canonical protocol document is:
 
-| Offset | Size | Field |
-|--------|------|-------|
-| 0 | 1 | Protocol version (0x02) |
-| 1-2 | 2 | Device ID |
-| 3-6 | 4 | Message sequence |
-| 7-10 | 4 | Unix timestamp |
-| 11 | 1 | Status |
-| 12-13 | 2 | Flags (pkt type + feature bits) |
-| 14-17 | 4 | Latitude x10^7 |
-| 18-21 | 4 | Longitude x10^7 |
-| 22-23 | 2 | Battery (mV) |
-| 24-25 | 2 | GPS accuracy (m) |
-| 26-27 | 2 | Fix age (s) |
-| 28 | 1 | TLV payload length |
+```text
+docs/TLV_PROTOCOL_V1_1.md
+```
 
-AES-128 encryption via RadioLib. CRC-16/CCITT-FALSE integrity check.
+The system is moving away from production JSON telemetry. JSON remains useful for debugging, logs, exports and admin APIs, but LoRa and cellular telemetry should use the compact binary TLV packet.
+
+Current packet shape:
+
+```text
+[32-byte fixed header][0-30 bytes TLV][2-byte CRC16]
+```
+
+Packet size:
+
+```text
+minimum = 34 bytes
+maximum = 64 bytes
+```
+
+### Fixed header summary
+
+| Offset | Size | Field | Type | Notes |
+|---:|---:|---|---|---|
+| 0 | 1 | `ver` | u8 | Protocol version |
+| 1 | 4 | `device_guid32` | u32 | Immutable collar identity |
+| 5 | 2 | `msg_seq_id` | u16 | Per-device sequence |
+| 7 | 4 | `time_unix` | u32 | UTC timestamp |
+| 11 | 1 | `state` | u8 | Packed status + power profile |
+| 12 | 1 | `flags` | u8 | Core bitfield |
+| 13 | 4 | `lat_e7` | i32 | Latitude x 10000000 |
+| 17 | 4 | `lon_e7` | i32 | Longitude x 10000000 |
+| 21 | 2 | `batt_mV` | u16 | Battery voltage |
+| 23 | 2 | `acc_m` | u16 | Accuracy in metres |
+| 25 | 2 | `dist_home_m` | u16 | Distance from home |
+| 27 | 1 | `tx_reason` | u8 | 8-value reason enum |
+| 28 | 1 | `tlv_len` | u8 | 0-30 TLV bytes |
+| 29 | 3 | `hdr_rsvd` | u8[3] | Reserved, set 0 |
+
+Key changes from the older v2 notes:
+
+- `device_guid32` replaces the previous 16-bit device ID.
+- `msg_seq_id` is now 16-bit to save bytes.
+- No boot ID is included yet.
+- `state` packs `status` and `power_profile` into one byte.
+- `flags` is now one byte, not two.
+- Absolute latitude and longitude remain i32 e7 values.
+- `dist_home_m` is now in the header.
+- `sat_count`, `hdop_x10`, `course_deg` and `fix_age_s` are optional TLVs.
+- RESTful HTTPS POST is the v1 cloud transport.
+
+CRC-16/CCITT-FALSE is appended at the end of the packet and calculated over the header plus TLVs.
 
 ## Message Flow
 
-```
-Collar ──LoRa──▶ Hub ──┬── log to CSV (with msg_seq for traceability)
-                       ├── display on local web GUI via SSE
-                       └── relay to Cloud via WiFi
-
-Collar ──LTE-M──▶ Cloud (every Nth cycle, same packet, same msg_seq)
+```text
+Collar --LoRa--> Hub --REST POST--> Cloud
+Collar --LTE-M/Cat-M1 REST POST--> Cloud
 ```
 
-Both paths preserve the original `(device_id, msg_seq)` from the TLV header. The hub relays all received packets upstream without deduplication — redundancy is intentional for reliability. **Deduplication is handled at the cloud VPS** using `(device_id, msg_seq)` as a UNIQUE constraint, so if the same message arrives via both WiFi relay and cellular, the duplicate is safely discarded.
+Both paths preserve the original `(device_guid32, msg_seq_id)` from the TLV header. The hub or puck should relay received packets upstream without changing the collar observation. Redundancy is intentional for reliability.
 
-Hub CSV log format: `timestamp, device_id, msg_seq, status, lat, lon, batt_mV, rssi, snr, profile`
+Deduplication is handled in the cloud using:
+
+```text
+(device_guid32, msg_seq_id)
+```
+
+Example dedup key:
+
+```text
+device_guid32 = 0x00A7F134
+msg_seq_id    = 10542
+key           = 00A7F134:10542
+```
+
+Hub CSV or debug log format should be derived from decoded TLV fields, not treated as the production on-air format.
 
 ## Building
 
@@ -173,7 +216,7 @@ pio run -e hub -t upload
 
 | Profile | TX Power | Interval | Cellular | Remarks |
 |---------|----------|----------|----------|---------|
-| **Normal** | 19 dBm | 10 min | 1:10 | Daily tracking — balanced power and update frequency |
-| **PowerSave** | 10 dBm | 30 min | 1:30 | At home or battery conservation — reduced TX power and longer sleep |
-| **Active Find** | 19 dBm | 1 min | 1:5 | Cat is outside geofence or user is actively searching — frequent updates to aid location |
-| **Emergency Lost** | 22 dBm | 30 s | 1:3 | User is close to the cat and needs constant updates for retrieval — LED flashes and buzzer beeps to aid location (2h max, then falls back to Active Find) |
+| **Normal** | 19 dBm | 10 min | 1:10 | Daily tracking, balanced power and update frequency |
+| **PowerSave** | 10 dBm | 30 min | 1:30 | At home or battery conservation, reduced TX power and longer sleep |
+| **Active Find** | 19 dBm | 1 min | 1:5 | Cat is outside geofence or user is actively searching |
+| **Emergency Lost** | 22 dBm | 30 s | 1:3 | User needs frequent updates for retrieval, then fallback to Active Find |
