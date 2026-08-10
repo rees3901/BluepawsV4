@@ -140,7 +140,7 @@ export function Dashboard({ householdId, initialLiveDevices, liveTelemetryError,
         if (!tutorialMode && !trailHistory[device.id]) {
           void loadDeviceTrail(device.id)
             .then((points) => setTrailHistory((history) => ({ ...history, [device.id]: points })))
-            .catch(() => setToast("Unable to load this device's seven-day trail"));
+            .catch(() => setToast("Unable to load this device's recent trail"));
         }
       }
       return next;
