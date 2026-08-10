@@ -2,6 +2,8 @@ export type CollarStatus = "Home" | "Out" | "Lost" | "Error";
 export type PowerProfile = "Normal" | "PowerSave" | "Active" | "Active Find" | "Emergency Lost";
 export type TelemetryError = "None" | "GPS" | "RF" | "Cellular" | "Module";
 
+export const VISIBLE_TRAIL_POINT_LIMIT = 4;
+
 export interface TelemetryDevice {
   id: number;
   name: string;

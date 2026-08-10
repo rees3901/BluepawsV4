@@ -2,7 +2,14 @@
 
 import L from "leaflet";
 import { useEffect, useRef } from "react";
-import type { DeviceAction, DeviceAvatar, MapCommand, TelemetryDevice, TrailPoint } from "@/types/telemetry";
+import {
+  VISIBLE_TRAIL_POINT_LIMIT,
+  type DeviceAction,
+  type DeviceAvatar,
+  type MapCommand,
+  type TelemetryDevice,
+  type TrailPoint,
+} from "@/types/telemetry";
 
 interface TrackingMapProps {
   devices: TelemetryDevice[];
@@ -177,7 +184,7 @@ export default function TrackingMap(props: TrackingMapProps) {
 
       const points = trailPointsRef.current.get(device.id) ?? [];
       points.push(latLng);
-      if (points.length > 100) points.shift();
+      while (points.length > VISIBLE_TRAIL_POINT_LIMIT) points.shift();
       trailPointsRef.current.set(device.id, points);
       let trail = trailsRef.current.get(device.id);
       if (!trail) {
@@ -206,19 +213,22 @@ export default function TrackingMap(props: TrackingMapProps) {
       const avatar = avatars[deviceId];
       if (!device || !avatar || historicalPoints.length === 0) return;
 
-      const points: L.LatLngExpression[] = historicalPoints.map((point) => [point.lat, point.lon]);
+      const points: L.LatLngExpression[] = historicalPoints
+        .slice(-VISIBLE_TRAIL_POINT_LIMIT)
+        .map((point) => [point.lat, point.lon]);
       const lastPoint = historicalPoints.at(-1);
       if (!lastPoint || lastPoint.lat !== device.lat || lastPoint.lon !== device.lon) {
         points.push([device.lat, device.lon]);
       }
-      trailPointsRef.current.set(deviceId, points);
+      const visiblePoints = points.slice(-VISIBLE_TRAIL_POINT_LIMIT);
+      trailPointsRef.current.set(deviceId, visiblePoints);
 
       let trail = trailsRef.current.get(deviceId);
       if (!trail) {
-        trail = L.polyline(points, { color: avatar.color, weight: 2, opacity: 0.75, dashArray: "6,5" });
+        trail = L.polyline(visiblePoints, { color: avatar.color, weight: 2, opacity: 0.75, dashArray: "6,5" });
         trailsRef.current.set(deviceId, trail);
       } else {
-        trail.setLatLngs(points);
+        trail.setLatLngs(visiblePoints);
       }
       if (trailIds.has(deviceId) && !map.hasLayer(trail)) trail.addTo(map);
     });
