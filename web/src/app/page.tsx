@@ -1,5 +1,5 @@
 import { connection } from "next/server";
-import { redirect } from "next/navigation";
+import { AuthBootstrap } from "@/components/AuthBootstrap";
 import { Dashboard } from "@/components/Dashboard";
 import { getLiveTelemetrySnapshot } from "@/lib/liveTelemetry";
 import { createClient } from "@/lib/supabase/server";
@@ -9,7 +9,7 @@ export default async function Home() {
   const supabase = await createClient();
   const { data: identity } = await supabase.auth.getClaims();
 
-  if (!identity?.claims?.sub) redirect("/login");
+  if (!identity?.claims?.sub) return <AuthBootstrap />;
 
   const snapshot = await getLiveTelemetrySnapshot();
   const userEmail = typeof identity.claims.email === "string" ? identity.claims.email : null;
