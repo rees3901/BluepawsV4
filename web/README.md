@@ -62,7 +62,9 @@ Hub/collar service
 
 The Supabase URL and publishable key are public browser configuration and have
 safe production defaults in `.env.production`; Vercel environment variables can
-override them. The service-role key and per-device bearer tokens must never be
+override them. `NEXT_PUBLIC_SITE_URL` identifies the one canonical production
+origin used by Auth; the stable Vercel aliases redirect there before an OAuth
+flow can begin. The service-role key and per-device bearer tokens must never be
 added to `NEXT_PUBLIC_` variables or committed.
 
 ### Authentication launch checklist
