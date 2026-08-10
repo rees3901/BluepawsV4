@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
+import { getAuthCallbackUrl } from "@/lib/authRedirect";
 import { createClient } from "@/lib/supabase/client";
 
 type LoginStep = "email" | "code";
@@ -21,7 +22,7 @@ export function LoginForm() {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
+        redirectTo: getAuthCallbackUrl(window.location.origin),
       },
     });
 
@@ -40,7 +41,7 @@ export function LoginForm() {
       email: email.trim(),
       options: {
         shouldCreateUser: true,
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
+        emailRedirectTo: getAuthCallbackUrl(window.location.origin),
       },
     });
 
