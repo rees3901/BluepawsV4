@@ -3,6 +3,7 @@
 import L from "leaflet";
 import { useEffect, useRef } from "react";
 import { emojiImageUrl } from "@/lib/emoji";
+import { formatMapCoordinates, googleMapsUrl, mapLocationShareText } from "@/lib/mapLocation";
 import { normalizeMarkerColor } from "@/lib/markerColor";
 import { appendTrailPoint, VISIBLE_TRAIL_POINT_LIMIT, type TrailLatLng } from "@/lib/trailPoints";
 import {
@@ -54,7 +55,7 @@ export default function TrackingMap(props: TrackingMapProps) {
     const markers = markersRef.current;
     const trails = trailsRef.current;
     const trailPoints = trailPointsRef.current;
-    const map = L.map("map", { center: [51.505, -0.09], zoom: 13, zoomControl: false });
+    const map = L.map("map", { center: [51.505, -0.09], zoom: 13, zoomControl: false, tapHold: true });
     mapRef.current = map;
 
     const street = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -108,24 +109,49 @@ export default function TrackingMap(props: TrackingMapProps) {
 
     const measureLayers: L.Layer[] = [];
     const measurePoints: L.LatLng[] = [];
+    const temporaryPins = new Map<number, L.Marker>();
+    let nextTemporaryPinId = 1;
+    let measureButton: HTMLButtonElement | null = null;
     let measuring = false;
+
+    const clearMeasurement = () => {
+      measureLayers.splice(0).forEach((layer) => map.removeLayer(layer));
+      measurePoints.splice(0);
+    };
+
+    const setMeasuring = (active: boolean) => {
+      measuring = active;
+      measureButton?.classList.toggle("active", active);
+      map.getContainer().style.cursor = active ? "crosshair" : "";
+      if (!active) clearMeasurement();
+    };
+
+    const addMeasurementPoint = (point: L.LatLng) => {
+      measurePoints.push(point);
+      const dot = L.circleMarker(point, { radius: 4, color: "#1d9bf0", fillOpacity: 1 }).addTo(map);
+      measureLayers.push(dot);
+      if (measurePoints.length < 2) return;
+
+      const line = L.polyline(measurePoints, { color: "#1d9bf0", weight: 2, dashArray: "5,5" }).addTo(map);
+      measureLayers.push(line);
+      const total = measurePoints.slice(1).reduce((sum, currentPoint, index) => sum + currentPoint.distanceTo(measurePoints[index]), 0);
+      const label = L.marker(point, {
+        interactive: false,
+        icon: L.divIcon({ className: "measure-label", html: formatDistance(total), iconSize: undefined }),
+      }).addTo(map);
+      measureLayers.push(label);
+    };
+
     const MeasureControl = L.Control.extend({
       options: { position: "topleft" },
       onAdd() {
         const button = L.DomUtil.create("button", "leaflet-map-btn") as HTMLButtonElement;
+        measureButton = button;
         button.type = "button";
         button.title = "Measure distance (click points on map)";
         button.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="1" y="7" width="22" height="10" rx="1"/><path d="M5 7v5M9 7v3M13 7v5M17 7v3M21 7v5"/></svg>';
         L.DomEvent.disableClickPropagation(button);
-        L.DomEvent.on(button, "click", () => {
-          measuring = !measuring;
-          button.classList.toggle("active", measuring);
-          map.getContainer().style.cursor = measuring ? "crosshair" : "";
-          if (!measuring) {
-            measureLayers.splice(0).forEach((layer) => map.removeLayer(layer));
-            measurePoints.splice(0);
-          }
-        });
+        L.DomEvent.on(button, "click", () => setMeasuring(!measuring));
         return button;
       },
     });
@@ -148,34 +174,123 @@ export default function TrackingMap(props: TrackingMapProps) {
     });
     map.on("click", (event) => {
       if (!measuring) return;
-      measurePoints.push(event.latlng);
-      const dot = L.circleMarker(event.latlng, { radius: 4, color: "#1d9bf0", fillOpacity: 1 }).addTo(map);
-      measureLayers.push(dot);
-      if (measurePoints.length > 1) {
-        const line = L.polyline(measurePoints, { color: "#1d9bf0", weight: 2, dashArray: "5,5" }).addTo(map);
-        measureLayers.push(line);
-        const total = measurePoints.slice(1).reduce((sum, point, index) => sum + point.distanceTo(measurePoints[index]), 0);
-        const label = L.marker(event.latlng, { interactive: false, icon: L.divIcon({ className: "measure-label", html: formatDistance(total), iconSize: undefined }) }).addTo(map);
-        measureLayers.push(label);
+      addMeasurementPoint(event.latlng);
+    });
+
+    const showMapNotice = (point: L.LatLng, message: string) => {
+      const notice = L.tooltip({ className: "map-action-notice", direction: "top", opacity: 1 })
+        .setLatLng(point)
+        .setContent(message)
+        .addTo(map);
+      window.setTimeout(() => {
+        if (map.hasLayer(notice)) map.removeLayer(notice);
+      }, 1800);
+    };
+
+    const copyLocation = async (point: L.LatLng) => {
+      try {
+        if (!navigator.clipboard) throw new Error("Clipboard API unavailable");
+        await navigator.clipboard.writeText(mapLocationShareText(point.lat, point.lng));
+        showMapNotice(point, "Location copied");
+      } catch {
+        showMapNotice(point, "Copy unavailable");
       }
+    };
+
+    const shareLocation = async (point: L.LatLng) => {
+      if (!navigator.share) {
+        await copyLocation(point);
+        return;
+      }
+      try {
+        await navigator.share({
+          title: "Bluepaws map location",
+          text: formatMapCoordinates(point.lat, point.lng, 6),
+          url: googleMapsUrl(point.lat, point.lng),
+        });
+        showMapNotice(point, "Location shared");
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        await copyLocation(point);
+      }
+    };
+
+    const addTemporaryPin = (point: L.LatLng) => {
+      const pinId = nextTemporaryPinId++;
+      const marker = L.marker(point, {
+        alt: "Temporary meeting point",
+        icon: temporaryPinIcon(),
+        keyboard: true,
+        title: "Temporary meeting point",
+        zIndexOffset: 900,
+      }).addTo(map);
+      marker.bindPopup(temporaryPinPopupHtml(point, pinId));
+      temporaryPins.set(pinId, marker);
+      marker.openPopup();
+    };
+
+    map.on("contextmenu", (event) => {
+      L.popup({ className: "map-context-popup", closeButton: true, maxWidth: 290 })
+        .setLatLng(event.latlng)
+        .setContent(contextMenuHtml(event.latlng))
+        .openOn(map);
     });
 
     const mapContainer = map.getContainer();
-    const handlePopupAction = (event: MouseEvent) => {
-      const target = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-map-action]");
-      if (!target) return;
-      const device = devicesRef.current.find((item) => item.id === Number(target.dataset.deviceId));
-      if (device) actionRef.current(device, target.dataset.mapAction as DeviceAction);
+    const handleMapAction = (event: MouseEvent) => {
+      const eventTarget = event.target as HTMLElement;
+      const deviceAction = eventTarget.closest<HTMLButtonElement>("[data-map-action]");
+      if (deviceAction) {
+        const device = devicesRef.current.find((item) => item.id === Number(deviceAction.dataset.deviceId));
+        if (device) actionRef.current(device, deviceAction.dataset.mapAction as DeviceAction);
+        return;
+      }
+
+      const locationAction = eventTarget.closest<HTMLElement>("[data-location-action]");
+      if (!locationAction) return;
+      event.preventDefault();
+
+      const action = locationAction.dataset.locationAction;
+      const pinId = Number(locationAction.dataset.pinId);
+      if (action === "remove-pin" && Number.isInteger(pinId)) {
+        const marker = temporaryPins.get(pinId);
+        if (marker) map.removeLayer(marker);
+        temporaryPins.delete(pinId);
+        map.closePopup();
+        return;
+      }
+
+      const latitude = Number(locationAction.dataset.latitude);
+      const longitude = Number(locationAction.dataset.longitude);
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
+      const point = L.latLng(latitude, longitude);
+
+      if (action === "drop-pin") {
+        addTemporaryPin(point);
+      } else if (action === "copy") {
+        map.closePopup();
+        void copyLocation(point);
+      } else if (action === "share") {
+        map.closePopup();
+        void shareLocation(point);
+      } else if (action === "measure") {
+        map.closePopup();
+        clearMeasurement();
+        setMeasuring(true);
+        addMeasurementPoint(point);
+        showMapNotice(point, "Choose the next measurement point");
+      }
     };
-    mapContainer.addEventListener("click", handlePopupAction);
+    mapContainer.addEventListener("click", handleMapAction);
 
     return () => {
-      mapContainer.removeEventListener("click", handlePopupAction);
+      mapContainer.removeEventListener("click", handleMapAction);
       map.remove();
       mapRef.current = null;
       markers.clear();
       trails.clear();
       trailPoints.clear();
+      temporaryPins.clear();
     };
   }, []);
 
@@ -306,7 +421,33 @@ function popupHtml(device: TelemetryDevice, avatar: DeviceAvatar) {
   const signal = device.rssi === null || device.snr === null ? "Not reported" : `${device.rssi} dBm / ${device.snr} dB`;
   const battery = device.batteryPercent === undefined || device.batteryPercent === null ? `${(device.batt / 1000).toFixed(2)} V` : `${device.batteryPercent}%`;
   const source = device.source ? `<span class="label">Source</span><span class="value">${escapeHtml(device.source)}</span>` : "";
-  return `<div class="popup-content"><div class="popup-header">${avatarHtml(avatar, "popup-avatar")}<strong>${name}</strong><span class="card-status status-${device.status.toLowerCase()}" style="margin-left:6px;font-size:10px">${device.status}</span></div><div class="popup-grid"><span class="label">Signal</span><span class="value">${signal}</span><span class="label">Battery</span><span class="value">${battery}</span><span class="label">Profile</span><span class="value">${escapeHtml(device.profile)}</span>${source}</div><div class="card-actions popup-actions"><button class="btn-action btn-jump" data-map-action="jump" data-device-id="${device.id}">↗ Jump To</button><button class="btn-action btn-follow" data-map-action="follow" data-device-id="${device.id}">● Follow</button><button class="btn-action btn-trail" data-map-action="trail" data-device-id="${device.id}">⌁ Trail</button><button class="btn-action btn-find" data-map-action="find" data-device-id="${device.id}">♟ Find Alert</button><button class="btn-action btn-cmd" data-map-action="command" data-device-id="${device.id}">⌘ Cmd</button></div></div>`;
+  const coordinates = formatMapCoordinates(device.lat, device.lon);
+  const mapsUrl = googleMapsUrl(device.lat, device.lon);
+  return `<div class="popup-content"><div class="popup-header">${avatarHtml(avatar, "popup-avatar")}<strong>${name}</strong><span class="card-status status-${device.status.toLowerCase()}" style="margin-left:6px;font-size:10px">${device.status}</span></div><div class="popup-grid"><span class="label">Coordinates</span><span class="value"><a class="card-coords card-coords-link" href="${mapsUrl}" target="_blank" rel="noopener noreferrer" title="Open this location in Google Maps">${coordinates}</a></span><span class="label">Signal</span><span class="value">${signal}</span><span class="label">Battery</span><span class="value">${battery}</span><span class="label">Profile</span><span class="value">${escapeHtml(device.profile)}</span>${source}</div><div class="card-actions popup-actions"><button class="btn-action btn-jump" data-map-action="jump" data-device-id="${device.id}">↗ Jump To</button><button class="btn-action btn-follow" data-map-action="follow" data-device-id="${device.id}">● Follow</button><button class="btn-action btn-trail" data-map-action="trail" data-device-id="${device.id}">⌁ Trail</button><button class="btn-action btn-find" data-map-action="find" data-device-id="${device.id}">♟ Find Alert</button><button class="btn-action btn-cmd" data-map-action="command" data-device-id="${device.id}">⌘ Cmd</button></div></div>`;
+}
+
+function contextMenuHtml(point: L.LatLng) {
+  const locationData = locationDataAttributes(point);
+  return `<div class="map-context-menu"><div class="map-context-heading">Map location</div><a class="map-context-coordinates" href="${googleMapsUrl(point.lat, point.lng)}" target="_blank" rel="noopener noreferrer" title="Open in Google Maps">${formatMapCoordinates(point.lat, point.lng, 6)}</a><div class="map-context-actions"><button type="button" data-location-action="drop-pin" ${locationData}>📍 Drop temporary pin</button><button type="button" data-location-action="copy" ${locationData}>⧉ Copy location</button><button type="button" data-location-action="share" ${locationData}>↗ Share location</button><a href="${googleMapsUrl(point.lat, point.lng)}" target="_blank" rel="noopener noreferrer">◉ Open in Google Maps</a><button type="button" data-location-action="measure" ${locationData}>↔ Measure from here</button></div><p class="map-context-hint">Right-click or long-press another point for more options.</p></div>`;
+}
+
+function temporaryPinPopupHtml(point: L.LatLng, pinId: number) {
+  const locationData = locationDataAttributes(point);
+  return `<div class="map-context-menu temporary-pin-card"><div class="map-context-heading">Temporary meeting point</div><a class="map-context-coordinates" href="${googleMapsUrl(point.lat, point.lng)}" target="_blank" rel="noopener noreferrer">${formatMapCoordinates(point.lat, point.lng, 6)}</a><div class="map-context-actions"><button type="button" data-location-action="copy" ${locationData}>⧉ Copy location</button><button type="button" data-location-action="share" ${locationData}>↗ Share location</button><a href="${googleMapsUrl(point.lat, point.lng)}" target="_blank" rel="noopener noreferrer">◉ Open in Google Maps</a><button type="button" data-location-action="measure" ${locationData}>↔ Measure from here</button><button type="button" class="danger" data-location-action="remove-pin" data-pin-id="${pinId}">× Remove pin</button></div><p class="map-context-hint">This pin stays only for this browser session.</p></div>`;
+}
+
+function locationDataAttributes(point: L.LatLng) {
+  return `data-latitude="${point.lat.toFixed(6)}" data-longitude="${point.lng.toFixed(6)}"`;
+}
+
+function temporaryPinIcon() {
+  return L.divIcon({
+    className: "temporary-map-pin-icon",
+    html: '<div class="temporary-map-pin" aria-hidden="true"><span></span></div>',
+    iconSize: [30, 42],
+    iconAnchor: [15, 41],
+    popupAnchor: [0, -37],
+  });
 }
 
 function avatarHtml(avatar: DeviceAvatar, className: string) {

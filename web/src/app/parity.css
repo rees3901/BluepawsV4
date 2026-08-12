@@ -928,6 +928,11 @@ body.light .console-log {
     color: var(--text-primary);
 }
 
+.popup-grid .card-coords-link {
+    display: inline-block;
+    overflow-wrap: anywhere;
+}
+
 /* ── Popup Action Buttons ── */
 .popup-actions {
     border-top: 1px solid var(--border);
@@ -943,6 +948,131 @@ body.light .console-log {
 .popup-content .signal-indicator {
     transform: scale(0.85);
     transform-origin: left center;
+}
+
+/* ── Map Context Menu and Temporary Pins ── */
+.map-context-popup .leaflet-popup-content-wrapper {
+    min-width: 250px;
+}
+
+.map-context-menu {
+    min-width: 226px;
+}
+
+.map-context-heading {
+    color: var(--text-primary);
+    font-size: 0.82rem;
+    font-weight: 700;
+    margin-bottom: 2px;
+}
+
+.map-context-coordinates {
+    display: inline-block;
+    color: var(--accent);
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 0.68rem;
+    margin-bottom: 8px;
+    overflow-wrap: anywhere;
+    text-decoration: none;
+}
+
+.map-context-coordinates:hover {
+    text-decoration: underline;
+}
+
+.map-context-actions {
+    display: grid;
+    gap: 4px;
+}
+
+.map-context-actions button,
+.map-context-actions a {
+    align-items: center;
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    color: var(--text-primary);
+    cursor: pointer;
+    display: flex;
+    font-family: inherit;
+    font-size: 0.7rem;
+    line-height: 1.25;
+    min-height: 32px;
+    padding: 6px 8px;
+    text-align: left;
+    text-decoration: none;
+    transition: border-color 0.15s, color 0.15s, background 0.15s;
+    width: 100%;
+}
+
+.map-context-actions button:hover,
+.map-context-actions a:hover {
+    background: rgba(29, 155, 240, 0.1);
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.map-context-actions .danger:hover {
+    background: rgba(255, 23, 68, 0.1);
+    border-color: var(--danger);
+    color: var(--danger);
+}
+
+.map-context-hint {
+    color: var(--text-secondary);
+    font-size: 0.62rem;
+    line-height: 1.35;
+    margin: 7px 0 0;
+}
+
+.temporary-map-pin {
+    background: var(--accent);
+    border: 2px solid #fff;
+    border-radius: 50% 50% 50% 0;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+    height: 26px;
+    position: relative;
+    transform: rotate(-45deg);
+    width: 26px;
+}
+
+.temporary-map-pin span {
+    background: #fff;
+    border-radius: 50%;
+    height: 8px;
+    left: 7px;
+    position: absolute;
+    top: 7px;
+    width: 8px;
+}
+
+.map-action-notice {
+    background: rgba(15, 25, 35, 0.92);
+    border: 1px solid var(--accent);
+    border-radius: 5px;
+    box-shadow: var(--shadow);
+    color: #fff;
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 5px 8px;
+}
+
+.map-action-notice::before {
+    border-top-color: var(--accent) !important;
+}
+
+body.light .map-action-notice {
+    background: rgba(255, 255, 255, 0.96);
+    color: var(--text-primary);
+}
+
+@media (max-width: 768px) {
+    .map-context-actions button,
+    .map-context-actions a {
+        font-size: 0.76rem;
+        min-height: 42px;
+        padding: 9px 10px;
+    }
 }
 
 /* ── Cursor Coordinate Display ── */
