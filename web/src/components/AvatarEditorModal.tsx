@@ -1,22 +1,24 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import EmojiPicker, { Emoji, EmojiStyle, Theme, type EmojiClickData } from "emoji-picker-react";
 import { prepareAvatarImage, validateAvatarFile } from "@/lib/avatarImage";
 import { saveDeviceAppearance } from "@/lib/deviceAppearances";
+import { emojiToUnified } from "@/lib/emoji";
 import type { DeviceAvatar, TelemetryDevice } from "@/types/telemetry";
 
-const EMOJIS = ["🐱", "🐶", "🐰", "🐾", "🦊", "🐹", "🦉", "🐼", "🐈", "🐕", "🦜", "🐢"];
 const COLORS = ["#1d9bf0", "#ff6b35", "#a855f7", "#22c55e", "#f97316", "#06b6d4", "#84cc16", "#ec4899"];
 
 interface AvatarEditorModalProps {
   device: TelemetryDevice;
   householdId: string;
   avatar: DeviceAvatar;
+  theme: "dark" | "light";
   onClose: () => void;
   onSaved: () => Promise<void>;
 }
 
-export function AvatarEditorModal({ device, householdId, avatar, onClose, onSaved }: AvatarEditorModalProps) {
+export function AvatarEditorModal({ device, householdId, avatar, theme, onClose, onSaved }: AvatarEditorModalProps) {
   const [kind, setKind] = useState<"emoji" | "photo">(avatar.kind);
   const [emoji, setEmoji] = useState(avatar.emoji);
   const [color, setColor] = useState(avatar.color);
@@ -94,10 +96,23 @@ export function AvatarEditorModal({ device, householdId, avatar, onClose, onSave
         </div>
 
         {kind === "emoji" ? (
-          <div className="avatar-emoji-grid" aria-label="Choose an emoji">
-            {EMOJIS.map((option) => (
-              <button key={option} type="button" className={emoji === option ? "active" : ""} aria-label={`Use ${option}`} aria-pressed={emoji === option} onClick={() => setEmoji(option)}>{option}</button>
-            ))}
+          <div className="avatar-emoji-picker">
+            <div className="avatar-selected-emoji" aria-live="polite">
+              <span className="avatar-selected-emoji-preview" style={{ borderColor: color }}>
+                <Emoji unified={emojiToUnified(emoji)} emojiStyle={EmojiStyle.GOOGLE} size={25} />
+              </span>
+              <span><strong>Selected marker</strong><small>Search below or browse by category</small></span>
+            </div>
+            <EmojiPicker
+              width="100%"
+              height={340}
+              theme={theme === "dark" ? Theme.DARK : Theme.LIGHT}
+              emojiStyle={EmojiStyle.GOOGLE}
+              searchPlaceholder="Search emojis and symbols"
+              lazyLoadEmojis
+              previewConfig={{ showPreview: false }}
+              onEmojiClick={(choice: EmojiClickData) => setEmoji(choice.emoji)}
+            />
           </div>
         ) : (
           <div className="avatar-photo-editor">

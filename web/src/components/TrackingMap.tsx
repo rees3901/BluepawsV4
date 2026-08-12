@@ -2,6 +2,7 @@
 
 import L from "leaflet";
 import { useEffect, useRef } from "react";
+import { emojiImageUrl } from "@/lib/emoji";
 import { appendTrailPoint, VISIBLE_TRAIL_POINT_LIMIT, type TrailLatLng } from "@/lib/trailPoints";
 import {
   type DeviceAction,
@@ -276,7 +277,7 @@ function avatarHtml(avatar: DeviceAvatar, className: string) {
   if (avatar.kind === "photo" && avatar.photoUrl) {
     return `<img class="${className} avatar-image" src="${escapeHtml(avatar.photoUrl)}" alt="">`;
   }
-  return `<span class="${className}">${escapeHtml(avatar.emoji)}</span>`;
+  return `<img class="${className} avatar-emoji-image" src="${emojiImageUrl(avatar.emoji)}" alt="${escapeHtml(avatar.emoji)}">`;
 }
 
 function fitMarkers(map: L.Map, markers: Map<number, L.Marker>) {
