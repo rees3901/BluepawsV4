@@ -1,25 +1,39 @@
 # Bluepaws Cat Tracker TLV Telemetry Protocol v1.1
 
-Status: locked packet-header decision, TLV section still under review  
-Last updated: 2026-08-12  
-Scope: collar telemetry packet, LoRa relay path, LTE-M/Cat-M1 direct path, Supabase Edge Function ingestion
+Status: locked packet-header decision, TLV set and transport wrapper decisions under active review  
+Last updated: 2026-08-13  
+Scope: collar telemetry packet, LoRa collar-to-hub path, LTE-M/Cat-M1 direct path, hub relay path, Supabase Edge Function ingestion
 
 ## 1. Purpose
 
-Bluepaws V4 uses a compact binary telemetry packet instead of JSON for the collar's over-the-air and cellular observation payload. The goal is to keep the packet small enough for LoRa while still carrying the minimum data required to identify, authenticate, validate, store and display a collar location fix.
+Bluepaws V4 uses a compact binary telemetry packet instead of JSON for the collar's immutable observation payload. The aim is to keep the collar packet small enough for LoRa while still carrying the minimum data required to identify, authenticate, validate, store, deduplicate and display a location fix.
 
-The packet produced by the collar is an immutable observation packet. The same byte sequence should be sent whether the packet travels:
+The collar-generated packet is deliberately separated from transport metadata.
+
+The collar packet answers:
+
+```text
+What did the collar report?
+```
+
+The transport wrapper answers:
+
+```text
+How did this packet reach the cloud, and what was the link quality?
+```
+
+This separation is critical because the same collar observation may arrive through more than one path:
 
 ```text
 Collar -> LoRa -> Home Hub / Relay -> HTTPS -> Supabase Edge Function
 Collar -> LTE-M / Cat-M1 -> HTTPS -> Supabase Edge Function
 ```
 
-The relay must not alter the original collar packet. Relay-specific metadata such as RSSI, SNR, gateway ID, ingress path and gateway receive time belongs outside the collar packet in the REST wrapper or in separate database metadata.
+The inner collar packet must remain byte-for-byte identical across both paths.
 
 ## 2. Current packet structure
 
-The locked v1.1 packet structure is:
+The locked v1.1 collar packet structure is:
 
 ```text
 [32-byte fixed header][0-24 byte collar TLV section][8-byte auth_tag_8]
@@ -50,7 +64,7 @@ The HMAC covers:
 
 It does not cover itself.
 
-Reserved header bytes must be set to zero before calculating the HMAC. If reserved bytes differ between transmission paths, the auth tag will differ and duplicate detection by raw packet hash will be weakened.
+Reserved header bytes must be set to zero before calculating the HMAC. If reserved bytes differ between transmission paths, the authentication tag will differ and the raw packet hash will no longer match.
 
 The authentication tag provides integrity and authenticity. It detects tampering and unauthorised packet injection. It does not encrypt the packet contents.
 
@@ -74,7 +88,7 @@ No floats, strings, JSON keys or human-readable timestamps are transmitted insid
 
 | Offset | Size | Field | Type | Description |
 |---:|---:|---|---|---|
-| 0 | 1 | `ver` | `u8` | Protocol version. Use `1` for this v1.1 layout unless the firmware explicitly bumps it. |
+| 0 | 1 | `ver` | `u8` | Protocol version. Use `1` for this v1.1 layout unless firmware explicitly bumps it. |
 | 1 | 2 | `device_guid16` | `u16` | Immutable 16-bit collar identity. Provisioned and registered in the backend. |
 | 3 | 2 | `msg_seq_id` | `u16` | Per-device message sequence. Used with `device_guid16` for deduplication. |
 | 5 | 4 | `time_unix` | `u32` | UTC packet/fix timestamp in seconds. |
@@ -157,7 +171,7 @@ lon = -2.2394678 -> lon_e7 = -22394678
 
 ### Removed from fixed header
 
-`dist_home_m` is intentionally not in the immutable collar packet. Distance from home/search hub is derived intelligence and should be calculated by the hub, cloud, or app using the current reference point. This avoids stale or misleading distance data if the hub moves or becomes portable during a search.
+`dist_home_m` is intentionally not in the immutable collar packet. Distance from home or search hub is derived intelligence and should be calculated by the hub, cloud, or app using the current reference point. This avoids stale or misleading distance data if the hub moves or becomes portable during a search.
 
 ## 7. Status enum
 
@@ -247,7 +261,53 @@ Rules:
 6. The HMAC is appended immediately after the last TLV byte.
 7. Transport-specific metadata must not be added inside the immutable collar TLV section.
 
-## 12. Transport metadata separation
+## 12. Current selected collar TLVs
+
+These TLVs are collar-generated and may be included inside the authenticated collar packet.
+
+| Type | Name | Length | Value type | Total TLV cost | Purpose |
+|---:|---|---:|---|---:|---|
+| `0x04` | `fw_ver` | 2 | `u16` | 4 bytes | Firmware version, suggested encoding `(major << 8) | minor`. |
+| `0x06` | `reset_reason` | 1 | `u8` | 3 bytes | Reset/cold-start diagnostic. Most useful with `tx_reason = BOOT`. |
+| `0x10` | `uptime_s` | 4 | `u32` | 6 bytes | Seconds since boot. Useful for reset detection and diagnostics. |
+| `0x13` | `activity_score` | 1 | `u8` | 3 bytes | Simple activity/movement score from accelerometer or motion logic. |
+| `0x20` | `acked_msg_seq_id` | 2 | `u16` | 4 bytes | Sequence number of command/message being acknowledged. |
+
+Current selected TLV total if all are sent together:
+
+```text
+4 + 3 + 6 + 3 + 4 = 20 bytes
+```
+
+Current remaining TLV headroom:
+
+```text
+24 - 20 = 4 bytes
+```
+
+`command_id` was deliberately omitted. The collar should normally ACK the sequence number of the command/message it received. Supabase already knows what command was associated with that sequence number.
+
+`speed_cms` and `ack_status` were also omitted to keep the selected set under budget. Speed can be estimated by backend position deltas. ACK status is unnecessary for the first version because the ACK mainly confirms receipt, and the next telemetry packet confirms whether the state actually changed.
+
+## 13. TLVs omitted from the collar packet for now
+
+| Omitted TLV | Reason |
+|---|---|
+| `speed_cms` | Useful, but backend can infer rough speed from position changes. |
+| `course_deg` | Nice to have, but not essential. |
+| `hdop_x10` | Header already includes `acc_m`, `fix_age_s` and `sat_count`. |
+| `cfg_rev` | Useful later, but not required in current selected set. |
+| `err_flags` | Useful later, but reset reason plus `ERROR_PRESENT` flag are enough for v1.1. |
+| `temp_c_x10` | Nice diagnostic, not core telemetry. |
+| `vcc_mV` | Nice power diagnostic, but `batt_mV` is already in the header. |
+| `sleep_s` | Useful power/profile diagnostic, but not essential. |
+| `gnss_ttff_s` | Useful GNSS diagnostic, but not essential. |
+| `ack_status` | Omitted. `tx_reason = ACK` plus `acked_msg_seq_id` is enough for receipt acknowledgement. |
+| `command_id` | Omitted. Supabase can map the ACKed sequence ID to the original command. |
+| `interrupt_source` | Could be useful later, but `tx_reason = INTERRUPT` covers the broad event. |
+| `alert_reason` | Could be useful later, but `tx_reason`, `state` and `flags` cover the broad event. |
+
+## 14. Transport metadata separation
 
 The collar packet must remain identical across LoRa relay and LTE direct transmission. Do not include path-specific information in the collar packet.
 
@@ -260,46 +320,93 @@ Do not put these inside the immutable packet:
 | gateway/hub ID | REST wrapper or `observation_paths` table |
 | ingress path | REST wrapper or `observation_paths` table |
 | gateway receive time | REST wrapper or `observation_paths` table |
-| LTE RSRP/RSRQ/SINR | wrapper, diagnostics event, or separate metadata table |
-| cell ID/TAC/band | wrapper, diagnostics event, or separate metadata table |
+| LTE RSSI | REST wrapper or `observation_paths` table |
+| LTE SNR/SINR | REST wrapper or `observation_paths` table |
+| LTE RSRP/RSRQ | REST wrapper or `observation_paths` table |
+| cell ID/TAC/band | REST wrapper or `observation_paths` table |
 
-Example relay wrapper:
+These fields describe the link used to deliver the packet. They are measurements made by the receiving hub, the LTE modem, or the cloud ingestion path. They are not part of the collar's immutable observation.
+
+## 15. Transport formats
+
+### 15.1 Collar to hub over LoRa
+
+The LoRa payload is raw binary only:
+
+```text
+[32-byte header][0-24 byte TLVs][8-byte auth_tag_8]
+```
+
+There is no JSON and no Base64 over LoRa.
+
+The SX1262/LoRa layer may add its own radio-layer preamble, sync word, FEC, LoRa header and PHY CRC depending on radio configuration. Those are not part of this application payload.
+
+### 15.2 Hub to Supabase over HTTPS
+
+The hub sends a JSON wrapper because it needs to include relay metadata as well as the original binary packet.
+
+The binary packet is Base64-encoded only because JSON is text and cannot safely carry arbitrary binary bytes directly.
+
+Example LoRa relay wrapper:
 
 ```json
 {
-  "ingest_path": "hub_lora_relay",
-  "gateway_guid": "hub-000016",
-  "rx_rssi_dbm": -92,
-  "rx_snr_db": 6.25,
+  "ingest_path": "lora_hub",
+  "link_type": "lora",
+  "gateway_guid16": "0016",
   "gateway_rx_time_unix": 1786537811,
+  "link_rssi_dbm": -92,
+  "link_snr_db": 6.25,
   "payload_b64": "BASE64_OF_UNMODIFIED_COLLAR_PACKET"
 }
 ```
+
+### 15.3 Collar direct to Supabase over LTE
+
+The LTE path also uses a JSON wrapper with `payload_b64`. This keeps the Supabase Edge Function input shape consistent with the hub relay path.
 
 Example LTE direct wrapper:
 
 ```json
 {
-  "ingest_path": "collar_lte_direct",
-  "payload_b64": "SAME_BASE64_OF_UNMODIFIED_COLLAR_PACKET"
+  "ingest_path": "cellular_direct",
+  "link_type": "lte",
+  "link_rssi_dbm": -104,
+  "link_snr_db": 7.0,
+  "cell_rsrp_dbm": -104,
+  "cell_rsrq_db": -9.5,
+  "cell_sinr_db": 7.0,
+  "payload_b64": "BASE64_OF_UNMODIFIED_COLLAR_PACKET"
 }
 ```
 
-## 13. Supabase ingestion model
+The LTE RF fields serve the same dashboard role as LoRa RSSI/SNR, but they describe the cellular link rather than the LoRa link.
+
+### 15.4 Why Base64 is used in wrappers
+
+Base64 is not part of the TLV protocol. It is only a wrapper encoding.
+
+It is used because arbitrary binary bytes are not safe to embed directly inside JSON strings. The cost is about 33 percent expansion of the encoded packet string, but that cost is acceptable on Wi-Fi/LTE HTTPS wrapper paths and avoids having separate raw-binary and JSON ingestion endpoints.
+
+Do not use Base64 over LoRa.
+
+## 16. Supabase ingestion model
 
 The Supabase Edge Function should:
 
-1. Receive raw packet bytes directly or decode `payload_b64` from a wrapper.
-2. Check total length is between 40 and 64 bytes.
-3. Read the 32-byte header.
-4. Validate `tlv_len <= 24`.
-5. Verify `packet_len == 32 + tlv_len + 8`.
-6. Look up the device key using `device_guid16`.
-7. Verify `auth_tag_8` using HMAC-SHA256 over header + TLVs.
-8. Decode header fields.
-9. Parse TLVs.
-10. Insert into `observations` using unique key `(device_guid16, msg_seq_id)`.
-11. Store path metadata separately in `observation_paths` if provided.
+1. Receive JSON wrapper.
+2. Read `payload_b64`.
+3. Decode `payload_b64` to raw packet bytes.
+4. Check total decoded packet length is between 40 and 64 bytes.
+5. Read the 32-byte header.
+6. Validate `tlv_len <= 24`.
+7. Verify `packet_len == 32 + tlv_len + 8`.
+8. Look up the device key using `device_guid16`.
+9. Verify `auth_tag_8` using HMAC-SHA256 over header + TLVs.
+10. Decode header fields.
+11. Parse TLVs.
+12. Insert into `observations` using unique key `(device_guid16, msg_seq_id)`.
+13. Store wrapper/link metadata separately in `observation_paths`.
 
 Suggested observation unique constraint:
 
@@ -307,7 +414,7 @@ Suggested observation unique constraint:
 UNIQUE (device_guid16, msg_seq_id)
 ```
 
-Suggested tables:
+Suggested `observations` table:
 
 ```text
 observations
@@ -327,36 +434,69 @@ observations
 - tlv_json
 - payload_hash
 - received_at
+```
 
+Suggested `observation_paths` table:
+
+```text
 observation_paths
 - device_guid16
 - msg_seq_id
 - ingest_path
-- gateway_guid
-- rx_rssi_dbm
-- rx_snr_db
+- link_type
+- gateway_guid16
 - gateway_rx_time_unix
+- link_rssi_dbm
+- link_snr_db
+- cell_rsrp_dbm
+- cell_rsrq_db
+- cell_sinr_db
 - received_at
+- payload_hash
 ```
 
-## 14. Decoder procedure
+This allows a single observation to have multiple arrival paths.
+
+Example:
 
 ```text
-if packet_len < 40 or packet_len > 64: reject
-header = packet[0:32]
-tlv_len = header[31]
-if tlv_len > 24: reject
-expected_len = 32 + tlv_len + 8
-if packet_len != expected_len: reject
-body = packet[0:32 + tlv_len]
-rx_tag = packet[32 + tlv_len : 32 + tlv_len + 8]
-expected_tag = first_8_bytes(HMAC_SHA256(device_key, body))
-if rx_tag != expected_tag: reject
-parse header
-parse TLVs from packet[32 : 32 + tlv_len]
+Observation 04A7:10542
+- LoRa hub path: RSSI -92 dBm, SNR 6.25 dB
+- LTE direct path: RSSI -104 dBm, SINR 7.0 dB
 ```
 
-## 15. Example minimum packet decoded to JSON
+## 17. Decoder procedure
+
+```text
+wrapper = parse_json(request_body)
+packet = base64_decode(wrapper.payload_b64)
+
+if packet_len < 40 or packet_len > 64: reject
+
+header = packet[0:32]
+tlv_len = header[31]
+
+if tlv_len > 24: reject
+
+expected_len = 32 + tlv_len + 8
+if packet_len != expected_len: reject
+
+body = packet[0 : 32 + tlv_len]
+rx_tag = packet[32 + tlv_len : 32 + tlv_len + 8]
+
+device_guid16 = read_u16_le(header[1:3])
+device_key = lookup_device_key(device_guid16)
+
+expected_tag = first_8_bytes(HMAC_SHA256(device_key, body))
+if rx_tag != expected_tag: reject
+
+parse header
+parse TLVs from packet[32 : 32 + tlv_len]
+upsert observation
+insert observation path metadata
+```
+
+## 18. Example minimum packet decoded to JSON
 
 A packet with no TLVs still carries the full minimum observation data.
 
@@ -392,7 +532,7 @@ Packet size:
 32 header + 0 TLV + 8 auth tag = 40 bytes
 ```
 
-## 16. Example header byte layout
+## 19. Example header byte layout
 
 Example values:
 
@@ -401,51 +541,107 @@ ver            = 1
 device_guid16  = 0x04A7
 msg_seq_id     = 10542
 time_unix      = 1786537810
-state          = 0x11    # OUT + NORMAL
-flags          = 0x13    # GNSS_VALID + FIX_3D + GEOFENCE_BREACHED
-tx_reason      = 0       # TELEMETRY
+state          = 0x11
+flags          = 0x03
+tx_reason      = TELEMETRY = 0
 lat_e7         = 519058165
 lon_e7         = -22394678
 batt_mV        = 3700
 acc_m          = 12
-fix_age_s      = 4
+fix_age_s      = 3
 sat_count      = 8
 hdr_rsvd       = 00 00 00 00
-tlv_len        = 0
+tlv_len        = 20
 ```
 
-Little-endian header bytes, before auth tag:
+Header bytes:
 
 ```text
 01
 A7 04
 2E 29
-12 34 7D 6A
+D2 F8 7C 6A
 11
-13
+03
 00
 F5 32 F0 1E
 CA 48 AA FE
 74 0E
 0C 00
-04 00
+03 00
 08
 00 00 00 00
-00
+14
 ```
 
-## 17. Current locked decisions
+## 20. Example selected TLV section
+
+Example selected TLVs:
+
+```text
+04 02 03 01                TLV 0x04, len 2, fw_ver = 0x0103
+
+10 04 80 51 01 00          TLV 0x10, len 4, uptime_s = 86400
+
+13 01 2A                   TLV 0x13, len 1, activity_score = 42
+
+20 02 2D 29                TLV 0x20, len 2, acked_msg_seq_id = 10541
+
+06 01 01                   TLV 0x06, len 1, reset_reason = POWER_ON
+```
+
+TLV length:
+
+```text
+20 bytes
+```
+
+Full application packet size:
+
+```text
+32 header + 20 TLV + 8 auth tag = 60 bytes
+```
+
+## 21. Dashboard interpretation
+
+The dashboard should not assume that RSSI/SNR always means LoRa. It should use `link_type`.
+
+Suggested display logic:
+
+```text
+link_type = lora -> show LoRa/RF antenna icon
+link_type = lte  -> show cellular/modem icon
+```
+
+For each path:
+
+```text
+LoRa: RSSI -92 dBm, SNR 6.25 dB
+LTE:  RSSI -104 dBm, SINR 7.0 dB
+```
+
+If both paths deliver the same observation, the UI can show the deduped location once and show both delivery paths as diagnostics.
+
+## 22. Current locked decisions
 
 - Fixed header is 32 bytes.
-- Active header fields use 28 bytes.
-- Four reserved header bytes remain.
-- `tlv_len` is the final byte of the header at offset 31.
+- Header active fields use 28 bytes.
+- Four header bytes remain reserved.
+- `tlv_len` is the final byte of the fixed header.
 - TLV budget is 0 to 24 bytes.
-- 8-byte truncated HMAC-SHA256 replaces CRC16.
-- Packet size is 40 to 64 bytes.
-- Device identity is `device_guid16`, not `device_guid32`.
-- Message sequence is `msg_seq_id` as u16.
-- Header includes `fix_age_s` and `sat_count`.
-- Header does not include `dist_home_m`.
-- Transport metadata must remain outside the immutable collar packet.
-- Duplicate observations are identified by `(device_guid16, msg_seq_id)`.
+- Authentication tag is 8 bytes.
+- CRC16 is removed.
+- Device ID is 16-bit.
+- Message sequence ID is 16-bit.
+- No boot ID in v1.1.
+- Latitude and longitude remain signed 32-bit e7 values.
+- `dist_home_m` is removed from collar packet.
+- `fix_age_s` and `sat_count` are in the fixed header.
+- Selected collar TLVs: `fw_ver`, `reset_reason`, `uptime_s`, `activity_score`, `acked_msg_seq_id`.
+- `command_id` is omitted.
+- ACKs identify the received command/message using `acked_msg_seq_id`.
+- LoRa RSSI/SNR and LTE RF stats are wrapper metadata, not collar TLVs.
+- LoRa collar-to-hub uses raw binary.
+- Hub-to-Supabase uses JSON wrapper plus `payload_b64`.
+- LTE direct-to-Supabase also uses JSON wrapper plus `payload_b64`.
+- Supabase deduplicates on `(device_guid16, msg_seq_id)`.
