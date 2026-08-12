@@ -45,8 +45,11 @@ export interface MapCommand {
 }
 
 export interface DeviceAvatar {
+  kind: "emoji" | "photo";
   emoji: string;
   color: string;
+  photoUrl?: string;
+  storagePath?: string;
 }
 
 export type DeviceAction = "jump" | "follow" | "trail" | "find" | "command";

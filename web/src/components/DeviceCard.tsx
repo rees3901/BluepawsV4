@@ -19,10 +19,11 @@ interface DeviceCardProps {
   ageSeconds: number;
   onExpand: () => void;
   onAction: (action: DeviceAction) => void;
+  onAvatarEdit?: () => void;
 }
 
 export function DeviceCard(props: DeviceCardProps) {
-  const { device, avatar, expanded, followed, trailVisible, portableMode, distance, ageSeconds, onExpand, onAction } = props;
+  const { device, avatar, expanded, followed, trailVisible, portableMode, distance, ageSeconds, onExpand, onAction, onAvatarEdit } = props;
   const status = STATUS[device.status.toLowerCase() as keyof typeof STATUS] ?? STATUS.error;
   const profileLower = device.profile.toLowerCase();
   const profileClass = `profile-${profileLower.replace("save", "").replaceAll(" ", "-")}`;
@@ -32,7 +33,21 @@ export function DeviceCard(props: DeviceCardProps) {
   return (
     <article className={`device-card${ageSeconds > 600 ? " stale" : ""}${expanded ? " expanded" : ""}`}>
       <div className="card-summary" onClick={onExpand}>
-        <div className="card-avatar" style={{ borderColor: avatar.color }}>{avatar.emoji}</div>
+        <div className="card-avatar-wrap">
+          <div
+            className={`card-avatar${avatar.kind === "photo" ? " has-photo" : ""}`}
+            style={{ borderColor: avatar.color, backgroundImage: avatar.photoUrl ? `url(${JSON.stringify(avatar.photoUrl)})` : undefined }}
+          >{avatar.kind === "photo" && avatar.photoUrl ? null : avatar.emoji}</div>
+          {expanded && onAvatarEdit && (
+            <button
+              type="button"
+              className="card-avatar-edit"
+              title={`Customise ${device.name}'s marker`}
+              aria-label={`Customise ${device.name}'s marker`}
+              onClick={(event) => { event.stopPropagation(); onAvatarEdit(); }}
+            >+</button>
+          )}
+        </div>
         <div className="card-identity">
           <div className="card-name-row">
             <span className="card-name">{device.name}</span>
