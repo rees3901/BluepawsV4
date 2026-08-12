@@ -400,9 +400,10 @@ body.panel-open .map-loading {
 .marker-pin {
   --marker-color: var(--accent);
   position: relative;
+  isolation: isolate;
   display: block;
-  width: 40px;
-  height: 52px;
+  width: 36px;
+  height: 48px;
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -412,11 +413,11 @@ body.panel-open .map-loading {
 .marker-pin::after {
   content: "";
   position: absolute;
-  top: 34px;
-  left: 13px;
-  z-index: 0;
+  top: 35px;
+  left: 11px;
+  z-index: -1;
   width: 14px;
-  height: 18px;
+  height: 13px;
   background: var(--marker-color);
   clip-path: polygon(0 0, 100% 0, 50% 100%);
 }
@@ -424,43 +425,18 @@ body.panel-open .map-loading {
 .marker-pin-face {
   position: relative;
   z-index: 1;
-  display: grid;
-  box-sizing: border-box;
-  width: 40px;
-  height: 40px;
   overflow: hidden;
-  place-items: center;
-  border: 3px solid var(--marker-color);
-  border-radius: 50%;
-  background: var(--bg-card);
-  box-shadow: 0 3px 10px rgb(0 0 0 / 50%);
+  border-color: var(--marker-color);
 }
 
 .bp-marker {
-  width: 40px;
-  height: 52px;
+  width: 36px;
+  height: 48px;
 }
 
 .bp-marker.status-home .marker-pin-face,
 .bp-marker.status-lost .marker-pin-face {
   border-color: var(--marker-color);
-}
-
-.bp-marker-avatar,
-.bp-marker-avatar.avatar-image {
-  display: grid;
-  width: 100%;
-  height: 100%;
-  place-items: center;
-  border-radius: 50%;
-  object-fit: cover;
-}
-
-.bp-marker-avatar.avatar-emoji-image {
-  width: 70%;
-  height: 70%;
-  margin: 0;
-  object-fit: contain;
 }
 
 .popup-avatar {
@@ -563,9 +539,9 @@ body.panel-open .map-loading {
 }
 
 .avatar-map-pin-preview {
-  width: 40px;
-  height: 52px;
-  flex: 0 0 40px;
+  width: 36px;
+  height: 48px;
+  flex: 0 0 36px;
 }
 
 .avatar-selected-emoji strong,
