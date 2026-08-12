@@ -43,7 +43,7 @@ const TOUR_STEPS: TourStep[] = [
   {
     selector: ".bp-marker",
     title: "Open a map marker",
-    description: "The emoji and coloured ring match the pet's side-panel tile. Select a marker to see current signal, battery, profile, and the same quick actions.",
+    description: "The avatar and pin colour match the pet's side-panel tile, while the pointed tip marks its exact coordinate. Select a pin to see current signal, battery, profile, and the same quick actions.",
   },
   {
     selector: ".leaflet-control-layers",

@@ -3,6 +3,7 @@
 import L from "leaflet";
 import { useEffect, useRef } from "react";
 import { emojiImageUrl } from "@/lib/emoji";
+import { normalizeMarkerColor } from "@/lib/markerColor";
 import { appendTrailPoint, VISIBLE_TRAIL_POINT_LIMIT, type TrailLatLng } from "@/lib/trailPoints";
 import {
   type DeviceAction,
@@ -171,13 +172,15 @@ export default function TrackingMap(props: TrackingMapProps) {
 
     devices.forEach((device) => {
       const avatar = avatars[device.id];
+      const markerColor = normalizeMarkerColor(avatar.color);
       const latLng: TrailLatLng = [device.lat, device.lon];
       let marker = markersRef.current.get(device.id);
       const icon = L.divIcon({
-        className: "",
-        html: `<div class="bp-marker status-${device.status.toLowerCase()}" style="border-color:${avatar.color}">${avatarHtml(avatar, "bp-marker-avatar")}</div>`,
-        iconSize: [32, 32],
-        iconAnchor: [16, 16],
+        className: "bp-marker-icon",
+        html: `<div class="marker-pin bp-marker status-${device.status.toLowerCase()}" style="--marker-color:${markerColor}"><div class="marker-pin-face">${avatarHtml(avatar, "bp-marker-avatar")}</div></div>`,
+        iconSize: [40, 52],
+        iconAnchor: [20, 51],
+        popupAnchor: [0, -47],
       });
       if (!marker) {
         marker = L.marker(latLng, { icon }).addTo(map);
@@ -191,10 +194,11 @@ export default function TrackingMap(props: TrackingMapProps) {
       trailPointsRef.current.set(device.id, points);
       let trail = trailsRef.current.get(device.id);
       if (!trail) {
-        trail = L.polyline(points, { color: avatar.color, weight: 2, opacity: 0.75, dashArray: "6,5" });
+        trail = L.polyline(points, { color: markerColor, weight: 2, opacity: 0.75, dashArray: "6,5" });
         trailsRef.current.set(device.id, trail);
       } else {
         trail.setLatLngs(points);
+        trail.setStyle({ color: markerColor });
       }
       if (trailIdsRef.current.has(device.id) && !map.hasLayer(trail)) trail.addTo(map);
       if (!trailIdsRef.current.has(device.id) && map.hasLayer(trail)) map.removeLayer(trail);
