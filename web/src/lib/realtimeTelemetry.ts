@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/client";
 import { isPositionRow, positionToTelemetryDevice, type PositionRow } from "@/lib/telemetryRows";
-import { VISIBLE_TRAIL_POINT_LIMIT, type TelemetryDevice, type TelemetrySource, type TrailPoint } from "@/types/telemetry";
+import { VISIBLE_TRAIL_POINT_LIMIT } from "@/lib/trailPoints";
+import type { TelemetryDevice, TelemetrySource, TrailPoint } from "@/types/telemetry";
 
 const INITIAL_FALLBACK_DELAY_MS = 30_000;
 const MAX_FALLBACK_DELAY_MS = 120_000;

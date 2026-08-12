@@ -11,6 +11,7 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "next typegen && tsc --noEmit",
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test src/lib/trailPoints.test.ts",
     "loadtest:realtime": "node tools/realtime-load.mjs"
   },
   "dependencies": {
