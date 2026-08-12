@@ -428,12 +428,25 @@ function popupHtml(device: TelemetryDevice, avatar: DeviceAvatar) {
 
 function contextMenuHtml(point: L.LatLng) {
   const locationData = locationDataAttributes(point);
-  return `<div class="map-context-menu"><div class="map-context-heading">Map location</div><a class="map-context-coordinates" href="${googleMapsUrl(point.lat, point.lng)}" target="_blank" rel="noopener noreferrer" title="Open in Google Maps">${formatMapCoordinates(point.lat, point.lng, 6)}</a><div class="map-context-actions"><button type="button" data-location-action="drop-pin" ${locationData}>📍 Drop temporary pin</button><button type="button" data-location-action="copy" ${locationData}>⧉ Copy location</button><button type="button" data-location-action="share" ${locationData}>↗ Share location</button><a href="${googleMapsUrl(point.lat, point.lng)}" target="_blank" rel="noopener noreferrer">◉ Open in Google Maps</a><button type="button" data-location-action="measure" ${locationData}>↔ Measure from here</button></div><p class="map-context-hint">Right-click or long-press another point for more options.</p></div>`;
+  return `<div class="map-context-menu"><div class="map-context-heading">Map location</div>${coordinateActionRow(point, locationData)}<div class="map-context-actions"><button type="button" data-location-action="drop-pin" ${locationData}>📍 Drop temporary pin</button><button type="button" data-location-action="copy" ${locationData}>⧉ Copy location</button><button type="button" data-location-action="measure" ${locationData}>↔ Measure from here</button></div><p class="map-context-hint">Right-click or long-press another point for more options.</p></div>`;
 }
 
 function temporaryPinPopupHtml(point: L.LatLng, pinId: number) {
   const locationData = locationDataAttributes(point);
-  return `<div class="map-context-menu temporary-pin-card"><div class="map-context-heading">Temporary meeting point</div><a class="map-context-coordinates" href="${googleMapsUrl(point.lat, point.lng)}" target="_blank" rel="noopener noreferrer">${formatMapCoordinates(point.lat, point.lng, 6)}</a><div class="map-context-actions"><button type="button" data-location-action="copy" ${locationData}>⧉ Copy location</button><button type="button" data-location-action="share" ${locationData}>↗ Share location</button><a href="${googleMapsUrl(point.lat, point.lng)}" target="_blank" rel="noopener noreferrer">◉ Open in Google Maps</a><button type="button" data-location-action="measure" ${locationData}>↔ Measure from here</button><button type="button" class="danger" data-location-action="remove-pin" data-pin-id="${pinId}">× Remove pin</button></div><p class="map-context-hint">This pin stays only for this browser session.</p></div>`;
+  return `<div class="map-context-menu temporary-pin-card"><div class="map-context-heading">Temporary meeting point</div>${coordinateActionRow(point, locationData)}<div class="map-context-actions"><button type="button" data-location-action="copy" ${locationData}>⧉ Copy location</button><button type="button" data-location-action="measure" ${locationData}>↔ Measure from here</button><button type="button" class="danger" data-location-action="remove-pin" data-pin-id="${pinId}">× Remove pin</button></div><p class="map-context-hint">This pin stays only for this browser session.</p></div>`;
+}
+
+function coordinateActionRow(point: L.LatLng, locationData: string) {
+  const mapsUrl = googleMapsUrl(point.lat, point.lng);
+  return `<div class="map-context-coordinate-row"><span class="map-context-coordinates">${formatMapCoordinates(point.lat, point.lng, 6)}</span><a class="map-context-icon-action" href="${mapsUrl}" target="_blank" rel="noopener noreferrer" title="Open in Google Maps" aria-label="Open this location in Google Maps in a new tab">${openInNewTabIcon()}</a><button type="button" class="map-context-icon-action" data-location-action="share" ${locationData} title="Share location" aria-label="Share this location">${shareIcon()}</button></div>`;
+}
+
+function openInNewTabIcon() {
+  return '<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3h7v7"/><path d="M10 14 21 3"/><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/></svg>';
+}
+
+function shareIcon() {
+  return '<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 10.5 6.8-4"/><path d="m8.6 13.5 6.8 4"/></svg>';
 }
 
 function locationDataAttributes(point: L.LatLng) {
@@ -443,10 +456,10 @@ function locationDataAttributes(point: L.LatLng) {
 function temporaryPinIcon() {
   return L.divIcon({
     className: "temporary-map-pin-icon",
-    html: '<div class="temporary-map-pin" aria-hidden="true"><span></span></div>',
-    iconSize: [30, 42],
-    iconAnchor: [15, 41],
-    popupAnchor: [0, -37],
+    html: '<span class="temporary-map-pin-emoji" aria-hidden="true">📍</span>',
+    iconSize: [36, 42],
+    iconAnchor: [18, 40],
+    popupAnchor: [0, -36],
   });
 }
 
