@@ -255,6 +255,25 @@ body.panel-open .hamburger-btn {
     border-top: 1px solid var(--border);
 }
 
+.card-detail-reveal {
+    display: grid;
+    grid-template-rows: 0fr;
+    opacity: 0;
+    transition:
+        grid-template-rows 0.5s cubic-bezier(0.22, 1, 0.36, 1),
+        opacity 0.32s ease;
+}
+
+.device-card.expanded .card-detail-reveal {
+    grid-template-rows: 1fr;
+    opacity: 1;
+}
+
+.card-detail-reveal-inner {
+    min-height: 0;
+    overflow: hidden;
+}
+
 /* ── Sheen animation on update ──
    A subtle blue gradient sweeps across the card when new telemetry
    arrives, giving visual feedback that data just updated. */
@@ -292,7 +311,11 @@ body.panel-open .hamburger-btn {
     justify-content: center;
     font-size: 18px;
     box-shadow: 0 0 8px rgba(29,155,240,0.3);
-    transition: width 0.2s ease, height 0.2s ease, min-width 0.2s ease, font-size 0.2s ease;
+    transition:
+        width 0.5s cubic-bezier(0.22, 1, 0.36, 1),
+        height 0.5s cubic-bezier(0.22, 1, 0.36, 1),
+        min-width 0.5s cubic-bezier(0.22, 1, 0.36, 1),
+        font-size 0.5s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .card-identity {

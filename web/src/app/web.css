@@ -348,7 +348,7 @@ body.panel-open .map-loading {
 .card-avatar-wrap {
   position: relative;
   flex: 0 0 36px;
-  transition: flex-basis 0.2s ease;
+  transition: flex-basis 0.5s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .device-card.expanded .card-avatar-wrap {
@@ -399,6 +399,17 @@ body.panel-open .map-loading {
   font-weight: 800;
   line-height: 1;
   box-shadow: 0 2px 6px rgb(0 0 0 / 35%);
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0.7);
+  transition: opacity 0.24s ease, transform 0.24s ease;
+}
+
+.device-card.expanded .card-avatar-edit {
+  opacity: 1;
+  pointer-events: auto;
+  transform: scale(1);
+  transition-delay: 0.16s;
 }
 
 .card-avatar-edit:hover,
@@ -406,6 +417,16 @@ body.panel-open .map-loading {
   transform: scale(1.08);
   outline: 2px solid color-mix(in srgb, var(--accent) 35%, transparent);
   outline-offset: 1px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-avatar-wrap,
+  .card-avatar,
+  .card-detail-reveal,
+  .card-avatar-edit {
+    transition-duration: 0.01ms;
+    transition-delay: 0s;
+  }
 }
 
 .bp-marker-icon {

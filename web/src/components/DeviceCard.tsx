@@ -45,12 +45,14 @@ export function DeviceCard(props: DeviceCardProps) {
               <img className="avatar-emoji-image" src={emojiImageUrl(avatar.emoji)} alt={avatar.emoji} draggable={false} />
             )}
           </div>
-          {expanded && onAvatarEdit && (
+          {onAvatarEdit && (
             <button
               type="button"
               className="card-avatar-edit"
               title={`Customise ${device.name}'s marker`}
               aria-label={`Customise ${device.name}'s marker`}
+              aria-hidden={!expanded}
+              tabIndex={expanded ? 0 : -1}
               onClick={(event) => { event.stopPropagation(); onAvatarEdit(); }}
             >+</button>
           )}
@@ -75,28 +77,30 @@ export function DeviceCard(props: DeviceCardProps) {
         <span className="card-chevron">{expanded ? "▲" : "▼"}</span>
       </div>
 
-      {expanded && (
-        <div className="card-detail">
-          <div className="card-grid">
-            <span className="label">Coordinates</span>
-            <span className="value">
-              <a className="card-coords card-coords-link" href={googleMapsUrl(device.lat, device.lon)} target="_blank" rel="noopener noreferrer">
-                {formatMapCoordinates(device.lat, device.lon)}
-              </a>
-            </span>
-            <span className="label">Power Profile</span><span className="value">{device.profile}</span>
-            <span className="label">Dist From Hub</span><span className="value">{distance}</span>
-            <span className="label">Last seen</span><span className="value">{formatAge(ageSeconds)}</span>
-          </div>
-          <ActionButtons followed={followed} trailVisible={trailVisible} onAction={onAction} />
-          <div className="log-btn-row">
-            <button className="btn-device-log btn-secondary">Message Log</button>
-            <button className="btn-log-export" title="Export log as CSV" aria-label="Export device log">
-              <DownloadIcon />
-            </button>
+      <div className="card-detail-reveal" aria-hidden={!expanded} inert={!expanded}>
+        <div className="card-detail-reveal-inner">
+          <div className="card-detail">
+            <div className="card-grid">
+              <span className="label">Coordinates</span>
+              <span className="value">
+                <a className="card-coords card-coords-link" href={googleMapsUrl(device.lat, device.lon)} target="_blank" rel="noopener noreferrer">
+                  {formatMapCoordinates(device.lat, device.lon)}
+                </a>
+              </span>
+              <span className="label">Power Profile</span><span className="value">{device.profile}</span>
+              <span className="label">Dist From Hub</span><span className="value">{distance}</span>
+              <span className="label">Last seen</span><span className="value">{formatAge(ageSeconds)}</span>
+            </div>
+            <ActionButtons followed={followed} trailVisible={trailVisible} onAction={onAction} />
+            <div className="log-btn-row">
+              <button className="btn-device-log btn-secondary">Message Log</button>
+              <button className="btn-log-export" title="Export log as CSV" aria-label="Export device log">
+                <DownloadIcon />
+              </button>
+            </div>
           </div>
         </div>
-      )}
+      </div>
     </article>
   );
 }
