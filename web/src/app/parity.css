@@ -908,8 +908,8 @@ body.light .console-log {
 .popup-header {
     display: flex;
     align-items: center;
-    gap: 4px;
-    margin-bottom: 6px;
+    gap: 8px;
+    margin-bottom: 8px;
 }
 
 .popup-grid {
