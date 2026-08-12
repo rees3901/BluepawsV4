@@ -1,6 +1,7 @@
 /* eslint-disable @next/next/no-img-element -- Tiny pre-sized emoji artwork is intentionally served directly from the picker CDN. */
 import { BatteryIndicator, BleProximity, HomeDistance, LastSeen, SignalIndicator } from "@/components/Indicators";
 import { emojiImageUrl } from "@/lib/emoji";
+import { formatMapCoordinates, googleMapsUrl } from "@/lib/mapLocation";
 import type { DeviceAction, DeviceAvatar, TelemetryDevice } from "@/types/telemetry";
 
 const STATUS = {
@@ -79,8 +80,8 @@ export function DeviceCard(props: DeviceCardProps) {
           <div className="card-grid">
             <span className="label">Coordinates</span>
             <span className="value">
-              <a className="card-coords card-coords-link" href={`https://www.google.com/maps?q=${device.lat.toFixed(6)},${device.lon.toFixed(6)}`} target="_blank" rel="noopener noreferrer">
-                {device.lat.toFixed(5)}, {device.lon.toFixed(5)}
+              <a className="card-coords card-coords-link" href={googleMapsUrl(device.lat, device.lon)} target="_blank" rel="noopener noreferrer">
+                {formatMapCoordinates(device.lat, device.lon)}
               </a>
             </span>
             <span className="label">Power Profile</span><span className="value">{device.profile}</span>

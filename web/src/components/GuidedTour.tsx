@@ -48,7 +48,7 @@ const TOUR_STEPS: TourStep[] = [
   {
     selector: ".leaflet-control-layers",
     title: "Choose the best map view",
-    description: "Use Layers to switch between street, satellite, and topographic maps. The nearby controls zoom, fit every pet into view, and measure distance.",
+    description: "Use Layers to switch between street, satellite, and topographic maps. Right-click the map—or long-press on mobile—to drop or share a meeting point, open its coordinates, or measure from it.",
   },
   {
     selector: "[data-tour='settings']",
