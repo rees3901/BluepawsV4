@@ -981,6 +981,12 @@ body.light .console-log {
     font-family: 'SF Mono', 'Fira Code', monospace;
     font-size: 0.68rem;
     overflow-wrap: anywhere;
+    text-decoration: none;
+}
+
+.map-context-coordinates:hover,
+.map-context-coordinates:focus-visible {
+    text-decoration: underline;
 }
 
 .map-context-icon-action {
