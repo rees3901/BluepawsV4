@@ -348,6 +348,23 @@ body.panel-open .map-loading {
 .card-avatar-wrap {
   position: relative;
   flex: 0 0 36px;
+  transition: flex-basis 0.2s ease;
+}
+
+.device-card.expanded .card-avatar-wrap {
+  flex-basis: 78px;
+}
+
+.device-card.expanded .card-avatar {
+  width: 78px;
+  height: 78px;
+  min-width: 78px;
+  font-size: 39px;
+}
+
+.device-card.expanded .card-avatar .avatar-emoji-image {
+  width: 77%;
+  height: 77%;
 }
 
 .card-avatar.has-photo {
