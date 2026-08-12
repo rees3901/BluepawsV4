@@ -2,8 +2,8 @@
 
 import L from "leaflet";
 import { useEffect, useRef } from "react";
+import { appendTrailPoint, VISIBLE_TRAIL_POINT_LIMIT, type TrailLatLng } from "@/lib/trailPoints";
 import {
-  VISIBLE_TRAIL_POINT_LIMIT,
   type DeviceAction,
   type DeviceAvatar,
   type MapCommand,
@@ -27,14 +27,18 @@ export default function TrackingMap(props: TrackingMapProps) {
   const mapRef = useRef<L.Map | null>(null);
   const markersRef = useRef(new Map<number, L.Marker>());
   const trailsRef = useRef(new Map<number, L.Polyline>());
-  const trailPointsRef = useRef(new Map<number, L.LatLngExpression[]>());
+  const trailPointsRef = useRef(new Map<number, TrailLatLng[]>());
   const devicesRef = useRef(devices);
+  const avatarsRef = useRef(avatars);
+  const trailIdsRef = useRef(trailIds);
   const actionRef = useRef(onAction);
 
   useEffect(() => {
     devicesRef.current = devices;
+    avatarsRef.current = avatars;
+    trailIdsRef.current = trailIds;
     actionRef.current = onAction;
-  }, [devices, onAction]);
+  }, [avatars, devices, onAction, trailIds]);
 
   useEffect(() => {
     const markers = markersRef.current;
@@ -166,7 +170,7 @@ export default function TrackingMap(props: TrackingMapProps) {
 
     devices.forEach((device) => {
       const avatar = avatars[device.id];
-      const latLng: L.LatLngExpression = [device.lat, device.lon];
+      const latLng: TrailLatLng = [device.lat, device.lon];
       let marker = markersRef.current.get(device.id);
       const icon = L.divIcon({
         className: "",
@@ -182,9 +186,7 @@ export default function TrackingMap(props: TrackingMapProps) {
       }
       marker.bindPopup(popupHtml(device, avatar));
 
-      const points = trailPointsRef.current.get(device.id) ?? [];
-      points.push(latLng);
-      while (points.length > VISIBLE_TRAIL_POINT_LIMIT) points.shift();
+      const points = appendTrailPoint(trailPointsRef.current.get(device.id) ?? [], latLng);
       trailPointsRef.current.set(device.id, points);
       let trail = trailsRef.current.get(device.id);
       if (!trail) {
@@ -193,15 +195,27 @@ export default function TrackingMap(props: TrackingMapProps) {
       } else {
         trail.setLatLngs(points);
       }
-      if (trailIds.has(device.id) && !map.hasLayer(trail)) trail.addTo(map);
-      if (!trailIds.has(device.id) && map.hasLayer(trail)) map.removeLayer(trail);
+      if (trailIdsRef.current.has(device.id) && !map.hasLayer(trail)) trail.addTo(map);
+      if (!trailIdsRef.current.has(device.id) && map.hasLayer(trail)) map.removeLayer(trail);
     });
+  }, [avatars, devices]);
 
-    if (followedId !== null) {
-      const followed = devices.find((device) => device.id === followedId);
-      if (followed) map.panTo([followed.lat, followed.lon]);
-    }
-  }, [avatars, devices, followedId, trailIds]);
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+
+    trailsRef.current.forEach((trail, deviceId) => {
+      if (trailIds.has(deviceId) && !map.hasLayer(trail)) trail.addTo(map);
+      if (!trailIds.has(deviceId) && map.hasLayer(trail)) map.removeLayer(trail);
+    });
+  }, [trailIds]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || followedId === null) return;
+    const followed = devices.find((device) => device.id === followedId);
+    if (followed) map.panTo([followed.lat, followed.lon]);
+  }, [devices, followedId]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -210,10 +224,10 @@ export default function TrackingMap(props: TrackingMapProps) {
     Object.entries(trailHistory).forEach(([deviceIdValue, historicalPoints]) => {
       const deviceId = Number(deviceIdValue);
       const device = devicesRef.current.find((item) => item.id === deviceId);
-      const avatar = avatars[deviceId];
+      const avatar = avatarsRef.current[deviceId];
       if (!device || !avatar || historicalPoints.length === 0) return;
 
-      const points: L.LatLngExpression[] = historicalPoints
+      const points: TrailLatLng[] = historicalPoints
         .slice(-VISIBLE_TRAIL_POINT_LIMIT)
         .map((point) => [point.lat, point.lon]);
       const lastPoint = historicalPoints.at(-1);
@@ -230,9 +244,9 @@ export default function TrackingMap(props: TrackingMapProps) {
       } else {
         trail.setLatLngs(visiblePoints);
       }
-      if (trailIds.has(deviceId) && !map.hasLayer(trail)) trail.addTo(map);
+      if (trailIdsRef.current.has(deviceId) && !map.hasLayer(trail)) trail.addTo(map);
     });
-  }, [avatars, trailHistory, trailIds]);
+  }, [trailHistory]);
 
   useEffect(() => {
     const map = mapRef.current;
