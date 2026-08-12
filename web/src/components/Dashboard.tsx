@@ -3,7 +3,6 @@
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AvatarEditorModal } from "@/components/AvatarEditorModal";
 import { DeviceCard, DownloadIcon } from "@/components/DeviceCard";
 import { GuidedTour } from "@/components/GuidedTour";
 import { loadDeviceAppearances, revokeAvatarUrls } from "@/lib/deviceAppearances";
@@ -16,6 +15,11 @@ const TrackingMap = dynamic(() => import("@/components/TrackingMap"), {
   ssr: false,
   loading: () => <div className="map-loading">Loading map…</div>,
 });
+
+const AvatarEditorModal = dynamic(
+  () => import("@/components/AvatarEditorModal").then((module) => module.AvatarEditorModal),
+  { ssr: false, loading: () => <div className="modal" role="status"><span className="avatar-picker-loading">Loading emoji palette…</span></div> },
+);
 
 const EMOJIS = ["🐱", "🐶", "🐰", "🐾", "🦊", "🐹", "🦉", "🐼"];
 const COLORS = ["#1d9bf0", "#ff6b35", "#a855f7", "#22c55e", "#f97316", "#06b6d4", "#84cc16", "#ec4899"];
@@ -394,6 +398,7 @@ export function Dashboard({ householdId, initialLiveDevices, liveTelemetryError,
           device={avatarDevice}
           householdId={householdId}
           avatar={avatars[avatarDevice.id]}
+          theme={darkMode ? "dark" : "light"}
           onClose={() => setAvatarDevice(null)}
           onSaved={refreshAppearances}
         />

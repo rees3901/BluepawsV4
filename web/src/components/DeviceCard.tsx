@@ -1,4 +1,6 @@
+/* eslint-disable @next/next/no-img-element -- Tiny pre-sized emoji artwork is intentionally served directly from the picker CDN. */
 import { BatteryIndicator, BleProximity, HomeDistance, LastSeen, SignalIndicator } from "@/components/Indicators";
+import { emojiImageUrl } from "@/lib/emoji";
 import type { DeviceAction, DeviceAvatar, TelemetryDevice } from "@/types/telemetry";
 
 const STATUS = {
@@ -37,7 +39,11 @@ export function DeviceCard(props: DeviceCardProps) {
           <div
             className={`card-avatar${avatar.kind === "photo" ? " has-photo" : ""}`}
             style={{ borderColor: avatar.color, backgroundImage: avatar.photoUrl ? `url(${JSON.stringify(avatar.photoUrl)})` : undefined }}
-          >{avatar.kind === "photo" && avatar.photoUrl ? null : avatar.emoji}</div>
+          >
+            {avatar.kind === "photo" && avatar.photoUrl ? null : (
+              <img className="avatar-emoji-image" src={emojiImageUrl(avatar.emoji)} alt={avatar.emoji} draggable={false} />
+            )}
+          </div>
           {expanded && onAvatarEdit && (
             <button
               type="button"

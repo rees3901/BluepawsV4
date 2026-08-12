@@ -356,6 +356,14 @@ body.panel-open .map-loading {
   background-size: cover;
 }
 
+.avatar-emoji-image {
+  width: 72%;
+  height: 72%;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+}
+
 .card-avatar-edit {
   position: absolute;
   right: -5px;
@@ -397,6 +405,13 @@ body.panel-open .map-loading {
   object-fit: cover;
 }
 
+.bp-marker-avatar.avatar-emoji-image {
+  width: 72%;
+  height: 72%;
+  margin: 14%;
+  object-fit: contain;
+}
+
 .popup-avatar {
   display: grid;
   width: 26px;
@@ -406,6 +421,10 @@ body.panel-open .map-loading {
   border-radius: 50%;
   font-size: 20px;
   object-fit: cover;
+}
+
+.popup-avatar.avatar-emoji-image {
+  object-fit: contain;
 }
 
 .avatar-editor-content {
@@ -470,27 +489,60 @@ body.panel-open .map-loading {
   box-shadow: 0 1px 4px rgb(0 0 0 / 22%);
 }
 
-.avatar-emoji-grid {
-  display: grid;
-  grid-template-columns: repeat(6, 1fr);
-  gap: 8px;
+.avatar-picker-loading {
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  box-shadow: var(--shadow);
+  font-size: 0.76rem;
 }
 
-.avatar-emoji-grid button {
+.avatar-emoji-picker {
   display: grid;
-  aspect-ratio: 1;
+  gap: 12px;
+}
+
+.avatar-selected-emoji {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-primary);
+}
+
+.avatar-selected-emoji-preview {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
   place-items: center;
-  border: 1px solid var(--border);
-  border-radius: 9px;
+  border: 3px solid var(--accent);
+  border-radius: 50%;
   background: var(--bg-primary);
-  cursor: pointer;
   font-size: 1.35rem;
 }
 
-.avatar-emoji-grid button:hover,
-.avatar-emoji-grid button.active {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px rgb(29 155 240 / 16%);
+.avatar-selected-emoji strong,
+.avatar-selected-emoji small {
+  display: block;
+}
+
+.avatar-selected-emoji strong {
+  font-size: 0.76rem;
+}
+
+.avatar-selected-emoji small {
+  margin-top: 2px;
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+}
+
+.avatar-emoji-picker .EmojiPickerReact {
+  --epr-highlight-color: var(--accent);
+  --epr-picker-border-color: var(--border);
+  --epr-picker-border-radius: 9px;
+  font-family: inherit;
 }
 
 .avatar-photo-editor {
@@ -612,8 +664,9 @@ body.panel-open .map-loading {
 }
 
 @media (max-width: 520px) {
-  .avatar-emoji-grid {
-    grid-template-columns: repeat(4, 1fr);
+  .avatar-editor-content {
+    max-height: calc(100vh - 24px);
+    overflow-y: auto;
   }
 }
 
