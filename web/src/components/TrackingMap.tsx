@@ -24,6 +24,14 @@ interface TrackingMapProps {
   onAction: (device: TelemetryDevice, action: DeviceAction) => void;
 }
 
+const STANDARD_DISPLAY_MAX_ZOOM = 22;
+const TOPOGRAPHIC_DISPLAY_MAX_ZOOM = 20;
+const ESRI_DISPLAY_MAX_ZOOM = 23;
+const OSM_NATIVE_MAX_ZOOM = 19;
+const OPEN_TOPO_NATIVE_MAX_ZOOM = 17;
+const ESRI_NATIVE_MAX_ZOOM = 23;
+const JUMP_TO_ZOOM = 17;
+
 export default function TrackingMap(props: TrackingMapProps) {
   const { devices, avatars, sidebarOpen, followedId, trailIds, trailHistory, command, onAction } = props;
   const mapRef = useRef<L.Map | null>(null);
@@ -49,12 +57,36 @@ export default function TrackingMap(props: TrackingMapProps) {
     const map = L.map("map", { center: [51.505, -0.09], zoom: 13, zoomControl: false });
     mapRef.current = map;
 
-    const street = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "&copy; OpenStreetMap", maxZoom: 19 });
-    const satellite = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", { attribution: "&copy; Esri World Imagery", maxZoom: 19 });
-    const clarity = L.tileLayer("https://clarity.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", { attribution: "&copy; Esri Clarity", maxZoom: 19 });
-    const topo = L.tileLayer("https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", { attribution: "&copy; OpenTopoMap", maxZoom: 17 });
-    const humanitarian = L.tileLayer("https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png", { attribution: "&copy; OpenStreetMap, Tiles: HOT", maxZoom: 19 });
-    const esriTopo = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}", { attribution: "&copy; Esri", maxZoom: 19 });
+    const street = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: "&copy; OpenStreetMap",
+      maxNativeZoom: OSM_NATIVE_MAX_ZOOM,
+      maxZoom: STANDARD_DISPLAY_MAX_ZOOM,
+    });
+    const satellite = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+      attribution: "&copy; Esri World Imagery",
+      maxNativeZoom: ESRI_NATIVE_MAX_ZOOM,
+      maxZoom: ESRI_DISPLAY_MAX_ZOOM,
+    });
+    const clarity = L.tileLayer("https://clarity.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+      attribution: "&copy; Esri Clarity",
+      maxNativeZoom: ESRI_NATIVE_MAX_ZOOM,
+      maxZoom: ESRI_DISPLAY_MAX_ZOOM,
+    });
+    const topo = L.tileLayer("https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", {
+      attribution: "&copy; OpenTopoMap",
+      maxNativeZoom: OPEN_TOPO_NATIVE_MAX_ZOOM,
+      maxZoom: TOPOGRAPHIC_DISPLAY_MAX_ZOOM,
+    });
+    const humanitarian = L.tileLayer("https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png", {
+      attribution: "&copy; OpenStreetMap, Tiles: HOT",
+      maxNativeZoom: OSM_NATIVE_MAX_ZOOM,
+      maxZoom: STANDARD_DISPLAY_MAX_ZOOM,
+    });
+    const esriTopo = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}", {
+      attribution: "&copy; Esri",
+      maxNativeZoom: ESRI_NATIVE_MAX_ZOOM,
+      maxZoom: ESRI_DISPLAY_MAX_ZOOM,
+    });
     street.addTo(map);
     L.control.layers({ Street: street, Satellite: satellite, "Satellite HD": clarity, Topographic: topo, Humanitarian: humanitarian, "Esri Topo": esriTopo }, undefined, { position: "topright", collapsed: true }).addTo(map);
     L.control.zoom({ position: "bottomleft" }).addTo(map);
@@ -260,8 +292,8 @@ export default function TrackingMap(props: TrackingMapProps) {
     if (command.type === "jump" && command.deviceId !== undefined) {
       const marker = markersRef.current.get(command.deviceId);
       if (marker) {
-        map.setView(marker.getLatLng(), 17, { animate: true });
-        marker.openPopup();
+        map.closePopup();
+        map.setView(marker.getLatLng(), Math.max(map.getZoom(), JUMP_TO_ZOOM), { animate: true });
       }
     }
   }, [command]);
