@@ -391,8 +391,57 @@ body.panel-open .map-loading {
   outline-offset: 1px;
 }
 
-.bp-marker {
+.bp-marker-icon {
+  border: 0;
+  background: transparent;
+  overflow: visible;
+}
+
+.marker-pin {
+  --marker-color: var(--accent);
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  place-items: center;
+  border: 3px solid var(--marker-color);
+  border-radius: 50%;
+  background: var(--bg-card);
+  box-shadow: 0 3px 10px rgb(0 0 0 / 50%);
+}
+
+.marker-pin::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -8px;
+  z-index: -1;
+  width: 15px;
+  height: 15px;
+  transform: translateX(-50%) rotate(45deg);
+  border-right: 3px solid var(--marker-color);
+  border-bottom: 3px solid var(--marker-color);
+  border-radius: 0 0 3px;
+  background: var(--bg-card);
+}
+
+.marker-pin-face {
+  display: grid;
+  width: 100%;
+  height: 100%;
   overflow: hidden;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--bg-card);
+}
+
+.bp-marker {
+  width: 40px;
+  height: 40px;
+}
+
+.bp-marker.status-home,
+.bp-marker.status-lost {
+  border-color: var(--marker-color);
 }
 
 .bp-marker-avatar,
@@ -511,16 +560,11 @@ body.panel-open .map-loading {
   color: var(--text-primary);
 }
 
-.avatar-selected-emoji-preview {
-  display: grid;
-  width: 42px;
-  height: 42px;
-  flex: 0 0 42px;
-  place-items: center;
-  border: 3px solid var(--accent);
-  border-radius: 50%;
-  background: var(--bg-primary);
-  font-size: 1.35rem;
+.avatar-map-pin-preview {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  margin-bottom: 8px;
 }
 
 .avatar-selected-emoji strong,
@@ -626,12 +670,34 @@ body.panel-open .map-loading {
   border-top: 1px solid var(--border);
 }
 
-.avatar-colour-section > span {
-  display: block;
+.avatar-colour-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   margin-bottom: 9px;
+}
+
+.avatar-colour-heading > span {
   color: var(--text-secondary);
   font-size: 0.72rem;
   font-weight: 700;
+}
+
+.avatar-colour-heading output {
+  padding: 3px 7px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.65rem;
+}
+
+.avatar-colour-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
 .avatar-colour-grid {
@@ -653,6 +719,60 @@ body.panel-open .map-loading {
   box-shadow: 0 0 0 2px var(--bg-card), 0 0 0 4px currentcolor;
 }
 
+.avatar-custom-colour {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  padding: 5px 8px 5px 5px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.avatar-custom-colour:hover,
+.avatar-custom-colour:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgb(29 155 240 / 12%);
+}
+
+.avatar-custom-colour input {
+  width: 38px;
+  height: 34px;
+  padding: 2px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.avatar-custom-colour input::-webkit-color-swatch {
+  border: 0;
+  border-radius: 5px;
+}
+
+.avatar-custom-colour input::-moz-color-swatch {
+  border: 0;
+  border-radius: 5px;
+}
+
+.avatar-custom-colour strong,
+.avatar-custom-colour small {
+  display: block;
+}
+
+.avatar-custom-colour strong {
+  font-size: 0.7rem;
+}
+
+.avatar-custom-colour small {
+  margin-top: 1px;
+  color: var(--text-secondary);
+  font-size: 0.6rem;
+}
+
 .avatar-editor-error {
   margin: 13px 0 0;
   padding: 8px 10px;
@@ -667,6 +787,11 @@ body.panel-open .map-loading {
   .avatar-editor-content {
     max-height: calc(100vh - 24px);
     overflow-y: auto;
+  }
+
+  .avatar-custom-colour {
+    width: 100%;
+    margin-left: 0;
   }
 }
 

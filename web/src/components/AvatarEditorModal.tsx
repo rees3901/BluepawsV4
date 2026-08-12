@@ -1,13 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import EmojiPicker, { Emoji, EmojiStyle, Theme, type EmojiClickData } from "emoji-picker-react";
 import { prepareAvatarImage, validateAvatarFile } from "@/lib/avatarImage";
 import { saveDeviceAppearance } from "@/lib/deviceAppearances";
 import { emojiToUnified } from "@/lib/emoji";
+import { normalizeMarkerColor } from "@/lib/markerColor";
 import type { DeviceAvatar, TelemetryDevice } from "@/types/telemetry";
 
-const COLORS = ["#1d9bf0", "#ff6b35", "#a855f7", "#22c55e", "#f97316", "#06b6d4", "#84cc16", "#ec4899"];
+const SUGGESTED_COLORS = ["#1d9bf0", "#ff6b35", "#a855f7", "#22c55e", "#f59e0b", "#06b6d4", "#84cc16", "#ec4899"];
 
 interface AvatarEditorModalProps {
   device: TelemetryDevice;
@@ -21,7 +22,7 @@ interface AvatarEditorModalProps {
 export function AvatarEditorModal({ device, householdId, avatar, theme, onClose, onSaved }: AvatarEditorModalProps) {
   const [kind, setKind] = useState<"emoji" | "photo">(avatar.kind);
   const [emoji, setEmoji] = useState(avatar.emoji);
-  const [color, setColor] = useState(avatar.color);
+  const [color, setColor] = useState(() => normalizeMarkerColor(avatar.color));
   const [file, setFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
@@ -98,8 +99,10 @@ export function AvatarEditorModal({ device, householdId, avatar, theme, onClose,
         {kind === "emoji" ? (
           <div className="avatar-emoji-picker">
             <div className="avatar-selected-emoji" aria-live="polite">
-              <span className="avatar-selected-emoji-preview" style={{ borderColor: color }}>
-                <Emoji unified={emojiToUnified(emoji)} emojiStyle={EmojiStyle.GOOGLE} size={25} />
+              <span className="marker-pin avatar-map-pin-preview" style={{ "--marker-color": color } as CSSProperties}>
+                <span className="marker-pin-face">
+                  <Emoji unified={emojiToUnified(emoji)} emojiStyle={EmojiStyle.GOOGLE} size={25} />
+                </span>
               </span>
               <span><strong>Selected marker</strong><small>Search below or browse by category</small></span>
             </div>
@@ -147,11 +150,20 @@ export function AvatarEditorModal({ device, householdId, avatar, theme, onClose,
         )}
 
         <div className="avatar-colour-section">
-          <span>Marker colour</span>
-          <div className="avatar-colour-grid">
-            {COLORS.map((option) => (
-              <button key={option} type="button" style={{ backgroundColor: option }} className={color === option ? "active" : ""} aria-label={`Use marker colour ${option}`} aria-pressed={color === option} onClick={() => setColor(option)} />
-            ))}
+          <div className="avatar-colour-heading">
+            <span>Marker colour</span>
+            <output aria-live="polite">{color.toUpperCase()}</output>
+          </div>
+          <div className="avatar-colour-controls">
+            <div className="avatar-colour-grid" aria-label="Suggested marker colours">
+              {SUGGESTED_COLORS.map((option) => (
+                <button key={option} type="button" style={{ backgroundColor: option, color: option }} className={color === option ? "active" : ""} aria-label={`Use suggested marker colour ${option}`} aria-pressed={color === option} onClick={() => setColor(option)} />
+              ))}
+            </div>
+            <label className="avatar-custom-colour">
+              <input type="color" value={color} aria-label="Choose any custom marker colour" onInput={(event) => setColor(event.currentTarget.value)} />
+              <span><strong>Custom colour</strong><small>Open the full colour picker</small></span>
+            </label>
           </div>
         </div>
 
