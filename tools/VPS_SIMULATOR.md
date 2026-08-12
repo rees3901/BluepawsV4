@@ -3,12 +3,19 @@
 This standard-library Python tool makes several provisioned test collars send
 independent HTTPS position messages to the Supabase `ingest-position` Edge
 Function. It is suitable for an Ubuntu VPS and requires Python 3.10 or newer.
+By default it generates movement around Sandhurst, Gloucestershire, with one
+fleet update cycle every ten seconds.
 
 ## Credentials
 
 Each device has a 16-bit identifier (`1..65534`) and its own random bearer
 token. The identifier routes data; the token authenticates the sender. Supabase
 stores only the SHA-256 token hash.
+
+The plaintext token is issued once during device provisioning and must be kept
+in the private `vps_devices.json` file. It cannot be recovered from the
+Supabase dashboard after provisioning; if both private copies are lost, rotate
+the device to a newly generated token and replace its stored hash.
 
 Copy the separately supplied `vps_devices.json` to the VPS beside the repository
 and protect it:
@@ -26,6 +33,12 @@ From the repository root:
 
 ```bash
 python3 tools/vps_position_simulator.py --device-count 5 --iterations 10 --interval 2
+```
+
+For the original continuous Sandhurst simulation defaults, run:
+
+```bash
+python3 tools/vps_position_simulator.py --device-count 5
 ```
 
 Successful new messages return HTTP `201`; deliberate safe retries return `200`
