@@ -174,7 +174,7 @@ export default function TrackingMap(props: TrackingMapProps) {
       let marker = markersRef.current.get(device.id);
       const icon = L.divIcon({
         className: "",
-        html: `<div class="bp-marker status-${device.status.toLowerCase()}" style="border-color:${avatar.color}">${avatar.emoji}</div>`,
+        html: `<div class="bp-marker status-${device.status.toLowerCase()}" style="border-color:${avatar.color}">${avatarHtml(avatar, "bp-marker-avatar")}</div>`,
         iconSize: [32, 32],
         iconAnchor: [16, 16],
       });
@@ -269,7 +269,14 @@ function popupHtml(device: TelemetryDevice, avatar: DeviceAvatar) {
   const signal = device.rssi === null || device.snr === null ? "Not reported" : `${device.rssi} dBm / ${device.snr} dB`;
   const battery = device.batteryPercent === undefined || device.batteryPercent === null ? `${(device.batt / 1000).toFixed(2)} V` : `${device.batteryPercent}%`;
   const source = device.source ? `<span class="label">Source</span><span class="value">${escapeHtml(device.source)}</span>` : "";
-  return `<div class="popup-content"><div class="popup-header"><span style="font-size:20px">${avatar.emoji}</span><strong>${name}</strong><span class="card-status status-${device.status.toLowerCase()}" style="margin-left:6px;font-size:10px">${device.status}</span></div><div class="popup-grid"><span class="label">Signal</span><span class="value">${signal}</span><span class="label">Battery</span><span class="value">${battery}</span><span class="label">Profile</span><span class="value">${escapeHtml(device.profile)}</span>${source}</div><div class="card-actions popup-actions"><button class="btn-action btn-jump" data-map-action="jump" data-device-id="${device.id}">↗ Jump To</button><button class="btn-action btn-follow" data-map-action="follow" data-device-id="${device.id}">● Follow</button><button class="btn-action btn-trail" data-map-action="trail" data-device-id="${device.id}">⌁ Trail</button><button class="btn-action btn-find" data-map-action="find" data-device-id="${device.id}">♟ Find Alert</button><button class="btn-action btn-cmd" data-map-action="command" data-device-id="${device.id}">⌘ Cmd</button></div></div>`;
+  return `<div class="popup-content"><div class="popup-header">${avatarHtml(avatar, "popup-avatar")}<strong>${name}</strong><span class="card-status status-${device.status.toLowerCase()}" style="margin-left:6px;font-size:10px">${device.status}</span></div><div class="popup-grid"><span class="label">Signal</span><span class="value">${signal}</span><span class="label">Battery</span><span class="value">${battery}</span><span class="label">Profile</span><span class="value">${escapeHtml(device.profile)}</span>${source}</div><div class="card-actions popup-actions"><button class="btn-action btn-jump" data-map-action="jump" data-device-id="${device.id}">↗ Jump To</button><button class="btn-action btn-follow" data-map-action="follow" data-device-id="${device.id}">● Follow</button><button class="btn-action btn-trail" data-map-action="trail" data-device-id="${device.id}">⌁ Trail</button><button class="btn-action btn-find" data-map-action="find" data-device-id="${device.id}">♟ Find Alert</button><button class="btn-action btn-cmd" data-map-action="command" data-device-id="${device.id}">⌘ Cmd</button></div></div>`;
+}
+
+function avatarHtml(avatar: DeviceAvatar, className: string) {
+  if (avatar.kind === "photo" && avatar.photoUrl) {
+    return `<img class="${className} avatar-image" src="${escapeHtml(avatar.photoUrl)}" alt="">`;
+  }
+  return `<span class="${className}">${escapeHtml(avatar.emoji)}</span>`;
 }
 
 function fitMarkers(map: L.Map, markers: Map<number, L.Marker>) {

@@ -3,8 +3,10 @@
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AvatarEditorModal } from "@/components/AvatarEditorModal";
 import { DeviceCard, DownloadIcon } from "@/components/DeviceCard";
 import { GuidedTour } from "@/components/GuidedTour";
+import { loadDeviceAppearances, revokeAvatarUrls } from "@/lib/deviceAppearances";
 import { createRealtimeTelemetrySource, loadDeviceTrail } from "@/lib/realtimeTelemetry";
 import { createClient } from "@/lib/supabase/client";
 import { getTutorialTelemetrySource } from "@/lib/telemetry";
@@ -58,9 +60,43 @@ export function Dashboard({ householdId, initialLiveDevices, liveTelemetryError,
   const [toast, setToast] = useState<string | null>(null);
   const [now, setNow] = useState(0);
   const [logs, setLogs] = useState<string[]>([]);
+  const [customAvatars, setCustomAvatars] = useState<Record<number, DeviceAvatar>>({});
+  const [avatarDevice, setAvatarDevice] = useState<TelemetryDevice | null>(null);
   const sequences = useRef(new Map<number, number>());
+  const customAvatarsRef = useRef<Record<number, DeviceAvatar>>({});
 
-  const avatars = useMemo<Record<number, DeviceAvatar>>(() => Object.fromEntries(devices.map((device, index) => [device.id, { emoji: EMOJIS[index % EMOJIS.length], color: COLORS[index % COLORS.length] }])), [devices]);
+  const avatars = useMemo<Record<number, DeviceAvatar>>(() => Object.fromEntries(devices.map((device, index) => [
+    device.id,
+    (!tutorialMode ? customAvatars[device.id] : undefined) ?? { kind: "emoji", emoji: EMOJIS[index % EMOJIS.length], color: COLORS[index % COLORS.length] },
+  ])), [customAvatars, devices, tutorialMode]);
+
+  const replaceCustomAvatars = useCallback((next: Record<number, DeviceAvatar>) => {
+    revokeAvatarUrls(customAvatarsRef.current);
+    customAvatarsRef.current = next;
+    setCustomAvatars(next);
+  }, []);
+
+  const refreshAppearances = useCallback(async () => {
+    if (!householdId || tutorialMode) return;
+    const next = await loadDeviceAppearances(householdId);
+    replaceCustomAvatars(next);
+  }, [householdId, replaceCustomAvatars, tutorialMode]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!householdId || tutorialMode) return;
+
+    void loadDeviceAppearances(householdId)
+      .then((next) => {
+        if (cancelled) revokeAvatarUrls(next);
+        else replaceCustomAvatars(next);
+      })
+      .catch(() => setToast("Pet appearances could not be loaded"));
+
+    return () => { cancelled = true; };
+  }, [householdId, replaceCustomAvatars, tutorialMode]);
+
+  useEffect(() => () => revokeAvatarUrls(customAvatarsRef.current), []);
 
   useEffect(() => {
     const restorePreferences = window.setTimeout(() => {
@@ -323,6 +359,7 @@ export function Dashboard({ householdId, initialLiveDevices, liveTelemetryError,
               ageSeconds={Math.max(0, Math.floor((now - device.lastUpdate) / 1000))}
               onExpand={() => setExpandedId((current) => current === device.id ? null : device.id)}
               onAction={(action) => handleAction(device, action)}
+              onAvatarEdit={tutorialMode ? undefined : () => setAvatarDevice(device)}
             />
           ))}
         </div>
@@ -352,6 +389,15 @@ export function Dashboard({ householdId, initialLiveDevices, liveTelemetryError,
       )}
       {commandDevice && <CommandModal device={commandDevice} onClose={() => setCommandDevice(null)} onSend={(mode) => { setCommandDevice(null); setToast(tutorialMode ? `Tutorial command preview: ${mode}` : "Command sending is not connected yet"); }} />}
       {findDevice && <FindModal device={findDevice} onClose={() => setFindDevice(null)} onSend={() => { setFindDevice(null); setToast(tutorialMode ? "Tutorial Find Alert previewed" : "Find Alert sending is not connected yet"); }} />}
+      {avatarDevice && householdId && (
+        <AvatarEditorModal
+          device={avatarDevice}
+          householdId={householdId}
+          avatar={avatars[avatarDevice.id]}
+          onClose={() => setAvatarDevice(null)}
+          onSaved={refreshAppearances}
+        />
+      )}
       {tutorialOpen && tutorialMode && (
         <GuidedTour
           onFinish={completeTutorial}
