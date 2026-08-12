@@ -20,6 +20,9 @@ from typing import Any
 DEFAULT_URL = (
     "https://ykcdaonkvwemedotdpdr.supabase.co/functions/v1/ingest-position"
 )
+DEFAULT_INTERVAL_SECONDS = 10.0
+DEFAULT_BASE_LATITUDE = 51.907055
+DEFAULT_BASE_LONGITUDE = -2.256660
 
 
 @dataclass(frozen=True)
@@ -144,13 +147,28 @@ def parse_args() -> argparse.Namespace:
         default=Path(os.getenv("BLUEPAWS_DEVICE_FILE", "tools/vps_devices.json")),
     )
     parser.add_argument("--device-count", type=int, default=0, help="0 uses every device")
-    parser.add_argument("--interval", type=float, default=5.0)
+    parser.add_argument(
+        "--interval",
+        type=float,
+        default=DEFAULT_INTERVAL_SECONDS,
+        help="seconds between fleet update cycles (default: 10)",
+    )
     parser.add_argument(
         "--iterations", type=int, default=0, help="cycles to send; 0 runs until stopped"
     )
     parser.add_argument("--duplicate-rate", type=float, default=0.05)
-    parser.add_argument("--base-latitude", type=float, default=51.5074)
-    parser.add_argument("--base-longitude", type=float, default=-0.1278)
+    parser.add_argument(
+        "--base-latitude",
+        type=float,
+        default=DEFAULT_BASE_LATITUDE,
+        help="simulation centre latitude (default: Sandhurst, Gloucestershire)",
+    )
+    parser.add_argument(
+        "--base-longitude",
+        type=float,
+        default=DEFAULT_BASE_LONGITUDE,
+        help="simulation centre longitude (default: Sandhurst, Gloucestershire)",
+    )
     parser.add_argument("--step-degrees", type=float, default=0.0002)
     parser.add_argument("--timeout", type=float, default=15.0)
     parser.add_argument("--seed", type=int)

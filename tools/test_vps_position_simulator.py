@@ -5,6 +5,9 @@ import unittest
 from pathlib import Path
 
 from vps_position_simulator import (
+    DEFAULT_BASE_LATITUDE,
+    DEFAULT_BASE_LONGITUDE,
+    DEFAULT_INTERVAL_SECONDS,
     DeviceCredential,
     DeviceState,
     build_payload,
@@ -13,6 +16,11 @@ from vps_position_simulator import (
 
 
 class SimulatorTests(unittest.TestCase):
+    def test_defaults_preserve_original_sandhurst_simulation(self):
+        self.assertEqual(DEFAULT_INTERVAL_SECONDS, 10.0)
+        self.assertEqual(DEFAULT_BASE_LATITUDE, 51.907055)
+        self.assertEqual(DEFAULT_BASE_LONGITUDE, -2.256660)
+
     def test_load_credentials_rejects_duplicate_device_ids(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "devices.json"
