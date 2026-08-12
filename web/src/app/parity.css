@@ -566,6 +566,15 @@ body.panel-open .hamburger-btn {
     color: #000;
 }
 
+.global-trails-icon {
+    display: block;
+    width: 17px;
+    height: 17px;
+    background: currentColor;
+    -webkit-mask: url("../../map-location.png") center / contain no-repeat;
+    mask: url("../../map-location.png") center / contain no-repeat;
+}
+
 .ctrl-btn:disabled {
     opacity: 0.45;
     cursor: not-allowed;
