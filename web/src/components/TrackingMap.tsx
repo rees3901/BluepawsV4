@@ -177,10 +177,10 @@ export default function TrackingMap(props: TrackingMapProps) {
       let marker = markersRef.current.get(device.id);
       const icon = L.divIcon({
         className: "bp-marker-icon",
-        html: `<div class="marker-pin bp-marker status-${device.status.toLowerCase()}" style="--marker-color:${markerColor}"><div class="marker-pin-face">${avatarHtml(avatar, "bp-marker-avatar")}</div></div>`,
-        iconSize: [40, 52],
-        iconAnchor: [20, 51],
-        popupAnchor: [0, -47],
+        html: markerElement(avatar, markerColor, device.status),
+        iconSize: [36, 48],
+        iconAnchor: [18, 47],
+        popupAnchor: [0, -43],
       });
       if (!marker) {
         marker = L.marker(latLng, { icon }).addTo(map);
@@ -282,6 +282,28 @@ function avatarHtml(avatar: DeviceAvatar, className: string) {
     return `<img class="${className} avatar-image" src="${escapeHtml(avatar.photoUrl)}" alt="">`;
   }
   return `<img class="${className} avatar-emoji-image" src="${emojiImageUrl(avatar.emoji)}" alt="${escapeHtml(avatar.emoji)}">`;
+}
+
+function markerElement(avatar: DeviceAvatar, markerColor: string, status: TelemetryDevice["status"]) {
+  const pin = document.createElement("div");
+  pin.className = `marker-pin bp-marker status-${status.toLowerCase()}`;
+  pin.style.setProperty("--marker-color", markerColor);
+
+  const face = document.createElement("div");
+  face.className = "card-avatar marker-pin-face";
+  if (avatar.kind === "photo" && avatar.photoUrl) {
+    face.classList.add("has-photo");
+    face.style.backgroundImage = `url(${JSON.stringify(avatar.photoUrl)})`;
+  } else {
+    const image = document.createElement("img");
+    image.className = "avatar-emoji-image";
+    image.src = emojiImageUrl(avatar.emoji);
+    image.alt = avatar.emoji;
+    image.draggable = false;
+    face.append(image);
+  }
+  pin.append(face);
+  return pin;
 }
 
 function fitMarkers(map: L.Map, markers: Map<number, L.Marker>) {

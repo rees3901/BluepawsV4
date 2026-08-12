@@ -100,7 +100,7 @@ export function AvatarEditorModal({ device, householdId, avatar, theme, onClose,
           <div className="avatar-emoji-picker">
             <div className="avatar-selected-emoji" aria-live="polite">
               <span className="marker-pin avatar-map-pin-preview" style={{ "--marker-color": color } as CSSProperties}>
-                <span className="marker-pin-face">
+                <span className="card-avatar marker-pin-face">
                   <Emoji unified={emojiToUnified(emoji)} emojiStyle={EmojiStyle.GOOGLE} size={25} />
                 </span>
               </span>
