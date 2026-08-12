@@ -400,8 +400,35 @@ body.panel-open .map-loading {
 .marker-pin {
   --marker-color: var(--accent);
   position: relative;
-  isolation: isolate;
+  display: block;
+  width: 40px;
+  height: 52px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.marker-pin::after {
+  content: "";
+  position: absolute;
+  top: 34px;
+  left: 13px;
+  z-index: 0;
+  width: 14px;
+  height: 18px;
+  background: var(--marker-color);
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+}
+
+.marker-pin-face {
+  position: relative;
+  z-index: 1;
   display: grid;
+  box-sizing: border-box;
+  width: 40px;
+  height: 40px;
+  overflow: hidden;
   place-items: center;
   border: 3px solid var(--marker-color);
   border-radius: 50%;
@@ -409,38 +436,13 @@ body.panel-open .map-loading {
   box-shadow: 0 3px 10px rgb(0 0 0 / 50%);
 }
 
-.marker-pin::after {
-  content: "";
-  position: absolute;
-  left: 50%;
-  bottom: -8px;
-  z-index: -1;
-  width: 15px;
-  height: 15px;
-  transform: translateX(-50%) rotate(45deg);
-  border-right: 3px solid var(--marker-color);
-  border-bottom: 3px solid var(--marker-color);
-  border-radius: 0 0 3px;
-  background: var(--bg-card);
-}
-
-.marker-pin-face {
-  display: grid;
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
-  place-items: center;
-  border-radius: 50%;
-  background: var(--bg-card);
-}
-
 .bp-marker {
   width: 40px;
-  height: 40px;
+  height: 52px;
 }
 
-.bp-marker.status-home,
-.bp-marker.status-lost {
+.bp-marker.status-home .marker-pin-face,
+.bp-marker.status-lost .marker-pin-face {
   border-color: var(--marker-color);
 }
 
@@ -455,9 +457,9 @@ body.panel-open .map-loading {
 }
 
 .bp-marker-avatar.avatar-emoji-image {
-  width: 72%;
-  height: 72%;
-  margin: 14%;
+  width: 70%;
+  height: 70%;
+  margin: 0;
   object-fit: contain;
 }
 
@@ -562,9 +564,8 @@ body.panel-open .map-loading {
 
 .avatar-map-pin-preview {
   width: 40px;
-  height: 40px;
+  height: 52px;
   flex: 0 0 40px;
-  margin-bottom: 8px;
 }
 
 .avatar-selected-emoji strong,
