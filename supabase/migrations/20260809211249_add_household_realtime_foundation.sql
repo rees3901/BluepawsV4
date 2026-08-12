@@ -394,3 +394,5 @@ grant select on table public.device_latest_positions to service_role;
 
 comment on table public.households is 'Customer tenancy boundary for Bluepaws users and devices.';
 comment on table public.device_latest_positions is 'Maintained current position per device; changes are broadcast to its private household channel.';
+
+;
