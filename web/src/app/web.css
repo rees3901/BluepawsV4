@@ -441,12 +441,12 @@ body.panel-open .map-loading {
 
 .popup-avatar {
   display: grid;
-  width: 52px;
-  height: 52px;
-  flex: 0 0 52px;
+  width: 78px;
+  height: 78px;
+  flex: 0 0 78px;
   place-items: center;
   border-radius: 50%;
-  font-size: 40px;
+  font-size: 60px;
   object-fit: cover;
 }
 
