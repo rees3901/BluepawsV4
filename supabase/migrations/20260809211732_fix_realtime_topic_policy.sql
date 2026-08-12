@@ -12,3 +12,5 @@ create policy "Household members receive position broadcasts"
         and (select realtime.topic()) = 'household:' || member.household_id::text
     )
   );
+
+;
