@@ -59,6 +59,7 @@ from tlv_packet_codec import (
     TX_REASON_CODES,
     BuiltPacket,
     DeviceCredential,
+    GatewayCredential,
     PacketFields,
     TlvEntry,
     build_tlv_packet,
@@ -67,7 +68,7 @@ from tlv_packet_codec import (
     decode_hmac_key,
     firmware_tlv,
     known_tlv,
-    load_credentials,
+    load_credential_bundle,
     post_wrapper,
 )
 
@@ -99,6 +100,7 @@ TRANSPORTS = {
 }
 EARTH_RADIUS_METRES = 6_371_000.0
 EARTH_METRES_PER_DEGREE = math.tau * EARTH_RADIUS_METRES / 360.0
+LIVE_PREVIEW_DELAY_MS = 250
 
 
 def parse_coordinates(value: str) -> tuple[float, float]:
@@ -288,19 +290,29 @@ class BluepawsTlvConsole(QMainWindow):
         self.resize(1220, 860)
         self.setMinimumSize(980, 700)
         self._credentials: dict[str, DeviceCredential] = {}
+        self._gateway_credentials: dict[str, GatewayCredential] = {}
         self._custom_tlvs: list[TlvEntry] = []
         self._last_built: BuiltPacket | None = None
         self._prepared_fields: list[PacketFields] = []
         self._stop_event = threading.Event()
         self._worker: threading.Thread | None = None
+        self._auto_build_timer = QTimer(self)
+        self._auto_build_timer.setSingleShot(True)
+        self._auto_build_timer.setInterval(LIVE_PREVIEW_DELAY_MS)
+        self._auto_build_timer.timeout.connect(self.build_packet)
+        self._auto_preview_timer = QTimer(self)
+        self._auto_preview_timer.setSingleShot(True)
+        self._auto_preview_timer.setInterval(LIVE_PREVIEW_DELAY_MS)
+        self._auto_preview_timer.timeout.connect(self.preview_wrapper)
         self.worker_signals = WorkerSignals()
         self.worker_signals.log_line.connect(self._append_log)
         self.worker_signals.finished.connect(self._send_finished)
         self._build_ui()
+        self._connect_live_previews()
         self._transport_changed()
         self._tag_mode_changed()
         self.statusBar().showMessage("Ready • protocol v1.1 • secrets remain on this computer")
-        QTimer.singleShot(100, self.build_packet)
+        self._schedule_packet_build()
 
     def _build_ui(self) -> None:
         central = QWidget()
@@ -337,15 +349,27 @@ class BluepawsTlvConsole(QMainWindow):
         grid.setColumnStretch(1, 1)
 
         credentials = QGroupBox("Provisioned test credentials")
-        credential_row = QHBoxLayout(credentials)
+        credential_row = QGridLayout(credentials)
         load = QPushButton("Load credentials JSON…")
         load.clicked.connect(self.load_credentials_file)
-        credential_row.addWidget(load)
-        credential_row.addWidget(QLabel("Device"))
+        credential_row.addWidget(load, 0, 0)
+        credential_row.addWidget(QLabel("Device"), 0, 1)
         self.credential_combo = combo([])
         self.credential_combo.currentTextChanged.connect(self._credential_selected)
-        credential_row.addWidget(self.credential_combo, 1)
-        credential_row.addWidget(QLabel("Bearer and HMAC values stay masked and are never logged."))
+        credential_row.addWidget(self.credential_combo, 0, 2)
+        credential_row.addWidget(QLabel("Gateway"), 0, 3)
+        self.gateway_combo = combo([])
+        self.gateway_combo.setEnabled(False)
+        self.gateway_combo.currentTextChanged.connect(self._gateway_selected)
+        credential_row.addWidget(self.gateway_combo, 0, 4)
+        credential_note = QLabel(
+            "The selected transport chooses the device or gateway bearer automatically. "
+            "Secrets stay masked and are never logged."
+        )
+        credential_note.setStyleSheet(f"color: {MUTED};")
+        credential_row.addWidget(credential_note, 1, 0, 1, 5)
+        credential_row.setColumnStretch(2, 1)
+        credential_row.setColumnStretch(4, 1)
         grid.addWidget(credentials, 0, 0, 1, 2)
 
         header = QGroupBox("Fixed 32-byte header")
@@ -502,10 +526,11 @@ class BluepawsTlvConsole(QMainWindow):
         output = QGroupBox("Packet output")
         output_layout = QVBoxLayout(output)
         output_actions = QHBoxLayout()
-        build = QPushButton("Build and validate packet")
+        build = QPushButton("Rebuild now")
         build.clicked.connect(self.build_packet)
+        build.setToolTip("The preview updates automatically; this forces an immediate rebuild.")
         output_actions.addWidget(build)
-        self.packet_summary = QLabel("Packet not built")
+        self.packet_summary = QLabel("Auto-updating packet preview")
         self.packet_summary.setStyleSheet(f"color: {SUCCESS};")
         output_actions.addWidget(self.packet_summary)
         output_actions.addStretch()
@@ -522,10 +547,12 @@ class BluepawsTlvConsole(QMainWindow):
         output_layout.addWidget(QLabel("Packet Base64"))
         self.packet_b64 = QPlainTextEdit()
         self.packet_b64.setMaximumHeight(75)
+        self.packet_b64.setReadOnly(True)
         output_layout.addWidget(self.packet_b64)
         output_layout.addWidget(QLabel("Packet hex"))
         self.packet_hex = QPlainTextEdit()
         self.packet_hex.setMaximumHeight(100)
+        self.packet_hex.setReadOnly(True)
         output_layout.addWidget(self.packet_hex)
         grid.addWidget(output, 5, 0, 1, 2)
 
@@ -557,6 +584,10 @@ class BluepawsTlvConsole(QMainWindow):
         )
         request_form.addRow("Bearer token", self.bearer)
         request_form.addRow("", show_bearer)
+        self.bearer_hint = QLabel()
+        self.bearer_hint.setStyleSheet(f"color: {MUTED};")
+        self.bearer_hint.setWordWrap(True)
+        request_form.addRow("", self.bearer_hint)
         grid.addWidget(request, 0, 0)
 
         metadata = QGroupBox("Transport metadata")
@@ -596,6 +627,7 @@ class BluepawsTlvConsole(QMainWindow):
         preview_actions.addStretch()
         preview_layout.addLayout(preview_actions)
         self.wrapper_preview = QPlainTextEdit()
+        self.wrapper_preview.setReadOnly(True)
         preview_layout.addWidget(self.wrapper_preview)
         grid.addWidget(preview, 1, 0)
 
@@ -646,7 +678,7 @@ class BluepawsTlvConsole(QMainWindow):
         buttons.addStretch()
         buttons.addWidget(clear)
         sender_layout.addLayout(buttons)
-        self.sender_status = QLabel("Build a packet, preview the wrapper, then send.")
+        self.sender_status = QLabel("Packet and wrapper previews update automatically.")
         self.sender_status.setStyleSheet(f"color: {MUTED};")
         sender_layout.addWidget(self.sender_status)
         self.response_log = QPlainTextEdit()
@@ -655,39 +687,112 @@ class BluepawsTlvConsole(QMainWindow):
         grid.addWidget(sender, 1, 1)
         return body
 
+    def _connect_live_previews(self) -> None:
+        """Debounce edits so generated output always follows the visible form state."""
+        packet_lines = (
+            self.device_id,
+            self.sequence,
+            self.timestamp,
+            self.latitude,
+            self.longitude,
+            self.battery_mv,
+            self.accuracy_m,
+            self.fix_age_s,
+            self.satellites,
+            self.hmac,
+            self.custom_tag,
+            *self.known_values.values(),
+        )
+        for field in packet_lines:
+            field.textChanged.connect(self._schedule_packet_build)
+
+        for selector in (self.status, self.profile, self.reason, self.tag_mode):
+            selector.currentTextChanged.connect(self._schedule_packet_build)
+        for check in (*self.flag_checks.values(), *self.known_checks.values()):
+            check.toggled.connect(self._schedule_packet_build)
+
+        wrapper_lines = (
+            self.gateway_guid,
+            self.gateway_rx_time,
+            self.link_rssi,
+            self.link_snr,
+            self.cell_rsrp,
+            self.cell_rsrq,
+            self.cell_sinr,
+        )
+        for field in wrapper_lines:
+            field.textChanged.connect(self._schedule_wrapper_preview)
+
+    def _schedule_packet_build(self, *_unused: object) -> None:
+        self._auto_build_timer.start()
+
+    def _schedule_wrapper_preview(self, *_unused: object) -> None:
+        self._auto_preview_timer.start()
+
     def load_credentials_file(self) -> None:
         selected, _ = QFileDialog.getOpenFileName(
-            self, "Load Bluepaws test credentials", "", "JSON files (*.json);;All files (*.*)"
+            self, "Load Bluepaws credential bundle", "", "JSON files (*.json);;All files (*.*)"
         )
         if not selected:
             return
         try:
-            credentials = load_credentials(Path(selected))
+            bundle = load_credential_bundle(Path(selected))
         except (OSError, ValueError, json.JSONDecodeError) as error:
             QMessageBox.critical(self, "Unable to load credentials", str(error))
             return
-        self._credentials = {f"Device {item.device_id}": item for item in credentials}
+        self._credentials = {f"Device {item.device_id}": item for item in bundle.devices}
+        self._gateway_credentials = {
+            self._gateway_label(item): item for item in bundle.gateways
+        }
         self.credential_combo.blockSignals(True)
         self.credential_combo.clear()
         self.credential_combo.addItems(list(self._credentials))
         self.credential_combo.blockSignals(False)
         self.credential_combo.setCurrentIndex(0)
-        self._apply_credential(credentials[0])
-        self.builder_status.setText(f"Loaded {len(credentials)} provisioned test device(s).")
+        self.gateway_combo.blockSignals(True)
+        self.gateway_combo.clear()
+        self.gateway_combo.addItems(list(self._gateway_credentials))
+        self.gateway_combo.blockSignals(False)
+        if self._gateway_credentials:
+            self.gateway_combo.setCurrentIndex(0)
+        self._apply_credential(bundle.devices[0])
+        if bundle.gateways:
+            self._apply_gateway(bundle.gateways[0])
+        self._transport_changed()
+        self.builder_status.setText(
+            f"Loaded {len(bundle.devices)} device(s) and {len(bundle.gateways)} gateway(s)."
+        )
 
     def _credential_selected(self, name: str) -> None:
         credential = self._credentials.get(name)
         if credential is not None:
             self._apply_credential(credential)
 
+    def _gateway_selected(self, name: str) -> None:
+        credential = self._gateway_credentials.get(name)
+        if credential is not None:
+            self._apply_gateway(credential)
+
     def _apply_credential(self, credential: DeviceCredential) -> None:
         self.device_id.setText(str(credential.device_id))
         self.hmac.setText(base64.b64encode(credential.hmac_key).decode("ascii"))
-        self.bearer.setText(credential.token)
+        if TRANSPORTS[self.transport.currentText()] == "cellular_direct":
+            self.bearer.setText(credential.token)
         self.builder_status.setText(
             f"Device {credential.device_id} selected. Secrets remain masked."
         )
         self.build_packet()
+
+    def _apply_gateway(self, credential: GatewayCredential) -> None:
+        self.gateway_guid.setText(credential.gateway_guid16)
+        if TRANSPORTS[self.transport.currentText()] == "lora_hub":
+            self.bearer.setText(credential.token)
+        self.preview_wrapper()
+
+    @staticmethod
+    def _gateway_label(credential: GatewayCredential) -> str:
+        suffix = f" — {credential.display_name}" if credential.display_name else ""
+        return f"Gateway {credential.gateway_guid16}{suffix}"
 
     def _set_now(self) -> None:
         self.timestamp.setText(str(int(time.time())))
@@ -746,6 +851,26 @@ class BluepawsTlvConsole(QMainWindow):
 
     def _transport_changed(self) -> None:
         is_lora = TRANSPORTS[self.transport.currentText()] == "lora_hub"
+        self.gateway_combo.setEnabled(is_lora and bool(self._gateway_credentials))
+        if is_lora:
+            gateway = self._gateway_credentials.get(self.gateway_combo.currentText())
+            if gateway is not None:
+                self.gateway_guid.setText(gateway.gateway_guid16)
+                self.bearer.setText(gateway.token)
+            else:
+                device = self._credentials.get(self.credential_combo.currentText())
+                if device is not None and self.bearer.text() == device.token:
+                    self.bearer.clear()
+        else:
+            device = self._credentials.get(self.credential_combo.currentText())
+            if device is not None:
+                self.bearer.setText(device.token)
+        self.bearer_hint.setText(
+            "The selected gateway bearer token authenticates this relay. "
+            "Its four-digit GUID identifies the hub but is not a secret."
+            if is_lora
+            else "The selected device bearer token authenticates direct LTE ingestion."
+        )
         for widget in self.gateway_widgets:
             widget.setEnabled(is_lora)
         for widget in self.cell_widgets:
@@ -818,12 +943,17 @@ class BluepawsTlvConsole(QMainWindow):
         )
 
     def build_packet(self) -> BuiltPacket | None:
+        self._auto_build_timer.stop()
         try:
             built = self._build_from_fields()
         except ValueError as error:
             self._last_built = None
             self.packet_summary.setText("Packet not built")
             self.builder_status.setText(str(error))
+            self.packet_b64.clear()
+            self.packet_hex.clear()
+            self.wrapper_preview.clear()
+            self.sender_status.setText("Correct the packet fields before sending.")
             return None
         self._last_built = built
         self.packet_b64.setPlainText(built.payload_b64)
@@ -872,9 +1002,11 @@ class BluepawsTlvConsole(QMainWindow):
         )
 
     def preview_wrapper(self) -> dict[str, Any] | None:
+        self._auto_preview_timer.stop()
         try:
             wrapper = self._wrapper()
         except ValueError as error:
+            self.wrapper_preview.clear()
             self.sender_status.setText(str(error))
             return None
         self.wrapper_preview.setPlainText(json.dumps(wrapper, indent=2))
@@ -887,6 +1019,8 @@ class BluepawsTlvConsole(QMainWindow):
         if self._worker is not None and self._worker.is_alive():
             return
         try:
+            if self.build_packet() is None:
+                raise ValueError(self.builder_status.text())
             count = self._int(self.send_count.text(), "send count")
             if not 1 <= count <= 1000:
                 raise ValueError("send count must be from 1 to 1000")

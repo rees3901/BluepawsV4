@@ -30,15 +30,22 @@ Bluepaws Qt console dependencies available (PySide6 6.11.1).
 
 ## Safe use
 
-Load the private device credentials file on the packet-builder tab. Secrets stay
-masked and are excluded from wrapper previews and response logs. For LTE direct,
-use the selected device bearer token. For a LoRa home-hub relay, replace it with
-the provisioned gateway bearer token and provide the gateway GUID16.
+Load the private typed credentials bundle on the packet-builder tab. It contains
+separate `devices` and `gateways` arrays; the legacy flat device array remains
+supported. Secrets stay masked and are excluded from wrapper previews and logs.
+The selected transport automatically uses the selected device bearer for direct
+LTE or the selected gateway bearer and GUID16 for a LoRa home-hub relay.
 
 The console supports valid packets and deliberate negative HMAC tests, custom
 TLVs, wrapper preview, repeated or advancing sequences, cancellable background
 HTTP posting and timestamped response logging. Use test devices only. Never put
 a Supabase service-role key in the credential file or bearer field.
+
+Packet Base64, packet hex and JSON wrapper output update automatically after a
+short pause whenever an applicable field, selector, flag or TLV changes. The
+generated fields are read-only. **Send** also performs an immediate final rebuild,
+so a request cannot use an older preview when an edit has just been made. Invalid
+input clears the previous generated output instead of leaving stale data visible.
 
 ## Live movement simulation
 

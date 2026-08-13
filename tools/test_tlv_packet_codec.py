@@ -1,8 +1,11 @@
 import base64
 import hashlib
 import hmac
+import json
 import struct
+import tempfile
 import unittest
+from pathlib import Path
 
 from tlv_packet_codec import (
     PacketFields,
@@ -12,6 +15,8 @@ from tlv_packet_codec import (
     custom_tlv,
     firmware_tlv,
     known_tlv,
+    load_credential_bundle,
+    load_credentials,
     validate_payload_b64,
 )
 
@@ -37,6 +42,72 @@ def packet_fields(**overrides):
 
 
 class TlvPacketCodecTests(unittest.TestCase):
+    def test_loads_typed_bundle_and_preserves_legacy_device_arrays(self):
+        key = base64.b64encode(bytes(32)).decode()
+        with tempfile.TemporaryDirectory() as directory:
+            bundle_path = Path(directory) / "credentials.json"
+            bundle_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "devices": [
+                            {
+                                "device_id": 1001,
+                                "bearer_token": "d" * 48,
+                                "hmac_key_b64": key,
+                            }
+                        ],
+                        "gateways": [
+                            {
+                                "gateway_guid16": "0016",
+                                "bearer_token": "g" * 48,
+                                "display_name": "Test Hub",
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            bundle = load_credential_bundle(bundle_path)
+            self.assertEqual(bundle.devices[0].device_id, 1001)
+            self.assertEqual(bundle.gateways[0].gateway_guid16, "0016")
+            self.assertEqual(bundle.gateways[0].display_name, "Test Hub")
+
+            legacy_path = Path(directory) / "legacy.json"
+            legacy_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "device_id": 1002,
+                            "token": "l" * 48,
+                            "hmac_key_b64": key,
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            self.assertEqual(load_credentials(legacy_path)[0].device_id, 1002)
+
+    def test_rejects_duplicate_or_zero_gateway_identifiers(self):
+        key = base64.b64encode(bytes(32)).decode()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "credentials.json"
+            body = {
+                "devices": [
+                    {
+                        "device_id": 1001,
+                        "bearer_token": "d" * 48,
+                        "hmac_key_b64": key,
+                    }
+                ],
+                "gateways": [
+                    {"gateway_guid16": "0000", "bearer_token": "g" * 48}
+                ],
+            }
+            path.write_text(json.dumps(body), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "0001..FFFF"):
+                load_credential_bundle(path)
+
     def test_builds_locked_layout_and_valid_hmac(self):
         key = bytes(range(32))
         built = build_tlv_packet(

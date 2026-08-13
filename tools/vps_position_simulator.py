@@ -43,20 +43,21 @@ class DeviceState:
 
 def load_credentials(path: Path) -> list[DeviceCredential]:
     raw = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(raw, list) or not raw:
-        raise ValueError("credentials file must contain a non-empty JSON array")
+    device_items = raw.get("devices") if isinstance(raw, dict) else raw
+    if not isinstance(device_items, list) or not device_items:
+        raise ValueError("credentials file must contain a non-empty devices array")
 
     credentials: list[DeviceCredential] = []
     seen: set[int] = set()
-    for item in raw:
+    for item in device_items:
         if not isinstance(item, dict):
             raise ValueError("each credential must be a JSON object")
         device_id = item.get("device_id")
-        token = item.get("token")
+        token = item.get("bearer_token", item.get("token"))
         if not isinstance(device_id, int) or isinstance(device_id, bool):
             raise ValueError("device_id must be an integer")
-        if not 1 <= device_id <= 65_534:
-            raise ValueError(f"device_id {device_id} is outside 1..65534")
+        if not 1 <= device_id <= 65_535:
+            raise ValueError(f"device_id {device_id} is outside 1..65535")
         if device_id in seen:
             raise ValueError(f"device_id {device_id} is duplicated")
         if not isinstance(token, str) or len(token) < 32:

@@ -16,13 +16,18 @@ from typing import Any
 
 from tlv_packet_codec import (
     DEFAULT_URL,
+    CredentialBundle,
     DeviceCredential,
+    GatewayCredential,
     PacketFields,
     build_tlv_packet,
     build_transport_wrapper,
     known_tlv,
+    load_credential_bundle,
     load_credentials,
+    normalize_gateway_guid16,
     post_wrapper,
+    validate_bearer_token,
 )
 DEFAULT_INTERVAL_SECONDS = 10.0
 DEFAULT_BASE_LATITUDE = 51.907055
@@ -167,26 +172,57 @@ def parse_args() -> argparse.Namespace:
         parser.error("interval/step cannot be negative and timeout must be positive")
     if not 0 <= args.duplicate_rate <= 1:
         parser.error("duplicate-rate must be from 0 to 1")
-    if args.transport == "lora_hub":
-        if not args.gateway_token:
-            parser.error("--gateway-token or BLUEPAWS_GATEWAY_TOKEN is required for LoRa")
-        if not args.gateway_guid16:
-            parser.error("--gateway-guid16 or BLUEPAWS_GATEWAY_GUID16 is required for LoRa")
-        try:
-            gateway_id = int(args.gateway_guid16, 16)
-        except ValueError:
-            parser.error("gateway-guid16 must be exactly four hexadecimal characters")
-        if len(args.gateway_guid16) != 4 or not 1 <= gateway_id <= 0xFFFF:
-            parser.error("gateway-guid16 must be 0001..FFFF")
-        args.gateway_guid16 = args.gateway_guid16.upper()
     return args
+
+
+def resolve_gateway_auth(
+    bundle: CredentialBundle,
+    gateway_guid16: str | None,
+    gateway_token: str | None,
+) -> tuple[str, str]:
+    normalized_guid = (
+        normalize_gateway_guid16(gateway_guid16) if gateway_guid16 is not None else None
+    )
+    selected = None
+    if normalized_guid is not None:
+        selected = next(
+            (
+                gateway
+                for gateway in bundle.gateways
+                if gateway.gateway_guid16 == normalized_guid
+            ),
+            None,
+        )
+    elif len(bundle.gateways) == 1:
+        selected = bundle.gateways[0]
+        normalized_guid = selected.gateway_guid16
+    elif len(bundle.gateways) > 1:
+        raise ValueError(
+            "multiple gateways are available; select one with --gateway-guid16"
+        )
+
+    resolved_token = gateway_token or (selected.token if selected is not None else None)
+    if normalized_guid is None:
+        raise ValueError(
+            "LoRa requires a gateway in the credentials bundle or --gateway-guid16"
+        )
+    if resolved_token is None:
+        raise ValueError(
+            f"gateway {normalized_guid} requires a bundle credential or --gateway-token"
+        )
+    return normalized_guid, validate_bearer_token(resolved_token, "gateway bearer token")
 
 
 def main() -> int:
     args = parse_args()
     rng = random.Random(args.seed)
     try:
-        credentials = load_credentials(args.devices_file)
+        bundle = load_credential_bundle(args.devices_file)
+        credentials = list(bundle.devices)
+        if args.transport == "lora_hub":
+            args.gateway_guid16, args.gateway_token = resolve_gateway_auth(
+                bundle, args.gateway_guid16, args.gateway_token
+            )
     except (OSError, ValueError, json.JSONDecodeError) as error:
         print(f"Unable to load credentials: {error}", file=sys.stderr)
         return 2
