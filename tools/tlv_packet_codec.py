@@ -1,0 +1,436 @@
+#!/usr/bin/env python3
+"""Reusable Bluepaws v1.1 TLV packet and HTTPS-wrapper primitives.
+
+This module deliberately contains no GUI code.  Both the command-line fleet
+simulator and the desktop test console import it so they cannot silently drift
+onto different packet contracts.
+"""
+
+from __future__ import annotations
+
+import base64
+import binascii
+import hashlib
+import hmac
+import json
+import re
+import struct
+import urllib.error
+import urllib.request
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Iterable
+
+
+DEFAULT_URL = (
+    "https://ykcdaonkvwemedotdpdr.supabase.co/functions/v1/ingest-position"
+)
+HEADER_SIZE = 32
+AUTH_TAG_SIZE = 8
+MAX_TLV_SIZE = 24
+MIN_PACKET_SIZE = HEADER_SIZE + AUTH_TAG_SIZE
+MAX_PACKET_SIZE = HEADER_SIZE + MAX_TLV_SIZE + AUTH_TAG_SIZE
+
+STATUS_CODES = {
+    "HOME": 0,
+    "OUT": 1,
+    "LOST": 2,
+    "ERROR": 3,
+}
+POWER_PROFILE_CODES = {
+    "POWER_SAVE": 0,
+    "NORMAL": 1,
+    "ACTIVE": 2,
+    "LOST_ALERT": 3,
+}
+# The deployed v1.1 decoder currently accepts 0..6.  WAKE_CHECKIN remains a
+# documentation candidate until the Edge Function contract is updated.
+TX_REASON_CODES = {
+    "TELEMETRY": 0,
+    "ACK": 1,
+    "PING": 2,
+    "INTERRUPT": 3,
+    "BOOT": 4,
+    "ALERT": 5,
+    "CONFIG": 6,
+}
+FLAG_MASKS = {
+    "GNSS_VALID": 0x01,
+    "FIX_3D": 0x02,
+    "LOW_BATTERY": 0x04,
+    "HOME_BEACON_SEEN": 0x08,
+    "GEOFENCE_BREACHED": 0x10,
+    "CHARGING": 0x20,
+    "STALE_FIX": 0x40,
+    "ERROR_PRESENT": 0x80,
+}
+KNOWN_TLV_LENGTHS = {
+    0x04: ("fw_ver", 2),
+    0x06: ("reset_reason", 1),
+    0x10: ("uptime_s", 4),
+    0x13: ("activity_score", 1),
+    0x20: ("acked_msg_seq_id", 2),
+}
+
+
+@dataclass(frozen=True)
+class DeviceCredential:
+    device_id: int
+    token: str
+    hmac_key: bytes
+
+
+@dataclass(frozen=True)
+class PacketFields:
+    device_id: int
+    message_sequence: int
+    timestamp: int
+    status: int
+    power_profile: int
+    flags: int
+    tx_reason: int
+    latitude: float
+    longitude: float
+    battery_mv: int
+    accuracy_m: int
+    fix_age_s: int
+    satellite_count: int
+    protocol_version: int = 1
+
+
+@dataclass(frozen=True)
+class TlvEntry:
+    tlv_type: int
+    value: bytes
+    name: str = "custom"
+
+
+@dataclass(frozen=True)
+class BuiltPacket:
+    body: bytes
+    expected_tag: bytes
+    transmitted_tag: bytes
+    packet: bytes
+    tlv_length: int
+    payload_hash: str
+
+    @property
+    def packet_hex(self) -> str:
+        return self.packet.hex().upper()
+
+    @property
+    def payload_b64(self) -> str:
+        return base64.b64encode(self.packet).decode("ascii")
+
+
+def load_credentials(path: Path) -> list[DeviceCredential]:
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, list) or not raw:
+        raise ValueError("credentials file must contain a non-empty JSON array")
+
+    credentials: list[DeviceCredential] = []
+    seen: set[int] = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            raise ValueError("each credential must be a JSON object")
+        device_id = item.get("device_id")
+        token = item.get("token")
+        key_text = item.get("hmac_key_b64")
+        if not isinstance(device_id, int) or isinstance(device_id, bool):
+            raise ValueError("device_id must be an integer")
+        _range(device_id, 1, 65_535, "device_id")
+        if device_id in seen:
+            raise ValueError(f"device_id {device_id} is duplicated")
+        if not isinstance(token, str) or not 32 <= len(token) <= 256:
+            raise ValueError(f"device_id {device_id} has an invalid bearer token")
+        if re.fullmatch(r"[A-Za-z0-9_-]{32,256}", token) is None:
+            raise ValueError(f"device_id {device_id} bearer token has invalid characters")
+        hmac_key = decode_hmac_key(key_text, f"device_id {device_id} HMAC key")
+        seen.add(device_id)
+        credentials.append(DeviceCredential(device_id, token, hmac_key))
+    return credentials
+
+
+def decode_hmac_key(value: Any, field: str = "HMAC key") -> bytes:
+    if not isinstance(value, str):
+        raise ValueError(f"{field} must be Base64 text")
+    try:
+        decoded = base64.b64decode(value.strip(), validate=True)
+    except (ValueError, binascii.Error) as error:
+        raise ValueError(f"{field} is not valid Base64") from error
+    if len(decoded) != 32:
+        raise ValueError(f"{field} must decode to 32 bytes")
+    return decoded
+
+
+def encode_tlv(tlv_type: int, value: bytes) -> bytes:
+    _range(tlv_type, 0, 255, "TLV type")
+    if not isinstance(value, bytes) or not 1 <= len(value) <= 255:
+        raise ValueError("TLV value must contain 1..255 bytes")
+    return bytes((tlv_type, len(value))) + value
+
+
+def known_tlv(tlv_type: int, value: int) -> TlvEntry:
+    spec = KNOWN_TLV_LENGTHS.get(tlv_type)
+    if spec is None:
+        raise ValueError(f"0x{tlv_type:02X} is not a selected v1.1 TLV")
+    name, length = spec
+    maximum = (1 << (length * 8)) - 1
+    _range(value, 0, maximum, name)
+    return TlvEntry(tlv_type, value.to_bytes(length, "little"), name)
+
+
+def firmware_tlv(value: str) -> TlvEntry:
+    parts = value.strip().split(".")
+    if len(parts) != 2:
+        raise ValueError("firmware version must use major.minor, for example 1.1")
+    try:
+        major, minor = (int(part, 10) for part in parts)
+    except ValueError as error:
+        raise ValueError("firmware major and minor must be decimal integers") from error
+    _range(major, 0, 255, "firmware major")
+    _range(minor, 0, 255, "firmware minor")
+    return known_tlv(0x04, (major << 8) | minor)
+
+
+def custom_tlv(type_text: str, value_hex: str) -> TlvEntry:
+    cleaned_type = type_text.strip().lower()
+    try:
+        tlv_type = int(cleaned_type, 16) if cleaned_type.startswith("0x") else int(cleaned_type, 16)
+    except ValueError as error:
+        raise ValueError("custom TLV type must be hexadecimal, such as 7E or 0x7E") from error
+    _range(tlv_type, 0, 255, "custom TLV type")
+    cleaned_value = "".join(value_hex.split())
+    if cleaned_value.lower().startswith("0x"):
+        cleaned_value = cleaned_value[2:]
+    if not cleaned_value or len(cleaned_value) % 2:
+        raise ValueError("custom TLV value must contain complete hexadecimal bytes")
+    try:
+        value = bytes.fromhex(cleaned_value)
+    except ValueError as error:
+        raise ValueError("custom TLV value contains non-hexadecimal characters") from error
+    if not 1 <= len(value) <= 22:
+        raise ValueError("custom TLV value must contain 1..22 bytes")
+    return TlvEntry(tlv_type, value, "custom")
+
+
+def build_tlv_packet(
+    fields: PacketFields,
+    tlvs: Iterable[TlvEntry],
+    hmac_key: bytes,
+    *,
+    tag_mode: str = "valid",
+    custom_tag_hex: str = "",
+) -> BuiltPacket:
+    _validate_packet_fields(fields)
+    if not isinstance(hmac_key, bytes) or len(hmac_key) != 32:
+        raise ValueError("HMAC key must contain exactly 32 bytes")
+
+    encoded_tlvs: list[bytes] = []
+    seen_known: set[int] = set()
+    for entry in tlvs:
+        if not isinstance(entry, TlvEntry):
+            raise ValueError("TLV entries must be TlvEntry values")
+        selected = KNOWN_TLV_LENGTHS.get(entry.tlv_type)
+        if selected:
+            if entry.tlv_type in seen_known:
+                raise ValueError(f"known TLV 0x{entry.tlv_type:02X} appears more than once")
+            expected_length = selected[1]
+            if len(entry.value) != expected_length:
+                raise ValueError(
+                    f"known TLV 0x{entry.tlv_type:02X} must contain {expected_length} bytes"
+                )
+            seen_known.add(entry.tlv_type)
+        encoded_tlvs.append(encode_tlv(entry.tlv_type, entry.value))
+    tlv_bytes = b"".join(encoded_tlvs)
+    if len(tlv_bytes) > MAX_TLV_SIZE:
+        raise ValueError(f"TLV section uses {len(tlv_bytes)} bytes; v1.1 allows at most 24")
+
+    header = bytearray(HEADER_SIZE)
+    header[0] = fields.protocol_version
+    struct.pack_into("<H", header, 1, fields.device_id)
+    struct.pack_into("<H", header, 3, fields.message_sequence)
+    struct.pack_into("<I", header, 5, fields.timestamp)
+    header[9] = (fields.power_profile << 4) | fields.status
+    header[10] = fields.flags
+    header[11] = fields.tx_reason
+    struct.pack_into("<i", header, 12, round(fields.latitude * 10_000_000))
+    struct.pack_into("<i", header, 16, round(fields.longitude * 10_000_000))
+    struct.pack_into("<H", header, 20, fields.battery_mv)
+    struct.pack_into("<H", header, 22, fields.accuracy_m)
+    struct.pack_into("<H", header, 24, fields.fix_age_s)
+    header[26] = fields.satellite_count
+    # Bytes 27..30 stay zero by construction.
+    header[31] = len(tlv_bytes)
+
+    body = bytes(header) + tlv_bytes
+    expected_tag = hmac.new(hmac_key, body, hashlib.sha256).digest()[:AUTH_TAG_SIZE]
+    if tag_mode == "valid":
+        transmitted_tag = expected_tag
+    elif tag_mode == "corrupt":
+        transmitted_tag = bytes((expected_tag[0] ^ 0x01,)) + expected_tag[1:]
+    elif tag_mode == "custom":
+        cleaned = "".join(custom_tag_hex.split())
+        try:
+            transmitted_tag = bytes.fromhex(cleaned)
+        except ValueError as error:
+            raise ValueError("custom HMAC tag must be hexadecimal") from error
+        if len(transmitted_tag) != AUTH_TAG_SIZE:
+            raise ValueError("custom HMAC tag must contain exactly 8 bytes (16 hex characters)")
+    else:
+        raise ValueError("HMAC mode must be valid, corrupt, or custom")
+
+    packet = body + transmitted_tag
+    return BuiltPacket(
+        body=body,
+        expected_tag=expected_tag,
+        transmitted_tag=transmitted_tag,
+        packet=packet,
+        tlv_length=len(tlv_bytes),
+        payload_hash=hashlib.sha256(packet).hexdigest(),
+    )
+
+
+def build_transport_wrapper(
+    payload_b64: str,
+    transport: str,
+    *,
+    gateway_guid16: str | None = None,
+    gateway_rx_time_unix: int | None = None,
+    link_rssi_dbm: float | None = None,
+    link_snr_db: float | None = None,
+    cell_rsrp_dbm: float | None = None,
+    cell_rsrq_db: float | None = None,
+    cell_sinr_db: float | None = None,
+) -> dict[str, Any]:
+    validate_payload_b64(payload_b64)
+    wrapper: dict[str, Any]
+    if transport == "lora_hub":
+        gateway = (gateway_guid16 or "").strip().upper()
+        if len(gateway) != 4:
+            raise ValueError("gateway GUID must be exactly four hexadecimal characters")
+        try:
+            gateway_number = int(gateway, 16)
+        except ValueError as error:
+            raise ValueError("gateway GUID must be exactly four hexadecimal characters") from error
+        _range(gateway_number, 1, 0xFFFF, "gateway GUID")
+        if gateway_rx_time_unix is None:
+            raise ValueError("gateway receive timestamp is required for LoRa")
+        _range(gateway_rx_time_unix, 0, 0xFFFF_FFFF, "gateway receive timestamp")
+        if any(value is not None for value in (cell_rsrp_dbm, cell_rsrq_db, cell_sinr_db)):
+            raise ValueError("cellular RF fields are not valid for a LoRa wrapper")
+        wrapper = {
+            "ingest_path": "lora_hub",
+            "link_type": "lora",
+            "gateway_guid16": gateway,
+            "gateway_rx_time_unix": gateway_rx_time_unix,
+        }
+    elif transport == "cellular_direct":
+        if gateway_guid16 is not None or gateway_rx_time_unix is not None:
+            raise ValueError("gateway fields are not valid for a cellular wrapper")
+        wrapper = {"ingest_path": "cellular_direct", "link_type": "lte"}
+    else:
+        raise ValueError("transport must be cellular_direct or lora_hub")
+
+    optional_values = {
+        "link_rssi_dbm": _optional_number(link_rssi_dbm, -200, 0, "link RSSI"),
+        "link_snr_db": _optional_number(link_snr_db, -100, 100, "link SNR"),
+        "cell_rsrp_dbm": _optional_number(cell_rsrp_dbm, -200, 0, "cell RSRP"),
+        "cell_rsrq_db": _optional_number(cell_rsrq_db, -100, 0, "cell RSRQ"),
+        "cell_sinr_db": _optional_number(cell_sinr_db, -100, 100, "cell SINR"),
+    }
+    wrapper.update({key: value for key, value in optional_values.items() if value is not None})
+    wrapper["payload_b64"] = payload_b64
+    return wrapper
+
+
+def validate_payload_b64(value: str) -> bytes:
+    if not isinstance(value, str) or not value or len(value) % 4:
+        raise ValueError("payload must be non-empty canonical Base64")
+    try:
+        decoded = base64.b64decode(value, validate=True)
+    except (ValueError, binascii.Error) as error:
+        raise ValueError("payload is not canonical Base64") from error
+    if not MIN_PACKET_SIZE <= len(decoded) <= MAX_PACKET_SIZE:
+        raise ValueError(f"decoded TLV packet must contain {MIN_PACKET_SIZE}..{MAX_PACKET_SIZE} bytes")
+    if len(decoded) != HEADER_SIZE + decoded[31] + AUTH_TAG_SIZE:
+        raise ValueError("decoded packet length does not match its tlv_len header byte")
+    return decoded
+
+
+def post_wrapper(
+    url: str,
+    bearer_token: str,
+    wrapper: dict[str, Any],
+    timeout: float,
+    *,
+    user_agent: str = "bluepaws-tlv-simulator/2",
+) -> tuple[int, dict[str, Any]]:
+    if not url.lower().startswith("https://"):
+        raise ValueError("ingestion endpoint must use HTTPS")
+    if not isinstance(bearer_token, str) or not 32 <= len(bearer_token) <= 256:
+        raise ValueError("bearer token must contain 32..256 characters")
+    if re.fullmatch(r"[A-Za-z0-9_-]{32,256}", bearer_token) is None:
+        raise ValueError("bearer token contains unsupported characters")
+    if timeout <= 0:
+        raise ValueError("HTTP timeout must be positive")
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(wrapper, separators=(",", ":")).encode("utf-8"),
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {bearer_token}",
+            "Content-Type": "application/json",
+            "User-Agent": user_agent,
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return response.status, _decode_response(response.read())
+    except urllib.error.HTTPError as error:
+        return error.code, _decode_response(error.read(), fallback=str(error.reason))
+
+
+def _validate_packet_fields(fields: PacketFields) -> None:
+    if fields.protocol_version != 1:
+        raise ValueError("the deployed protocol version must be 1")
+    _range(fields.device_id, 1, 65_535, "device ID")
+    _range(fields.message_sequence, 0, 65_535, "message sequence")
+    _range(fields.timestamp, 0, 0xFFFF_FFFF, "timestamp")
+    _range(fields.status, 0, 3, "status")
+    _range(fields.power_profile, 0, 3, "power profile")
+    _range(fields.flags, 0, 255, "flags")
+    _range(fields.tx_reason, 0, 6, "TX reason")
+    if not -90 <= fields.latitude <= 90:
+        raise ValueError("latitude must be from -90 to 90")
+    if not -180 <= fields.longitude <= 180:
+        raise ValueError("longitude must be from -180 to 180")
+    _range(fields.battery_mv, 0, 65_535, "battery millivolts")
+    _range(fields.accuracy_m, 0, 65_535, "accuracy metres")
+    _range(fields.fix_age_s, 0, 65_535, "fix age seconds")
+    _range(fields.satellite_count, 0, 255, "satellite count")
+
+
+def _range(value: Any, minimum: int, maximum: int, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
+        raise ValueError(f"{field} must be an integer from {minimum} to {maximum}")
+    return value
+
+
+def _optional_number(
+    value: float | None, minimum: float, maximum: float, field: str
+) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not minimum <= value <= maximum:
+        raise ValueError(f"{field} must be a number from {minimum} to {maximum}")
+    return value
+
+
+def _decode_response(raw: bytes, fallback: str = "") -> dict[str, Any]:
+    text = raw.decode("utf-8", errors="replace")
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError:
+        return {"error": text or fallback}
+    return value if isinstance(value, dict) else {"response": value}

@@ -51,7 +51,10 @@ BluepawsV4/
 │       └── app.js
 ├── tools/
 │   ├── mock-server.js                # Node.js mock hub for local GUI dev
-│   └── vps_position_simulator.py     # External HTTPS multi-collar simulator
+│   ├── vps_position_simulator.py     # Legacy JSON HTTPS simulator
+│   ├── tlv_telemetry_simulator.py    # Headless TLV fleet simulator
+│   ├── tlv_packet_codec.py           # Shared v1.1 packet/wrapper codec
+│   └── tlv_simulator_gui.py          # Desktop TLV test console
 ├── web/                              # Next.js + TypeScript customer dashboard
 │   ├── src/app/                      # App Router entry point
 │   ├── src/components/               # React dashboard and Leaflet map
@@ -110,7 +113,7 @@ npm run dev
 
 For Vercel, import this repository and select `web` as the project **Root Directory**. Leave the Install, Build, and Output settings at their detected Next.js defaults. See `web/README.md` for the exact deployment settings and the planned HTTPS Edge Function -> Supabase -> Realtime data path.
 
-The cloud ingestion schema, device registry, and authenticated Edge Function are under `supabase/`. See `tools/VPS_SIMULATOR.md` for the Ubuntu VPS test client and versioned request contract.
+The cloud ingestion schema, device registry, and authenticated Edge Function are under `supabase/`. See `tools/VPS_SIMULATOR.md` for the Ubuntu VPS client and `tools/TLV_SIMULATOR_GUI.md` for the desktop packet-builder and manual HTTPS test console.
 
 ## TLV Protocol v1.1
 
@@ -122,16 +125,16 @@ docs/TLV_PROTOCOL_V1_1.md
 
 The system is moving away from production JSON telemetry. JSON remains useful for debugging, logs, exports and admin APIs, but LoRa and cellular telemetry should use the compact binary TLV packet.
 
-Current packet shape:
+Locked packet shape:
 
 ```text
-[32-byte fixed header][0-30 bytes TLV][2-byte CRC16]
+[32-byte fixed header][0-24 bytes TLV][8-byte HMAC-SHA256 tag]
 ```
 
 Packet size:
 
 ```text
-minimum = 34 bytes
+minimum = 40 bytes
 maximum = 64 bytes
 ```
 
@@ -140,33 +143,26 @@ maximum = 64 bytes
 | Offset | Size | Field | Type | Notes |
 |---:|---:|---|---|---|
 | 0 | 1 | `ver` | u8 | Protocol version |
-| 1 | 4 | `device_guid32` | u32 | Immutable collar identity |
-| 5 | 2 | `msg_seq_id` | u16 | Per-device sequence |
-| 7 | 4 | `time_unix` | u32 | UTC timestamp |
-| 11 | 1 | `state` | u8 | Packed status + power profile |
-| 12 | 1 | `flags` | u8 | Core bitfield |
-| 13 | 4 | `lat_e7` | i32 | Latitude x 10000000 |
-| 17 | 4 | `lon_e7` | i32 | Longitude x 10000000 |
-| 21 | 2 | `batt_mV` | u16 | Battery voltage |
-| 23 | 2 | `acc_m` | u16 | Accuracy in metres |
-| 25 | 2 | `dist_home_m` | u16 | Distance from home |
-| 27 | 1 | `tx_reason` | u8 | 8-value reason enum |
-| 28 | 1 | `tlv_len` | u8 | 0-30 TLV bytes |
-| 29 | 3 | `hdr_rsvd` | u8[3] | Reserved, set 0 |
+| 1 | 2 | `device_guid16` | u16 | Immutable collar identity |
+| 3 | 2 | `msg_seq_id` | u16 | Per-device rolling sequence |
+| 5 | 4 | `time_unix` | u32 | UTC timestamp |
+| 9 | 1 | `state` | u8 | Packed status + power profile |
+| 10 | 1 | `flags` | u8 | Core bitfield |
+| 11 | 1 | `tx_reason` | u8 | Transmission reason enum |
+| 12 | 4 | `lat_e7` | i32 | Latitude x 10000000 |
+| 16 | 4 | `lon_e7` | i32 | Longitude x 10000000 |
+| 20 | 2 | `batt_mV` | u16 | Battery voltage |
+| 22 | 2 | `acc_m` | u16 | Accuracy in metres |
+| 24 | 2 | `fix_age_s` | u16 | GNSS fix age |
+| 26 | 1 | `sat_count` | u8 | Satellite count |
+| 27 | 4 | `hdr_rsvd` | u8[4] | Reserved, set 0 |
+| 31 | 1 | `tlv_len` | u8 | 0-24 TLV bytes |
 
-Key changes from the older v2 notes:
-
-- `device_guid32` replaces the previous 16-bit device ID.
-- `msg_seq_id` is now 16-bit to save bytes.
-- No boot ID is included yet.
-- `state` packs `status` and `power_profile` into one byte.
-- `flags` is now one byte, not two.
-- Absolute latitude and longitude remain i32 e7 values.
-- `dist_home_m` is now in the header.
-- `sat_count`, `hdop_x10`, `course_deg` and `fix_age_s` are optional TLVs.
-- RESTful HTTPS POST is the v1 cloud transport.
-
-CRC-16/CCITT-FALSE is appended at the end of the packet and calculated over the header plus TLVs.
+The 8-byte tag is the first eight bytes of HMAC-SHA256 over the complete header
+and TLV section. The same authenticated binary packet is preserved across LoRa
+and LTE paths; path-specific RF and gateway details live only in the HTTPS JSON
+wrapper. See the canonical document for enums, selected TLVs, validation rules
+and examples.
 
 ## Message Flow
 
@@ -175,21 +171,16 @@ Collar --LoRa--> Hub --REST POST--> Cloud
 Collar --LTE-M/Cat-M1 REST POST--> Cloud
 ```
 
-Both paths preserve the original `(device_guid32, msg_seq_id)` from the TLV header. The hub or puck should relay received packets upstream without changing the collar observation. Redundancy is intentional for reliability.
+Both paths preserve the original authenticated packet, including `(device_guid16, msg_seq_id, time_unix)`. The hub relays the collar bytes without changing them. Redundancy is intentional for reliability.
 
-Deduplication is handled in the cloud using:
-
-```text
-(device_guid32, msg_seq_id)
-```
-
-Example dedup key:
+Canonical retry deduplication is handled in the cloud using:
 
 ```text
-device_guid32 = 0x00A7F134
-msg_seq_id    = 10542
-key           = 00A7F134:10542
+SHA-256(complete authenticated packet)
 ```
+
+Reuse of `(device_guid16, msg_seq_id, time_unix)` with different packet content
+is treated as an identity conflict rather than an overwrite.
 
 Hub CSV or debug log format should be derived from decoded TLV fields, not treated as the production on-air format.
 

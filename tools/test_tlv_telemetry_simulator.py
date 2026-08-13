@@ -69,7 +69,9 @@ class TlvSimulatorTests(unittest.TestCase):
         self.assertEqual(first["payload_b64"], second["payload_b64"])
 
     def test_lora_wrapper_preserves_packet_and_route_metadata(self):
-        packet = bytes(range(40))
+        packet_data = bytearray(40)
+        packet_data[31] = 0
+        packet = bytes(packet_data)
         wrapper = build_wrapper(packet, "lora_hub", random.Random(1), "0016")
         self.assertEqual(wrapper["ingest_path"], "lora_hub")
         self.assertEqual(wrapper["gateway_guid16"], "0016")
