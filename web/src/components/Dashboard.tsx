@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DeviceCard, DownloadIcon } from "@/components/DeviceCard";
 import { GuidedTour } from "@/components/GuidedTour";
 import { loadDeviceAppearances, revokeAvatarUrls } from "@/lib/deviceAppearances";
+import { followedDeviceAfterAction } from "@/lib/followState";
 import { createRealtimeTelemetrySource, loadDeviceTrail } from "@/lib/realtimeTelemetry";
 import { createClient } from "@/lib/supabase/client";
 import { getTutorialTelemetrySource } from "@/lib/telemetry";
@@ -198,8 +199,13 @@ export function Dashboard({ householdId, initialLiveDevices, liveTelemetryError,
   }, [trailHistory, tutorialMode]);
 
   const handleAction = useCallback((device: TelemetryDevice, action: DeviceAction) => {
-    if (action === "jump") setMapCommand({ type: "jump", deviceId: device.id, nonce: Date.now() });
-    if (action === "follow") setFollowedId((current) => current === device.id ? null : device.id);
+    if (action === "jump") {
+      setFollowedId((current) => followedDeviceAfterAction(current, device.id, "jump"));
+      setMapCommand({ type: "jump", deviceId: device.id, nonce: Date.now() });
+    }
+    if (action === "follow") {
+      setFollowedId((current) => followedDeviceAfterAction(current, device.id, "follow"));
+    }
     if (action === "trail") {
       const trailVisible = trailIds.has(device.id);
       setTrailIds((current) => {
