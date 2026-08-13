@@ -1,8 +1,8 @@
 # Bluepaws TLV desktop test console
 
 `tlv_simulator_gui.py` is a two-stage desktop tool for manually constructing
-and sending Bluepaws v1.1 telemetry. It uses only Python's standard library and
-shares its packet codec with the VPS command-line simulator.
+and sending Bluepaws v1.1 telemetry. It uses CustomTkinter's dark, high-DPI
+interface and shares its packet codec with the VPS command-line simulator.
 
 Use the GUI for exploratory and negative-path testing. Keep using
 `tlv_telemetry_simulator.py` for headless VPS runs and load tests.
@@ -12,6 +12,7 @@ Use the GUI for exploratory and negative-path testing. Keep using
 On Windows, from the repository root:
 
 ```powershell
+py -3 -m pip install -r tools\requirements-gui.txt
 py -3 tools\tlv_simulator_gui.py
 ```
 
@@ -19,6 +20,7 @@ On a Linux desktop:
 
 ```bash
 sudo apt install python3-tk
+python3 -m pip install -r tools/requirements-gui.txt
 python3 tools/tlv_simulator_gui.py
 ```
 
@@ -32,7 +34,7 @@ python3 tools/tlv_simulator_gui.py --check
 
 ## Credentials
 
-Choose **File -> Load credentials** and select the private
+Choose **Load credentials JSON** on the packet-builder tab and select the private
 `vps_devices.json`. Selecting a device fills its ID, HMAC key and HTTPS bearer
 token. Both secrets stay masked and are not copied into the JSON preview or
 response log.

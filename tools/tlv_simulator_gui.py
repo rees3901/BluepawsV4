@@ -11,9 +11,16 @@ import time
 import tkinter as tk
 from dataclasses import replace
 from pathlib import Path
-from tkinter import filedialog, messagebox, ttk
-from tkinter.scrolledtext import ScrolledText
+from tkinter import filedialog, messagebox, ttk as native_ttk
 from typing import Any
+
+try:
+    import customtkinter as ctk
+except ModuleNotFoundError as error:
+    raise SystemExit(
+        "CustomTkinter is required. Run: "
+        "py -3 -m pip install -r tools\\requirements-gui.txt"
+    ) from error
 
 from tlv_packet_codec import (
     DEFAULT_URL,
@@ -49,30 +56,65 @@ TRANSPORTS = {
     "LoRa home-hub relay (lora_hub)": "lora_hub",
 }
 
+NAVY = "#071827"
+NAVY_DEEP = "#04111D"
+SURFACE = "#0D2438"
+SURFACE_RAISED = "#12314A"
+BORDER = "#1D4F73"
+BLUE = "#1687FF"
+BLUE_HOVER = "#0E6FCC"
+TEXT = "#F4F8FC"
+MUTED = "#91ABC2"
+SUCCESS = "#35D0A0"
+DANGER = "#FF6B7A"
 
-class ScrollableFrame(ttk.Frame):
+ctk.set_appearance_mode("dark")
+ctk.set_default_color_theme("dark-blue")
+
+
+class Section(ctk.CTkFrame):
+    """Dark card with a compact section heading."""
+
+    def __init__(self, parent: tk.Misc, *, text: str, padding: int = 0) -> None:
+        del padding
+        super().__init__(
+            parent,
+            fg_color=SURFACE,
+            border_color=BORDER,
+            border_width=1,
+            corner_radius=12,
+        )
+        self.grid_rowconfigure(0, minsize=68)
+        ctk.CTkLabel(
+            self,
+            text=text,
+            text_color=TEXT,
+            font=ctk.CTkFont(size=14, weight="bold"),
+        ).place(x=14, y=8)
+
+
+class AppButton(ctk.CTkButton):
+    def __init__(self, parent: tk.Misc, **kwargs: Any) -> None:
+        kwargs.setdefault("width", 108)
+        kwargs.setdefault("height", 32)
+        kwargs.setdefault("corner_radius", 8)
+        kwargs.setdefault("fg_color", BLUE)
+        kwargs.setdefault("hover_color", BLUE_HOVER)
+        super().__init__(parent, **kwargs)
+
+
+class ScrollableFrame(ctk.CTkScrollableFrame):
     def __init__(self, parent: tk.Misc) -> None:
-        super().__init__(parent)
-        canvas = tk.Canvas(self, highlightthickness=0, borderwidth=0)
-        scrollbar = ttk.Scrollbar(self, orient="vertical", command=canvas.yview)
-        self.content = ttk.Frame(canvas, padding=(10, 8, 16, 12))
-        window_id = canvas.create_window((0, 0), window=self.content, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
-        canvas.grid(row=0, column=0, sticky="nsew")
-        scrollbar.grid(row=0, column=1, sticky="ns")
-        self.rowconfigure(0, weight=1)
-        self.columnconfigure(0, weight=1)
-        self.content.bind(
-            "<Configure>",
-            lambda _event: canvas.configure(scrollregion=canvas.bbox("all")),
+        super().__init__(
+            parent,
+            fg_color="transparent",
+            scrollbar_button_color=BORDER,
+            scrollbar_button_hover_color=BLUE,
         )
-        canvas.bind(
-            "<Configure>",
-            lambda event: canvas.itemconfigure(window_id, width=event.width),
-        )
+        self.content = self
 
 
-class BluepawsTlvSimulator(tk.Tk):
+class BluepawsTlvSimulator(ctk.CTk):
     def __init__(self) -> None:
         super().__init__()
         self.title("Bluepaws TLV Telemetry Test Console")
@@ -84,9 +126,9 @@ class BluepawsTlvSimulator(tk.Tk):
         self._credentials: dict[str, DeviceCredential] = {}
         self._custom_tlvs: dict[str, TlvEntry] = {}
         self._last_built: BuiltPacket | None = None
-        self._configure_style()
+        self.configure(fg_color=NAVY_DEEP)
+        self._configure_native_style()
         self._create_variables()
-        self._build_menu()
         self._build_layout()
         self._set_now()
         self._set_gateway_now()
@@ -94,20 +136,25 @@ class BluepawsTlvSimulator(tk.Tk):
         self._tag_mode_changed()
         self.after(100, self.build_packet)
 
-    def _configure_style(self) -> None:
-        style = ttk.Style(self)
-        available = style.theme_names()
-        for preferred in ("vista", "xpnative", "clam"):
-            if preferred in available:
-                style.theme_use(preferred)
-                break
-        style.configure("TButton", padding=(9, 5))
-        style.configure("Accent.TButton", padding=(12, 7), font=("Segoe UI", 10, "bold"))
-        style.configure("Title.TLabel", font=("Segoe UI", 16, "bold"))
-        style.configure("Muted.TLabel", foreground="#607284")
-        style.configure("Success.TLabel", foreground="#14804A")
-        style.configure("Error.TLabel", foreground="#B42318")
-        style.configure("Treeview", rowheight=27)
+    def _configure_native_style(self) -> None:
+        """Theme the one native ttk widget CustomTkinter does not supply."""
+        style = native_ttk.Style(self)
+        style.theme_use("clam")
+        style.configure(
+            "Treeview",
+            background=SURFACE_RAISED,
+            fieldbackground=SURFACE_RAISED,
+            foreground=TEXT,
+            bordercolor=BORDER,
+            rowheight=28,
+        )
+        style.configure(
+            "Treeview.Heading",
+            background=BORDER,
+            foreground=TEXT,
+            relief="flat",
+        )
+        style.map("Treeview", background=[("selected", BLUE)])
 
     def _create_variables(self) -> None:
         now = int(time.time())
@@ -168,57 +215,71 @@ class BluepawsTlvSimulator(tk.Tk):
         self.advance_packets = tk.BooleanVar(value=False)
         self.sender_status = tk.StringVar(value="Build a packet, preview the wrapper, then send.")
 
-    def _build_menu(self) -> None:
-        menu = tk.Menu(self)
-        file_menu = tk.Menu(menu, tearoff=False)
-        file_menu.add_command(label="Load credentials…", command=self.load_credentials_file)
-        file_menu.add_separator()
-        file_menu.add_command(label="Exit", command=self._close)
-        menu.add_cascade(label="File", menu=file_menu)
-        help_menu = tk.Menu(menu, tearoff=False)
-        help_menu.add_command(label="About", command=self._about)
-        menu.add_cascade(label="Help", menu=help_menu)
-        self.configure(menu=menu)
-
     def _build_layout(self) -> None:
-        shell = ttk.Frame(self, padding=(14, 12))
-        shell.pack(fill="both", expand=True)
-        header = ttk.Frame(shell)
+        shell = ctk.CTkFrame(self, fg_color=NAVY_DEEP)
+        shell.pack(fill="both", expand=True, padx=16, pady=14)
+        header = ctk.CTkFrame(shell, fg_color="transparent")
         header.pack(fill="x", pady=(0, 10))
-        ttk.Label(header, text="Bluepaws TLV Test Console", style="Title.TLabel").pack(side="left")
-        ttk.Label(
+        ctk.CTkLabel(
+            header,
+            text="Bluepaws TLV Test Console",
+            text_color=TEXT,
+            font=ctk.CTkFont(size=22, weight="bold"),
+        ).pack(side="left")
+        ctk.CTkLabel(
             header,
             text="Protocol v1.1 • local validation • secrets remain on this computer",
-            style="Muted.TLabel",
+            text_color=MUTED,
+            font=ctk.CTkFont(size=12),
         ).pack(side="right", pady=(6, 0))
 
-        notebook = ttk.Notebook(shell)
+        notebook = ctk.CTkTabview(
+            shell,
+            fg_color=NAVY,
+            segmented_button_fg_color=SURFACE,
+            segmented_button_selected_color=BLUE,
+            segmented_button_selected_hover_color=BLUE_HOVER,
+            segmented_button_unselected_color=SURFACE,
+            segmented_button_unselected_hover_color=SURFACE_RAISED,
+            corner_radius=14,
+        )
         notebook.pack(fill="both", expand=True)
-        packet_tab = ttk.Frame(notebook)
-        wrapper_tab = ttk.Frame(notebook)
-        notebook.add(packet_tab, text="  1. TLV Packet Builder  ")
-        notebook.add(wrapper_tab, text="  2. HTTPS Wrapper & Send  ")
+        packet_tab = notebook.add("1. TLV Packet Builder")
+        wrapper_tab = notebook.add("2. HTTPS Wrapper & Send")
         self._build_packet_tab(packet_tab)
         self._build_wrapper_tab(wrapper_tab)
 
-    def _build_packet_tab(self, parent: ttk.Frame) -> None:
+    def _build_packet_tab(self, parent: ctk.CTkFrame) -> None:
         scroll = ScrollableFrame(parent)
         scroll.pack(fill="both", expand=True)
         root = scroll.content
         root.columnconfigure(0, weight=1)
         root.columnconfigure(1, weight=1)
 
-        credentials = ttk.LabelFrame(root, text="Provisioned test credentials", padding=10)
+        credentials = Section(root, text="Provisioned test credentials", padding=10)
         credentials.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 8))
         credentials.columnconfigure(2, weight=1)
-        ttk.Button(credentials, text="Load credentials JSON…", command=self.load_credentials_file).grid(row=0, column=0, padx=(0, 10))
-        ttk.Label(credentials, text="Device").grid(row=0, column=1, padx=(0, 6))
-        self.credential_combo = ttk.Combobox(credentials, textvariable=self.credential_choice, state="readonly", width=28)
+        AppButton(credentials, text="Load credentials JSON…", width=190, command=self.load_credentials_file).grid(row=0, column=0, padx=(14, 10), pady=(26, 8))
+        ctk.CTkLabel(credentials, text="Device", text_color=TEXT).grid(row=0, column=1, padx=(0, 6), pady=(26, 8))
+        self.credential_combo = ctk.CTkComboBox(
+            credentials,
+            variable=self.credential_choice,
+            state="readonly",
+            width=240,
+            fg_color=SURFACE_RAISED,
+            border_color=BORDER,
+            button_color=BLUE,
+            button_hover_color=BLUE_HOVER,
+        )
         self.credential_combo.grid(row=0, column=2, sticky="w")
         self.credential_combo.bind("<<ComboboxSelected>>", self._credential_selected)
-        ttk.Label(credentials, text="Bearer and HMAC values are loaded into masked fields; they are never printed.", style="Muted.TLabel").grid(row=1, column=0, columnspan=3, sticky="w", pady=(7, 0))
+        ctk.CTkLabel(
+            credentials,
+            text="Bearer and HMAC values are loaded into masked fields; they are never printed.",
+            text_color=MUTED,
+        ).grid(row=1, column=0, columnspan=3, sticky="w", padx=14, pady=(0, 12))
 
-        header = ttk.LabelFrame(root, text="Fixed 32-byte header", padding=10)
+        header = Section(root, text="Fixed 32-byte header", padding=10)
         header.grid(row=1, column=0, sticky="nsew", padx=(0, 4), pady=4)
         header.columnconfigure(1, weight=1)
         self._form_entry(header, 0, "Protocol version", tk.StringVar(value="1"), disabled=True)
@@ -229,7 +290,7 @@ class BluepawsTlvSimulator(tk.Tk):
         self._form_combo(header, 5, "Power profile", self.profile, PROFILE_CHOICES)
         self._form_combo(header, 6, "TX reason", self.reason, REASON_CHOICES)
 
-        location = ttk.LabelFrame(root, text="Position and telemetry", padding=10)
+        location = Section(root, text="Position and telemetry", padding=10)
         location.grid(row=1, column=1, sticky="nsew", padx=(4, 0), pady=4)
         location.columnconfigure(1, weight=1)
         self._form_entry(location, 0, "Latitude", self.latitude)
@@ -238,14 +299,26 @@ class BluepawsTlvSimulator(tk.Tk):
         self._form_entry(location, 3, "Accuracy (m)", self.accuracy_m)
         self._form_entry(location, 4, "Fix age (s)", self.fix_age_s)
         self._form_entry(location, 5, "Satellite count", self.satellites)
-        ttk.Label(location, text="Use fix age 65535 or satellites 255 for unknown.", style="Muted.TLabel", wraplength=420).grid(row=6, column=0, columnspan=3, sticky="w", pady=(8, 0))
+        ctk.CTkLabel(
+            location,
+            text="Use fix age 65535 or satellites 255 for unknown.",
+            text_color=MUTED,
+            wraplength=420,
+        ).grid(row=6, column=0, columnspan=3, sticky="w", padx=12, pady=(8, 12))
 
-        flags = ttk.LabelFrame(root, text="Header flags", padding=10)
+        flags = Section(root, text="Header flags", padding=10)
         flags.grid(row=2, column=0, columnspan=2, sticky="ew", pady=4)
         for index, (name, mask) in enumerate(FLAG_MASKS.items()):
-            ttk.Checkbutton(flags, text=f"{name} (0x{mask:02X})", variable=self.flag_vars[name]).grid(row=index // 4, column=index % 4, sticky="w", padx=(0, 18), pady=3)
+            ctk.CTkCheckBox(
+                flags,
+                text=f"{name} (0x{mask:02X})",
+                variable=self.flag_vars[name],
+                fg_color=BLUE,
+                hover_color=BLUE_HOVER,
+                border_color=BORDER,
+            ).grid(row=index // 4, column=index % 4, sticky="w", padx=(14, 18), pady=(28 if index < 4 else 5, 10))
 
-        known = ttk.LabelFrame(root, text="Selected v1.1 TLVs (24-byte total budget)", padding=10)
+        known = Section(root, text="Selected v1.1 TLVs (24-byte total budget)", padding=10)
         known.grid(row=3, column=0, sticky="nsew", padx=(0, 4), pady=4)
         known.columnconfigure(2, weight=1)
         specs = [
@@ -256,81 +329,117 @@ class BluepawsTlvSimulator(tk.Tk):
             ("acked_msg_seq_id", "0x20", "0–65535"),
         ]
         for row, (name, code, hint) in enumerate(specs):
-            ttk.Checkbutton(known, text=f"{code}  {name}", variable=self.known_enabled[name]).grid(row=row, column=0, sticky="w", padx=(0, 10), pady=3)
-            ttk.Entry(known, textvariable=self.known_values[name], width=18).grid(row=row, column=1, sticky="ew", padx=(0, 8))
-            ttk.Label(known, text=hint, style="Muted.TLabel").grid(row=row, column=2, sticky="w")
+            ctk.CTkCheckBox(
+                known,
+                text=f"{code}  {name}",
+                variable=self.known_enabled[name],
+                fg_color=BLUE,
+                hover_color=BLUE_HOVER,
+                border_color=BORDER,
+            ).grid(row=row, column=0, sticky="w", padx=(14, 10), pady=(28 if row == 0 else 4, 4))
+            ctk.CTkEntry(
+                known,
+                textvariable=self.known_values[name],
+                width=145,
+                fg_color=SURFACE_RAISED,
+                border_color=BORDER,
+            ).grid(row=row, column=1, sticky="ew", padx=(0, 8), pady=(28 if row == 0 else 4, 4))
+            ctk.CTkLabel(known, text=hint, text_color=MUTED).grid(row=row, column=2, sticky="w", padx=(0, 12), pady=(28 if row == 0 else 4, 4))
 
-        custom = ttk.LabelFrame(root, text="Custom / unknown TLVs", padding=10)
+        custom = Section(root, text="Custom / unknown TLVs", padding=10)
         custom.grid(row=3, column=1, sticky="nsew", padx=(4, 0), pady=4)
         custom.columnconfigure(1, weight=1)
-        ttk.Label(custom, text="Type (hex)").grid(row=0, column=0, sticky="w")
-        ttk.Entry(custom, textvariable=self.custom_type, width=10).grid(row=0, column=1, sticky="ew", padx=(6, 8))
-        ttk.Label(custom, text="Value bytes (hex)").grid(row=1, column=0, sticky="w", pady=(6, 0))
-        ttk.Entry(custom, textvariable=self.custom_value).grid(row=1, column=1, sticky="ew", padx=(6, 8), pady=(6, 0))
-        ttk.Button(custom, text="Add TLV", command=self._add_custom_tlv).grid(row=0, column=2, rowspan=2, sticky="ns")
-        self.custom_tree = ttk.Treeview(custom, columns=("type", "length", "value"), show="headings", height=4)
+        ctk.CTkLabel(custom, text="Type (hex)", text_color=TEXT).grid(row=0, column=0, sticky="w", padx=(14, 0), pady=(28, 4))
+        ctk.CTkEntry(custom, textvariable=self.custom_type, width=90, fg_color=SURFACE_RAISED, border_color=BORDER).grid(row=0, column=1, sticky="ew", padx=(6, 8), pady=(28, 4))
+        ctk.CTkLabel(custom, text="Value bytes (hex)", text_color=TEXT).grid(row=1, column=0, sticky="w", padx=(14, 0), pady=(6, 0))
+        ctk.CTkEntry(custom, textvariable=self.custom_value, fg_color=SURFACE_RAISED, border_color=BORDER).grid(row=1, column=1, sticky="ew", padx=(6, 8), pady=(6, 0))
+        AppButton(custom, text="Add TLV", command=self._add_custom_tlv).grid(row=0, column=2, rowspan=2, sticky="ns", padx=(0, 12), pady=(28, 0))
+        self.custom_tree = native_ttk.Treeview(custom, columns=("type", "length", "value"), show="headings", height=4)
         for column, title, width in (("type", "Type", 70), ("length", "Bytes", 65), ("value", "Value hex", 230)):
             self.custom_tree.heading(column, text=title)
             self.custom_tree.column(column, width=width, anchor="w")
-        self.custom_tree.grid(row=2, column=0, columnspan=3, sticky="nsew", pady=(9, 5))
-        ttk.Button(custom, text="Remove selected", command=self._remove_custom_tlv).grid(row=3, column=2, sticky="e")
+        self.custom_tree.grid(row=2, column=0, columnspan=3, sticky="nsew", padx=14, pady=(9, 5))
+        AppButton(custom, text="Remove selected", fg_color=SURFACE_RAISED, hover_color=BORDER, command=self._remove_custom_tlv).grid(row=3, column=2, sticky="e", padx=14, pady=(0, 12))
 
-        auth = ttk.LabelFrame(root, text="HMAC-SHA256 authentication (first 8 bytes)", padding=10)
+        auth = Section(root, text="HMAC-SHA256 authentication (first 8 bytes)", padding=10)
         auth.grid(row=4, column=0, columnspan=2, sticky="ew", pady=4)
         auth.columnconfigure(1, weight=1)
-        ttk.Label(auth, text="32-byte key (Base64)").grid(row=0, column=0, sticky="w", padx=(0, 8))
-        self.hmac_entry = ttk.Entry(auth, textvariable=self.hmac_key_b64, show="•")
-        self.hmac_entry.grid(row=0, column=1, sticky="ew")
-        ttk.Checkbutton(auth, text="Show", variable=self.show_hmac, command=self._toggle_hmac).grid(row=0, column=2, padx=(8, 0))
-        ttk.Label(auth, text="Tag mode").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=(7, 0))
-        tag_combo = ttk.Combobox(auth, textvariable=self.tag_mode, values=list(TAG_MODES), state="readonly")
+        ctk.CTkLabel(auth, text="32-byte key (Base64)", text_color=TEXT).grid(row=0, column=0, sticky="w", padx=(14, 8), pady=(28, 4))
+        self.hmac_entry = ctk.CTkEntry(auth, textvariable=self.hmac_key_b64, show="•", fg_color=SURFACE_RAISED, border_color=BORDER)
+        self.hmac_entry.grid(row=0, column=1, sticky="ew", pady=(28, 4))
+        ctk.CTkCheckBox(auth, text="Show", variable=self.show_hmac, command=self._toggle_hmac, fg_color=BLUE, hover_color=BLUE_HOVER, border_color=BORDER).grid(row=0, column=2, padx=(8, 14), pady=(28, 4))
+        ctk.CTkLabel(auth, text="Tag mode", text_color=TEXT).grid(row=1, column=0, sticky="w", padx=(14, 8), pady=(7, 12))
+        tag_combo = ctk.CTkComboBox(
+            auth,
+            variable=self.tag_mode,
+            values=list(TAG_MODES),
+            state="readonly",
+            fg_color=SURFACE_RAISED,
+            border_color=BORDER,
+            button_color=BLUE,
+            button_hover_color=BLUE_HOVER,
+        )
         tag_combo.grid(row=1, column=1, sticky="ew", pady=(7, 0))
         tag_combo.bind("<<ComboboxSelected>>", lambda _event: self._tag_mode_changed())
-        self.custom_tag_entry = ttk.Entry(auth, textvariable=self.custom_tag, width=22)
-        self.custom_tag_entry.grid(row=1, column=2, padx=(8, 0), pady=(7, 0))
+        self.custom_tag_entry = ctk.CTkEntry(auth, textvariable=self.custom_tag, width=190, fg_color=SURFACE_RAISED, border_color=BORDER)
+        self.custom_tag_entry.grid(row=1, column=2, padx=(8, 14), pady=(7, 12))
 
-        actions = ttk.Frame(root)
+        actions = ctk.CTkFrame(root, fg_color="transparent")
         actions.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(8, 4))
-        ttk.Button(actions, text="Build and validate packet", style="Accent.TButton", command=self.build_packet).pack(side="left")
-        ttk.Label(actions, textvariable=self.builder_status, style="Muted.TLabel").pack(side="left", padx=12)
+        AppButton(actions, text="Build and validate packet", width=210, height=38, command=self.build_packet).pack(side="left")
+        ctk.CTkLabel(actions, textvariable=self.builder_status, text_color=MUTED).pack(side="left", padx=12)
 
-        output = ttk.LabelFrame(root, text="Packet output", padding=10)
+        output = Section(root, text="Packet output", padding=10)
         output.grid(row=6, column=0, columnspan=2, sticky="nsew", pady=4)
         output.columnconfigure(0, weight=1)
-        ttk.Label(output, textvariable=self.packet_summary, style="Success.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 6))
-        ttk.Button(output, text="Copy Base64", command=lambda: self._copy_text(self.packet_b64)).grid(row=0, column=1, padx=(6, 0))
-        ttk.Button(output, text="Copy hex", command=lambda: self._copy_text(self.packet_hex)).grid(row=0, column=2, padx=(6, 0))
-        ttk.Label(output, text="Packet Base64").grid(row=1, column=0, sticky="w")
-        self.packet_b64 = ScrolledText(output, height=3, wrap="word", font=("Consolas", 9))
-        self.packet_b64.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(3, 8))
-        ttk.Label(output, text="Packet hex").grid(row=3, column=0, sticky="w")
-        self.packet_hex = ScrolledText(output, height=4, wrap="word", font=("Consolas", 9))
-        self.packet_hex.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(3, 0))
+        ctk.CTkLabel(output, textvariable=self.packet_summary, text_color=SUCCESS).grid(row=0, column=0, sticky="w", padx=14, pady=(28, 6))
+        AppButton(output, text="Copy Base64", command=lambda: self._copy_text(self.packet_b64)).grid(row=0, column=1, padx=(6, 0), pady=(28, 6))
+        AppButton(output, text="Copy hex", command=lambda: self._copy_text(self.packet_hex)).grid(row=0, column=2, padx=(6, 14), pady=(28, 6))
+        ctk.CTkLabel(output, text="Packet Base64", text_color=TEXT).grid(row=1, column=0, sticky="w", padx=14)
+        self.packet_b64 = ctk.CTkTextbox(output, height=72, wrap="word", font=("Consolas", 12), fg_color=SURFACE_RAISED, border_color=BORDER, border_width=1)
+        self.packet_b64.grid(row=2, column=0, columnspan=3, sticky="ew", padx=14, pady=(3, 8))
+        ctk.CTkLabel(output, text="Packet hex", text_color=TEXT).grid(row=3, column=0, sticky="w", padx=14)
+        self.packet_hex = ctk.CTkTextbox(output, height=96, wrap="word", font=("Consolas", 12), fg_color=SURFACE_RAISED, border_color=BORDER, border_width=1)
+        self.packet_hex.grid(row=4, column=0, columnspan=3, sticky="ew", padx=14, pady=(3, 14))
 
-    def _build_wrapper_tab(self, parent: ttk.Frame) -> None:
+    def _build_wrapper_tab(self, parent: ctk.CTkFrame) -> None:
         parent.columnconfigure(0, weight=1)
         parent.columnconfigure(1, weight=1)
         parent.rowconfigure(1, weight=1)
 
-        settings = ttk.LabelFrame(parent, text="HTTPS request", padding=12)
+        settings = Section(parent, text="HTTPS request", padding=12)
         settings.grid(row=0, column=0, sticky="nsew", padx=(10, 5), pady=10)
         settings.columnconfigure(1, weight=1)
         self._form_entry(settings, 0, "Supabase endpoint", self.endpoint)
-        ttk.Label(settings, text="Transport").grid(row=1, column=0, sticky="w", pady=4)
-        transport_combo = ttk.Combobox(settings, textvariable=self.transport, values=list(TRANSPORTS), state="readonly")
+        ctk.CTkLabel(settings, text="Transport", text_color=TEXT).grid(row=1, column=0, sticky="w", padx=(14, 8), pady=4)
+        transport_combo = ctk.CTkComboBox(
+            settings,
+            variable=self.transport,
+            values=list(TRANSPORTS),
+            state="readonly",
+            fg_color=SURFACE_RAISED,
+            border_color=BORDER,
+            button_color=BLUE,
+            button_hover_color=BLUE_HOVER,
+        )
         transport_combo.grid(row=1, column=1, columnspan=2, sticky="ew", pady=4)
         transport_combo.bind("<<ComboboxSelected>>", lambda _event: self._transport_changed())
-        ttk.Label(settings, text="Bearer token").grid(row=2, column=0, sticky="w", pady=4)
-        self.token_entry = ttk.Entry(settings, textvariable=self.bearer_token, show="•")
+        ctk.CTkLabel(settings, text="Bearer token", text_color=TEXT).grid(row=2, column=0, sticky="w", padx=(14, 8), pady=4)
+        self.token_entry = ctk.CTkEntry(settings, textvariable=self.bearer_token, show="•", fg_color=SURFACE_RAISED, border_color=BORDER)
         self.token_entry.grid(row=2, column=1, sticky="ew", pady=4)
-        ttk.Checkbutton(settings, text="Show", variable=self.show_token, command=self._toggle_token).grid(row=2, column=2, padx=(8, 0))
-        ttk.Label(settings, text="Use the device token for LTE; use the provisioned gateway token for LoRa.", style="Muted.TLabel", wraplength=520).grid(row=3, column=0, columnspan=3, sticky="w", pady=(2, 0))
+        ctk.CTkCheckBox(settings, text="Show", variable=self.show_token, command=self._toggle_token, fg_color=BLUE, hover_color=BLUE_HOVER, border_color=BORDER).grid(row=2, column=2, padx=(8, 14))
+        ctk.CTkLabel(
+            settings,
+            text="Use the device token for LTE; use the provisioned gateway token for LoRa.",
+            text_color=MUTED,
+            wraplength=520,
+        ).grid(row=3, column=0, columnspan=3, sticky="w", padx=14, pady=(2, 12))
 
-        metadata = ttk.LabelFrame(parent, text="Transport metadata", padding=12)
+        metadata = Section(parent, text="Transport metadata", padding=12)
         metadata.grid(row=0, column=1, sticky="nsew", padx=(5, 10), pady=10)
         metadata.columnconfigure(1, weight=1)
-        self.gateway_widgets: list[ttk.Entry | ttk.Button] = []
-        self.cell_widgets: list[ttk.Entry] = []
+        self.gateway_widgets: list[ctk.CTkEntry | ctk.CTkButton] = []
+        self.cell_widgets: list[ctk.CTkEntry] = []
         self._metadata_entry(metadata, 0, "Gateway GUID16", self.gateway_guid, "gateway")
         self._metadata_entry(metadata, 1, "Gateway RX Unix", self.gateway_rx_time, "gateway", button=("Now", self._set_gateway_now))
         self._metadata_entry(metadata, 2, "Link RSSI (dBm)", self.link_rssi, "common")
@@ -338,67 +447,101 @@ class BluepawsTlvSimulator(tk.Tk):
         self._metadata_entry(metadata, 4, "LTE RSRP (dBm)", self.cell_rsrp, "cell")
         self._metadata_entry(metadata, 5, "LTE RSRQ (dB)", self.cell_rsrq, "cell")
         self._metadata_entry(metadata, 6, "LTE SINR (dB)", self.cell_sinr, "cell")
-        ttk.Label(metadata, text="Leave optional RF fields blank to omit them from JSON.", style="Muted.TLabel").grid(row=7, column=0, columnspan=3, sticky="w", pady=(6, 0))
+        ctk.CTkLabel(metadata, text="Leave optional RF fields blank to omit them from JSON.", text_color=MUTED).grid(row=7, column=0, columnspan=3, sticky="w", padx=14, pady=(6, 12))
 
-        preview_frame = ttk.LabelFrame(parent, text="JSON wrapper preview (Authorization header intentionally omitted)", padding=10)
+        preview_frame = Section(parent, text="JSON wrapper preview (Authorization header intentionally omitted)", padding=10)
         preview_frame.grid(row=1, column=0, sticky="nsew", padx=(10, 5), pady=(0, 10))
         preview_frame.columnconfigure(0, weight=1)
         preview_frame.rowconfigure(1, weight=1)
-        preview_actions = ttk.Frame(preview_frame)
-        preview_actions.grid(row=0, column=0, sticky="ew", pady=(0, 6))
-        ttk.Button(preview_actions, text="Refresh preview", command=self.preview_wrapper).pack(side="left")
-        ttk.Button(preview_actions, text="Copy JSON", command=lambda: self._copy_text(self.wrapper_preview)).pack(side="left", padx=6)
-        self.wrapper_preview = ScrolledText(preview_frame, wrap="word", font=("Consolas", 9))
-        self.wrapper_preview.grid(row=1, column=0, sticky="nsew")
+        preview_actions = ctk.CTkFrame(preview_frame, fg_color="transparent")
+        preview_actions.grid(row=0, column=0, sticky="ew", padx=14, pady=(28, 6))
+        AppButton(preview_actions, text="Refresh preview", width=140, command=self.preview_wrapper).pack(side="left")
+        AppButton(preview_actions, text="Copy JSON", fg_color=SURFACE_RAISED, hover_color=BORDER, command=lambda: self._copy_text(self.wrapper_preview)).pack(side="left", padx=6)
+        self.wrapper_preview = ctk.CTkTextbox(preview_frame, wrap="word", font=("Consolas", 12), fg_color=SURFACE_RAISED, border_color=BORDER, border_width=1)
+        self.wrapper_preview.grid(row=1, column=0, sticky="nsew", padx=14, pady=(0, 14))
 
-        sender = ttk.LabelFrame(parent, text="Send and response log", padding=10)
+        sender = Section(parent, text="Send and response log", padding=10)
         sender.grid(row=1, column=1, sticky="nsew", padx=(5, 10), pady=(0, 10))
         sender.columnconfigure(1, weight=1)
         sender.rowconfigure(4, weight=1)
-        controls = ttk.Frame(sender)
-        controls.grid(row=0, column=0, columnspan=3, sticky="ew")
-        ttk.Label(controls, text="Count").pack(side="left")
-        ttk.Entry(controls, textvariable=self.send_count, width=7).pack(side="left", padx=(5, 12))
-        ttk.Label(controls, text="Interval (s)").pack(side="left")
-        ttk.Entry(controls, textvariable=self.send_interval, width=7).pack(side="left", padx=(5, 12))
-        ttk.Label(controls, text="Timeout (s)").pack(side="left")
-        ttk.Entry(controls, textvariable=self.timeout, width=7).pack(side="left", padx=(5, 0))
-        ttk.Checkbutton(sender, text="Advance sequence and timestamp for each request", variable=self.advance_packets).grid(row=1, column=0, columnspan=3, sticky="w", pady=(8, 6))
-        buttons = ttk.Frame(sender)
+        controls = ctk.CTkFrame(sender, fg_color="transparent")
+        controls.grid(row=0, column=0, columnspan=3, sticky="ew", padx=14, pady=(28, 4))
+        ctk.CTkLabel(controls, text="Count", text_color=TEXT).pack(side="left")
+        ctk.CTkEntry(controls, textvariable=self.send_count, width=65, fg_color=SURFACE_RAISED, border_color=BORDER).pack(side="left", padx=(5, 12))
+        ctk.CTkLabel(controls, text="Interval (s)", text_color=TEXT).pack(side="left")
+        ctk.CTkEntry(controls, textvariable=self.send_interval, width=65, fg_color=SURFACE_RAISED, border_color=BORDER).pack(side="left", padx=(5, 12))
+        ctk.CTkLabel(controls, text="Timeout (s)", text_color=TEXT).pack(side="left")
+        ctk.CTkEntry(controls, textvariable=self.timeout, width=65, fg_color=SURFACE_RAISED, border_color=BORDER).pack(side="left", padx=(5, 0))
+        ctk.CTkCheckBox(sender, text="Advance sequence and timestamp for each request", variable=self.advance_packets, fg_color=BLUE, hover_color=BLUE_HOVER, border_color=BORDER).grid(row=1, column=0, columnspan=3, sticky="w", padx=14, pady=(8, 6))
+        buttons = ctk.CTkFrame(sender, fg_color="transparent")
         buttons.grid(row=2, column=0, columnspan=3, sticky="ew")
-        self.send_button = ttk.Button(buttons, text="Send", style="Accent.TButton", command=self.send_requests)
+        self.send_button = AppButton(buttons, text="Send", command=self.send_requests)
         self.send_button.pack(side="left")
-        self.stop_button = ttk.Button(buttons, text="Stop", command=self.stop_sending, state="disabled")
+        self.stop_button = AppButton(buttons, text="Stop", fg_color=DANGER, hover_color="#D94B5B", command=self.stop_sending, state="disabled")
         self.stop_button.pack(side="left", padx=6)
-        ttk.Button(buttons, text="Clear log", command=self._clear_log).pack(side="right")
-        ttk.Label(sender, textvariable=self.sender_status, style="Muted.TLabel").grid(row=3, column=0, columnspan=3, sticky="w", pady=(7, 4))
-        self.response_log = ScrolledText(sender, wrap="word", font=("Consolas", 9), height=18)
-        self.response_log.grid(row=4, column=0, columnspan=3, sticky="nsew")
+        AppButton(buttons, text="Clear log", fg_color=SURFACE_RAISED, hover_color=BORDER, command=self._clear_log).pack(side="right")
+        ctk.CTkLabel(sender, textvariable=self.sender_status, text_color=MUTED).grid(row=3, column=0, columnspan=3, sticky="w", padx=14, pady=(7, 4))
+        self.response_log = ctk.CTkTextbox(sender, wrap="word", font=("Consolas", 12), fg_color=SURFACE_RAISED, border_color=BORDER, border_width=1)
+        self.response_log.grid(row=4, column=0, columnspan=3, sticky="nsew", padx=14, pady=(0, 14))
 
     def _form_entry(
         self,
-        parent: ttk.LabelFrame,
+        parent: Section,
         row: int,
         label: str,
         variable: tk.StringVar,
         *,
         disabled: bool = False,
         button: tuple[str, Any] | None = None,
-    ) -> ttk.Entry:
-        ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=4, padx=(0, 8))
-        entry = ttk.Entry(parent, textvariable=variable, state="disabled" if disabled else "normal")
-        entry.grid(row=row, column=1, sticky="ew", pady=4)
+    ) -> ctk.CTkEntry:
+        top_pad = 28 if row == 0 else 4
+        ctk.CTkLabel(parent, text=label, text_color=TEXT).grid(
+            row=row,
+            column=0,
+            sticky="w",
+            pady=(top_pad, 4),
+            padx=(14, 8),
+        )
+        entry = ctk.CTkEntry(
+            parent,
+            textvariable=variable,
+            state="disabled" if disabled else "normal",
+            fg_color=SURFACE_RAISED,
+            border_color=BORDER,
+        )
+        entry.grid(row=row, column=1, sticky="ew", pady=(top_pad, 4))
         if button:
-            ttk.Button(parent, text=button[0], command=button[1]).grid(row=row, column=2, padx=(7, 0))
+            AppButton(parent, text=button[0], width=68, command=button[1]).grid(
+                row=row,
+                column=2,
+                padx=(7, 14),
+                pady=(top_pad, 4),
+            )
         return entry
 
-    def _form_combo(self, parent: ttk.LabelFrame, row: int, label: str, variable: tk.StringVar, values: list[str]) -> None:
-        ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=4, padx=(0, 8))
-        ttk.Combobox(parent, textvariable=variable, values=values, state="readonly").grid(row=row, column=1, columnspan=2, sticky="ew", pady=4)
+    def _form_combo(self, parent: Section, row: int, label: str, variable: tk.StringVar, values: list[str]) -> None:
+        top_pad = 28 if row == 0 else 4
+        ctk.CTkLabel(parent, text=label, text_color=TEXT).grid(
+            row=row,
+            column=0,
+            sticky="w",
+            pady=(top_pad, 4),
+            padx=(14, 8),
+        )
+        ctk.CTkComboBox(
+            parent,
+            variable=variable,
+            values=values,
+            state="readonly",
+            fg_color=SURFACE_RAISED,
+            border_color=BORDER,
+            button_color=BLUE,
+            button_hover_color=BLUE_HOVER,
+        ).grid(row=row, column=1, columnspan=2, sticky="ew", padx=(0, 14), pady=(top_pad, 4))
 
     def _metadata_entry(
         self,
-        parent: ttk.LabelFrame,
+        parent: Section,
         row: int,
         label: str,
         variable: tk.StringVar,
@@ -406,16 +549,28 @@ class BluepawsTlvSimulator(tk.Tk):
         *,
         button: tuple[str, Any] | None = None,
     ) -> None:
-        ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=3, padx=(0, 8))
-        entry = ttk.Entry(parent, textvariable=variable)
-        entry.grid(row=row, column=1, sticky="ew", pady=3)
+        top_pad = 28 if row == 0 else 3
+        ctk.CTkLabel(parent, text=label, text_color=TEXT).grid(
+            row=row,
+            column=0,
+            sticky="w",
+            pady=(top_pad, 3),
+            padx=(14, 8),
+        )
+        entry = ctk.CTkEntry(
+            parent,
+            textvariable=variable,
+            fg_color=SURFACE_RAISED,
+            border_color=BORDER,
+        )
+        entry.grid(row=row, column=1, sticky="ew", pady=(top_pad, 3))
         if group == "gateway":
             self.gateway_widgets.append(entry)
         elif group == "cell":
             self.cell_widgets.append(entry)
         if button:
-            control = ttk.Button(parent, text=button[0], command=button[1])
-            control.grid(row=row, column=2, padx=(7, 0))
+            control = AppButton(parent, text=button[0], width=68, command=button[1])
+            control.grid(row=row, column=2, padx=(7, 14), pady=(top_pad, 3))
             if group == "gateway":
                 self.gateway_widgets.append(control)
 
@@ -709,7 +864,7 @@ class BluepawsTlvSimulator(tk.Tk):
     def _clear_log(self) -> None:
         self.response_log.delete("1.0", "end")
 
-    def _copy_text(self, widget: ScrolledText) -> None:
+    def _copy_text(self, widget: ctk.CTkTextbox) -> None:
         value = self._text(widget)
         if not value:
             return
@@ -718,12 +873,12 @@ class BluepawsTlvSimulator(tk.Tk):
         self.update_idletasks()
 
     @staticmethod
-    def _replace_text(widget: ScrolledText, value: str) -> None:
+    def _replace_text(widget: ctk.CTkTextbox, value: str) -> None:
         widget.delete("1.0", "end")
         widget.insert("1.0", value)
 
     @staticmethod
-    def _text(widget: ScrolledText) -> str:
+    def _text(widget: ctk.CTkTextbox) -> str:
         return widget.get("1.0", "end-1c").strip()
 
     @staticmethod
@@ -758,14 +913,6 @@ class BluepawsTlvSimulator(tk.Tk):
     def _close(self) -> None:
         self._stop_event.set()
         self.destroy()
-
-    def _about(self) -> None:
-        messagebox.showinfo(
-            "About Bluepaws TLV Test Console",
-            "Builds the locked Bluepaws v1.1 binary collar packet and sends its approved JSON wrapper to the Supabase Edge Function.\n\nThe program stores no credentials and writes no secrets to its response log.",
-            parent=self,
-        )
-
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Bluepaws TLV desktop test console")
