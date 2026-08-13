@@ -6,17 +6,21 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import math
+import random
+import re
 import sys
 import threading
 import time
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
 try:
     import PySide6
-    from PySide6.QtCore import QObject, Qt, QTimer, Signal
-    from PySide6.QtGui import QCloseEvent, QFont
+    from PySide6.QtCore import QObject, Qt, QTimer, QUrl, QUrlQuery, Signal
+    from PySide6.QtGui import QCloseEvent, QDesktopServices, QFont
     from PySide6.QtWidgets import (
         QApplication,
         QCheckBox,
@@ -27,6 +31,7 @@ try:
         QGroupBox,
         QHBoxLayout,
         QHeaderView,
+        QInputDialog,
         QLabel,
         QLineEdit,
         QMainWindow,
@@ -92,6 +97,50 @@ TRANSPORTS = {
     "LTE direct (cellular_direct)": "cellular_direct",
     "LoRa home-hub relay (lora_hub)": "lora_hub",
 }
+EARTH_RADIUS_METRES = 6_371_000.0
+EARTH_METRES_PER_DEGREE = math.tau * EARTH_RADIUS_METRES / 360.0
+
+
+def parse_coordinates(value: str) -> tuple[float, float]:
+    """Extract latitude/longitude from plain text or a common Google Maps URL."""
+    decoded = unquote(value.strip())
+    patterns = (
+        r"!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)",
+        r"(?<![\d.])(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)(?![\d.])",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, decoded, flags=re.IGNORECASE)
+        if match is None:
+            continue
+        latitude, longitude = float(match.group(1)), float(match.group(2))
+        if not -90 <= latitude <= 90:
+            raise ValueError("latitude must be from -90 to 90")
+        if not -180 <= longitude <= 180:
+            raise ValueError("longitude must be from -180 to 180")
+        return latitude, longitude
+    raise ValueError("paste coordinates as latitude, longitude or a Google Maps URL")
+
+
+def drift_coordinates(
+    latitude: float,
+    longitude: float,
+    maximum_metres: float,
+    *,
+    rng: Any = random,
+) -> tuple[float, float]:
+    """Return one uniformly distributed random-walk step within the radius."""
+    if not 0 < maximum_metres <= 10_000:
+        raise ValueError("maximum drift must be greater than 0 and at most 10000 metres")
+    radius = maximum_metres * math.sqrt(rng.random())
+    angle = rng.random() * math.tau
+    latitude_delta = (radius * math.cos(angle)) / EARTH_METRES_PER_DEGREE
+    longitude_scale = EARTH_METRES_PER_DEGREE * max(
+        abs(math.cos(math.radians(latitude))), 1e-6
+    )
+    longitude_delta = (radius * math.sin(angle)) / longitude_scale
+    next_latitude = max(-90.0, min(90.0, latitude + latitude_delta))
+    next_longitude = ((longitude + longitude_delta + 180.0) % 360.0) - 180.0
+    return next_latitude, next_longitude
 
 
 STYLESHEET = f"""
@@ -147,6 +196,11 @@ QLineEdit, QComboBox, QPlainTextEdit, QTableWidget {{
 QLineEdit:focus, QComboBox:focus, QPlainTextEdit:focus {{
     border: 1px solid {BLUE};
 }}
+QLineEdit:disabled {{
+    background: #091B2A;
+    color: {MUTED};
+    border-color: #153A56;
+}}
 QComboBox::drop-down {{
     border: 0;
     width: 25px;
@@ -175,6 +229,11 @@ QCheckBox {{ spacing: 7px; }}
 QCheckBox::indicator {{
     width: 16px;
     height: 16px;
+}}
+QCheckBox::indicator:unchecked {{
+    background: {SURFACE_RAISED};
+    border: 1px solid {MUTED};
+    border-radius: 3px;
 }}
 QHeaderView::section {{
     background: {BORDER};
@@ -231,6 +290,7 @@ class BluepawsTlvConsole(QMainWindow):
         self._credentials: dict[str, DeviceCredential] = {}
         self._custom_tlvs: list[TlvEntry] = []
         self._last_built: BuiltPacket | None = None
+        self._prepared_fields: list[PacketFields] = []
         self._stop_event = threading.Event()
         self._worker: threading.Thread | None = None
         self.worker_signals = WorkerSignals()
@@ -330,6 +390,35 @@ class BluepawsTlvConsole(QMainWindow):
         ):
             position_form.addRow(label, field)
         position_form.addRow(QLabel("Use fix age 65535 or satellites 255 for unknown."))
+        map_tools = QHBoxLayout()
+        open_maps = QPushButton("Open Google Maps…")
+        open_maps.clicked.connect(self._open_google_maps)
+        open_maps.setToolTip("Open Google Maps at the current latitude and longitude.")
+        paste_maps = secondary_button("Paste coordinates…")
+        paste_maps.clicked.connect(self._paste_map_coordinates)
+        paste_maps.setToolTip(
+            "Paste copied latitude/longitude text or a full Google Maps URL."
+        )
+        map_tools.addWidget(open_maps)
+        map_tools.addWidget(paste_maps)
+        map_tools.addStretch()
+        position_form.addRow("Map tools", map_tools)
+
+        drift_row = QHBoxLayout()
+        self.drift_enabled = QCheckBox("Random-walk movement")
+        self.drift_enabled.setToolTip(
+            "Move each packet after the first by a random distance within this radius."
+        )
+        self.drift_enabled.toggled.connect(self._drift_mode_changed)
+        self.maximum_drift = line_edit("100")
+        self.maximum_drift.setMaximumWidth(70)
+        self.maximum_drift.setEnabled(False)
+        drift_row.addWidget(self.drift_enabled)
+        drift_row.addWidget(QLabel("Maximum"))
+        drift_row.addWidget(self.maximum_drift)
+        drift_row.addWidget(QLabel("metres per packet"))
+        drift_row.addStretch()
+        position_form.addRow("Movement", drift_row)
         grid.addWidget(position, 1, 1)
 
         flags = QGroupBox("Header flags")
@@ -528,8 +617,21 @@ class BluepawsTlvConsole(QMainWindow):
             controls.addWidget(field)
         controls.addStretch()
         sender_layout.addLayout(controls)
-        self.advance_packets = QCheckBox("Advance sequence and timestamp for each request")
+        self.advance_packets = QCheckBox(
+            "Live simulation: advance sequence, current time and optional movement"
+        )
+        self.advance_packets.setChecked(True)
+        self.advance_packets.setToolTip(
+            "Recommended for movement simulation. Turn off only to resend the exact same "
+            "packet for duplicate/idempotency testing."
+        )
+        self.advance_packets.toggled.connect(self._live_mode_changed)
         sender_layout.addWidget(self.advance_packets)
+        duplicate_hint = QLabel(
+            "Turn live simulation off only when deliberately testing duplicate handling."
+        )
+        duplicate_hint.setStyleSheet(f"color: {MUTED};")
+        sender_layout.addWidget(duplicate_hint)
         buttons = QHBoxLayout()
         self.send_button = QPushButton("Send")
         self.send_button.clicked.connect(self.send_requests)
@@ -592,6 +694,52 @@ class BluepawsTlvConsole(QMainWindow):
 
     def _set_gateway_now(self) -> None:
         self.gateway_rx_time.setText(str(int(time.time())))
+
+    def _open_google_maps(self) -> None:
+        try:
+            latitude = self._float(self.latitude.text(), "latitude")
+            longitude = self._float(self.longitude.text(), "longitude")
+            if not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
+                raise ValueError("coordinates are outside the valid latitude/longitude range")
+        except ValueError as error:
+            QMessageBox.critical(self, "Cannot open Google Maps", str(error))
+            return
+        url = QUrl("https://www.google.com/maps/search/")
+        query = QUrlQuery()
+        query.addQueryItem("api", "1")
+        query.addQueryItem("query", f"{latitude:.7f},{longitude:.7f}")
+        url.setQuery(query)
+        if not QDesktopServices.openUrl(url):
+            QMessageBox.critical(self, "Cannot open Google Maps", "Windows could not open the web browser.")
+
+    def _paste_map_coordinates(self) -> None:
+        clipboard = QApplication.clipboard()
+        initial = clipboard.text().strip() if clipboard is not None else ""
+        value, accepted = QInputDialog.getMultiLineText(
+            self,
+            "Import coordinates from Google Maps",
+            "In Google Maps, right-click a point and copy its coordinates, or copy the page URL.\n"
+            "Paste latitude, longitude or the Google Maps URL here:",
+            initial,
+        )
+        if not accepted:
+            return
+        try:
+            latitude, longitude = parse_coordinates(value)
+        except ValueError as error:
+            QMessageBox.critical(self, "Invalid coordinates", str(error))
+            return
+        self.latitude.setText(f"{latitude:.7f}")
+        self.longitude.setText(f"{longitude:.7f}")
+        self.builder_status.setText("Coordinates imported from Google Maps.")
+        self.build_packet()
+
+    def _live_mode_changed(self, enabled: bool) -> None:
+        self.drift_enabled.setEnabled(enabled)
+        self.maximum_drift.setEnabled(enabled and self.drift_enabled.isChecked())
+
+    def _drift_mode_changed(self, enabled: bool) -> None:
+        self.maximum_drift.setEnabled(enabled and self.advance_packets.isChecked())
 
     def _tag_mode_changed(self) -> None:
         self.custom_tag.setEnabled(TAG_MODES[self.tag_mode.currentText()] == "custom")
@@ -773,28 +921,44 @@ class BluepawsTlvConsole(QMainWindow):
     def _prepare_requests(
         self, count: int, interval: float
     ) -> list[tuple[int, dict[str, Any]]]:
+        self._prepared_fields = []
         if not self.advance_packets.isChecked():
             wrapper = self._wrapper()
             sequence = self._int(self.sequence.text(), "message sequence")
             return [(sequence, wrapper) for _ in range(count)]
 
         base_fields = self._packet_fields()
+        base_send_time = int(time.time())
         hmac_key = decode_hmac_key(self.hmac.text())
         tlvs = self._packet_tlvs()
         mode = TAG_MODES[self.tag_mode.currentText()]
         base_gateway_time = (
-            self._int(self.gateway_rx_time.text(), "gateway receive timestamp")
+            base_send_time
             if TRANSPORTS[self.transport.currentText()] == "lora_hub"
             else None
         )
+        drift_radius = None
+        if self.drift_enabled.isChecked():
+            drift_radius = self._float(self.maximum_drift.text(), "maximum drift")
+            if not 0 < drift_radius <= 10_000:
+                raise ValueError(
+                    "maximum drift must be greater than 0 and at most 10000 metres"
+                )
+        latitude = base_fields.latitude
+        longitude = base_fields.longitude
         result: list[tuple[int, dict[str, Any]]] = []
         for index in range(count):
             offset = round(index * interval)
+            if index and drift_radius is not None:
+                latitude, longitude = drift_coordinates(latitude, longitude, drift_radius)
             fields = replace(
                 base_fields,
                 message_sequence=(base_fields.message_sequence + index) & 0xFFFF,
-                timestamp=min(0xFFFF_FFFF, base_fields.timestamp + offset),
+                timestamp=min(0xFFFF_FFFF, base_send_time + offset),
+                latitude=latitude,
+                longitude=longitude,
             )
+            self._prepared_fields.append(fields)
             built = build_tlv_packet(
                 fields,
                 tlvs,
@@ -863,18 +1027,25 @@ class BluepawsTlvConsole(QMainWindow):
         self,
         completed: int,
         total: int,
-        requests: object,
+        _requests: object,
     ) -> None:
-        request_list = list(requests)  # type: ignore[arg-type]
         self.send_button.setEnabled(True)
         self.stop_button.setEnabled(False)
         stopped = completed < total
-        self.sender_status.setText(
+        completion_status = (
             f"{'Stopped after' if stopped else 'Completed'} {completed} of {total} request(s)."
         )
         if completed and self.advance_packets.isChecked():
-            self.sequence.setText(str((request_list[completed - 1][0] + 1) & 0xFFFF))
-            self._set_now()
+            last_fields = self._prepared_fields[completed - 1]
+            self.sequence.setText(str((last_fields.message_sequence + 1) & 0xFFFF))
+            self.timestamp.setText(str(int(time.time())))
+            self.latitude.setText(f"{last_fields.latitude:.7f}")
+            self.longitude.setText(f"{last_fields.longitude:.7f}")
+            if TRANSPORTS[self.transport.currentText()] == "lora_hub":
+                self._set_gateway_now()
+            self.build_packet()
+        self.sender_status.setText(completion_status)
+        self._prepared_fields = []
         self._worker = None
 
     def stop_sending(self) -> None:
