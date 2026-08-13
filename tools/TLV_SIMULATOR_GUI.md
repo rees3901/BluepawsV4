@@ -1,5 +1,9 @@
 # Bluepaws TLV desktop test console
 
+> Legacy fallback: the primary desktop console is now the PySide6 application
+> documented in `TLV_SIMULATOR_QT.md`. Keep this CustomTkinter version only until
+> Qt feature-parity testing is complete.
+
 `tlv_simulator_gui.py` is a two-stage desktop tool for manually constructing
 and sending Bluepaws v1.1 telemetry. It uses CustomTkinter's dark, high-DPI
 interface and shares its packet codec with the VPS command-line simulator.
