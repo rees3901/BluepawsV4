@@ -8,6 +8,13 @@ The console pins CustomTkinter 5.2.2. Version 6.0.0 showed a measurable Windows
 title-bar dragging regression during Bluepaws testing, so do not upgrade it
 independently of `requirements-gui.txt`.
 
+The complete form is deliberately replaced by a lightweight placeholder while
+a Windows user moves or resizes the window, then restored immediately after the
+movement stops. This avoids asking the Windows compositor to repaint dozens of
+canvas-backed controls for every intermediate window position. The HTTPS tab is
+also created only when it is first opened. Neither optimization clears entered
+values or changes packet-building and sending behaviour.
+
 Use the GUI for exploratory and negative-path testing. Keep using
 `tlv_telemetry_simulator.py` for headless VPS runs and load tests.
 
