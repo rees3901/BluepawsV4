@@ -4,6 +4,7 @@ tools/vps_devices.json
 # Python simulator/test artefacts.
 __pycache__/
 *.py[cod]
+.venv*/
 
 # Local Supabase CLI link and runtime state.
 supabase/.temp/
