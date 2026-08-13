@@ -135,17 +135,27 @@ Never add the service-role key to the VPS simulator.
 
 ## 6. Configure the VPS simulator
 
-In the VPS's private `tools/vps_devices.json`, add the HMAC key beside the
-existing device bearer token:
+In the VPS's private `tools/vps_devices.json`, keep collar and gateway identities
+in separate arrays inside one credentials bundle:
 
 ```json
-[
-  {
-    "device_id": 1001,
-    "token": "device-bearer-token-issued-during-provisioning",
-    "hmac_key_b64": "the-same-base64-key-stored-in-vault"
-  }
-]
+{
+  "schema_version": 1,
+  "devices": [
+    {
+      "device_id": 1001,
+      "bearer_token": "device-bearer-token-issued-during-provisioning",
+      "hmac_key_b64": "the-same-base64-key-stored-in-vault"
+    }
+  ],
+  "gateways": [
+    {
+      "gateway_guid16": "0016",
+      "display_name": "Bluepaws Test Hub",
+      "bearer_token": "gateway-plaintext-token"
+    }
+  ]
+}
 ```
 
 Protect the file and send a short LTE test:
@@ -155,13 +165,15 @@ chmod 600 tools/vps_devices.json
 python3 tools/tlv_telemetry_simulator.py --device-count 1 --iterations 5 --interval 2
 ```
 
-To test the same immutable collar packet through a LoRa relay wrapper:
+To test the same immutable collar packet through the single gateway in the
+bundle:
 
 ```bash
-export BLUEPAWS_GATEWAY_GUID16=0016
-export BLUEPAWS_GATEWAY_TOKEN='gateway-plaintext-token'
 python3 tools/tlv_telemetry_simulator.py --transport lora_hub --device-count 1 --iterations 5 --interval 2
 ```
+
+With multiple bundled gateways, add `--gateway-guid16 0016`. Explicit gateway
+environment variables remain supported as temporary overrides.
 
 New observations return HTTP `201`. Exact packet retries return `200` with
 `"duplicate": true`; route receipts are aggregated rather than duplicating the

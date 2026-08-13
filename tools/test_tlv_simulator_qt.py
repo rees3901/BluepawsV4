@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import base64
 import importlib.util
+import json
 import math
 import os
 from pathlib import Path
 import sys
+import tempfile
 import time
 import unittest
 from unittest.mock import patch
@@ -211,7 +213,7 @@ class QtConsoleTests(unittest.TestCase):
         self.window.transport.setCurrentText(next(iter(TRANSPORTS)))
         self.assertFalse(self.window.gateway_guid.isEnabled())
         self.assertTrue(self.window.cell_rsrp.isEnabled())
-        self.assertIn("device's bearer token", self.window.bearer_hint.text())
+        self.assertIn("device bearer token", self.window.bearer_hint.text())
 
         self.window.transport.setCurrentText("LoRa home-hub relay (lora_hub)")
         self.assertTrue(self.window.gateway_guid.isEnabled())
@@ -235,6 +237,48 @@ class QtConsoleTests(unittest.TestCase):
         self.assertEqual(self.window.bearer.text(), "z" * 48)
         self.assertEqual(self.window.hmac.echoMode(), self.window.hmac.EchoMode.Password)
         self.assertEqual(self.window.bearer.echoMode(), self.window.bearer.EchoMode.Password)
+
+    def test_bundle_switches_device_and_gateway_bearers_by_transport(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "credentials.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "devices": [
+                            {
+                                "device_id": 1001,
+                                "bearer_token": "d" * 48,
+                                "hmac_key_b64": base64.b64encode(bytes(32)).decode(),
+                            }
+                        ],
+                        "gateways": [
+                            {
+                                "gateway_guid16": "0016",
+                                "bearer_token": "g" * 48,
+                                "display_name": "Test Hub",
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with patch(
+                "tlv_simulator_qt.QFileDialog.getOpenFileName",
+                return_value=(str(path), "JSON files (*.json)"),
+            ):
+                self.window.load_credentials_file()
+
+        self.assertEqual(self.window.bearer.text(), "d" * 48)
+        self.assertEqual(self.window.gateway_combo.count(), 1)
+        self.assertIn("Test Hub", self.window.gateway_combo.currentText())
+
+        self.window.transport.setCurrentText("LoRa home-hub relay (lora_hub)")
+        self.assertEqual(self.window.bearer.text(), "g" * 48)
+        self.assertEqual(self.window.gateway_guid.text(), "0016")
+
+        self.window.transport.setCurrentText("LTE direct (cellular_direct)")
+        self.assertEqual(self.window.bearer.text(), "d" * 48)
 
     def test_background_send_returns_through_qt_signals(self) -> None:
         self.window.send_count.setText("2")

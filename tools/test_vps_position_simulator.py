@@ -36,6 +36,26 @@ class SimulatorTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "duplicated"):
                 load_credentials(path)
 
+    def test_load_credentials_accepts_typed_bundle_and_bearer_token_name(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "credentials.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "devices": [
+                            {"device_id": 1001, "bearer_token": "a" * 48}
+                        ],
+                        "gateways": [
+                            {"gateway_guid16": "0016", "bearer_token": "g" * 48}
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            credentials = load_credentials(path)
+            self.assertEqual(credentials, [DeviceCredential(1001, "a" * 48)])
+
     def test_payload_uses_wire_contract_and_increments_message_id(self):
         state = DeviceState(
             credential=DeviceCredential(1001, "a" * 32),

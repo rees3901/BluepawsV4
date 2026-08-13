@@ -59,6 +59,7 @@ from tlv_packet_codec import (
     TX_REASON_CODES,
     BuiltPacket,
     DeviceCredential,
+    GatewayCredential,
     PacketFields,
     TlvEntry,
     build_tlv_packet,
@@ -67,7 +68,7 @@ from tlv_packet_codec import (
     decode_hmac_key,
     firmware_tlv,
     known_tlv,
-    load_credentials,
+    load_credential_bundle,
     post_wrapper,
 )
 
@@ -289,6 +290,7 @@ class BluepawsTlvConsole(QMainWindow):
         self.resize(1220, 860)
         self.setMinimumSize(980, 700)
         self._credentials: dict[str, DeviceCredential] = {}
+        self._gateway_credentials: dict[str, GatewayCredential] = {}
         self._custom_tlvs: list[TlvEntry] = []
         self._last_built: BuiltPacket | None = None
         self._prepared_fields: list[PacketFields] = []
@@ -347,15 +349,27 @@ class BluepawsTlvConsole(QMainWindow):
         grid.setColumnStretch(1, 1)
 
         credentials = QGroupBox("Provisioned test credentials")
-        credential_row = QHBoxLayout(credentials)
+        credential_row = QGridLayout(credentials)
         load = QPushButton("Load credentials JSON…")
         load.clicked.connect(self.load_credentials_file)
-        credential_row.addWidget(load)
-        credential_row.addWidget(QLabel("Device"))
+        credential_row.addWidget(load, 0, 0)
+        credential_row.addWidget(QLabel("Device"), 0, 1)
         self.credential_combo = combo([])
         self.credential_combo.currentTextChanged.connect(self._credential_selected)
-        credential_row.addWidget(self.credential_combo, 1)
-        credential_row.addWidget(QLabel("Bearer and HMAC values stay masked and are never logged."))
+        credential_row.addWidget(self.credential_combo, 0, 2)
+        credential_row.addWidget(QLabel("Gateway"), 0, 3)
+        self.gateway_combo = combo([])
+        self.gateway_combo.setEnabled(False)
+        self.gateway_combo.currentTextChanged.connect(self._gateway_selected)
+        credential_row.addWidget(self.gateway_combo, 0, 4)
+        credential_note = QLabel(
+            "The selected transport chooses the device or gateway bearer automatically. "
+            "Secrets stay masked and are never logged."
+        )
+        credential_note.setStyleSheet(f"color: {MUTED};")
+        credential_row.addWidget(credential_note, 1, 0, 1, 5)
+        credential_row.setColumnStretch(2, 1)
+        credential_row.setColumnStretch(4, 1)
         grid.addWidget(credentials, 0, 0, 1, 2)
 
         header = QGroupBox("Fixed 32-byte header")
@@ -717,37 +731,68 @@ class BluepawsTlvConsole(QMainWindow):
 
     def load_credentials_file(self) -> None:
         selected, _ = QFileDialog.getOpenFileName(
-            self, "Load Bluepaws test credentials", "", "JSON files (*.json);;All files (*.*)"
+            self, "Load Bluepaws credential bundle", "", "JSON files (*.json);;All files (*.*)"
         )
         if not selected:
             return
         try:
-            credentials = load_credentials(Path(selected))
+            bundle = load_credential_bundle(Path(selected))
         except (OSError, ValueError, json.JSONDecodeError) as error:
             QMessageBox.critical(self, "Unable to load credentials", str(error))
             return
-        self._credentials = {f"Device {item.device_id}": item for item in credentials}
+        self._credentials = {f"Device {item.device_id}": item for item in bundle.devices}
+        self._gateway_credentials = {
+            self._gateway_label(item): item for item in bundle.gateways
+        }
         self.credential_combo.blockSignals(True)
         self.credential_combo.clear()
         self.credential_combo.addItems(list(self._credentials))
         self.credential_combo.blockSignals(False)
         self.credential_combo.setCurrentIndex(0)
-        self._apply_credential(credentials[0])
-        self.builder_status.setText(f"Loaded {len(credentials)} provisioned test device(s).")
+        self.gateway_combo.blockSignals(True)
+        self.gateway_combo.clear()
+        self.gateway_combo.addItems(list(self._gateway_credentials))
+        self.gateway_combo.blockSignals(False)
+        if self._gateway_credentials:
+            self.gateway_combo.setCurrentIndex(0)
+        self._apply_credential(bundle.devices[0])
+        if bundle.gateways:
+            self._apply_gateway(bundle.gateways[0])
+        self._transport_changed()
+        self.builder_status.setText(
+            f"Loaded {len(bundle.devices)} device(s) and {len(bundle.gateways)} gateway(s)."
+        )
 
     def _credential_selected(self, name: str) -> None:
         credential = self._credentials.get(name)
         if credential is not None:
             self._apply_credential(credential)
 
+    def _gateway_selected(self, name: str) -> None:
+        credential = self._gateway_credentials.get(name)
+        if credential is not None:
+            self._apply_gateway(credential)
+
     def _apply_credential(self, credential: DeviceCredential) -> None:
         self.device_id.setText(str(credential.device_id))
         self.hmac.setText(base64.b64encode(credential.hmac_key).decode("ascii"))
-        self.bearer.setText(credential.token)
+        if TRANSPORTS[self.transport.currentText()] == "cellular_direct":
+            self.bearer.setText(credential.token)
         self.builder_status.setText(
             f"Device {credential.device_id} selected. Secrets remain masked."
         )
         self.build_packet()
+
+    def _apply_gateway(self, credential: GatewayCredential) -> None:
+        self.gateway_guid.setText(credential.gateway_guid16)
+        if TRANSPORTS[self.transport.currentText()] == "lora_hub":
+            self.bearer.setText(credential.token)
+        self.preview_wrapper()
+
+    @staticmethod
+    def _gateway_label(credential: GatewayCredential) -> str:
+        suffix = f" — {credential.display_name}" if credential.display_name else ""
+        return f"Gateway {credential.gateway_guid16}{suffix}"
 
     def _set_now(self) -> None:
         self.timestamp.setText(str(int(time.time())))
@@ -806,11 +851,25 @@ class BluepawsTlvConsole(QMainWindow):
 
     def _transport_changed(self) -> None:
         is_lora = TRANSPORTS[self.transport.currentText()] == "lora_hub"
+        self.gateway_combo.setEnabled(is_lora and bool(self._gateway_credentials))
+        if is_lora:
+            gateway = self._gateway_credentials.get(self.gateway_combo.currentText())
+            if gateway is not None:
+                self.gateway_guid.setText(gateway.gateway_guid16)
+                self.bearer.setText(gateway.token)
+            else:
+                device = self._credentials.get(self.credential_combo.currentText())
+                if device is not None and self.bearer.text() == device.token:
+                    self.bearer.clear()
+        else:
+            device = self._credentials.get(self.credential_combo.currentText())
+            if device is not None:
+                self.bearer.setText(device.token)
         self.bearer_hint.setText(
-            "Use the separately provisioned gateway bearer token for this hub. "
-            "The four-digit gateway GUID identifies it but is not a secret."
+            "The selected gateway bearer token authenticates this relay. "
+            "Its four-digit GUID identifies the hub but is not a secret."
             if is_lora
-            else "Use the selected device's bearer token for direct LTE ingestion."
+            else "The selected device bearer token authenticates direct LTE ingestion."
         )
         for widget in self.gateway_widgets:
             widget.setEnabled(is_lora)

@@ -81,6 +81,19 @@ class DeviceCredential:
 
 
 @dataclass(frozen=True)
+class GatewayCredential:
+    gateway_guid16: str
+    token: str
+    display_name: str | None = None
+
+
+@dataclass(frozen=True)
+class CredentialBundle:
+    devices: tuple[DeviceCredential, ...]
+    gateways: tuple[GatewayCredential, ...]
+
+
+@dataclass(frozen=True)
 class PacketFields:
     device_id: int
     message_sequence: int
@@ -123,32 +136,103 @@ class BuiltPacket:
         return base64.b64encode(self.packet).decode("ascii")
 
 
-def load_credentials(path: Path) -> list[DeviceCredential]:
+def load_credential_bundle(path: Path) -> CredentialBundle:
     raw = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(raw, list) or not raw:
-        raise ValueError("credentials file must contain a non-empty JSON array")
+    if isinstance(raw, list):
+        device_items = raw
+        gateway_items: list[Any] = []
+    elif isinstance(raw, dict):
+        unknown = set(raw) - {"schema_version", "devices", "gateways"}
+        if unknown:
+            raise ValueError(
+                "credentials bundle contains unknown field(s): " + ", ".join(sorted(unknown))
+            )
+        if raw.get("schema_version", 1) != 1:
+            raise ValueError("credentials bundle schema_version must be 1")
+        device_items = raw.get("devices")
+        gateway_items = raw.get("gateways", [])
+        if not isinstance(gateway_items, list):
+            raise ValueError("credentials bundle gateways must be a JSON array")
+    else:
+        raise ValueError("credentials file must contain a JSON array or credentials bundle")
+
+    if not isinstance(device_items, list) or not device_items:
+        raise ValueError("credentials bundle devices must be a non-empty JSON array")
 
     credentials: list[DeviceCredential] = []
     seen: set[int] = set()
-    for item in raw:
+    for item in device_items:
         if not isinstance(item, dict):
-            raise ValueError("each credential must be a JSON object")
+            raise ValueError("each device credential must be a JSON object")
         device_id = item.get("device_id")
-        token = item.get("token")
+        token = _bearer_token(item, f"device_id {device_id}")
         key_text = item.get("hmac_key_b64")
         if not isinstance(device_id, int) or isinstance(device_id, bool):
             raise ValueError("device_id must be an integer")
         _range(device_id, 1, 65_535, "device_id")
         if device_id in seen:
             raise ValueError(f"device_id {device_id} is duplicated")
-        if not isinstance(token, str) or not 32 <= len(token) <= 256:
-            raise ValueError(f"device_id {device_id} has an invalid bearer token")
-        if re.fullmatch(r"[A-Za-z0-9_-]{32,256}", token) is None:
-            raise ValueError(f"device_id {device_id} bearer token has invalid characters")
         hmac_key = decode_hmac_key(key_text, f"device_id {device_id} HMAC key")
         seen.add(device_id)
         credentials.append(DeviceCredential(device_id, token, hmac_key))
-    return credentials
+
+    gateways: list[GatewayCredential] = []
+    seen_gateways: set[str] = set()
+    for item in gateway_items:
+        if not isinstance(item, dict):
+            raise ValueError("each gateway credential must be a JSON object")
+        gateway_guid16 = normalize_gateway_guid16(item.get("gateway_guid16"))
+        if gateway_guid16 in seen_gateways:
+            raise ValueError(f"gateway_guid16 {gateway_guid16} is duplicated")
+        token = _bearer_token(item, f"gateway_guid16 {gateway_guid16}")
+        display_name = item.get("display_name")
+        if display_name is not None and (
+            not isinstance(display_name, str) or not 1 <= len(display_name.strip()) <= 80
+        ):
+            raise ValueError(
+                f"gateway_guid16 {gateway_guid16} display_name must contain 1..80 characters"
+            )
+        seen_gateways.add(gateway_guid16)
+        gateways.append(
+            GatewayCredential(
+                gateway_guid16,
+                token,
+                display_name.strip() if display_name is not None else None,
+            )
+        )
+    return CredentialBundle(tuple(credentials), tuple(gateways))
+
+
+def load_credentials(path: Path) -> list[DeviceCredential]:
+    """Load device credentials from either the legacy array or typed bundle."""
+    return list(load_credential_bundle(path).devices)
+
+
+def normalize_gateway_guid16(value: Any) -> str:
+    if isinstance(value, int) and not isinstance(value, bool):
+        _range(value, 1, 0xFFFF, "gateway_guid16")
+        return f"{value:04X}"
+    if not isinstance(value, str) or re.fullmatch(r"[0-9A-Fa-f]{4}", value.strip()) is None:
+        raise ValueError("gateway_guid16 must be four hexadecimal characters from 0001..FFFF")
+    normalized = value.strip().upper()
+    if int(normalized, 16) == 0:
+        raise ValueError("gateway_guid16 must be four hexadecimal characters from 0001..FFFF")
+    return normalized
+
+
+def _bearer_token(item: dict[str, Any], owner: str) -> str:
+    legacy = item.get("token")
+    canonical = item.get("bearer_token")
+    if legacy is not None and canonical is not None and legacy != canonical:
+        raise ValueError(f"{owner} token and bearer_token values do not match")
+    token = canonical if canonical is not None else legacy
+    return validate_bearer_token(token, f"{owner} bearer token")
+
+
+def validate_bearer_token(value: Any, field: str = "bearer token") -> str:
+    if not isinstance(value, str) or re.fullmatch(r"[A-Za-z0-9_-]{32,256}", value) is None:
+        raise ValueError(f"{field} must contain 32..256 URL-safe characters")
+    return value
 
 
 def decode_hmac_key(value: Any, field: str = "HMAC key") -> bytes:
@@ -368,10 +452,7 @@ def post_wrapper(
 ) -> tuple[int, dict[str, Any]]:
     if not url.lower().startswith("https://"):
         raise ValueError("ingestion endpoint must use HTTPS")
-    if not isinstance(bearer_token, str) or not 32 <= len(bearer_token) <= 256:
-        raise ValueError("bearer token must contain 32..256 characters")
-    if re.fullmatch(r"[A-Za-z0-9_-]{32,256}", bearer_token) is None:
-        raise ValueError("bearer token contains unsupported characters")
+    validate_bearer_token(bearer_token)
     if timeout <= 0:
         raise ValueError("HTTP timeout must be positive")
     request = urllib.request.Request(

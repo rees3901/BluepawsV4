@@ -21,10 +21,11 @@ Supabase stores only the SHA-256 token hash. TLV devices also have a random
 32-byte HMAC key. The simulator stores it as Base64, while Supabase stores its
 encrypted copy in Vault.
 
-The plaintext token is issued once during device provisioning and must be kept
-in the private `vps_devices.json` file. It cannot be recovered from the
+Plaintext tokens are issued once during provisioning and must be kept in the
+private `vps_devices.json` credentials bundle. Its `devices` and `gateways`
+arrays keep the two identity types distinct. It cannot be recovered from the
 Supabase dashboard after provisioning; if both private copies are lost, rotate
-the device to a newly generated token and replace its stored hash.
+the affected identity to a newly generated token and replace its stored hash.
 
 Copy the separately supplied `vps_devices.json` to the VPS beside the repository
 and protect it:
@@ -34,7 +35,7 @@ chmod 600 tools/vps_devices.json
 ```
 
 The real file is Git-ignored. `vps_devices.example.json` documents its format
-without containing valid secrets.
+without containing valid secrets. Existing flat device arrays remain supported.
 
 ## Run a bounded test
 
@@ -49,6 +50,16 @@ For the primary TLV contract:
 ```bash
 python3 tools/tlv_telemetry_simulator.py --device-count 5 --iterations 10 --interval 2
 ```
+
+For LoRa, a bundle containing exactly one gateway is selected automatically:
+
+```bash
+python3 tools/tlv_telemetry_simulator.py --transport lora_hub --device-count 1 --iterations 5 --interval 2
+```
+
+If the bundle contains several gateways, add `--gateway-guid16 0016`. The
+`--gateway-token` and `BLUEPAWS_GATEWAY_TOKEN` overrides remain available for
+temporary testing, but the token is normally loaded from the private bundle.
 
 For the original continuous Sandhurst simulation defaults, run:
 

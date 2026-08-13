@@ -9,15 +9,39 @@ import unittest
 from pathlib import Path
 
 from tlv_telemetry_simulator import (
+    CredentialBundle,
     DeviceCredential,
     DeviceState,
+    GatewayCredential,
     build_packet,
     build_wrapper,
     load_credentials,
+    resolve_gateway_auth,
 )
 
 
 class TlvSimulatorTests(unittest.TestCase):
+    def test_gateway_auth_resolves_from_bundle_and_allows_explicit_override(self):
+        bundle = CredentialBundle(
+            devices=(DeviceCredential(1001, "d" * 48, bytes(32)),),
+            gateways=(GatewayCredential("0016", "g" * 48, "Test Hub"),),
+        )
+        self.assertEqual(resolve_gateway_auth(bundle, None, None), ("0016", "g" * 48))
+        self.assertEqual(
+            resolve_gateway_auth(bundle, "0016", "x" * 48), ("0016", "x" * 48)
+        )
+
+    def test_gateway_auth_requires_selection_when_bundle_has_multiple_hubs(self):
+        bundle = CredentialBundle(
+            devices=(DeviceCredential(1001, "d" * 48, bytes(32)),),
+            gateways=(
+                GatewayCredential("0016", "g" * 48),
+                GatewayCredential("0017", "h" * 48),
+            ),
+        )
+        with self.assertRaisesRegex(ValueError, "multiple gateways"):
+            resolve_gateway_auth(bundle, None, None)
+
     def test_load_credentials_requires_a_32_byte_hmac_key(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "devices.json"
