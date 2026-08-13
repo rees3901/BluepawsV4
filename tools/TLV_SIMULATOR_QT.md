@@ -40,6 +40,33 @@ TLVs, wrapper preview, repeated or advancing sequences, cancellable background
 HTTP posting and timestamped response logging. Use test devices only. Never put
 a Supabase service-role key in the credential file or bearer field.
 
+## Live movement simulation
+
+**Live simulation** is enabled by default. For a multi-packet send it:
+
+- advances the 16-bit message sequence for every packet, wrapping after 65535;
+- starts packet timestamps from the current Unix time and advances them by the
+  configured interval;
+- updates the form to the next sequence and latest transmitted location when the
+  run finishes;
+- optionally applies a bounded random-walk step after the first packet. Enable
+  **Random-walk movement** and choose the maximum metres per packet (100 m by
+  default).
+
+Turn live simulation off only when intentionally repeating the exact same packet
+to test idempotent duplicate handling. In that mode, a first `201` followed by
+`200` duplicate responses is expected.
+
+## Google Maps coordinates
+
+**Open Google Maps** uses Google's documented cross-platform Maps URL and requires
+no Maps API key. It opens the current coordinate in the default browser. To pick
+a new point, right-click it in Google Maps and copy the displayed coordinates, or
+copy the page URL. Return to the console, choose **Paste coordinates**, and paste
+either `latitude, longitude` or the full Maps URL. A desktop program cannot safely
+read a click from an unrelated Chrome tab directly, so the clipboard is the
+explicit handoff between the two applications.
+
 Expected responses include `201` for a new observation, `200` with
 `duplicate: true` for an idempotent retry, `400` for malformed input, `401` for
 invalid credentials/HMAC, `409` for an identity conflict and `503` for an
