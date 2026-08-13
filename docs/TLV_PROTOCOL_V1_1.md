@@ -1,6 +1,6 @@
 # Bluepaws Cat Tracker TLV Telemetry Protocol v1.1
 
-Status: locked packet-header decision, TLV set and transport wrapper decisions under active review  
+Status: locked v1.1 packet header, TLV set and transport wrapper contract; implementation validation remains active
 Last updated: 2026-08-13  
 Scope: collar telemetry packet, LoRa collar-to-hub path, LTE-M/Cat-M1 direct path, hub relay path, Supabase Edge Function ingestion
 
@@ -90,7 +90,7 @@ No floats, strings, JSON keys or human-readable timestamps are transmitted insid
 |---:|---:|---|---|---|
 | 0 | 1 | `ver` | `u8` | Protocol version. Use `1` for this v1.1 layout unless firmware explicitly bumps it. |
 | 1 | 2 | `device_guid16` | `u16` | Immutable 16-bit collar identity. Provisioned and registered in the backend. |
-| 3 | 2 | `msg_seq_id` | `u16` | Per-device message sequence. Used with `device_guid16` for deduplication. |
+| 3 | 2 | `msg_seq_id` | `u16` | Per-device rolling message sequence. It is diagnostic identity, not the sole deduplication key. |
 | 5 | 4 | `time_unix` | `u32` | UTC packet/fix timestamp in seconds. |
 | 9 | 1 | `state` | `u8` | Packed status and power profile. Lower nibble is status, upper nibble is power profile. |
 | 10 | 1 | `flags` | `u8` | Core boolean flags. |
@@ -128,10 +128,13 @@ This keeps the collar packet compact. Exhausting 65,000 collar IDs would be a la
 
 `msg_seq_id` is also 16-bit. It increments once per new collar observation, not once per transmission path. If the same observation goes out over LoRa and LTE, both paths must carry the same `msg_seq_id`.
 
-Current deduplication key:
+The counter wraps after `65535`. It therefore cannot be a permanent globally
+unique key. The backend uses a SHA-256 hash of the complete authenticated
+packet as its canonical retry/delivery deduplication key. The tuple below is
+retained as a collision/anomaly check within the device timeline:
 
 ```text
-(device_guid16, msg_seq_id)
+(device_guid16, msg_seq_id, time_unix)
 ```
 
 No boot ID is included in the fixed header yet. Reset handling can be improved later if testing proves it is needed.
@@ -228,7 +231,8 @@ GNSS_VALID + FIX_3D + GEOFENCE_BREACHED = 0x01 + 0x02 + 0x10 = 0x13
 
 ## 10. TX reason enum
 
-`tx_reason` is one byte, but only values `0..7` are valid in v1.1.
+`tx_reason` is one byte, but only values `0..6` are assigned in v1.1. Value
+`7` is reserved and receivers must reject it until a later contract assigns it.
 
 | Value | Name | Meaning |
 |---:|---|---|
@@ -407,13 +411,17 @@ The Supabase Edge Function should:
 9. Verify `auth_tag_8` using HMAC-SHA256 over header + TLVs.
 10. Decode header fields.
 11. Parse TLVs.
-12. Insert into `observations` using unique key `(device_guid16, msg_seq_id)`.
+12. Hash the complete authenticated packet with SHA-256 and insert into
+    `observations` using that payload hash as the canonical deduplication key.
 13. Store wrapper/link metadata separately in `observation_paths`.
+14. Treat a reused `(device_guid16, msg_seq_id, time_unix)` containing a
+    different payload hash as an identity conflict rather than overwriting it.
 
-Suggested observation unique constraint:
+Observation constraints:
 
 ```sql
-UNIQUE (device_guid16, msg_seq_id)
+UNIQUE (payload_hash)
+UNIQUE (device_guid16, msg_seq_id, time_unix)
 ```
 
 Suggested `observations` table:
@@ -494,7 +502,9 @@ if rx_tag != expected_tag: reject
 
 parse header
 parse TLVs from packet[32 : 32 + tlv_len]
-upsert observation
+payload_hash = SHA256(packet)
+insert-or-find observation by payload_hash
+reject a different payload reusing (device_guid16, msg_seq_id, time_unix)
 insert observation path metadata
 ```
 
@@ -507,7 +517,7 @@ A packet with no TLVs still carries the full minimum observation data.
   "protocol_version": 1,
   "device_guid16": "04A7",
   "msg_seq_id": 10542,
-  "dedup_key": "04A7:10542",
+  "message_identity": "04A7:10542:1786537810",
   "time_unix": 1786537810,
   "status": "OUT",
   "power_profile": "NORMAL",
@@ -647,4 +657,7 @@ If both paths deliver the same observation, the UI can show the deduped location
 - LoRa collar-to-hub uses raw binary.
 - Hub-to-Supabase uses JSON wrapper plus `payload_b64`.
 - LTE direct-to-Supabase also uses JSON wrapper plus `payload_b64`.
-- Supabase deduplicates on `(device_guid16, msg_seq_id)`.
+- Supabase canonically deduplicates identical authenticated packets by their
+  backend-computed SHA-256 payload hash.
+- `(device_guid16, msg_seq_id, time_unix)` is an anomaly/conflict identity so
+  the 16-bit message sequence may safely wrap without overwriting observations.

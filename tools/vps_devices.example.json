@@ -1,10 +1,12 @@
 [
   {
     "device_id": 1001,
-    "token": "replace-with-the-provisioned-token-for-device-1001"
+    "token": "replace-with-the-provisioned-token-for-device-1001",
+    "hmac_key_b64": "replace-with-a-random-32-byte-key-encoded-as-base64"
   },
   {
     "device_id": 1002,
-    "token": "replace-with-the-provisioned-token-for-device-1002"
+    "token": "replace-with-the-provisioned-token-for-device-1002",
+    "hmac_key_b64": "replace-with-a-random-32-byte-key-encoded-as-base64"
   }
 ]

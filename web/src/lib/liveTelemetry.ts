@@ -25,7 +25,7 @@ export async function getLiveTelemetrySnapshot(): Promise<LiveTelemetrySnapshot>
 
     const { data, error } = await supabase
       .from("device_latest_positions")
-      .select("position_id,device_uid,household_id,message_id,latitude,longitude,battery,source,recorded_at,received_at,schema_version")
+      .select("position_id,device_uid,household_id,message_id,latitude,longitude,battery,battery_mv,status_code,power_profile_code,flags,tx_reason,link_type,link_rssi_dbm,link_snr_db,source,recorded_at,received_at,schema_version")
       .eq("household_id", membership.data.household_id);
 
     if (error) throw error;
