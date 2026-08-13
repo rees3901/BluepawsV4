@@ -232,16 +232,18 @@ GNSS_VALID + FIX_3D + GEOFENCE_BREACHED = 0x01 + 0x02 + 0x10 = 0x13
 
 | Value | Name | Meaning |
 |---:|---|---|
-| 0 | `TELEMETRY` | Normal scheduled location/status update. |
-| 1 | `ACK` | Acknowledgement or response to a command. |
+| 0 | `TELEMETRY` | Normal scheduled location/status update containing the standard fix/status data. |
+| 1 | `ACK` | Acknowledgement or response to a command/message. Use `acked_msg_seq_id` TLV when relevant. |
 | 2 | `PING` | Response to a user, app, cloud or hub ping. |
 | 3 | `INTERRUPT` | Triggered by motion, geofence, button, sensor or similar interrupt. |
 | 4 | `BOOT` | Cold start, reboot, brownout recovery or first report after boot. |
 | 5 | `ALERT` | Important event such as lost alert, low battery or error. |
 | 6 | `CONFIG` | Config/settings changed, applied or reported. |
-| 7 | `RESERVED` | Reserved for future use. |
+| 7 | `WAKE_CHECKIN` | Lightweight wake-up presence check-in. Used when the collar wakes, may see the BLE home beacon, reports last-seen/presence, then opens a short command receive window. |
 
-Do not keep expanding `tx_reason`. Use TLVs for detail.
+`WAKE_CHECKIN` is intended for low-cost presence and command-poll behaviour, not full diagnostic telemetry. It tells Supabase that the collar is alive and reachable, updates last-seen status, and allows the backend/user app to queue configuration commands for the receive window.
+
+Do not keep expanding `tx_reason` without a protocol version bump. Use TLVs for detail where possible.
 
 ## 11. TLV section, 0 to 24 bytes
 
@@ -640,6 +642,7 @@ If both paths deliver the same observation, the UI can show the deduped location
 - Selected collar TLVs: `fw_ver`, `reset_reason`, `uptime_s`, `activity_score`, `acked_msg_seq_id`.
 - `command_id` is omitted.
 - ACKs identify the received command/message using `acked_msg_seq_id`.
+- `WAKE_CHECKIN` is TX reason value 7 for lightweight wake-up presence checks and command receive windows.
 - LoRa RSSI/SNR and LTE RF stats are wrapper metadata, not collar TLVs.
 - LoRa collar-to-hub uses raw binary.
 - Hub-to-Supabase uses JSON wrapper plus `payload_b64`.
