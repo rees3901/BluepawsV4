@@ -1,16 +1,22 @@
-# VPS position simulator
+# VPS telemetry simulators
 
-This standard-library Python tool makes several provisioned test collars send
+The standard-library Python tools make several provisioned test collars send
 independent HTTPS position messages to the Supabase `ingest-position` Edge
 Function. It is suitable for an Ubuntu VPS and requires Python 3.10 or newer.
 By default it generates movement around Sandhurst, Gloucestershire, with one
 fleet update cycle every ten seconds.
 
+- `vps_position_simulator.py` preserves the legacy JSON debugging contract.
+- `tlv_telemetry_simulator.py` sends the primary authenticated v1.1 binary TLV
+  packet inside the locked LTE or LoRa JSON transport wrapper.
+
 ## Credentials
 
-Each device has a 16-bit identifier (`1..65534`) and its own random bearer
-token. The identifier routes data; the token authenticates the sender. Supabase
-stores only the SHA-256 token hash.
+Each device has a 16-bit identifier (`1..65535`) and its own random bearer
+token. The identifier routes data; the token authenticates the HTTPS sender.
+Supabase stores only the SHA-256 token hash. TLV devices also have a random
+32-byte HMAC key. The simulator stores it as Base64, while Supabase stores its
+encrypted copy in Vault.
 
 The plaintext token is issued once during device provisioning and must be kept
 in the private `vps_devices.json` file. It cannot be recovered from the
@@ -33,6 +39,12 @@ From the repository root:
 
 ```bash
 python3 tools/vps_position_simulator.py --device-count 5 --iterations 10 --interval 2
+```
+
+For the primary TLV contract:
+
+```bash
+python3 tools/tlv_telemetry_simulator.py --device-count 5 --iterations 10 --interval 2
 ```
 
 For the original continuous Sandhurst simulation defaults, run:
@@ -62,10 +74,11 @@ export BLUEPAWS_INGEST_URL=https://ykcdaonkvwemedotdpdr.supabase.co/functions/v1
 python3 tools/vps_position_simulator.py --iterations 100 --interval 1 --seed 42
 ```
 
-The simulator starts `message_id` from the current Unix time and increments it
-per device. The database treats `(device_id, message_id)` as the retry key:
-repeating the identical message is accepted once, while reusing that key for a
-different position returns HTTP `409`.
+The legacy simulator starts `message_id` from the current Unix time. The TLV
+simulator uses the protocol's rolling 16-bit sequence and an 8-byte truncated
+HMAC-SHA256 authentication tag. The backend canonically deduplicates identical
+TLV packets with its own full SHA-256 payload hash and returns HTTP `409` if a
+different packet reuses the same device, sequence, and packet timestamp.
 
 ## Request contract (version 1)
 
@@ -83,3 +96,6 @@ different position returns HTTP `409`.
 
 Send it as `application/json` with `Authorization: Bearer <device-token>`. Never
 put the Supabase service-role key on a VPS, collar, hub, browser, or in Git.
+
+See `docs/TLV_INGESTION_RUNBOOK.md` for HMAC key provisioning, LoRa gateway
+credentials, migration/deployment steps, and validation queries.

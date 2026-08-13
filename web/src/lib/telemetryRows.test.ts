@@ -1,0 +1,38 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { positionToTelemetryDevice, type PositionRow } from "./telemetryRows.ts";
+
+test("maps TLV projection fields into the live dashboard model", () => {
+  const row: PositionRow = {
+    position_id: 1,
+    device_uid: 1001,
+    household_id: "household",
+    message_id: 42,
+    latitude: 51.5,
+    longitude: -0.1,
+    battery: null,
+    battery_mv: 3700,
+    status_code: 2,
+    power_profile_code: 3,
+    flags: 0x89,
+    tx_reason: 5,
+    link_type: "lte",
+    link_rssi_dbm: -104,
+    link_snr_db: 7,
+    source: "tlv",
+    recorded_at: "2026-08-13T08:00:00.000Z",
+    received_at: "2026-08-13T08:00:01.000Z",
+    schema_version: 1,
+  };
+
+  const device = positionToTelemetryDevice(row);
+  assert.equal(device.status, "Lost");
+  assert.equal(device.profile, "Emergency Lost");
+  assert.equal(device.error, "Module");
+  assert.equal(device.batt, 3700);
+  assert.equal(device.batteryPercent, null);
+  assert.equal(device.rssi, -104);
+  assert.equal(device.snr, 7);
+  assert.equal(device.bleHome, true);
+  assert.equal(device.cellular, true);
+});
