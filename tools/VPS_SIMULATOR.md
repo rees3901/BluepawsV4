@@ -9,6 +9,9 @@ fleet update cycle every ten seconds.
 - `vps_position_simulator.py` preserves the legacy JSON debugging contract.
 - `tlv_telemetry_simulator.py` sends the primary authenticated v1.1 binary TLV
   packet inside the locked LTE or LoRa JSON transport wrapper.
+- `tlv_simulator_gui.py` is the desktop packet-builder and manual HTTPS test
+  console. Run it on Windows or a Linux desktop, not a headless VPS. See
+  `TLV_SIMULATOR_GUI.md`.
 
 ## Credentials
 
