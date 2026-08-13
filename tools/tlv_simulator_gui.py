@@ -80,6 +80,7 @@ DANGER = "#FF6B7A"
 DESIRED_WINDOW_SIZE = (1220, 860)
 MINIMUM_WINDOW_SIZE = (980, 700)
 WINDOW_MARGIN = (80, 80)
+DRAG_RESTORE_DELAY_MS = 160
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("dark-blue")
@@ -144,6 +145,16 @@ class ScrollableFrame(ctk.CTkScrollableFrame):
         self.content = self
 
 
+class AppTabview(ctk.CTkTabview):
+    """Run the normal tab callback for programmatic selections as well as clicks."""
+
+    def set(self, name: str) -> None:
+        previous = self.get()
+        super().set(name)
+        if name != previous and self._command is not None:
+            self._command()
+
+
 class BluepawsTlvSimulator(ctk.CTk):
     def __init__(self) -> None:
         super().__init__()
@@ -155,15 +166,21 @@ class BluepawsTlvSimulator(ctk.CTk):
         self._credentials: dict[str, DeviceCredential] = {}
         self._custom_tlvs: dict[str, TlvEntry] = {}
         self._last_built: BuiltPacket | None = None
+        self._wrapper_tab_built = False
+        self._drag_tracking_enabled = False
+        self._drag_suspended = False
+        self._drag_restore_job: str | None = None
+        self._last_root_geometry: tuple[int, int, int, int] | None = None
         self.configure(fg_color=NAVY_DEEP)
         self._configure_native_style()
         self._create_variables()
         self._build_layout()
         self._set_now()
         self._set_gateway_now()
-        self._transport_changed()
         self._tag_mode_changed()
         self.after(100, self.build_packet)
+        if sys.platform.startswith("win"):
+            self.after_idle(self._enable_drag_optimization)
 
     def _configure_initial_window(self) -> None:
         left, top, work_width, work_height = self._work_area()
@@ -280,9 +297,18 @@ class BluepawsTlvSimulator(ctk.CTk):
         self.sender_status = tk.StringVar(value="Build a packet, preview the wrapper, then send.")
 
     def _build_layout(self) -> None:
-        shell = ctk.CTkFrame(self, fg_color=NAVY_DEEP)
-        shell.pack(fill="both", expand=True, padx=16, pady=14)
-        header = ctk.CTkFrame(shell, fg_color="transparent")
+        self._shell = ctk.CTkFrame(self, fg_color=NAVY_DEEP)
+        self._shell.pack(fill="both", expand=True, padx=16, pady=14)
+        self._drag_placeholder = tk.Frame(self, background=NAVY_DEEP, highlightthickness=0)
+        tk.Label(
+            self._drag_placeholder,
+            text="Bluepaws TLV Test Console",
+            background=NAVY_DEEP,
+            foreground=TEXT,
+            font=("Segoe UI", 18, "bold"),
+        ).pack(expand=True)
+
+        header = ctk.CTkFrame(self._shell, fg_color="transparent")
         header.pack(fill="x", pady=(0, 10))
         ctk.CTkLabel(
             header,
@@ -297,8 +323,8 @@ class BluepawsTlvSimulator(ctk.CTk):
             font=ctk.CTkFont(size=12),
         ).pack(side="right", pady=(6, 0))
 
-        notebook = ctk.CTkTabview(
-            shell,
+        self._notebook = AppTabview(
+            self._shell,
             fg_color=NAVY,
             segmented_button_fg_color=SURFACE,
             segmented_button_selected_color=BLUE,
@@ -306,12 +332,54 @@ class BluepawsTlvSimulator(ctk.CTk):
             segmented_button_unselected_color=SURFACE,
             segmented_button_unselected_hover_color=SURFACE_RAISED,
             corner_radius=14,
+            command=self._tab_changed,
         )
-        notebook.pack(fill="both", expand=True)
-        packet_tab = notebook.add("1. TLV Packet Builder")
-        wrapper_tab = notebook.add("2. HTTPS Wrapper & Send")
+        self._notebook.pack(fill="both", expand=True)
+        packet_tab = self._notebook.add("1. TLV Packet Builder")
+        self._wrapper_tab = self._notebook.add("2. HTTPS Wrapper & Send")
         self._build_packet_tab(packet_tab)
-        self._build_wrapper_tab(wrapper_tab)
+
+    def _tab_changed(self) -> None:
+        """Construct the heavyweight sender tab only when it is first opened."""
+        if self._notebook.get() != "2. HTTPS Wrapper & Send" or self._wrapper_tab_built:
+            return
+        self._build_wrapper_tab(self._wrapper_tab)
+        self._wrapper_tab_built = True
+        self._transport_changed()
+
+    def _enable_drag_optimization(self) -> None:
+        """Avoid repainting the complete canvas-heavy form during Windows moves."""
+        self.update_idletasks()
+        self._last_root_geometry = self._root_geometry()
+        self._drag_tracking_enabled = True
+        self.bind("<Configure>", self._root_configured, add="+")
+
+    def _root_geometry(self) -> tuple[int, int, int, int]:
+        return self.winfo_width(), self.winfo_height(), self.winfo_x(), self.winfo_y()
+
+    def _root_configured(self, event: tk.Event) -> None:
+        if not self._drag_tracking_enabled or event.widget is not self:
+            return
+        geometry = self._root_geometry()
+        if geometry == self._last_root_geometry:
+            return
+        self._last_root_geometry = geometry
+
+        if self._drag_restore_job is not None:
+            self.after_cancel(self._drag_restore_job)
+        if not self._drag_suspended:
+            self._shell.pack_forget()
+            self._drag_placeholder.pack(fill="both", expand=True)
+            self._drag_suspended = True
+        self._drag_restore_job = self.after(DRAG_RESTORE_DELAY_MS, self._restore_after_drag)
+
+    def _restore_after_drag(self) -> None:
+        self._drag_restore_job = None
+        if not self._drag_suspended or not self.winfo_exists():
+            return
+        self._drag_placeholder.pack_forget()
+        self._shell.pack(fill="both", expand=True, padx=16, pady=14)
+        self._drag_suspended = False
 
     def _build_packet_tab(self, parent: ctk.CTkFrame) -> None:
         scroll = ScrollableFrame(parent)
