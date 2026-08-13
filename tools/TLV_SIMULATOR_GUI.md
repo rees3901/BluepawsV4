@@ -4,6 +4,10 @@
 and sending Bluepaws v1.1 telemetry. It uses CustomTkinter's dark, high-DPI
 interface and shares its packet codec with the VPS command-line simulator.
 
+The console pins CustomTkinter 5.2.2. Version 6.0.0 showed a measurable Windows
+title-bar dragging regression during Bluepaws testing, so do not upgrade it
+independently of `requirements-gui.txt`.
+
 Use the GUI for exploratory and negative-path testing. Keep using
 `tlv_telemetry_simulator.py` for headless VPS runs and load tests.
 
@@ -12,9 +16,13 @@ Use the GUI for exploratory and negative-path testing. Keep using
 On Windows, from the repository root:
 
 ```powershell
-py -3 -m pip install -r tools\requirements-gui.txt
+py -3 -m pip install --force-reinstall -r tools\requirements-gui.txt
 py -3 tools\tlv_simulator_gui.py
 ```
+
+Close every existing Bluepaws GUI window before reinstalling. Windows keeps the
+CustomTkinter font files open while the program is running and can otherwise
+return an `Access is denied` pip error.
 
 On a Linux desktop:
 

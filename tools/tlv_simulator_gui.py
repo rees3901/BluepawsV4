@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import argparse
 import base64
+import ctypes
 import json
+import sys
 import threading
 import time
 import tkinter as tk
@@ -21,6 +23,14 @@ except ModuleNotFoundError as error:
         "CustomTkinter is required. Run: "
         "py -3 -m pip install -r tools\\requirements-gui.txt"
     ) from error
+
+REQUIRED_CUSTOMTKINTER_VERSION = "5.2.2"
+if ctk.__version__ != REQUIRED_CUSTOMTKINTER_VERSION:
+    raise SystemExit(
+        f"This console requires CustomTkinter {REQUIRED_CUSTOMTKINTER_VERSION}; "
+        f"found {ctk.__version__}. Close every Bluepaws GUI window, then run: "
+        "py -3 -m pip install --force-reinstall -r tools\\requirements-gui.txt"
+    )
 
 from tlv_packet_codec import (
     DEFAULT_URL,
@@ -67,9 +77,29 @@ TEXT = "#F4F8FC"
 MUTED = "#91ABC2"
 SUCCESS = "#35D0A0"
 DANGER = "#FF6B7A"
+DESIRED_WINDOW_SIZE = (1220, 860)
+MINIMUM_WINDOW_SIZE = (980, 700)
+WINDOW_MARGIN = (80, 80)
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("dark-blue")
+
+
+def fit_window_to_work_area(
+    work_width: int,
+    work_height: int,
+    window_scaling: float,
+) -> tuple[int, int, int, int]:
+    """Return logical initial and minimum sizes that fit the physical desktop."""
+    if work_width <= 0 or work_height <= 0 or window_scaling <= 0:
+        raise ValueError("work area and window scaling must be positive")
+    usable_width = max(480, work_width - WINDOW_MARGIN[0])
+    usable_height = max(420, work_height - WINDOW_MARGIN[1])
+    width = min(DESIRED_WINDOW_SIZE[0], int(usable_width / window_scaling))
+    height = min(DESIRED_WINDOW_SIZE[1], int(usable_height / window_scaling))
+    minimum_width = min(MINIMUM_WINDOW_SIZE[0], width)
+    minimum_height = min(MINIMUM_WINDOW_SIZE[1], height)
+    return width, height, minimum_width, minimum_height
 
 
 class Section(ctk.CTkFrame):
@@ -118,8 +148,7 @@ class BluepawsTlvSimulator(ctk.CTk):
     def __init__(self) -> None:
         super().__init__()
         self.title("Bluepaws TLV Telemetry Test Console")
-        self.geometry("1220x860")
-        self.minsize(980, 700)
+        self._configure_initial_window()
         self.protocol("WM_DELETE_WINDOW", self._close)
         self._stop_event = threading.Event()
         self._worker: threading.Thread | None = None
@@ -135,6 +164,41 @@ class BluepawsTlvSimulator(ctk.CTk):
         self._transport_changed()
         self._tag_mode_changed()
         self.after(100, self.build_packet)
+
+    def _configure_initial_window(self) -> None:
+        left, top, work_width, work_height = self._work_area()
+        scaling = self._get_window_scaling()
+        width, height, minimum_width, minimum_height = fit_window_to_work_area(
+            work_width,
+            work_height,
+            scaling,
+        )
+        physical_width = round(width * scaling)
+        physical_height = round(height * scaling)
+        x = left + max(0, (work_width - physical_width) // 2)
+        y = top + max(0, (work_height - physical_height) // 2)
+        self.geometry(f"{width}x{height}+{x}+{y}")
+        self.minsize(minimum_width, minimum_height)
+
+    def _work_area(self) -> tuple[int, int, int, int]:
+        if sys.platform.startswith("win"):
+            class Rect(ctypes.Structure):
+                _fields_ = [
+                    ("left", ctypes.c_long),
+                    ("top", ctypes.c_long),
+                    ("right", ctypes.c_long),
+                    ("bottom", ctypes.c_long),
+                ]
+
+            rect = Rect()
+            if ctypes.windll.user32.SystemParametersInfoW(48, 0, ctypes.byref(rect), 0):
+                return (
+                    rect.left,
+                    rect.top,
+                    rect.right - rect.left,
+                    rect.bottom - rect.top,
+                )
+        return 0, 0, self.winfo_screenwidth(), self.winfo_screenheight()
 
     def _configure_native_style(self) -> None:
         """Theme the one native ttk widget CustomTkinter does not supply."""
@@ -923,7 +987,10 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     if args.check:
-        print(f"Bluepaws TLV GUI dependencies available (Tk {tk.TkVersion}).")
+        print(
+            "Bluepaws TLV GUI dependencies available "
+            f"(CustomTkinter {ctk.__version__}, Tk {tk.TkVersion})."
+        )
         return 0
     app = BluepawsTlvSimulator()
     app.mainloop()
