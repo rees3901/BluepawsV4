@@ -19,6 +19,7 @@ if PYSIDE_AVAILABLE:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from PySide6.QtCore import QUrlQuery
+    from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QApplication
 
     from tlv_simulator_qt import (
@@ -26,6 +27,7 @@ if PYSIDE_AVAILABLE:
         TAG_MODES,
         TRANSPORTS,
         BluepawsTlvConsole,
+        LIVE_PREVIEW_DELAY_MS,
         drift_coordinates,
         parse_coordinates,
     )
@@ -62,6 +64,51 @@ class QtConsoleTests(unittest.TestCase):
         self.assertEqual(wrapper["ingest_path"], "cellular_direct")
         self.assertEqual(wrapper["payload_b64"], built.payload_b64)
         self.assertNotIn("authorization", json_keys_lower(wrapper))
+
+    def test_packet_and_wrapper_previews_update_automatically(self) -> None:
+        original_payload = self.window.packet_b64.toPlainText()
+        self.window.latitude.setText("51.5080000")
+        QTest.qWait(LIVE_PREVIEW_DELAY_MS + 50)
+        self.app.processEvents()
+
+        self.assertNotEqual(self.window.packet_b64.toPlainText(), original_payload)
+        self.assertIn(
+            self.window.packet_b64.toPlainText(), self.window.wrapper_preview.toPlainText()
+        )
+
+        self.window.link_rssi.setText("-91")
+        QTest.qWait(LIVE_PREVIEW_DELAY_MS + 50)
+        self.app.processEvents()
+        self.assertIn('"link_rssi_dbm": -91.0', self.window.wrapper_preview.toPlainText())
+
+    def test_invalid_edit_clears_generated_output(self) -> None:
+        self.window.latitude.setText("not-a-coordinate")
+        QTest.qWait(LIVE_PREVIEW_DELAY_MS + 50)
+        self.app.processEvents()
+
+        self.assertEqual(self.window.packet_b64.toPlainText(), "")
+        self.assertEqual(self.window.packet_hex.toPlainText(), "")
+        self.assertEqual(self.window.wrapper_preview.toPlainText(), "")
+
+    def test_send_forces_rebuild_before_debounce_expires(self) -> None:
+        self.window.advance_packets.setChecked(False)
+        original_payload = self.window.packet_b64.toPlainText()
+        self.window.latitude.setText("51.5090000")
+        with patch(
+            "tlv_simulator_qt.post_wrapper", return_value=(201, {"accepted": True})
+        ) as mocked_post:
+            self.window.send_requests()
+            deadline = time.monotonic() + 2
+            while self.window._worker is not None and self.window._worker.is_alive():
+                self.app.processEvents()
+                if time.monotonic() >= deadline:
+                    self.fail("background send worker did not finish")
+                time.sleep(0.01)
+            self.app.processEvents()
+
+        sent_payload = mocked_post.call_args.args[2]["payload_b64"]
+        self.assertNotEqual(sent_payload, original_payload)
+        self.assertEqual(sent_payload, self.window.packet_b64.toPlainText())
 
     def test_custom_tlv_and_corrupt_hmac_negative_packet(self) -> None:
         self.window.custom_type.setText("7E")
@@ -164,10 +211,12 @@ class QtConsoleTests(unittest.TestCase):
         self.window.transport.setCurrentText(next(iter(TRANSPORTS)))
         self.assertFalse(self.window.gateway_guid.isEnabled())
         self.assertTrue(self.window.cell_rsrp.isEnabled())
+        self.assertIn("device's bearer token", self.window.bearer_hint.text())
 
         self.window.transport.setCurrentText("LoRa home-hub relay (lora_hub)")
         self.assertTrue(self.window.gateway_guid.isEnabled())
         self.assertFalse(self.window.cell_rsrp.isEnabled())
+        self.assertIn("gateway bearer token", self.window.bearer_hint.text())
         self.assertEqual(TAG_MODES[self.window.tag_mode.currentText()], "valid")
         wrapper = self.window.preview_wrapper()
         self.assertIsNotNone(wrapper)

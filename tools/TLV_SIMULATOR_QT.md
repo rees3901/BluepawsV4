@@ -40,6 +40,12 @@ TLVs, wrapper preview, repeated or advancing sequences, cancellable background
 HTTP posting and timestamped response logging. Use test devices only. Never put
 a Supabase service-role key in the credential file or bearer field.
 
+Packet Base64, packet hex and JSON wrapper output update automatically after a
+short pause whenever an applicable field, selector, flag or TLV changes. The
+generated fields are read-only. **Send** also performs an immediate final rebuild,
+so a request cannot use an older preview when an edit has just been made. Invalid
+input clears the previous generated output instead of leaving stale data visible.
+
 ## Live movement simulation
 
 **Live simulation** is enabled by default. For a multi-packet send it:

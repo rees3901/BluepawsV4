@@ -99,6 +99,7 @@ TRANSPORTS = {
 }
 EARTH_RADIUS_METRES = 6_371_000.0
 EARTH_METRES_PER_DEGREE = math.tau * EARTH_RADIUS_METRES / 360.0
+LIVE_PREVIEW_DELAY_MS = 250
 
 
 def parse_coordinates(value: str) -> tuple[float, float]:
@@ -293,14 +294,23 @@ class BluepawsTlvConsole(QMainWindow):
         self._prepared_fields: list[PacketFields] = []
         self._stop_event = threading.Event()
         self._worker: threading.Thread | None = None
+        self._auto_build_timer = QTimer(self)
+        self._auto_build_timer.setSingleShot(True)
+        self._auto_build_timer.setInterval(LIVE_PREVIEW_DELAY_MS)
+        self._auto_build_timer.timeout.connect(self.build_packet)
+        self._auto_preview_timer = QTimer(self)
+        self._auto_preview_timer.setSingleShot(True)
+        self._auto_preview_timer.setInterval(LIVE_PREVIEW_DELAY_MS)
+        self._auto_preview_timer.timeout.connect(self.preview_wrapper)
         self.worker_signals = WorkerSignals()
         self.worker_signals.log_line.connect(self._append_log)
         self.worker_signals.finished.connect(self._send_finished)
         self._build_ui()
+        self._connect_live_previews()
         self._transport_changed()
         self._tag_mode_changed()
         self.statusBar().showMessage("Ready • protocol v1.1 • secrets remain on this computer")
-        QTimer.singleShot(100, self.build_packet)
+        self._schedule_packet_build()
 
     def _build_ui(self) -> None:
         central = QWidget()
@@ -502,10 +512,11 @@ class BluepawsTlvConsole(QMainWindow):
         output = QGroupBox("Packet output")
         output_layout = QVBoxLayout(output)
         output_actions = QHBoxLayout()
-        build = QPushButton("Build and validate packet")
+        build = QPushButton("Rebuild now")
         build.clicked.connect(self.build_packet)
+        build.setToolTip("The preview updates automatically; this forces an immediate rebuild.")
         output_actions.addWidget(build)
-        self.packet_summary = QLabel("Packet not built")
+        self.packet_summary = QLabel("Auto-updating packet preview")
         self.packet_summary.setStyleSheet(f"color: {SUCCESS};")
         output_actions.addWidget(self.packet_summary)
         output_actions.addStretch()
@@ -522,10 +533,12 @@ class BluepawsTlvConsole(QMainWindow):
         output_layout.addWidget(QLabel("Packet Base64"))
         self.packet_b64 = QPlainTextEdit()
         self.packet_b64.setMaximumHeight(75)
+        self.packet_b64.setReadOnly(True)
         output_layout.addWidget(self.packet_b64)
         output_layout.addWidget(QLabel("Packet hex"))
         self.packet_hex = QPlainTextEdit()
         self.packet_hex.setMaximumHeight(100)
+        self.packet_hex.setReadOnly(True)
         output_layout.addWidget(self.packet_hex)
         grid.addWidget(output, 5, 0, 1, 2)
 
@@ -557,6 +570,10 @@ class BluepawsTlvConsole(QMainWindow):
         )
         request_form.addRow("Bearer token", self.bearer)
         request_form.addRow("", show_bearer)
+        self.bearer_hint = QLabel()
+        self.bearer_hint.setStyleSheet(f"color: {MUTED};")
+        self.bearer_hint.setWordWrap(True)
+        request_form.addRow("", self.bearer_hint)
         grid.addWidget(request, 0, 0)
 
         metadata = QGroupBox("Transport metadata")
@@ -596,6 +613,7 @@ class BluepawsTlvConsole(QMainWindow):
         preview_actions.addStretch()
         preview_layout.addLayout(preview_actions)
         self.wrapper_preview = QPlainTextEdit()
+        self.wrapper_preview.setReadOnly(True)
         preview_layout.addWidget(self.wrapper_preview)
         grid.addWidget(preview, 1, 0)
 
@@ -646,7 +664,7 @@ class BluepawsTlvConsole(QMainWindow):
         buttons.addStretch()
         buttons.addWidget(clear)
         sender_layout.addLayout(buttons)
-        self.sender_status = QLabel("Build a packet, preview the wrapper, then send.")
+        self.sender_status = QLabel("Packet and wrapper previews update automatically.")
         self.sender_status.setStyleSheet(f"color: {MUTED};")
         sender_layout.addWidget(self.sender_status)
         self.response_log = QPlainTextEdit()
@@ -654,6 +672,48 @@ class BluepawsTlvConsole(QMainWindow):
         sender_layout.addWidget(self.response_log, 1)
         grid.addWidget(sender, 1, 1)
         return body
+
+    def _connect_live_previews(self) -> None:
+        """Debounce edits so generated output always follows the visible form state."""
+        packet_lines = (
+            self.device_id,
+            self.sequence,
+            self.timestamp,
+            self.latitude,
+            self.longitude,
+            self.battery_mv,
+            self.accuracy_m,
+            self.fix_age_s,
+            self.satellites,
+            self.hmac,
+            self.custom_tag,
+            *self.known_values.values(),
+        )
+        for field in packet_lines:
+            field.textChanged.connect(self._schedule_packet_build)
+
+        for selector in (self.status, self.profile, self.reason, self.tag_mode):
+            selector.currentTextChanged.connect(self._schedule_packet_build)
+        for check in (*self.flag_checks.values(), *self.known_checks.values()):
+            check.toggled.connect(self._schedule_packet_build)
+
+        wrapper_lines = (
+            self.gateway_guid,
+            self.gateway_rx_time,
+            self.link_rssi,
+            self.link_snr,
+            self.cell_rsrp,
+            self.cell_rsrq,
+            self.cell_sinr,
+        )
+        for field in wrapper_lines:
+            field.textChanged.connect(self._schedule_wrapper_preview)
+
+    def _schedule_packet_build(self, *_unused: object) -> None:
+        self._auto_build_timer.start()
+
+    def _schedule_wrapper_preview(self, *_unused: object) -> None:
+        self._auto_preview_timer.start()
 
     def load_credentials_file(self) -> None:
         selected, _ = QFileDialog.getOpenFileName(
@@ -746,6 +806,12 @@ class BluepawsTlvConsole(QMainWindow):
 
     def _transport_changed(self) -> None:
         is_lora = TRANSPORTS[self.transport.currentText()] == "lora_hub"
+        self.bearer_hint.setText(
+            "Use the separately provisioned gateway bearer token for this hub. "
+            "The four-digit gateway GUID identifies it but is not a secret."
+            if is_lora
+            else "Use the selected device's bearer token for direct LTE ingestion."
+        )
         for widget in self.gateway_widgets:
             widget.setEnabled(is_lora)
         for widget in self.cell_widgets:
@@ -818,12 +884,17 @@ class BluepawsTlvConsole(QMainWindow):
         )
 
     def build_packet(self) -> BuiltPacket | None:
+        self._auto_build_timer.stop()
         try:
             built = self._build_from_fields()
         except ValueError as error:
             self._last_built = None
             self.packet_summary.setText("Packet not built")
             self.builder_status.setText(str(error))
+            self.packet_b64.clear()
+            self.packet_hex.clear()
+            self.wrapper_preview.clear()
+            self.sender_status.setText("Correct the packet fields before sending.")
             return None
         self._last_built = built
         self.packet_b64.setPlainText(built.payload_b64)
@@ -872,9 +943,11 @@ class BluepawsTlvConsole(QMainWindow):
         )
 
     def preview_wrapper(self) -> dict[str, Any] | None:
+        self._auto_preview_timer.stop()
         try:
             wrapper = self._wrapper()
         except ValueError as error:
+            self.wrapper_preview.clear()
             self.sender_status.setText(str(error))
             return None
         self.wrapper_preview.setPlainText(json.dumps(wrapper, indent=2))
@@ -887,6 +960,8 @@ class BluepawsTlvConsole(QMainWindow):
         if self._worker is not None and self._worker.is_alive():
             return
         try:
+            if self.build_packet() is None:
+                raise ValueError(self.builder_status.text())
             count = self._int(self.send_count.text(), "send count")
             if not 1 <= count <= 1000:
                 raise ValueError("send count must be from 1 to 1000")
