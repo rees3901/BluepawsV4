@@ -20,14 +20,7 @@ export async function acceptInvitationAction(
 
   const supabase = await createClient();
   const { data: identity } = await supabase.auth.getClaims();
-  const userId = typeof identity?.claims?.sub === "string" ? identity.claims.sub : null;
-  if (!userId) redirect("/login?next=/join");
-
-  const membershipResult = await supabase
-    .from("household_members")
-    .select("household_id", { count: "exact", head: true })
-    .eq("user_id", userId);
-  const isFirstFamily = !membershipResult.error && (membershipResult.count ?? 0) === 0;
+  if (!identity?.claims?.sub) redirect("/login?next=/join");
 
   const { error } = await supabase.rpc("bluepaws_accept_family_invitation", {
     invitation_token: token,
@@ -39,5 +32,5 @@ export async function acceptInvitationAction(
   }
 
   cookieStore.delete("bp_family_invite");
-  redirect(isFirstFamily ? "/?tutorial=1" : "/");
+  redirect("/");
 }
