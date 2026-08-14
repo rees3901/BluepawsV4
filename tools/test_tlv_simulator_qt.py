@@ -93,6 +93,9 @@ class QtConsoleTests(unittest.TestCase):
         self.assertEqual(
             self.window.maximum_drift.text(), str(DEFAULT_MOVEMENT_METRES)
         )
+        self.assertEqual(self.window.send_count.text(), "5")
+        self.assertEqual(self.window.send_interval.text(), "5")
+        self.assertEqual(self.window.timeout.text(), "15")
         self.assertFalse(self.window.known_values["uptime_s"].isEnabled())
         self.assertFalse(self.window.custom_type.isEnabled())
         self.assertIsNotNone(built)
@@ -230,6 +233,8 @@ class QtConsoleTests(unittest.TestCase):
 
     def test_send_forces_rebuild_before_debounce_expires(self) -> None:
         self.window.advance_packets.setChecked(False)
+        self.window.send_count.setText("1")
+        self.window.send_interval.setText("0")
         original_payload = self.window.packet_b64.toPlainText()
         self.window.latitude.setText("51.5090000")
         with patch(

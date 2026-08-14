@@ -49,6 +49,10 @@ authenticated 40-byte packet. Enabling the global TLV control activates both the
 selected v1.1 and custom/unknown TLV editors. Response-table columns have useful
 starting widths and remain interactively resizable and movable.
 
+The manual send controls default to 5 packets at 5-second intervals with a
+15-second HTTP timeout. Cookbook recipes replace the count and interval with
+their own test-specific values while active.
+
 The optional TLV container uses a fully muted background, border, nested panels
 and table when unchecked, making its inactive state visually unambiguous.
 
