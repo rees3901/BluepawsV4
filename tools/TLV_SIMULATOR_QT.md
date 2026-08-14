@@ -37,15 +37,20 @@ The selected transport automatically uses the selected device bearer for direct
 LTE or the selected gateway bearer and GUID16 for a LoRa home-hub relay.
 
 The console supports valid packets and deliberate negative HMAC tests, custom
-TLVs, wrapper preview, repeated or advancing sequences, cancellable background
-HTTP posting and timestamped response logging. Use test devices only. Never put
-a Supabase service-role key in the credential file or bearer field.
+TLVs, wrapper preview, repeated or advancing sequences and cancellable background
+HTTP posting. Request results appear in a colour-coded summary table with a clear
+success, duplicate, authorization, client, server or network status. Selecting a
+row shows its complete formatted JSON response for diagnosis. Use test devices
+only. Never put a Supabase service-role key in the credential file or bearer field.
 
 Packet Base64, packet hex and JSON wrapper output update automatically after a
 short pause whenever an applicable field, selector, flag or TLV changes. The
 generated fields are read-only. **Send** also performs an immediate final rebuild,
 so a request cannot use an older preview when an edit has just been made. Invalid
 input clears the previous generated output instead of leaving stale data visible.
+The wrapper preview reports both the exact compact UTF-8 JSON request-body size
+sent by the console and the decoded TLV packet size. HTTP headers and TLS framing
+are intentionally excluded because their wire overhead depends on the connection.
 
 ## Live movement simulation
 
@@ -58,7 +63,17 @@ input clears the previous generated output instead of leaving stale data visible
   run finishes;
 - optionally applies a bounded random-walk step after the first packet. Enable
   **Random-walk movement** and choose the maximum metres per packet (100 m by
-  default).
+  default);
+- adds bounded measurement noise after the first packet: battery ±3 mV, GNSS
+  accuracy ±2 m, fix age and satellites ±1, activity score ±2, RSSI/RSRP ±2 dB,
+  and SNR/RSRQ/SINR ±0.5 dB;
+- advances the optional uptime TLV by the simulated elapsed time. Unknown fix-age
+  (`65535`) and satellite-count (`255`) sentinels are never varied.
+
+Fields affected by live mode carry a `↗` advance or `±` variation marker in the
+interface. These changes model sensor and radio measurement noise only: device
+identity, status, power profile, TX reason, flags, firmware, reset reason,
+credentials, transport and HMAC configuration remain exactly as selected.
 
 Turn live simulation off only when intentionally repeating the exact same packet
 to test idempotent duplicate handling. In that mode, a first `201` followed by

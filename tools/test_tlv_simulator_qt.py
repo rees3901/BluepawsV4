@@ -66,6 +66,14 @@ class QtConsoleTests(unittest.TestCase):
         self.assertEqual(wrapper["ingest_path"], "cellular_direct")
         self.assertEqual(wrapper["payload_b64"], built.payload_b64)
         self.assertNotIn("authorization", json_keys_lower(wrapper))
+        compact_body = json.dumps(wrapper, separators=(",", ":")).encode("utf-8")
+        self.assertIn(
+            f"JSON body {len(compact_body)} bytes", self.window.wrapper_summary.text()
+        )
+        self.assertIn(
+            f"TLV packet {len(built.packet)} bytes", self.window.wrapper_summary.text()
+        )
+        self.assertIn("TLS overhead", self.window.wrapper_summary.toolTip())
 
     def test_packet_and_wrapper_previews_update_automatically(self) -> None:
         original_payload = self.window.packet_b64.toPlainText()
@@ -209,6 +217,45 @@ class QtConsoleTests(unittest.TestCase):
         self.assertEqual(longitudes, [-2.25666, -2.25676, -2.25686])
         self.assertEqual(len({wrapper["payload_b64"] for _, wrapper in requests}), 3)
 
+    def test_live_mode_varies_measurements_within_documented_bounds(self) -> None:
+        self.window.accuracy_m.setText("8")
+        self.window.fix_age_s.setText("0")
+        self.window.satellites.setText("9")
+        with (
+            patch("tlv_simulator_qt.time.time", return_value=4000),
+            patch("tlv_simulator_qt.random.randint", side_effect=lambda _low, high: high),
+            patch("tlv_simulator_qt.random.uniform", side_effect=lambda _low, high: high),
+        ):
+            requests = self.window._prepare_requests(2, 2.0)
+            varied_tlvs = self.window._vary_live_tlvs(
+                self.window._packet_tlvs(), 1, 2
+            )
+
+        second = self.window._prepared_fields[1]
+        self.assertEqual(second.battery_mv, 3903)
+        self.assertEqual(second.accuracy_m, 10)
+        self.assertEqual(second.fix_age_s, 1)
+        self.assertEqual(second.satellite_count, 10)
+        second_wrapper = requests[1][1]
+        self.assertEqual(second_wrapper["link_rssi_dbm"], -102.0)
+        self.assertEqual(second_wrapper["link_snr_db"], 7.5)
+        self.assertEqual(second_wrapper["cell_rsrp_dbm"], -102.0)
+        self.assertEqual(second_wrapper["cell_rsrq_db"], -9.0)
+        self.assertEqual(second_wrapper["cell_sinr_db"], 7.5)
+        values = {entry.name: int.from_bytes(entry.value, "little") for entry in varied_tlvs}
+        self.assertEqual(values["uptime_s"], 62)
+        self.assertEqual(values["activity_score"], 44)
+
+    def test_live_mode_preserves_unknown_measurement_sentinels(self) -> None:
+        self.window.fix_age_s.setText("65535")
+        self.window.satellites.setText("255")
+        with patch("tlv_simulator_qt.time.time", return_value=4000):
+            self.window._prepare_requests(2, 1.0)
+
+        second = self.window._prepared_fields[1]
+        self.assertEqual(second.fix_age_s, 65_535)
+        self.assertEqual(second.satellite_count, 255)
+
     def test_transport_switches_relevant_metadata_controls(self) -> None:
         self.window.transport.setCurrentText(next(iter(TRANSPORTS)))
         self.assertFalse(self.window.gateway_guid.isEnabled())
@@ -296,13 +343,44 @@ class QtConsoleTests(unittest.TestCase):
             for _ in range(3):
                 self.app.processEvents()
 
-        self.assertEqual(self.window.response_log.toPlainText().count('"status":201'), 2)
+        self.assertEqual(self.window.response_table.rowCount(), 2)
+        self.assertEqual(self.window.response_table.item(0, 2).text(), "201")
+        self.assertIn("Created", self.window.response_table.item(0, 3).text())
+        self.assertIn('"accepted": true', self.window.response_detail.toPlainText())
         self.assertIn("Completed 2 of 2 request(s).", self.window.sender_status.text())
         self.assertTrue(self.window.send_button.isEnabled())
         self.assertFalse(self.window.stop_button.isEnabled())
         sent_payloads = [call.args[2]["payload_b64"] for call in mocked_post.call_args_list]
         self.assertEqual(len(sent_payloads), 2)
         self.assertEqual(len(set(sent_payloads)), 2)
+
+    def test_response_table_classifies_success_auth_server_and_network_results(self) -> None:
+        entries = (
+            {"status": 201, "request": 1, "response": {"accepted": True}},
+            {"status": 401, "request": 2, "response": {"error": "invalid token"}},
+            {"status": 503, "request": 3, "response": {"error": "database unavailable"}},
+            {"status": 0, "request": 4, "error": "connection timed out"},
+        )
+        for entry in entries:
+            self.window._append_response(entry)
+        self.app.processEvents()
+
+        self.assertEqual(self.window.response_table.rowCount(), 4)
+        labels = [self.window.response_table.item(row, 3).text() for row in range(4)]
+        self.assertIn("Created", labels[0])
+        self.assertIn("Unauthorized", labels[1])
+        self.assertIn("Server error", labels[2])
+        self.assertIn("Network error", labels[3])
+        colours = {
+            self.window.response_table.item(row, 3).background().color().name()
+            for row in range(4)
+        }
+        self.assertEqual(len(colours), 4)
+        self.assertIn("connection timed out", self.window.response_detail.toPlainText())
+
+        self.window._clear_responses()
+        self.assertEqual(self.window.response_table.rowCount(), 0)
+        self.assertEqual(self.window.response_detail.toPlainText(), "")
 
 
 def json_keys_lower(value: dict[str, object]) -> set[str]:
