@@ -1225,17 +1225,10 @@ body.light .leaflet-control-scale-line {
     background: color-mix(in srgb, currentColor 12%, transparent);
 }
 
-.transport-cellular {
-    color: #38bdf8;
-}
-
-.transport-lora {
-    color: #a78bfa;
-}
-
+.transport-cellular,
+.transport-lora,
 .transport-unknown {
     color: var(--text-secondary);
-    opacity: 0.65;
 }
 
 /* ── Scrollbar ── */
