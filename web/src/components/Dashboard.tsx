@@ -10,6 +10,7 @@ import { followedDeviceAfterAction } from "@/lib/followState";
 import { createRealtimeTelemetrySource, loadDeviceTrail } from "@/lib/realtimeTelemetry";
 import { createClient } from "@/lib/supabase/client";
 import { getTutorialTelemetrySource } from "@/lib/telemetry";
+import type { FamilyRole } from "@/lib/familySelection";
 import type { DeviceAction, DeviceAvatar, MapCommand, TelemetryConnectionStatus, TelemetryDevice, TrailPoint } from "@/types/telemetry";
 
 const TrackingMap = dynamic(() => import("@/components/TrackingMap"), {
@@ -39,9 +40,11 @@ interface DashboardProps {
   initialLiveDevices: TelemetryDevice[];
   liveTelemetryError: string | null;
   userEmail: string | null;
+  familyName: string | null;
+  familyRole: FamilyRole | null;
 }
 
-export function Dashboard({ householdId, initialLiveDevices, liveTelemetryError, userEmail }: DashboardProps) {
+export function Dashboard({ householdId, initialLiveDevices, liveTelemetryError, userEmail, familyName, familyRole }: DashboardProps) {
   const router = useRouter();
   const [devices, setDevices] = useState<TelemetryDevice[]>(initialLiveDevices);
   const [connected, setConnected] = useState(false);
@@ -296,14 +299,14 @@ export function Dashboard({ householdId, initialLiveDevices, liveTelemetryError,
         ? (tutorialMode ? "Tutorial" : "Live")
         : "Connecting";
   const emptyTitle = !householdId && !tutorialMode
-    ? "Account setup incomplete"
+    ? "Family unavailable"
     : liveUnavailable
       ? "Live telemetry unavailable"
       : connected
         ? "Connected to Supabase"
         : "Waiting for live telemetry";
   const emptyMessage = !householdId && !tutorialMode
-    ? "No household is assigned to this account yet."
+    ? "Your Family membership could not be loaded."
     : liveUnavailable
       ? effectiveError
       : "No devices have reported yet.";
@@ -387,6 +390,8 @@ export function Dashboard({ householdId, initialLiveDevices, liveTelemetryError,
           liveTelemetryError={liveTelemetryError}
           connectionDetail={connectionDetail}
           userEmail={userEmail}
+          familyName={familyName}
+          familyRole={familyRole}
           onTutorialModeChange={handleTutorialModeChange}
           onReplayTutorial={replayTutorial}
           onModeChange={setPortableMode}
@@ -430,6 +435,8 @@ interface SettingsModalProps {
   liveTelemetryError: string | null;
   connectionDetail: string | null;
   userEmail: string | null;
+  familyName: string | null;
+  familyRole: FamilyRole | null;
   onTutorialModeChange: (enabled: boolean) => void;
   onReplayTutorial: () => void;
   onModeChange: (portable: boolean) => void;
@@ -437,7 +444,7 @@ interface SettingsModalProps {
   onClose: () => void;
 }
 
-function SettingsModal({ logs, portableMode, devices, tutorialMode, connected, liveTelemetryError, connectionDetail, userEmail, onTutorialModeChange, onReplayTutorial, onModeChange, onSignOut, onClose }: SettingsModalProps) {
+function SettingsModal({ logs, portableMode, devices, tutorialMode, connected, liveTelemetryError, connectionDetail, userEmail, familyName, familyRole, onTutorialModeChange, onReplayTutorial, onModeChange, onSignOut, onClose }: SettingsModalProps) {
   const [consoleOpen, setConsoleOpen] = useState(false);
   return (
     <div className="modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
@@ -454,8 +461,8 @@ function SettingsModal({ logs, portableMode, devices, tutorialMode, connected, l
           </div>
           <small className="form-hint">Portable mode stops the home beacon and scans for collar BLE signals.</small>
         </div>
-        <div className="form-group"><label>Hub Status</label><div className="status-info">{tutorialMode ? "Tutorial mode" : "Live mode"}<br />Devices: {devices}<br />Data source: {tutorialMode ? "Simulated tutorial telemetry" : "Private Supabase household channel"}<br />Cloud: {tutorialMode ? "Disabled in Tutorial Mode" : connected ? "Realtime connected" : connectionDetail ?? liveTelemetryError ?? "Connecting to Supabase"}</div></div>
-        <div className="form-group"><label>Account</label><div className="status-info">{userEmail ?? "Signed-in Bluepaws user"}</div><button className="btn-secondary account-signout" type="button" onClick={onSignOut}>Sign out</button></div>
+        <div className="form-group"><label>Hub Status</label><div className="status-info">{tutorialMode ? "Tutorial mode" : "Live mode"}<br />Devices: {devices}<br />Data source: {tutorialMode ? "Simulated tutorial telemetry" : "Private Supabase Family channel"}<br />Cloud: {tutorialMode ? "Disabled in Tutorial Mode" : connected ? "Realtime connected" : connectionDetail ?? liveTelemetryError ?? "Connecting to Supabase"}</div></div>
+        <div className="form-group"><label>Account</label><div className="status-info">{userEmail ?? "Signed-in Bluepaws user"}{familyName && <><br />Family: {familyName}<br />Access: {familyRole === "owner" ? "Owner" : "Member"}</>}</div><button className="btn-secondary account-signout" type="button" onClick={onSignOut}>Sign out</button></div>
         <div className="form-group">
           <div className="log-btn-row">
             <button className="btn-secondary" style={{ flex: 1 }} onClick={() => setConsoleOpen((open) => !open)}>Console Log</button>

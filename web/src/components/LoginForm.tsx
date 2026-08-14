@@ -79,7 +79,7 @@ export function LoginForm() {
     <section className="login-card" aria-labelledby="login-title">
       <div className="login-brand">Bluepaws V4</div>
       <h1 id="login-title">Welcome back</h1>
-      <p>Sign in to see the trackers shared with your household.</p>
+      <p>Sign in to see the trackers shared with your Family.</p>
 
       <button className="google-login-button" type="button" disabled={busy} onClick={signInWithGoogle}>
         <GoogleIcon /> Continue with Google
@@ -128,7 +128,7 @@ export function LoginForm() {
       )}
 
       {message && <p className="login-message" role="status">{message}</p>}
-      <small>Tracker data is private to members of your household.</small>
+      <small>Tracker data is private to members of your Family.</small>
     </section>
   );
 }
