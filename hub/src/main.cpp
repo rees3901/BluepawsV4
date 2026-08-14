@@ -343,13 +343,13 @@ static void initLoRa() {
     // Configure radio with parameters from bp_config.h.
     // Hub uses 10 dBm TX (lower than collar — hub has wall power, no need for max range on TX).
     int state = lora.begin(
-        LORA_FREQUENCY,      // e.g. 915.0 MHz (US) or 868.0 MHz (EU)
+        LORA_FREQUENCY,      // Locked at 869.5 MHz
         LORA_BANDWIDTH,      // e.g. 125.0 kHz
         LORA_SPREADING,      // e.g. SF10 (good range vs speed tradeoff)
-        LORA_CODING_RATE,    // e.g. 4/5 (minimal overhead)
+        LORA_CODING_RATE,    // Locked at 4/6 FEC
         LORA_SYNC_WORD,      // Private network sync word
         10,                  // TX power in dBm (hub transmits at low power)
-        LORA_PREAMBLE_LEN    // Preamble symbols (longer = easier to detect)
+        LORA_PREAMBLE_LEN    // Locked at 8 symbols
     );
 
     if (state != RADIOLIB_ERR_NONE) {
