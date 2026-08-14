@@ -22,7 +22,7 @@ if PYSIDE_AVAILABLE:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from PySide6.QtCore import QUrlQuery
     from PySide6.QtTest import QTest
-    from PySide6.QtWidgets import QApplication
+    from PySide6.QtWidgets import QApplication, QHeaderView
 
     from tlv_simulator_qt import (
         STYLESHEET,
@@ -57,6 +57,7 @@ class QtConsoleTests(unittest.TestCase):
         built = self.window.build_packet()
         self.assertIsNotNone(built)
         assert built is not None
+        self.assertEqual(len(built.packet), 40)
         self.assertEqual(built.transmitted_tag, built.expected_tag)
         self.assertEqual(self.window.packet_b64.toPlainText(), built.payload_b64)
 
@@ -74,6 +75,21 @@ class QtConsoleTests(unittest.TestCase):
             f"TLV packet {len(built.packet)} bytes", self.window.wrapper_summary.text()
         )
         self.assertIn("TLS overhead", self.window.wrapper_summary.toolTip())
+
+    def test_safe_defaults_use_valid_hmac_and_disable_optional_tlvs(self) -> None:
+        built = self.window.build_packet()
+
+        self.assertEqual(
+            self.window.tag_mode.currentText(), "Valid HMAC (normal packet)"
+        )
+        self.assertFalse(self.window.tlv_options.isChecked())
+        self.assertFalse(self.window.known_values["uptime_s"].isEnabled())
+        self.assertFalse(self.window.custom_type.isEnabled())
+        self.assertIsNotNone(built)
+        assert built is not None
+        self.assertEqual(built.tlv_length, 0)
+        self.assertEqual(len(built.packet), 40)
+        self.assertEqual(built.transmitted_tag, built.expected_tag)
 
     def test_packet_and_wrapper_previews_update_automatically(self) -> None:
         original_payload = self.window.packet_b64.toPlainText()
@@ -121,6 +137,7 @@ class QtConsoleTests(unittest.TestCase):
         self.assertEqual(sent_payload, self.window.packet_b64.toPlainText())
 
     def test_custom_tlv_and_corrupt_hmac_negative_packet(self) -> None:
+        self.window.tlv_options.setChecked(True)
         self.window.custom_type.setText("7E")
         self.window.custom_value.setText("010203")
         self.window._add_custom_tlv()
@@ -218,6 +235,7 @@ class QtConsoleTests(unittest.TestCase):
         self.assertEqual(len({wrapper["payload_b64"] for _, wrapper in requests}), 3)
 
     def test_live_mode_varies_measurements_within_documented_bounds(self) -> None:
+        self.window.tlv_options.setChecked(True)
         self.window.accuracy_m.setText("8")
         self.window.fix_age_s.setText("0")
         self.window.satellites.setText("9")
@@ -255,6 +273,16 @@ class QtConsoleTests(unittest.TestCase):
         second = self.window._prepared_fields[1]
         self.assertEqual(second.fix_age_s, 65_535)
         self.assertEqual(second.satellite_count, 255)
+
+    def test_response_columns_are_readable_and_interactively_resizable(self) -> None:
+        header = self.window.response_table.horizontalHeader()
+        for column in range(self.window.response_table.columnCount()):
+            self.assertEqual(
+                header.sectionResizeMode(column), QHeaderView.ResizeMode.Interactive
+            )
+        self.assertGreaterEqual(self.window.response_table.columnWidth(4), 80)
+        self.window.response_table.setColumnWidth(4, 140)
+        self.assertEqual(self.window.response_table.columnWidth(4), 140)
 
     def test_transport_switches_relevant_metadata_controls(self) -> None:
         self.window.transport.setCurrentText(next(iter(TRANSPORTS)))

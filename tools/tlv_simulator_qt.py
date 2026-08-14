@@ -536,6 +536,16 @@ class BluepawsTlvConsole(QMainWindow):
             flag_grid.addWidget(flag, index // 4, index % 4)
         grid.addWidget(flags, 2, 0, 1, 2)
 
+        self.tlv_options = QGroupBox("Include optional TLVs in this packet")
+        self.tlv_options.setCheckable(True)
+        self.tlv_options.setChecked(False)
+        self.tlv_options.setToolTip(
+            "Off by default for a basic authenticated 40-byte header packet. "
+            "Enable to edit selected or custom TLVs."
+        )
+        self.tlv_options.toggled.connect(self._schedule_packet_build)
+        tlv_options_layout = QHBoxLayout(self.tlv_options)
+
         known = QGroupBox("Selected v1.1 TLVs (24-byte total budget)")
         known_grid = QGridLayout(known)
         known_grid.addWidget(QLabel("Enabled"), 0, 0)
@@ -560,7 +570,7 @@ class BluepawsTlvConsole(QMainWindow):
             known_grid.addWidget(check, row, 0)
             known_grid.addWidget(value_field, row, 1)
             known_grid.addWidget(QLabel(hint), row, 2)
-        grid.addWidget(known, 3, 0)
+        tlv_options_layout.addWidget(known, 1)
 
         custom = QGroupBox("Custom / unknown TLVs")
         custom_layout = QVBoxLayout(custom)
@@ -583,7 +593,8 @@ class BluepawsTlvConsole(QMainWindow):
         remove = secondary_button("Remove selected")
         remove.clicked.connect(self._remove_custom_tlv)
         custom_layout.addWidget(remove, alignment=Qt.AlignmentFlag.AlignRight)
-        grid.addWidget(custom, 3, 1)
+        tlv_options_layout.addWidget(custom, 1)
+        grid.addWidget(self.tlv_options, 3, 0, 1, 2)
 
         authentication = QGroupBox("HMAC-SHA256 authentication (first 8 bytes)")
         authentication_grid = QGridLayout(authentication)
@@ -599,6 +610,7 @@ class BluepawsTlvConsole(QMainWindow):
         authentication_grid.addWidget(show_hmac, 0, 2)
         authentication_grid.addWidget(QLabel("Tag mode"), 1, 0)
         self.tag_mode = combo(list(TAG_MODES))
+        self.tag_mode.setCurrentText("Valid HMAC (normal packet)")
         self.tag_mode.currentTextChanged.connect(self._tag_mode_changed)
         self.custom_tag = line_edit("0000000000000000")
         authentication_grid.addWidget(self.tag_mode, 1, 1)
@@ -778,13 +790,13 @@ class BluepawsTlvConsole(QMainWindow):
         self.response_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.response_table.setAlternatingRowColors(False)
         self.response_table.itemSelectionChanged.connect(self._response_selected)
-        for column in range(len(RESPONSE_HEADERS) - 1):
-            self.response_table.horizontalHeader().setSectionResizeMode(
-                column, QHeaderView.ResizeMode.ResizeToContents
-            )
-        self.response_table.horizontalHeader().setSectionResizeMode(
-            len(RESPONSE_HEADERS) - 1, QHeaderView.ResizeMode.Stretch
-        )
+        response_header = self.response_table.horizontalHeader()
+        response_header.setMinimumSectionSize(42)
+        response_header.setSectionsMovable(True)
+        for column in range(len(RESPONSE_HEADERS)):
+            response_header.setSectionResizeMode(column, QHeaderView.ResizeMode.Interactive)
+        for column, width in enumerate((72, 42, 58, 130, 84, 60, 260)):
+            self.response_table.setColumnWidth(column, width)
         self.response_table.setMinimumHeight(190)
         sender_layout.addWidget(self.response_table, 1)
         sender_layout.addWidget(QLabel("Selected response JSON"))
@@ -1028,6 +1040,8 @@ class BluepawsTlvConsole(QMainWindow):
         )
 
     def _packet_tlvs(self) -> list[TlvEntry]:
+        if not self.tlv_options.isChecked():
+            return []
         result: list[TlvEntry] = []
         if self.known_checks["fw_ver"].isChecked():
             result.append(firmware_tlv(self.known_values["fw_ver"].text()))

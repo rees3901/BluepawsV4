@@ -43,6 +43,12 @@ success, duplicate, authorization, client, server or network status. Selecting a
 row shows its complete formatted JSON response for diagnosis. Use test devices
 only. Never put a Supabase service-role key in the credential file or bearer field.
 
+Startup defaults favour the simplest successful end-to-end test: the HMAC mode
+is **Valid HMAC**, and **Include optional TLVs** is off. This produces the basic
+authenticated 40-byte packet. Enabling the global TLV control activates both the
+selected v1.1 and custom/unknown TLV editors. Response-table columns have useful
+starting widths and remain interactively resizable and movable.
+
 Packet Base64, packet hex and JSON wrapper output update automatically after a
 short pause whenever an applicable field, selector, flag or TLV changes. The
 generated fields are read-only. **Send** also performs an immediate final rebuild,
