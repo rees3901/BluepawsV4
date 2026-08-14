@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { FamilySettingsClient } from "./FamilySettingsClient";
 
 interface FamilyPageProps {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; removed?: string }>;
 }
 
 export default async function FamilyPage({ searchParams }: FamilyPageProps) {
@@ -20,7 +20,10 @@ export default async function FamilyPage({ searchParams }: FamilyPageProps) {
   if (!context.activeFamily) throw new Error(context.error ?? "Family unavailable");
 
   const settings = await loadFamilySettings(context.activeFamily.householdId, context.activeFamily.role);
-  const switchError = (await searchParams).error === "switch";
+  const parameters = await searchParams;
+  const switchError = parameters.error === "switch";
+  const removeError = parameters.error === "remove";
+  const memberRemoved = parameters.removed === "1";
 
   return (
     <main className="account-shell">
@@ -29,7 +32,9 @@ export default async function FamilyPage({ searchParams }: FamilyPageProps) {
         <Link className="btn-secondary" href="/">Back to map</Link>
       </header>
       {switchError && <p className="settings-message error">That Family could not be selected.</p>}
-      <FamilySettingsClient activeFamily={context.activeFamily} families={context.families} members={settings.members} invitations={settings.invitations} />
+      {removeError && <p className="settings-message error">That Member could not be removed. Check your Owner access and try again.</p>}
+      {memberRemoved && <p className="settings-message success">The Member no longer has access to this Family.</p>}
+      <FamilySettingsClient currentUserId={userId} activeFamily={context.activeFamily} families={context.families} members={settings.members} invitations={settings.invitations} />
     </main>
   );
 }

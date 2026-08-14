@@ -1124,14 +1124,16 @@ body.panel-open .map-loading {
 }
 
 .member-list,
-.invitation-list {
+.invitation-list,
+.billing-family-list {
   display: grid;
   gap: 8px;
   margin-top: 17px;
 }
 
 .member-row,
-.invitation-row {
+.invitation-row,
+.billing-family-row {
   display: flex;
   align-items: center;
   gap: 11px;
@@ -1154,7 +1156,8 @@ body.panel-open .map-loading {
 }
 
 .member-row > div,
-.invitation-row > div {
+.invitation-row > div,
+.billing-family-row > div {
   min-width: 0;
   flex: 1;
 }
@@ -1162,7 +1165,9 @@ body.panel-open .map-loading {
 .member-row strong,
 .member-row small,
 .invitation-row strong,
-.invitation-row small {
+.invitation-row small,
+.billing-family-row strong,
+.billing-family-row small {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1170,15 +1175,23 @@ body.panel-open .map-loading {
 }
 
 .member-row strong,
-.invitation-row strong {
+.invitation-row strong,
+.billing-family-row strong {
   font-size: 0.78rem;
 }
 
 .member-row small,
-.invitation-row small {
+.invitation-row small,
+.billing-family-row small {
   margin-top: 2px;
   color: var(--text-secondary);
   font-size: 0.68rem;
+}
+
+.member-remove-button {
+  padding: 6px 9px;
+  border-color: rgb(255 23 68 / 38%);
+  color: #ff9d9d;
 }
 
 .family-switcher,

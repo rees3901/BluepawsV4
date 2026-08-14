@@ -86,6 +86,29 @@ export async function revokeInvitationAction(formData: FormData) {
   revalidatePath("/family");
 }
 
+export async function removeFamilyMemberAction(formData: FormData) {
+  const householdId = String(formData.get("householdId") ?? "");
+  const memberUserId = String(formData.get("memberUserId") ?? "");
+  if (!householdId || !memberUserId) redirect("/family?error=remove");
+
+  const supabase = await createClient();
+  const { data: identity } = await supabase.auth.getClaims();
+  if (!identity?.claims?.sub) redirect("/login?next=/family");
+
+  const { error } = await supabase.rpc("bluepaws_remove_family_member", {
+    requested_household_id: householdId,
+    requested_user_id: memberUserId,
+  });
+  if (error) {
+    console.error("Unable to remove Family member", { code: error.code, message: error.message });
+    redirect("/family?error=remove");
+  }
+
+  revalidatePath("/family");
+  revalidatePath("/account");
+  redirect("/family?removed=1");
+}
+
 export async function setActiveFamilyAction(formData: FormData) {
   const householdId = String(formData.get("householdId") ?? "");
   if (!householdId) return;

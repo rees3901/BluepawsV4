@@ -39,6 +39,7 @@ interface SelectedDevice {
 
 interface DashboardProps {
   householdId: string | null;
+  householdAccessVersion: number | null;
   initialLiveDevices: TelemetryDevice[];
   liveTelemetryError: string | null;
   userEmail: string | null;
@@ -46,7 +47,7 @@ interface DashboardProps {
   familyRole: FamilyRole | null;
 }
 
-export function Dashboard({ householdId, initialLiveDevices, liveTelemetryError, userEmail, familyName, familyRole }: DashboardProps) {
+export function Dashboard({ householdId, householdAccessVersion, initialLiveDevices, liveTelemetryError, userEmail, familyName, familyRole }: DashboardProps) {
   const router = useRouter();
   const [devices, setDevices] = useState<TelemetryDevice[]>(initialLiveDevices);
   const [connected, setConnected] = useState(false);
@@ -143,14 +144,14 @@ export function Dashboard({ householdId, initialLiveDevices, liveTelemetryError,
   useEffect(() => {
     if (!preferencesReady) return;
 
-    if (!tutorialMode && !householdId) {
+    if (!tutorialMode && (!householdId || householdAccessVersion === null)) {
       return;
     }
 
     let fittedInitialPayload = false;
     const source = tutorialMode
       ? getTutorialTelemetrySource()
-      : createRealtimeTelemetrySource(householdId as string, initialLiveDevices);
+      : createRealtimeTelemetrySource(householdId as string, householdAccessVersion as number, initialLiveDevices);
     const unsubscribe = source.subscribe((incoming) => {
       setDevices(incoming);
       if (!fittedInitialPayload && incoming.length > 0) {
@@ -173,7 +174,7 @@ export function Dashboard({ householdId, initialLiveDevices, liveTelemetryError,
       setConnectionDetail(detail ?? null);
     });
     return unsubscribe;
-  }, [householdId, initialLiveDevices, preferencesReady, tutorialMode]);
+  }, [householdAccessVersion, householdId, initialLiveDevices, preferencesReady, tutorialMode]);
 
   useEffect(() => {
     document.body.classList.toggle("panel-open", sidebarOpen);

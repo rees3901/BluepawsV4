@@ -1,9 +1,10 @@
 "use client";
 
 import { useActionState, useMemo, useState } from "react";
+import { canRemoveFamilyMember } from "@/lib/familyAccess";
 import type { FamilyInvitation, FamilyMember } from "@/lib/familySettings";
 import type { FamilyMembership } from "@/lib/familySelection";
-import { createInvitationAction, revokeInvitationAction, setActiveFamilyAction, type InvitationActionState } from "./actions";
+import { createInvitationAction, removeFamilyMemberAction, revokeInvitationAction, setActiveFamilyAction, type InvitationActionState } from "./actions";
 
 const INITIAL_INVITATION_STATE: InvitationActionState = {
   error: null,
@@ -14,13 +15,14 @@ const INITIAL_INVITATION_STATE: InvitationActionState = {
 };
 
 interface FamilySettingsClientProps {
+  currentUserId: string;
   activeFamily: FamilyMembership;
   families: FamilyMembership[];
   members: FamilyMember[];
   invitations: FamilyInvitation[];
 }
 
-export function FamilySettingsClient({ activeFamily, families, members, invitations }: FamilySettingsClientProps) {
+export function FamilySettingsClient({ currentUserId, activeFamily, families, members, invitations }: FamilySettingsClientProps) {
   const [state, formAction, pending] = useActionState(createInvitationAction, INITIAL_INVITATION_STATE);
   const [shareMessage, setShareMessage] = useState<string | null>(null);
   const isOwner = activeFamily.role === "owner";
@@ -71,6 +73,18 @@ export function FamilySettingsClient({ activeFamily, families, members, invitati
               <span className="member-avatar" aria-hidden="true">{member.displayName.slice(0, 1).toUpperCase()}</span>
               <div><strong>{member.displayName}</strong><small>{member.email}</small></div>
               <span className="role-pill secondary">{member.role === "owner" ? "Owner" : "Member"}</span>
+              {canRemoveFamilyMember(activeFamily.role, currentUserId, member.role, member.userId) && (
+                <form
+                  action={removeFamilyMemberAction}
+                  onSubmit={(event) => {
+                    if (!window.confirm(`Remove ${member.displayName} from ${activeFamily.name}? Their other Bluepaws Families and personal account will not be affected.`)) event.preventDefault();
+                  }}
+                >
+                  <input type="hidden" name="householdId" value={activeFamily.householdId} />
+                  <input type="hidden" name="memberUserId" value={member.userId} />
+                  <button className="btn-secondary member-remove-button" type="submit">Remove</button>
+                </form>
+              )}
             </article>
           ))}
         </div>
