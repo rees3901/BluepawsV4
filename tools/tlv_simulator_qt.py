@@ -103,6 +103,8 @@ TRANSPORTS = {
 EARTH_RADIUS_METRES = 6_371_000.0
 EARTH_METRES_PER_DEGREE = math.tau * EARTH_RADIUS_METRES / 360.0
 LIVE_PREVIEW_DELAY_MS = 250
+DEFAULT_MOVEMENT_METRES = 200
+MAX_MOVEMENT_METRES = 300
 RESPONSE_HEADERS = ("Time", "#", "HTTP", "Result", "Seq", "ms", "Message")
 
 RESULT_STYLES = {
@@ -124,21 +126,28 @@ class TestRecipe:
     strategy: str = "all_valid"
     tlv_mode: str = "none"
     transport: str = "cellular_direct"
-    movement: bool = False
+    movement_metres: int | None = None
 
 
 TEST_RECIPES = {
     "Basic sunny day": TestRecipe(
-        "10 valid LTE header-only packets with normal live measurement variation.", 10, 2.0
+        "10 valid LTE header-only packets with gentle live movement and measurement variation.",
+        10,
+        2.0,
+        movement_metres=50,
     ),
     "Moving pet": TestRecipe(
-        "12 valid LTE packets with a bounded 100 m random walk.", 12, 2.0, movement=True
+        "12 valid LTE packets with a bounded 200 m random walk.",
+        12,
+        2.0,
+        movement_metres=200,
     ),
     "Rich known TLVs": TestRecipe(
         "10 valid packets carrying every selected v1.1 known TLV.",
         10,
         2.0,
         tlv_mode="full",
+        movement_metres=50,
     ),
     "Maximum TLV budget": TestRecipe(
         "5 valid packets using the complete 24-byte optional TLV budget.",
@@ -151,12 +160,14 @@ TEST_RECIPES = {
         10,
         2.0,
         tlv_mode="random",
+        movement_metres=100,
     ),
     "Bad day — only 2 of 10 valid": TestRecipe(
         "Exactly 2 valid packets and 8 packets with deliberately corrupt HMAC tags.",
         10,
         1.0,
         strategy="bad_day",
+        movement_metres=100,
     ),
     "Mixed bag": TestRecipe(
         "10 packets mixing valid/corrupt HMACs and randomized optional TLVs.",
@@ -164,6 +175,7 @@ TEST_RECIPES = {
         1.0,
         strategy="mixed",
         tlv_mode="random",
+        movement_metres=150,
     ),
     "Fully randomized": TestRecipe(
         "12 bounded random packets mixing authentication outcomes, telemetry and TLVs.",
@@ -171,7 +183,7 @@ TEST_RECIPES = {
         1.0,
         strategy="randomized",
         tlv_mode="random",
-        movement=True,
+        movement_metres=300,
     ),
     "Duplicate retry storm": TestRecipe(
         "Send the same valid packet 6 times to exercise idempotent retry handling.",
@@ -184,18 +196,21 @@ TEST_RECIPES = {
         5,
         1.0,
         strategy="rollover",
+        movement_metres=25,
     ),
     "Out-of-order delivery": TestRecipe(
         "6 valid packets with sequence 3 delivered before sequence 2.",
         6,
         1.0,
         strategy="out_of_order",
+        movement_metres=75,
     ),
     "LoRa relay sunny day": TestRecipe(
         "10 valid header-only packets relayed through the selected provisioned gateway.",
         10,
         2.0,
         transport="lora_hub",
+        movement_metres=50,
     ),
     "LTE radio fade": TestRecipe(
         "10 valid packets whose LTE signal measurements progressively deteriorate.",
@@ -255,8 +270,10 @@ def drift_coordinates(
     rng: Any = random,
 ) -> tuple[float, float]:
     """Return one uniformly distributed random-walk step within the radius."""
-    if not 0 < maximum_metres <= 10_000:
-        raise ValueError("maximum drift must be greater than 0 and at most 10000 metres")
+    if not 0 < maximum_metres <= MAX_MOVEMENT_METRES:
+        raise ValueError(
+            f"maximum drift must be greater than 0 and at most {MAX_MOVEMENT_METRES} metres"
+        )
     radius = maximum_metres * math.sqrt(rng.random())
     angle = rng.random() * math.tau
     latitude_delta = (radius * math.cos(angle)) / EARTH_METRES_PER_DEGREE
@@ -649,13 +666,15 @@ class BluepawsTlvConsole(QMainWindow):
 
         drift_row = QHBoxLayout()
         self.drift_enabled = QCheckBox("Random-walk movement")
+        self.drift_enabled.setChecked(True)
         self.drift_enabled.setToolTip(
-            "Move each packet after the first by a random distance within this radius."
+            "Move each packet after the first by a random distance within this radius "
+            f"(maximum {MAX_MOVEMENT_METRES} metres)."
         )
-        self.drift_enabled.toggled.connect(self._drift_mode_changed)
-        self.maximum_drift = line_edit("100")
+        self.maximum_drift = line_edit(str(DEFAULT_MOVEMENT_METRES))
         self.maximum_drift.setMaximumWidth(70)
-        self.maximum_drift.setEnabled(False)
+        self.maximum_drift.setEnabled(True)
+        self.drift_enabled.toggled.connect(self._drift_mode_changed)
         drift_row.addWidget(self.drift_enabled)
         drift_row.addWidget(QLabel("Maximum"))
         drift_row.addWidget(self.maximum_drift)
@@ -1113,8 +1132,14 @@ class BluepawsTlvConsole(QMainWindow):
 
     def _update_recipe_summary(self) -> None:
         recipe = TEST_RECIPES[self.recipe_combo.currentText()]
+        movement = (
+            f"movement ≤ {recipe.movement_metres} m"
+            if recipe.movement_metres is not None
+            else "stationary"
+        )
         self.recipe_summary.setText(
-            f"{recipe.count} packets • {recipe.interval:g} s interval • {recipe.description}"
+            f"{recipe.count} packets • {recipe.interval:g} s interval • {movement} • "
+            f"{recipe.description}"
         )
 
     def _recipe_enabled(self, enabled: bool) -> None:
@@ -1144,8 +1169,10 @@ class BluepawsTlvConsole(QMainWindow):
         self.send_count.setText(str(recipe.count))
         self.send_interval.setText(f"{recipe.interval:g}")
         self.advance_packets.setChecked(recipe.strategy != "duplicates")
-        self.drift_enabled.setChecked(recipe.movement)
-        self.maximum_drift.setText("100")
+        self.drift_enabled.setChecked(recipe.movement_metres is not None)
+        self.maximum_drift.setText(
+            str(recipe.movement_metres or DEFAULT_MOVEMENT_METRES)
+        )
         self.tag_mode.setCurrentText("Valid HMAC (normal packet)")
         self.status.setCurrentText("OUT (1)")
         self.profile.setCurrentText("NORMAL (1)")
@@ -1460,9 +1487,10 @@ class BluepawsTlvConsole(QMainWindow):
         drift_radius = None
         if self.drift_enabled.isChecked():
             drift_radius = self._float(self.maximum_drift.text(), "maximum drift")
-            if not 0 < drift_radius <= 10_000:
+            if not 0 < drift_radius <= MAX_MOVEMENT_METRES:
                 raise ValueError(
-                    "maximum drift must be greater than 0 and at most 10000 metres"
+                    "maximum drift must be greater than 0 and at most "
+                    f"{MAX_MOVEMENT_METRES} metres"
                 )
         latitude = base_fields.latitude
         longitude = base_fields.longitude

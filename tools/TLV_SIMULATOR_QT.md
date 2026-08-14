@@ -64,8 +64,8 @@ leaving the last applied values visible.
 
 The cookbook includes:
 
-- **Basic sunny day** — 10 valid LTE header-only packets;
-- **Moving pet** — valid traffic with bounded 100 m random-walk steps;
+- **Basic sunny day** — 10 valid LTE header-only packets with gentle 50 m steps;
+- **Moving pet** — valid traffic with bounded 200 m random-walk steps;
 - **Rich known TLVs**, **Maximum TLV budget**, and **Random TLV assortment**;
 - **Bad day** — exactly 2 valid and 8 deliberately corrupt HMAC packets;
 - **Mixed bag** and **Fully randomized** — bounded combinations of outcomes,
@@ -97,8 +97,8 @@ are intentionally excluded because their wire overhead depends on the connection
 - updates the form to the next sequence and latest transmitted location when the
   run finishes;
 - optionally applies a bounded random-walk step after the first packet. Enable
-  **Random-walk movement** and choose the maximum metres per packet (100 m by
-  default);
+  **Random-walk movement** and choose the maximum metres per packet. Movement is
+  enabled at startup with a 200 m default and a hard 300 m ceiling;
 - adds bounded measurement noise after the first packet: battery ±3 mV, GNSS
   accuracy ±2 m, fix age and satellites ±1, activity score ±2, RSSI/RSRP ±2 dB,
   and SNR/RSRQ/SINR ±0.5 dB;
@@ -109,6 +109,11 @@ Fields affected by live mode carry a `↗` advance or `±` variation marker in t
 interface. These changes model sensor and radio measurement noise only: device
 identity, status, power profile, TX reason, flags, firmware, reset reason,
 credentials, transport and HMAC configuration remain exactly as selected.
+
+Cookbook recipes set movement to match their purpose: normal traffic uses gentle
+steps, mixed/random stress traffic uses progressively larger bounds up to 300 m,
+and duplicate, maximum-TLV, radio-fade and HMAC-rejection recipes remain
+stationary so movement cannot obscure the behaviour under test.
 
 Turn live simulation off only when intentionally repeating the exact same packet
 to test idempotent duplicate handling. In that mode, a first `201` followed by

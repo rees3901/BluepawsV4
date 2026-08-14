@@ -27,6 +27,8 @@ if PYSIDE_AVAILABLE:
     from PySide6.QtWidgets import QApplication, QHeaderView
 
     from tlv_simulator_qt import (
+        DEFAULT_MOVEMENT_METRES,
+        MAX_MOVEMENT_METRES,
         STYLESHEET,
         TAG_MODES,
         TEST_RECIPES,
@@ -86,6 +88,11 @@ class QtConsoleTests(unittest.TestCase):
             self.window.tag_mode.currentText(), "Valid HMAC (normal packet)"
         )
         self.assertFalse(self.window.tlv_options.isChecked())
+        self.assertTrue(self.window.drift_enabled.isChecked())
+        self.assertTrue(self.window.maximum_drift.isEnabled())
+        self.assertEqual(
+            self.window.maximum_drift.text(), str(DEFAULT_MOVEMENT_METRES)
+        )
         self.assertFalse(self.window.known_values["uptime_s"].isEnabled())
         self.assertFalse(self.window.custom_type.isEnabled())
         self.assertIsNotNone(built)
@@ -166,6 +173,28 @@ class QtConsoleTests(unittest.TestCase):
                 (base_sequence + 5) & 0xFFFF,
             ],
         )
+
+    def test_recipes_apply_movement_bounds_that_match_their_purpose(self) -> None:
+        self.window.recipe_combo.setCurrentText("Basic sunny day")
+        self.window.cookbook_group.setChecked(True)
+        self.assertTrue(self.window.drift_enabled.isChecked())
+        self.assertEqual(self.window.maximum_drift.text(), "50")
+
+        self.window.recipe_combo.setCurrentText("Fully randomized")
+        self.assertTrue(self.window.drift_enabled.isChecked())
+        self.assertEqual(
+            self.window.maximum_drift.text(), str(MAX_MOVEMENT_METRES)
+        )
+
+        for stationary_recipe in (
+            "Maximum TLV budget",
+            "Duplicate retry storm",
+            "LTE radio fade",
+            "HMAC rejection only",
+        ):
+            with self.subTest(recipe=stationary_recipe):
+                self.window.recipe_combo.setCurrentText(stationary_recipe)
+                self.assertFalse(self.window.drift_enabled.isChecked())
 
     def test_disabled_tlv_container_uses_full_section_muted_styling(self) -> None:
         self.assertEqual(self.window.tlv_options.objectName(), "optionalTlvGroup")
@@ -295,6 +324,8 @@ class QtConsoleTests(unittest.TestCase):
         moved = drift_coordinates(*start, 100, rng=FixedRandom)
         self.assertLessEqual(haversine_metres(*start, *moved), 100.01)
         self.assertGreater(haversine_metres(*start, *moved), 99.9)
+        with self.assertRaisesRegex(ValueError, "at most 300 metres"):
+            drift_coordinates(*start, MAX_MOVEMENT_METRES + 1)
 
     def test_live_drift_changes_each_position_cumulatively(self) -> None:
         self.window.drift_enabled.setChecked(True)
