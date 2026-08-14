@@ -67,6 +67,7 @@ from tlv_packet_codec import (
     build_tlv_packet,
     build_transport_wrapper,
     custom_tlv,
+    decode_tlv_payload,
     decode_hmac_key,
     firmware_tlv,
     known_tlv,
@@ -535,8 +536,12 @@ class BluepawsTlvConsole(QMainWindow):
         outer.addLayout(heading)
 
         self.tabs = QTabWidget()
-        self.tabs.addTab(self._packet_tab(), "1. TLV Packet Builder")
-        self.tabs.addTab(self._wrapper_tab(), "2. HTTPS Wrapper & Send")
+        self.packet_builder_tab = self._packet_tab()
+        self.wrapper_tab = self._wrapper_tab()
+        self.response_tab = self._response_tab()
+        self.tabs.addTab(self.packet_builder_tab, "1. TLV Packet Builder")
+        self.tabs.addTab(self.wrapper_tab, "2. HTTPS Wrapper")
+        self.tabs.addTab(self.response_tab, "3. Send & Response Log")
         outer.addWidget(self.tabs, 1)
         self.setCentralWidget(central)
 
@@ -867,10 +872,10 @@ class BluepawsTlvConsole(QMainWindow):
         self.cell_widgets = [self.cell_rsrp, self.cell_rsrq, self.cell_sinr]
         grid.addWidget(metadata, 0, 1)
 
-        preview = QGroupBox("JSON wrapper preview")
+        preview = QGroupBox("Payload and packet previews")
         preview_layout = QVBoxLayout(preview)
         preview_actions = QHBoxLayout()
-        refresh = QPushButton("Refresh preview")
+        refresh = QPushButton("Refresh previews")
         refresh.clicked.connect(self.preview_wrapper)
         preview_actions.addWidget(refresh)
         self.wrapper_summary = QLabel("JSON body not available")
@@ -880,16 +885,42 @@ class BluepawsTlvConsole(QMainWindow):
             "HTTPS headers and TLS overhead are not included."
         )
         preview_actions.addWidget(self.wrapper_summary)
-        copy_json = secondary_button("Copy JSON")
-        copy_json.clicked.connect(lambda: self._copy_text(self.wrapper_preview))
-        preview_actions.addWidget(copy_json)
         preview_actions.addStretch()
         preview_layout.addLayout(preview_actions)
+
+        payload_heading = QHBoxLayout()
+        payload_heading.addWidget(QLabel("Decoded TLV payload — human-readable JSON"))
+        payload_heading.addStretch()
+        copy_payload = secondary_button("Copy payload JSON")
+        copy_payload.clicked.connect(lambda: self._copy_text(self.payload_preview))
+        payload_heading.addWidget(copy_payload)
+        preview_layout.addLayout(payload_heading)
+        self.payload_summary = QLabel("Decoded payload not available")
+        self.payload_summary.setStyleSheet(f"color: {MUTED};")
+        preview_layout.addWidget(self.payload_summary)
+        self.payload_preview = QPlainTextEdit()
+        self.payload_preview.setReadOnly(True)
+        self.payload_preview.setMinimumHeight(160)
+        preview_layout.addWidget(self.payload_preview, 1)
+
+        wrapper_heading = QHBoxLayout()
+        wrapper_heading.addWidget(QLabel("HTTPS JSON wrapper — Authorization header omitted"))
+        wrapper_heading.addStretch()
+        copy_json = secondary_button("Copy wrapper JSON")
+        copy_json.clicked.connect(lambda: self._copy_text(self.wrapper_preview))
+        wrapper_heading.addWidget(copy_json)
+        preview_layout.addLayout(wrapper_heading)
         self.wrapper_preview = QPlainTextEdit()
         self.wrapper_preview.setReadOnly(True)
-        preview_layout.addWidget(self.wrapper_preview)
-        grid.addWidget(preview, 1, 0)
+        self.wrapper_preview.setMinimumHeight(160)
+        preview_layout.addWidget(self.wrapper_preview, 1)
+        grid.addWidget(preview, 1, 0, 1, 2)
+        return body
 
+    def _response_tab(self) -> QWidget:
+        body = QWidget()
+        body_layout = QVBoxLayout(body)
+        body_layout.setContentsMargins(10, 10, 10, 10)
         sender = QGroupBox("Send and response log")
         sender_layout = QVBoxLayout(sender)
         controls = QHBoxLayout()
@@ -961,9 +992,9 @@ class BluepawsTlvConsole(QMainWindow):
         self.response_detail = QPlainTextEdit()
         self.response_detail.setReadOnly(True)
         self.response_detail.setPlaceholderText("Select a result row to inspect its full response.")
-        self.response_detail.setMaximumHeight(120)
+        self.response_detail.setMaximumHeight(180)
         sender_layout.addWidget(self.response_detail)
-        grid.addWidget(sender, 1, 1)
+        body_layout.addWidget(sender, 1)
         return body
 
     def _connect_live_previews(self) -> None:
@@ -1161,7 +1192,7 @@ class BluepawsTlvConsole(QMainWindow):
     def _run_recipe(self) -> None:
         if not self.cookbook_group.isChecked():
             return
-        self.tabs.setCurrentIndex(1)
+        self.tabs.setCurrentWidget(self.response_tab)
         self.send_requests()
 
     def _apply_recipe(self) -> None:
@@ -1329,9 +1360,11 @@ class BluepawsTlvConsole(QMainWindow):
             self._last_built = None
             self.packet_summary.setText("Packet not built")
             self.wrapper_summary.setText("JSON body not available")
+            self.payload_summary.setText("Decoded payload not available")
             self.builder_status.setText(str(error))
             self.packet_b64.clear()
             self.packet_hex.clear()
+            self.payload_preview.clear()
             self.wrapper_preview.clear()
             self.sender_status.setText("Correct the packet fields before sending.")
             return None
@@ -1403,6 +1436,28 @@ class BluepawsTlvConsole(QMainWindow):
 
     def preview_wrapper(self) -> dict[str, Any] | None:
         self._auto_preview_timer.stop()
+        try:
+            payload = decode_tlv_payload(
+                self.packet_b64.toPlainText().strip(),
+                decode_hmac_key(self.hmac.text()),
+            )
+        except ValueError as error:
+            self.payload_preview.clear()
+            self.payload_summary.setText("Decoded payload not available")
+            self.wrapper_preview.clear()
+            self.wrapper_summary.setText("JSON body not available")
+            self.sender_status.setText(str(error))
+            return None
+
+        self.payload_preview.setPlainText(json.dumps(payload, indent=2))
+        authentication_valid = payload["authentication"]["valid"]
+        authentication_label = "valid" if authentication_valid else "invalid"
+        self.payload_summary.setText(
+            f"Payload {payload['packet']['size_bytes']} bytes • "
+            f"TLVs {payload['packet']['tlv_length_bytes']} bytes "
+            f"({len(payload['tlvs'])} entries) • HMAC {authentication_label}"
+        )
+
         try:
             wrapper = self._wrapper()
         except ValueError as error:

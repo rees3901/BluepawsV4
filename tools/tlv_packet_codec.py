@@ -18,6 +18,7 @@ import struct
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -440,6 +441,132 @@ def validate_payload_b64(value: str) -> bytes:
     if len(decoded) != HEADER_SIZE + decoded[31] + AUTH_TAG_SIZE:
         raise ValueError("decoded packet length does not match its tlv_len header byte")
     return decoded
+
+
+def decode_tlv_payload(
+    payload_b64: str, hmac_key: bytes | None = None
+) -> dict[str, Any]:
+    """Decode a v1.1 payload into a human-readable JSON-safe structure."""
+    packet = validate_payload_b64(payload_b64)
+    if hmac_key is not None and (
+        not isinstance(hmac_key, bytes) or len(hmac_key) != 32
+    ):
+        raise ValueError("HMAC key must contain exactly 32 bytes")
+
+    status_profile = packet[9]
+    status = status_profile & 0x0F
+    power_profile = status_profile >> 4
+    flags = packet[10]
+    tx_reason = packet[11]
+    timestamp = struct.unpack_from("<I", packet, 5)[0]
+    tlv_length = packet[31]
+    tlv_bytes = packet[HEADER_SIZE : HEADER_SIZE + tlv_length]
+
+    decoded_tlvs: list[dict[str, Any]] = []
+    seen_known: set[int] = set()
+    offset = 0
+    while offset < len(tlv_bytes):
+        if len(tlv_bytes) - offset < 2:
+            raise ValueError("TLV section ends before a complete type/length header")
+        tlv_type = tlv_bytes[offset]
+        value_length = tlv_bytes[offset + 1]
+        value_start = offset + 2
+        value_end = value_start + value_length
+        if value_length == 0 or value_end > len(tlv_bytes):
+            raise ValueError(f"TLV 0x{tlv_type:02X} has an invalid value length")
+        value = tlv_bytes[value_start:value_end]
+        spec = KNOWN_TLV_LENGTHS.get(tlv_type)
+        entry: dict[str, Any] = {
+            "type": f"0x{tlv_type:02X}",
+            "length_bytes": value_length,
+            "raw_value_hex": value.hex().upper(),
+        }
+        if spec is None:
+            entry.update({"name": "unknown", "value": value.hex().upper()})
+        else:
+            name, expected_length = spec
+            if tlv_type in seen_known:
+                raise ValueError(f"known TLV 0x{tlv_type:02X} appears more than once")
+            if value_length != expected_length:
+                raise ValueError(
+                    f"known TLV 0x{tlv_type:02X} must contain {expected_length} bytes"
+                )
+            seen_known.add(tlv_type)
+            number = int.from_bytes(value, "little")
+            human_value: int | str
+            if tlv_type == 0x04:
+                human_value = f"{(number >> 8) & 0xFF}.{number & 0xFF}"
+            else:
+                human_value = number
+            entry.update({"name": name, "value": human_value})
+        decoded_tlvs.append(entry)
+        offset = value_end
+
+    body = packet[:-AUTH_TAG_SIZE]
+    transmitted_tag = packet[-AUTH_TAG_SIZE:]
+    expected_tag = (
+        hmac.new(hmac_key, body, hashlib.sha256).digest()[:AUTH_TAG_SIZE]
+        if hmac_key is not None
+        else None
+    )
+    status_name = _name_for_code(STATUS_CODES, status)
+    profile_name = _name_for_code(POWER_PROFILE_CODES, power_profile)
+    reason_name = _name_for_code(TX_REASON_CODES, tx_reason)
+    fix_age_s = struct.unpack_from("<H", packet, 24)[0]
+    satellite_count = packet[26]
+
+    return {
+        "packet": {
+            "size_bytes": len(packet),
+            "header_size_bytes": HEADER_SIZE,
+            "tlv_length_bytes": tlv_length,
+            "authentication_tag_size_bytes": AUTH_TAG_SIZE,
+            "sha256": hashlib.sha256(packet).hexdigest(),
+        },
+        "header": {
+            "protocol_version": packet[0],
+            "device_id": struct.unpack_from("<H", packet, 1)[0],
+            "message_sequence": struct.unpack_from("<H", packet, 3)[0],
+            "timestamp_unix": timestamp,
+            "timestamp_utc": datetime.fromtimestamp(timestamp, timezone.utc)
+            .isoformat()
+            .replace("+00:00", "Z"),
+            "status": {"code": status, "name": status_name},
+            "power_profile": {"code": power_profile, "name": profile_name},
+            "flags": {
+                "raw": flags,
+                "hex": f"0x{flags:02X}",
+                "set": [name for name, mask in FLAG_MASKS.items() if flags & mask],
+            },
+            "tx_reason": {"code": tx_reason, "name": reason_name},
+            "position": {
+                "latitude": struct.unpack_from("<i", packet, 12)[0] / 10_000_000,
+                "longitude": struct.unpack_from("<i", packet, 16)[0] / 10_000_000,
+                "battery_mv": struct.unpack_from("<H", packet, 20)[0],
+                "accuracy_m": struct.unpack_from("<H", packet, 22)[0],
+                "fix_age_s": None if fix_age_s == 65_535 else fix_age_s,
+                "satellite_count": None if satellite_count == 255 else satellite_count,
+            },
+            "reserved_bytes_hex": packet[27:31].hex().upper(),
+        },
+        "tlvs": decoded_tlvs,
+        "authentication": {
+            "algorithm": "HMAC-SHA256-64",
+            "tag_hex": transmitted_tag.hex().upper(),
+            "expected_tag_hex": (
+                expected_tag.hex().upper() if expected_tag is not None else None
+            ),
+            "valid": (
+                hmac.compare_digest(transmitted_tag, expected_tag)
+                if expected_tag is not None
+                else None
+            ),
+        },
+    }
+
+
+def _name_for_code(codes: dict[str, int], value: int) -> str:
+    return next((name for name, code in codes.items() if code == value), "UNKNOWN")
 
 
 def post_wrapper(

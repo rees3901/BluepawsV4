@@ -13,6 +13,7 @@ from tlv_packet_codec import (
     build_tlv_packet,
     build_transport_wrapper,
     custom_tlv,
+    decode_tlv_payload,
     firmware_tlv,
     known_tlv,
     load_credential_bundle,
@@ -123,6 +124,38 @@ class TlvPacketCodecTests(unittest.TestCase):
         self.assertEqual(len(packet), 32 + packet[31] + 8)
         self.assertEqual(packet[-8:], hmac.new(key, packet[:-8], hashlib.sha256).digest()[:8])
         self.assertEqual(validate_payload_b64(built.payload_b64), packet)
+
+    def test_decodes_transmitted_payload_into_human_readable_json(self):
+        key = bytes(range(32))
+        built = build_tlv_packet(
+            packet_fields(),
+            [
+                firmware_tlv("1.1"),
+                known_tlv(0x10, 60),
+                TlvEntry(0x7E, bytes.fromhex("A1B2")),
+            ],
+            key,
+        )
+
+        decoded = decode_tlv_payload(built.payload_b64, key)
+
+        self.assertEqual(decoded["packet"]["size_bytes"], len(built.packet))
+        self.assertEqual(decoded["header"]["device_id"], 1001)
+        self.assertEqual(decoded["header"]["status"], {"code": 1, "name": "OUT"})
+        self.assertEqual(
+            decoded["header"]["flags"]["set"], ["GNSS_VALID", "FIX_3D"]
+        )
+        self.assertEqual(decoded["header"]["position"]["latitude"], 51.5)
+        self.assertEqual(decoded["tlvs"][0]["value"], "1.1")
+        self.assertEqual(decoded["tlvs"][1]["value"], 60)
+        self.assertEqual(decoded["tlvs"][2]["name"], "unknown")
+        self.assertEqual(decoded["tlvs"][2]["value"], "A1B2")
+        self.assertTrue(decoded["authentication"]["valid"])
+
+        corrupt = build_tlv_packet(packet_fields(), [], key, tag_mode="corrupt")
+        self.assertFalse(
+            decode_tlv_payload(corrupt.payload_b64, key)["authentication"]["valid"]
+        )
 
     def test_corrupt_and_custom_tag_modes_are_explicit(self):
         key = bytes(32)

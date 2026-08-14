@@ -81,6 +81,25 @@ class QtConsoleTests(unittest.TestCase):
         )
         self.assertIn("TLS overhead", self.window.wrapper_summary.toolTip())
 
+        decoded = json.loads(self.window.payload_preview.toPlainText())
+        self.assertEqual(decoded["header"]["device_id"], 1001)
+        self.assertEqual(decoded["header"]["status"]["name"], "HOME")
+        self.assertTrue(decoded["authentication"]["valid"])
+        self.assertIn("HMAC valid", self.window.payload_summary.text())
+
+    def test_preview_and_response_log_have_dedicated_tabs(self) -> None:
+        self.assertEqual(self.window.tabs.count(), 3)
+        self.assertEqual(self.window.tabs.tabText(1), "2. HTTPS Wrapper")
+        self.assertEqual(self.window.tabs.tabText(2), "3. Send & Response Log")
+        self.assertTrue(self.window.wrapper_tab.isAncestorOf(self.window.payload_preview))
+        self.assertTrue(self.window.wrapper_tab.isAncestorOf(self.window.wrapper_preview))
+        self.assertTrue(
+            self.window.response_tab.isAncestorOf(self.window.response_table)
+        )
+        self.assertFalse(
+            self.window.wrapper_tab.isAncestorOf(self.window.response_table)
+        )
+
     def test_safe_defaults_use_valid_hmac_and_disable_optional_tlvs(self) -> None:
         built = self.window.build_packet()
 
@@ -122,7 +141,7 @@ class QtConsoleTests(unittest.TestCase):
         self.window.cookbook_group.setChecked(True)
         with patch.object(self.window, "send_requests") as sender:
             self.window._run_recipe()
-        self.assertEqual(self.window.tabs.currentIndex(), 1)
+        self.assertEqual(self.window.tabs.currentWidget(), self.window.response_tab)
         sender.assert_called_once_with()
 
     def test_basic_recipe_configures_valid_header_only_sequence(self) -> None:
@@ -216,6 +235,8 @@ class QtConsoleTests(unittest.TestCase):
         self.assertIn(
             self.window.packet_b64.toPlainText(), self.window.wrapper_preview.toPlainText()
         )
+        decoded = json.loads(self.window.payload_preview.toPlainText())
+        self.assertEqual(decoded["header"]["position"]["latitude"], 51.508)
 
         self.window.link_rssi.setText("-91")
         QTest.qWait(LIVE_PREVIEW_DELAY_MS + 50)
@@ -229,6 +250,7 @@ class QtConsoleTests(unittest.TestCase):
 
         self.assertEqual(self.window.packet_b64.toPlainText(), "")
         self.assertEqual(self.window.packet_hex.toPlainText(), "")
+        self.assertEqual(self.window.payload_preview.toPlainText(), "")
         self.assertEqual(self.window.wrapper_preview.toPlainText(), "")
 
     def test_send_forces_rebuild_before_debounce_expires(self) -> None:
