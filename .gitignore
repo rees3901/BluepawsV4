@@ -1,6 +1,7 @@
-# Per-device ingestion credentials. Commit only the example file.
-tools/vps_devices.json
-tools/vps_devices.provision.sql
+# Per-device ingestion credentials. Commit only sanitized example files.
+tools/*devices*.json
+!tools/*devices*.example.json
+tools/*.provision.sql
 
 # Python simulator/test artefacts.
 __pycache__/
