@@ -12,7 +12,7 @@ import re
 import sys
 import threading
 import time
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote
@@ -55,6 +55,7 @@ except ModuleNotFoundError as error:
 from tlv_packet_codec import (
     DEFAULT_URL,
     FLAG_MASKS,
+    MAX_TLV_SIZE,
     POWER_PROFILE_CODES,
     STATUS_CODES,
     TX_REASON_CODES,
@@ -112,6 +113,102 @@ RESULT_STYLES = {
     "server": ("#4A2028", "#FFD7DE"),
     "network": ("#3B2D34", "#F0DCE5"),
     "unknown": ("#24374A", "#D9E9F7"),
+}
+
+
+@dataclass(frozen=True)
+class TestRecipe:
+    description: str
+    count: int
+    interval: float
+    strategy: str = "all_valid"
+    tlv_mode: str = "none"
+    transport: str = "cellular_direct"
+    movement: bool = False
+
+
+TEST_RECIPES = {
+    "Basic sunny day": TestRecipe(
+        "10 valid LTE header-only packets with normal live measurement variation.", 10, 2.0
+    ),
+    "Moving pet": TestRecipe(
+        "12 valid LTE packets with a bounded 100 m random walk.", 12, 2.0, movement=True
+    ),
+    "Rich known TLVs": TestRecipe(
+        "10 valid packets carrying every selected v1.1 known TLV.",
+        10,
+        2.0,
+        tlv_mode="full",
+    ),
+    "Maximum TLV budget": TestRecipe(
+        "5 valid packets using the complete 24-byte optional TLV budget.",
+        5,
+        2.0,
+        tlv_mode="maximum",
+    ),
+    "Random TLV assortment": TestRecipe(
+        "10 valid packets with a different bounded selection of known and unknown TLVs.",
+        10,
+        2.0,
+        tlv_mode="random",
+    ),
+    "Bad day — only 2 of 10 valid": TestRecipe(
+        "Exactly 2 valid packets and 8 packets with deliberately corrupt HMAC tags.",
+        10,
+        1.0,
+        strategy="bad_day",
+    ),
+    "Mixed bag": TestRecipe(
+        "10 packets mixing valid/corrupt HMACs and randomized optional TLVs.",
+        10,
+        1.0,
+        strategy="mixed",
+        tlv_mode="random",
+    ),
+    "Fully randomized": TestRecipe(
+        "12 bounded random packets mixing authentication outcomes, telemetry and TLVs.",
+        12,
+        1.0,
+        strategy="randomized",
+        tlv_mode="random",
+        movement=True,
+    ),
+    "Duplicate retry storm": TestRecipe(
+        "Send the same valid packet 6 times to exercise idempotent retry handling.",
+        6,
+        1.0,
+        strategy="duplicates",
+    ),
+    "Sequence rollover": TestRecipe(
+        "5 valid packets beginning at sequence 65533 and wrapping through zero.",
+        5,
+        1.0,
+        strategy="rollover",
+    ),
+    "Out-of-order delivery": TestRecipe(
+        "6 valid packets with sequence 3 delivered before sequence 2.",
+        6,
+        1.0,
+        strategy="out_of_order",
+    ),
+    "LoRa relay sunny day": TestRecipe(
+        "10 valid header-only packets relayed through the selected provisioned gateway.",
+        10,
+        2.0,
+        transport="lora_hub",
+    ),
+    "LTE radio fade": TestRecipe(
+        "10 valid packets whose LTE signal measurements progressively deteriorate.",
+        10,
+        2.0,
+        strategy="radio_fade",
+    ),
+    "HMAC rejection only": TestRecipe(
+        "5 packets with deliberately corrupt HMAC tags; none should be accepted.",
+        5,
+        1.0,
+        strategy="all_corrupt",
+    ),
 }
 
 LIVE_INTEGER_VARIATION = {
@@ -242,6 +339,22 @@ QGroupBox::title {{
     subcontrol-origin: margin;
     left: 12px;
     padding: 0 5px;
+}}
+QGroupBox#optionalTlvGroup:unchecked,
+QGroupBox#recipeGroup:unchecked {{
+    background: #05111C;
+    border-color: #102A3F;
+    color: #587086;
+}}
+QGroupBox#optionalTlvGroup:unchecked QGroupBox {{
+    background: #061522;
+    border-color: #102A3F;
+    color: #587086;
+}}
+QGroupBox#optionalTlvGroup:unchecked QTableWidget {{
+    background: #04101A;
+    border-color: #102A3F;
+    color: #587086;
 }}
 QLineEdit, QComboBox, QPlainTextEdit, QTableWidget {{
     background: {SURFACE_RAISED};
@@ -404,10 +517,10 @@ class BluepawsTlvConsole(QMainWindow):
         heading.addWidget(subtitle)
         outer.addLayout(heading)
 
-        tabs = QTabWidget()
-        tabs.addTab(self._packet_tab(), "1. TLV Packet Builder")
-        tabs.addTab(self._wrapper_tab(), "2. HTTPS Wrapper & Send")
-        outer.addWidget(tabs, 1)
+        self.tabs = QTabWidget()
+        self.tabs.addTab(self._packet_tab(), "1. TLV Packet Builder")
+        self.tabs.addTab(self._wrapper_tab(), "2. HTTPS Wrapper & Send")
+        outer.addWidget(self.tabs, 1)
         self.setCentralWidget(central)
 
     def _packet_tab(self) -> QWidget:
@@ -421,6 +534,31 @@ class BluepawsTlvConsole(QMainWindow):
         grid.setVerticalSpacing(8)
         grid.setColumnStretch(0, 1)
         grid.setColumnStretch(1, 1)
+
+        self.cookbook_group = QGroupBox("Use test cookbook")
+        self.cookbook_group.setObjectName("recipeGroup")
+        self.cookbook_group.setCheckable(True)
+        self.cookbook_group.setChecked(False)
+        self.cookbook_group.setToolTip(
+            "Enable a predefined multi-packet test. Manual packet configuration remains "
+            "the default when this section is off."
+        )
+        cookbook_layout = QGridLayout(self.cookbook_group)
+        cookbook_layout.addWidget(QLabel("Recipe"), 0, 0)
+        self.recipe_combo = combo(list(TEST_RECIPES))
+        self.recipe_combo.currentTextChanged.connect(self._recipe_changed)
+        cookbook_layout.addWidget(self.recipe_combo, 0, 1)
+        self.run_recipe_button = QPushButton("Run selected recipe")
+        self.run_recipe_button.clicked.connect(self._run_recipe)
+        cookbook_layout.addWidget(self.run_recipe_button, 0, 2)
+        self.recipe_summary = QLabel()
+        self.recipe_summary.setWordWrap(True)
+        self.recipe_summary.setStyleSheet(f"color: {MUTED};")
+        cookbook_layout.addWidget(self.recipe_summary, 1, 0, 1, 3)
+        cookbook_layout.setColumnStretch(1, 1)
+        self.cookbook_group.toggled.connect(self._recipe_enabled)
+        grid.addWidget(self.cookbook_group, 0, 0, 1, 2)
+        self._update_recipe_summary()
 
         credentials = QGroupBox("Provisioned test credentials")
         credential_row = QGridLayout(credentials)
@@ -444,7 +582,7 @@ class BluepawsTlvConsole(QMainWindow):
         credential_row.addWidget(credential_note, 1, 0, 1, 5)
         credential_row.setColumnStretch(2, 1)
         credential_row.setColumnStretch(4, 1)
-        grid.addWidget(credentials, 0, 0, 1, 2)
+        grid.addWidget(credentials, 1, 0, 1, 2)
 
         header = QGroupBox("Fixed 32-byte header")
         header_form = QFormLayout(header)
@@ -468,7 +606,7 @@ class BluepawsTlvConsole(QMainWindow):
         header_form.addRow("Status", self.status)
         header_form.addRow("Power profile", self.profile)
         header_form.addRow("TX reason", self.reason)
-        grid.addWidget(header, 1, 0)
+        grid.addWidget(header, 2, 0)
 
         position = QGroupBox("Position and telemetry")
         position_form = QFormLayout(position)
@@ -524,7 +662,7 @@ class BluepawsTlvConsole(QMainWindow):
         drift_row.addWidget(QLabel("metres per packet"))
         drift_row.addStretch()
         position_form.addRow("Movement", drift_row)
-        grid.addWidget(position, 1, 1)
+        grid.addWidget(position, 2, 1)
 
         flags = QGroupBox("Header flags")
         flag_grid = QGridLayout(flags)
@@ -534,9 +672,10 @@ class BluepawsTlvConsole(QMainWindow):
             flag.setChecked(name in ("GNSS_VALID", "FIX_3D"))
             self.flag_checks[name] = flag
             flag_grid.addWidget(flag, index // 4, index % 4)
-        grid.addWidget(flags, 2, 0, 1, 2)
+        grid.addWidget(flags, 3, 0, 1, 2)
 
         self.tlv_options = QGroupBox("Include optional TLVs in this packet")
+        self.tlv_options.setObjectName("optionalTlvGroup")
         self.tlv_options.setCheckable(True)
         self.tlv_options.setChecked(False)
         self.tlv_options.setToolTip(
@@ -594,7 +733,7 @@ class BluepawsTlvConsole(QMainWindow):
         remove.clicked.connect(self._remove_custom_tlv)
         custom_layout.addWidget(remove, alignment=Qt.AlignmentFlag.AlignRight)
         tlv_options_layout.addWidget(custom, 1)
-        grid.addWidget(self.tlv_options, 3, 0, 1, 2)
+        grid.addWidget(self.tlv_options, 4, 0, 1, 2)
 
         authentication = QGroupBox("HMAC-SHA256 authentication (first 8 bytes)")
         authentication_grid = QGridLayout(authentication)
@@ -615,7 +754,7 @@ class BluepawsTlvConsole(QMainWindow):
         self.custom_tag = line_edit("0000000000000000")
         authentication_grid.addWidget(self.tag_mode, 1, 1)
         authentication_grid.addWidget(self.custom_tag, 1, 2)
-        grid.addWidget(authentication, 4, 0, 1, 2)
+        grid.addWidget(authentication, 5, 0, 1, 2)
 
         output = QGroupBox("Packet output")
         output_layout = QVBoxLayout(output)
@@ -648,7 +787,7 @@ class BluepawsTlvConsole(QMainWindow):
         self.packet_hex.setMaximumHeight(100)
         self.packet_hex.setReadOnly(True)
         output_layout.addWidget(self.packet_hex)
-        grid.addWidget(output, 5, 0, 1, 2)
+        grid.addWidget(output, 6, 0, 1, 2)
 
         scroll.setWidget(body)
         return scroll
@@ -967,6 +1106,86 @@ class BluepawsTlvConsole(QMainWindow):
     def _drift_mode_changed(self, enabled: bool) -> None:
         self.maximum_drift.setEnabled(enabled and self.advance_packets.isChecked())
 
+    def _active_recipe(self) -> TestRecipe | None:
+        if not self.cookbook_group.isChecked():
+            return None
+        return TEST_RECIPES[self.recipe_combo.currentText()]
+
+    def _update_recipe_summary(self) -> None:
+        recipe = TEST_RECIPES[self.recipe_combo.currentText()]
+        self.recipe_summary.setText(
+            f"{recipe.count} packets • {recipe.interval:g} s interval • {recipe.description}"
+        )
+
+    def _recipe_enabled(self, enabled: bool) -> None:
+        self.send_count.setEnabled(not enabled)
+        self.send_interval.setEnabled(not enabled)
+        self.advance_packets.setEnabled(not enabled)
+        if enabled:
+            self._apply_recipe()
+        else:
+            self.sender_status.setText(
+                "Manual mode restored. Recipe values remain visible and can now be edited."
+            )
+
+    def _recipe_changed(self, _name: str) -> None:
+        self._update_recipe_summary()
+        if self.cookbook_group.isChecked():
+            self._apply_recipe()
+
+    def _run_recipe(self) -> None:
+        if not self.cookbook_group.isChecked():
+            return
+        self.tabs.setCurrentIndex(1)
+        self.send_requests()
+
+    def _apply_recipe(self) -> None:
+        recipe = TEST_RECIPES[self.recipe_combo.currentText()]
+        self.send_count.setText(str(recipe.count))
+        self.send_interval.setText(f"{recipe.interval:g}")
+        self.advance_packets.setChecked(recipe.strategy != "duplicates")
+        self.drift_enabled.setChecked(recipe.movement)
+        self.maximum_drift.setText("100")
+        self.tag_mode.setCurrentText("Valid HMAC (normal packet)")
+        self.status.setCurrentText("OUT (1)")
+        self.profile.setCurrentText("NORMAL (1)")
+        self.reason.setCurrentText("TELEMETRY (0)")
+        for name, flag in self.flag_checks.items():
+            flag.setChecked(name in ("GNSS_VALID", "FIX_3D"))
+        for name, value in {
+            "battery_mv": "3900",
+            "accuracy_m": "8",
+            "fix_age_s": "0",
+            "satellites": "9",
+            "link_rssi": "-104",
+            "link_snr": "7.0",
+            "cell_rsrp": "-104",
+            "cell_rsrq": "-9.5",
+            "cell_sinr": "7.0",
+        }.items():
+            getattr(self, name).setText(value)
+        transport_label = next(
+            label for label, value in TRANSPORTS.items() if value == recipe.transport
+        )
+        self.transport.setCurrentText(transport_label)
+        self.sequence.setText(
+            "65533" if recipe.strategy == "rollover" else str(int(time.time()) & 0xFFFF)
+        )
+
+        include_tlvs = recipe.tlv_mode != "none"
+        self.tlv_options.setChecked(include_tlvs)
+        for check in self.known_checks.values():
+            check.setChecked(include_tlvs)
+        custom_entries: list[TlvEntry] = []
+        if recipe.tlv_mode == "maximum":
+            custom_entries.append(TlvEntry(0x7E, b"\x01\x02", "custom"))
+        self._set_custom_tlvs(custom_entries)
+        self._update_recipe_summary()
+        self.sender_status.setText(
+            f"Cookbook ready: {self.recipe_combo.currentText()}. Choose Send on tab 2."
+        )
+        self.build_packet()
+
     def _tag_mode_changed(self) -> None:
         self.custom_tag.setEnabled(TAG_MODES[self.tag_mode.currentText()] == "custom")
 
@@ -1011,6 +1230,16 @@ class BluepawsTlvConsole(QMainWindow):
         self.custom_table.setItem(row, 2, QTableWidgetItem(entry.value.hex().upper()))
         self._custom_tlvs.append(entry)
         self.build_packet()
+
+    def _set_custom_tlvs(self, entries: list[TlvEntry]) -> None:
+        self._custom_tlvs = list(entries)
+        self.custom_table.setRowCount(0)
+        for entry in entries:
+            row = self.custom_table.rowCount()
+            self.custom_table.insertRow(row)
+            self.custom_table.setItem(row, 0, QTableWidgetItem(f"0x{entry.tlv_type:02X}"))
+            self.custom_table.setItem(row, 1, QTableWidgetItem(str(len(entry.value))))
+            self.custom_table.setItem(row, 2, QTableWidgetItem(entry.value.hex().upper()))
 
     def _remove_custom_tlv(self) -> None:
         rows = sorted({item.row() for item in self.custom_table.selectedItems()}, reverse=True)
@@ -1194,7 +1423,12 @@ class BluepawsTlvConsole(QMainWindow):
         self._stop_event.clear()
         self.send_button.setEnabled(False)
         self.stop_button.setEnabled(True)
-        self.sender_status.setText(f"Sending {count} request(s)…")
+        recipe_name = self.recipe_combo.currentText() if self._active_recipe() else None
+        self.sender_status.setText(
+            f"Sending {count} request(s)"
+            + (f" from {recipe_name}" if recipe_name else "")
+            + "…"
+        )
         self._worker = threading.Thread(
             target=self._send_worker,
             args=(endpoint, token, requests, interval, timeout),
@@ -1206,6 +1440,7 @@ class BluepawsTlvConsole(QMainWindow):
         self, count: int, interval: float
     ) -> list[tuple[int, dict[str, Any]]]:
         self._prepared_fields = []
+        recipe = self._active_recipe()
         if not self.advance_packets.isChecked():
             wrapper = self._wrapper()
             sequence = self._int(self.sequence.text(), "message sequence")
@@ -1216,7 +1451,7 @@ class BluepawsTlvConsole(QMainWindow):
         hmac_key = decode_hmac_key(self.hmac.text())
         base_tlvs = self._packet_tlvs()
         base_metadata = self._base_transport_metadata()
-        mode = TAG_MODES[self.tag_mode.currentText()]
+        default_mode = TAG_MODES[self.tag_mode.currentText()]
         base_gateway_time = (
             base_send_time
             if TRANSPORTS[self.transport.currentText()] == "lora_hub"
@@ -1233,7 +1468,9 @@ class BluepawsTlvConsole(QMainWindow):
         longitude = base_fields.longitude
         result: list[tuple[int, dict[str, Any]]] = []
         for index in range(count):
-            offset = round(index * interval)
+            sequence_offset = self._recipe_sequence_offset(recipe, index)
+            offset = round(sequence_offset * interval)
+            arrival_offset = round(index * interval)
             if index and drift_radius is not None:
                 latitude, longitude = drift_coordinates(latitude, longitude, drift_radius)
             battery_mv = base_fields.battery_mv
@@ -1255,9 +1492,14 @@ class BluepawsTlvConsole(QMainWindow):
                     satellite_count = vary_integer(
                         satellite_count, *LIVE_INTEGER_VARIATION["satellite_count"]
                     )
+            if recipe is not None and recipe.strategy == "randomized":
+                battery_mv = random.randint(3_300, 4_200)
+                accuracy_m = random.randint(1, 100)
+                fix_age_s = random.randint(0, 60)
+                satellite_count = random.randint(4, 16)
             fields = replace(
                 base_fields,
-                message_sequence=(base_fields.message_sequence + index) & 0xFFFF,
+                message_sequence=(base_fields.message_sequence + sequence_offset) & 0xFFFF,
                 timestamp=min(0xFFFF_FFFF, base_send_time + offset),
                 latitude=latitude,
                 longitude=longitude,
@@ -1268,6 +1510,8 @@ class BluepawsTlvConsole(QMainWindow):
             )
             self._prepared_fields.append(fields)
             tlvs = self._vary_live_tlvs(base_tlvs, index, offset)
+            tlvs = self._recipe_tlvs(recipe, tlvs)
+            mode = self._recipe_tag_mode(recipe, index, default_mode)
             built = build_tlv_packet(
                 fields,
                 tlvs,
@@ -1276,11 +1520,12 @@ class BluepawsTlvConsole(QMainWindow):
                 custom_tag_hex=self.custom_tag.text(),
             )
             gateway_time = (
-                min(0xFFFF_FFFF, base_gateway_time + offset)
+                min(0xFFFF_FFFF, base_gateway_time + arrival_offset)
                 if base_gateway_time is not None
                 else None
             )
             metadata = self._vary_live_metadata(base_metadata, index)
+            metadata = self._recipe_metadata(recipe, metadata, index)
             result.append(
                 (
                     fields.message_sequence,
@@ -1292,6 +1537,88 @@ class BluepawsTlvConsole(QMainWindow):
                 )
             )
         return result
+
+    @staticmethod
+    def _recipe_sequence_offset(recipe: TestRecipe | None, index: int) -> int:
+        if recipe is not None and recipe.strategy == "out_of_order":
+            return (0, 1, 3, 2, 4, 5)[index]
+        return index
+
+    @staticmethod
+    def _recipe_tag_mode(
+        recipe: TestRecipe | None, index: int, default_mode: str
+    ) -> str:
+        if recipe is None:
+            return default_mode
+        if recipe.strategy == "bad_day":
+            return "valid" if index in (1, 6) else "corrupt"
+        if recipe.strategy == "mixed":
+            return "corrupt" if index in (1, 4, 6, 9) else "valid"
+        if recipe.strategy == "randomized":
+            if index == 0:
+                return "valid"
+            if index == 1:
+                return "corrupt"
+            return "valid" if random.random() < 0.6 else "corrupt"
+        if recipe.strategy == "all_corrupt":
+            return "corrupt"
+        return "valid"
+
+    @staticmethod
+    def _recipe_tlvs(
+        recipe: TestRecipe | None, base_tlvs: list[TlvEntry]
+    ) -> list[TlvEntry]:
+        if recipe is None or recipe.tlv_mode != "random":
+            return base_tlvs
+        selected = [entry for entry in base_tlvs if random.random() < 0.6]
+        used = sum(2 + len(entry.value) for entry in selected)
+        maximum_value_length = min(4, MAX_TLV_SIZE - used - 2)
+        if maximum_value_length >= 1 and random.random() < 0.75:
+            length = random.randint(1, maximum_value_length)
+            selected.append(
+                TlvEntry(
+                    random.randint(0x70, 0x7D),
+                    bytes(random.getrandbits(8) for _ in range(length)),
+                    "random_custom",
+                )
+            )
+        return selected
+
+    @staticmethod
+    def _recipe_metadata(
+        recipe: TestRecipe | None,
+        metadata: dict[str, float | None],
+        index: int,
+    ) -> dict[str, float | None]:
+        if recipe is None:
+            return metadata
+        if recipe.strategy == "radio_fade":
+            result = dict(metadata)
+            for name, decrement in {
+                "link_rssi_dbm": 3.0,
+                "link_snr_db": 1.0,
+                "cell_rsrp_dbm": 3.0,
+                "cell_rsrq_db": 0.7,
+                "cell_sinr_db": 1.2,
+            }.items():
+                value = result.get(name)
+                if value is not None:
+                    result[name] = round(value - decrement * index, 1)
+            return result
+        if recipe.strategy == "randomized":
+            result = dict(metadata)
+            ranges = {
+                "link_rssi_dbm": (-135.0, -65.0),
+                "link_snr_db": (-10.0, 15.0),
+                "cell_rsrp_dbm": (-140.0, -65.0),
+                "cell_rsrq_db": (-25.0, -3.0),
+                "cell_sinr_db": (-10.0, 25.0),
+            }
+            for name in result:
+                if result[name] is not None:
+                    result[name] = round(random.uniform(*ranges[name]), 1)
+            return result
+        return metadata
 
     def _base_transport_metadata(self) -> dict[str, float | None]:
         metadata = {

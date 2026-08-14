@@ -49,6 +49,35 @@ authenticated 40-byte packet. Enabling the global TLV control activates both the
 selected v1.1 and custom/unknown TLV editors. Response-table columns have useful
 starting widths and remain interactively resizable and movable.
 
+The optional TLV container uses a fully muted background, border, nested panels
+and table when unchecked, making its inactive state visually unambiguous.
+
+## Test cookbook
+
+**Use test cookbook** is an opt-in section at the top of the packet-builder tab.
+Enabling it applies the selected recipe, fixes its send count and interval, and
+leaves the generated packet fields visible for inspection. **Run selected recipe**
+starts the sequence and switches directly to tab 2 so its results are visible;
+the existing **Send** button there runs the same prepared sequence. Disabling the
+cookbook returns count, interval and live-mode controls to manual editing while
+leaving the last applied values visible.
+
+The cookbook includes:
+
+- **Basic sunny day** — 10 valid LTE header-only packets;
+- **Moving pet** — valid traffic with bounded 100 m random-walk steps;
+- **Rich known TLVs**, **Maximum TLV budget**, and **Random TLV assortment**;
+- **Bad day** — exactly 2 valid and 8 deliberately corrupt HMAC packets;
+- **Mixed bag** and **Fully randomized** — bounded combinations of outcomes,
+  telemetry and optional TLVs;
+- **Duplicate retry storm**, **Sequence rollover**, and **Out-of-order delivery**;
+- **LoRa relay sunny day**, **LTE radio fade**, and **HMAC rejection only**.
+
+Random recipes never alter device identity, credentials, endpoint or selected
+transport authentication. Negative recipes should be used only with provisioned
+test devices and gateways. A corrupt inner HMAC is expected to produce an HTTP
+authentication failure; a valid new observation is expected to return `201`.
+
 Packet Base64, packet hex and JSON wrapper output update automatically after a
 short pause whenever an applicable field, selector, flag or TLV changes. The
 generated fields are read-only. **Send** also performs an immediate final rebuild,

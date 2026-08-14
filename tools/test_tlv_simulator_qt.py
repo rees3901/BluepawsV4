@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import base64
+import hashlib
+import hmac
 import importlib.util
 import json
 import math
@@ -27,6 +29,7 @@ if PYSIDE_AVAILABLE:
     from tlv_simulator_qt import (
         STYLESHEET,
         TAG_MODES,
+        TEST_RECIPES,
         TRANSPORTS,
         BluepawsTlvConsole,
         LIVE_PREVIEW_DELAY_MS,
@@ -90,6 +93,86 @@ class QtConsoleTests(unittest.TestCase):
         self.assertEqual(built.tlv_length, 0)
         self.assertEqual(len(built.packet), 40)
         self.assertEqual(built.transmitted_tag, built.expected_tag)
+
+    def test_cookbook_is_opt_in_and_contains_useful_recipe_catalog(self) -> None:
+        self.assertFalse(self.window.cookbook_group.isChecked())
+        self.assertFalse(self.window.recipe_combo.isEnabled())
+        self.assertFalse(self.window.run_recipe_button.isEnabled())
+        self.assertGreaterEqual(len(TEST_RECIPES), 10)
+        for expected in (
+            "Basic sunny day",
+            "Bad day — only 2 of 10 valid",
+            "Mixed bag",
+            "Fully randomized",
+            "Maximum TLV budget",
+            "LoRa relay sunny day",
+        ):
+            self.assertIn(expected, TEST_RECIPES)
+
+        self.window.cookbook_group.setChecked(True)
+        with patch.object(self.window, "send_requests") as sender:
+            self.window._run_recipe()
+        self.assertEqual(self.window.tabs.currentIndex(), 1)
+        sender.assert_called_once_with()
+
+    def test_basic_recipe_configures_valid_header_only_sequence(self) -> None:
+        self.window.recipe_combo.setCurrentText("Basic sunny day")
+        self.window.cookbook_group.setChecked(True)
+        requests = self.window._prepare_requests(10, 2.0)
+        key = bytes(range(32))
+
+        self.assertEqual(self.window.send_count.text(), "10")
+        self.assertFalse(self.window.send_count.isEnabled())
+        self.assertEqual(TAG_MODES[self.window.tag_mode.currentText()], "valid")
+        self.assertFalse(self.window.tlv_options.isChecked())
+        self.assertTrue(all(packet_hmac_valid(wrapper, key) for _, wrapper in requests))
+        self.assertTrue(
+            all(base64.b64decode(wrapper["payload_b64"])[31] == 0 for _, wrapper in requests)
+        )
+
+    def test_bad_day_recipe_produces_exactly_two_valid_hmacs(self) -> None:
+        self.window.recipe_combo.setCurrentText("Bad day — only 2 of 10 valid")
+        self.window.cookbook_group.setChecked(True)
+        requests = self.window._prepare_requests(10, 1.0)
+        key = bytes(range(32))
+
+        self.assertEqual(
+            sum(packet_hmac_valid(wrapper, key) for _, wrapper in requests), 2
+        )
+
+    def test_specialized_recipes_cover_maximum_tlvs_duplicates_and_ordering(self) -> None:
+        self.window.recipe_combo.setCurrentText("Maximum TLV budget")
+        self.window.cookbook_group.setChecked(True)
+        built = self.window.build_packet()
+        self.assertIsNotNone(built)
+        assert built is not None
+        self.assertEqual(built.tlv_length, 24)
+
+        self.window.recipe_combo.setCurrentText("Duplicate retry storm")
+        duplicates = self.window._prepare_requests(6, 1.0)
+        self.assertEqual(len({wrapper["payload_b64"] for _, wrapper in duplicates}), 1)
+
+        self.window.recipe_combo.setCurrentText("Out-of-order delivery")
+        base_sequence = int(self.window.sequence.text())
+        reordered = self.window._prepare_requests(6, 1.0)
+        self.assertEqual(
+            [sequence for sequence, _ in reordered],
+            [
+                base_sequence,
+                (base_sequence + 1) & 0xFFFF,
+                (base_sequence + 3) & 0xFFFF,
+                (base_sequence + 2) & 0xFFFF,
+                (base_sequence + 4) & 0xFFFF,
+                (base_sequence + 5) & 0xFFFF,
+            ],
+        )
+
+    def test_disabled_tlv_container_uses_full_section_muted_styling(self) -> None:
+        self.assertEqual(self.window.tlv_options.objectName(), "optionalTlvGroup")
+        self.assertIn("QGroupBox#optionalTlvGroup:unchecked", STYLESHEET)
+        self.assertIn(
+            "QGroupBox#optionalTlvGroup:unchecked QGroupBox", STYLESHEET
+        )
 
     def test_packet_and_wrapper_previews_update_automatically(self) -> None:
         original_payload = self.window.packet_b64.toPlainText()
@@ -409,6 +492,12 @@ class QtConsoleTests(unittest.TestCase):
         self.window._clear_responses()
         self.assertEqual(self.window.response_table.rowCount(), 0)
         self.assertEqual(self.window.response_detail.toPlainText(), "")
+
+
+def packet_hmac_valid(wrapper: dict[str, object], key: bytes) -> bool:
+    packet = base64.b64decode(str(wrapper["payload_b64"]), validate=True)
+    expected = hmac.new(key, packet[:-8], hashlib.sha256).digest()[:8]
+    return hmac.compare_digest(packet[-8:], expected)
 
 
 def json_keys_lower(value: dict[str, object]) -> set[str]:
