@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { CANONICAL_SITE_URL } from "@/lib/authRedirect";
+import { normalizeFamilyName } from "@/lib/familyName";
 import { classifyInvitationEmailFailure, type InvitationEmailDelivery } from "@/lib/invitationDelivery";
 import { createClient } from "@/lib/supabase/server";
 
@@ -12,6 +13,41 @@ export interface InvitationActionState {
   invitedEmail: string | null;
   expiresAt: string | null;
   emailDelivery: InvitationEmailDelivery;
+}
+
+export interface FamilyNameActionState {
+  error: string | null;
+  success: string | null;
+}
+
+export async function updateFamilyNameAction(
+  _previousState: FamilyNameActionState,
+  formData: FormData,
+): Promise<FamilyNameActionState> {
+  const householdId = String(formData.get("householdId") ?? "");
+  const familyName = normalizeFamilyName(formData.get("familyName"));
+  if (!householdId || !familyName) {
+    return { error: "Your Family name must be between 1 and 80 characters.", success: null };
+  }
+
+  const supabase = await createClient();
+  const { data: identity } = await supabase.auth.getClaims();
+  if (!identity?.claims?.sub) redirect("/login?next=/account");
+
+  const { data, error } = await supabase
+    .from("households")
+    .update({ name: familyName })
+    .eq("id", householdId)
+    .select("id");
+
+  if (error || data?.length !== 1) {
+    console.error("Unable to update Family name", { code: error?.code ?? "not_authorized", message: error?.message ?? "No Family updated" });
+    return { error: "The Family name could not be updated. Check your Owner access and try again.", success: null };
+  }
+
+  revalidatePath("/account");
+  revalidatePath("/");
+  return { error: null, success: "Family name updated." };
 }
 
 export async function createInvitationAction(
