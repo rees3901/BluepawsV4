@@ -57,7 +57,7 @@ Hub/collar service
     -> maintained device_latest_positions table
     -> private household:<uuid> Realtime Broadcast channel
     -> authenticated Next.js dashboard
-    -> dashboard components
+    -> dashboard components (4G/RF transport badge beside signal quality)
 ```
 
 The Supabase URL and publishable key are public browser configuration and have

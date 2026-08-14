@@ -616,13 +616,16 @@ Full application packet size:
 
 ## 21. Dashboard interpretation
 
-The dashboard should not assume that RSSI/SNR always means LoRa. It should use `link_type`.
+The dashboard should not assume that RSSI/SNR always means LoRa. It should use
+the authenticated wrapper `ingest_path` for the customer-facing route badge,
+while the backend continues to validate the corresponding `link_type` pair.
 
 Suggested display logic:
 
 ```text
-link_type = lora -> show LoRa/RF antenna icon
-link_type = lte  -> show cellular/modem icon
+ingest_path = lora_hub       -> show RF beside the signal quality
+ingest_path = cellular_direct -> show 4G beside the signal quality
+ingest_path absent            -> show a neutral unknown marker
 ```
 
 For each path:

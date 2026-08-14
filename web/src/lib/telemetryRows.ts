@@ -13,6 +13,7 @@ export interface PositionRow {
   power_profile_code: number | null;
   flags: number | null;
   tx_reason: number | null;
+  ingest_path: "cellular_direct" | "lora_hub" | null;
   link_type: "lora" | "lte" | null;
   link_rssi_dbm: number | null;
   link_snr_db: number | null;
@@ -41,7 +42,7 @@ export function positionToTelemetryDevice(row: PositionRow): TelemetryDevice {
     rssi: row.link_rssi_dbm,
     snr: row.link_snr_db,
     bleHome: flags !== null && (flags & 0x08) !== 0,
-    cellular: row.link_type === "lte",
+    ingestPath: row.ingest_path,
     lastUpdate: recordedAt,
     source: row.source,
   };
@@ -63,6 +64,7 @@ export function isPositionRow(value: unknown): value is PositionRow {
     nullableNumber(row.power_profile_code) &&
     nullableNumber(row.flags) &&
     nullableNumber(row.tx_reason) &&
+    (row.ingest_path === null || row.ingest_path === "cellular_direct" || row.ingest_path === "lora_hub") &&
     (row.link_type === null || row.link_type === "lora" || row.link_type === "lte") &&
     nullableNumber(row.link_rssi_dbm) &&
     nullableNumber(row.link_snr_db) &&

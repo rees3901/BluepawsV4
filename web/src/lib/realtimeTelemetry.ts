@@ -5,7 +5,7 @@ import type { TelemetryDevice, TelemetrySource, TrailPoint } from "@/types/telem
 
 const INITIAL_FALLBACK_DELAY_MS = 30_000;
 const MAX_FALLBACK_DELAY_MS = 120_000;
-const POSITION_COLUMNS = "position_id,device_uid,household_id,message_id,latitude,longitude,battery,battery_mv,status_code,power_profile_code,flags,tx_reason,link_type,link_rssi_dbm,link_snr_db,source,recorded_at,received_at,schema_version";
+const POSITION_COLUMNS = "position_id,device_uid,household_id,message_id,latitude,longitude,battery,battery_mv,status_code,power_profile_code,flags,tx_reason,ingest_path,link_type,link_rssi_dbm,link_snr_db,source,recorded_at,received_at,schema_version";
 
 export function createRealtimeTelemetrySource(
   householdId: string,

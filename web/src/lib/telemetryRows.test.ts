@@ -16,6 +16,7 @@ test("maps TLV projection fields into the live dashboard model", () => {
     power_profile_code: 3,
     flags: 0x89,
     tx_reason: 5,
+    ingest_path: "cellular_direct",
     link_type: "lte",
     link_rssi_dbm: -104,
     link_snr_db: 7,
@@ -34,5 +35,5 @@ test("maps TLV projection fields into the live dashboard model", () => {
   assert.equal(device.rssi, -104);
   assert.equal(device.snr, 7);
   assert.equal(device.bleHome, true);
-  assert.equal(device.cellular, true);
+  assert.equal(device.ingestPath, "cellular_direct");
 });

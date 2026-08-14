@@ -66,7 +66,7 @@ export function DeviceCard(props: DeviceCardProps) {
           </div>
           <div className="card-indicators">
             <span className="card-indicator-group"><BatteryIndicator millivolts={device.batt} percent={device.batteryPercent} /></span>
-            <span className="card-indicator-group"><SignalIndicator rssi={device.rssi} snr={device.snr} /></span>
+            <span className="card-indicator-group"><SignalIndicator rssi={device.rssi} snr={device.snr} ingestPath={device.ingestPath} /></span>
             {portableMode && <span className="card-indicator-group"><BleProximity rssi={device.rssi === null ? null : device.rssi + 28} /></span>}
           </div>
           <div className="card-indicators card-indicators-row3">

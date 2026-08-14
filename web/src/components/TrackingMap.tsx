@@ -5,6 +5,7 @@ import { useEffect, useRef } from "react";
 import { emojiImageUrl } from "@/lib/emoji";
 import { formatMapCoordinates, googleMapsUrl, mapLocationShareText } from "@/lib/mapLocation";
 import { normalizeMarkerColor } from "@/lib/markerColor";
+import { transportPresentation } from "@/lib/transportPath";
 import { appendTrailPoint, VISIBLE_TRAIL_POINT_LIMIT, type TrailLatLng } from "@/lib/trailPoints";
 import {
   type DeviceAction,
@@ -418,7 +419,9 @@ export default function TrackingMap(props: TrackingMapProps) {
 
 function popupHtml(device: TelemetryDevice, avatar: DeviceAvatar) {
   const name = escapeHtml(device.name);
-  const signal = device.rssi === null || device.snr === null ? "Not reported" : `${device.rssi} dBm / ${device.snr} dB`;
+  const transport = transportPresentation(device.ingestPath);
+  const signalMeasurements = device.rssi === null || device.snr === null ? "Not reported" : `${device.rssi} dBm / ${device.snr} dB`;
+  const signal = `${signalMeasurements} · ${transport.badge}`;
   const battery = device.batteryPercent === undefined || device.batteryPercent === null ? `${(device.batt / 1000).toFixed(2)} V` : `${device.batteryPercent}%`;
   const source = device.source ? `<span class="label">Source</span><span class="value">${escapeHtml(device.source)}</span>` : "";
   const coordinates = formatMapCoordinates(device.lat, device.lon);

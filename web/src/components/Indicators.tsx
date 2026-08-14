@@ -1,4 +1,6 @@
 import type { ReactNode } from "react";
+import { transportPresentation } from "@/lib/transportPath";
+import type { IngestPath } from "@/types/telemetry";
 
 export function signalQuality(rssi: number, snr: number) {
   const rssiScore = rssi > -80 ? 4 : rssi > -100 ? 3 : rssi > -110 ? 2 : rssi > -120 ? 1 : 0;
@@ -28,25 +30,42 @@ function batteryPercentLevel(percent: number) {
   return { level: 1, label: "Nearly Empty", color: "#ef4444" };
 }
 
-export function SignalIndicator({ rssi, snr }: { rssi: number | null; snr: number | null }) {
+export function SignalIndicator({ rssi, snr, ingestPath }: { rssi: number | null; snr: number | null; ingestPath: IngestPath | null }) {
+  const transport = transportPresentation(ingestPath);
   if (rssi === null || snr === null) {
     return (
-      <span className="signal-indicator" title="Radio signal was not included in this report">
+      <span className="signal-indicator" title={`${transport.label}; radio signal was not included in this report`}>
         <AntennaIcon />
         {[1, 2, 3, 4, 5].map((bar) => <span key={bar} className="sig-bar" style={{ height: 4 + bar * 3 }} />)}
         <span className="sig-label">Not reported</span>
+        <TransportBadge ingestPath={ingestPath} />
       </span>
     );
   }
 
   const signal = signalQuality(rssi, snr);
   return (
-    <span className="signal-indicator" title={`RSSI: ${rssi} dBm / SNR: ${snr} dB — ${signal.label}`}>
+    <span className="signal-indicator" title={`${transport.label}; RSSI: ${rssi} dBm / SNR: ${snr} dB — ${signal.label}`}>
       <AntennaIcon />
       {[1, 2, 3, 4, 5].map((bar) => (
         <span key={bar} className={`sig-bar${bar <= signal.level ? " filled" : ""}`} style={{ height: 4 + bar * 3, background: bar <= signal.level ? signal.color : undefined }} />
       ))}
       <span className="sig-label" style={{ color: signal.color }}>{signal.label}</span>
+      <TransportBadge ingestPath={ingestPath} />
+    </span>
+  );
+}
+
+function TransportBadge({ ingestPath }: { ingestPath: IngestPath | null }) {
+  const transport = transportPresentation(ingestPath);
+  return (
+    <span
+      className={`transport-badge ${transport.cssClass}`}
+      title={transport.label}
+      role="img"
+      aria-label={transport.label}
+    >
+      {transport.badge}
     </span>
   );
 }
