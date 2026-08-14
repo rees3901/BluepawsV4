@@ -2,3 +2,6 @@ project_id = "ykcdaonkvwemedotdpdr"
 
 [functions.ingest-position]
 verify_jwt = false
+
+[functions.send-family-invitation]
+verify_jwt = true

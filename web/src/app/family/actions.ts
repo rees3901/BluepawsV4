@@ -10,6 +10,7 @@ export interface InvitationActionState {
   invitationUrl: string | null;
   invitedEmail: string | null;
   expiresAt: string | null;
+  emailDelivery: "sent" | "manual" | null;
 }
 
 export async function createInvitationAction(
@@ -19,7 +20,7 @@ export async function createInvitationAction(
   const householdId = String(formData.get("householdId") ?? "");
   const invitedEmail = String(formData.get("email") ?? "").trim().toLowerCase();
   if (!householdId || invitedEmail.length < 3 || invitedEmail.length > 320 || !invitedEmail.includes("@")) {
-    return { error: "Enter a valid email address.", invitationUrl: null, invitedEmail: null, expiresAt: null };
+    return { error: "Enter a valid email address.", invitationUrl: null, invitedEmail: null, expiresAt: null, emailDelivery: null };
   }
 
   const supabase = await createClient();
@@ -33,12 +34,31 @@ export async function createInvitationAction(
 
   if (error) {
     console.error("Unable to create Family invitation", { code: error.code, message: error.message });
-    return { error: "The invitation could not be created. Check your Owner access and try again.", invitationUrl: null, invitedEmail: null, expiresAt: null };
+    return { error: "The invitation could not be created. Check your Owner access and try again.", invitationUrl: null, invitedEmail: null, expiresAt: null, emailDelivery: null };
   }
 
   const invitation = Array.isArray(data) ? data[0] : null;
   if (!invitation || typeof invitation.invitation_token !== "string") {
-    return { error: "The invitation was created without a shareable link.", invitationUrl: null, invitedEmail: null, expiresAt: null };
+    return { error: "The invitation was created without a shareable link.", invitationUrl: null, invitedEmail: null, expiresAt: null, emailDelivery: null };
+  }
+
+  const invitationId = typeof invitation.invitation_id === "string" ? invitation.invitation_id : null;
+  let emailDelivery: "sent" | "manual" = "manual";
+  if (invitationId) {
+    const emailResult = await supabase.functions.invoke("send-family-invitation", {
+      body: {
+        invitationId,
+        invitationToken: invitation.invitation_token,
+      },
+    });
+    if (!emailResult.error && emailResult.data?.sent === true) {
+      emailDelivery = "sent";
+    } else {
+      console.error("Family invitation was created but its email was not delivered", {
+        errorName: emailResult.error?.name ?? "provider_response",
+        message: emailResult.error?.message ?? "Email provider did not confirm delivery",
+      });
+    }
   }
 
   revalidatePath("/family");
@@ -47,6 +67,7 @@ export async function createInvitationAction(
     invitationUrl: `${CANONICAL_SITE_URL}/join?token=${invitation.invitation_token}`,
     invitedEmail,
     expiresAt: typeof invitation.invitation_expires_at === "string" ? invitation.invitation_expires_at : null,
+    emailDelivery,
   };
 }
 

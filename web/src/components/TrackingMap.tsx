@@ -5,6 +5,7 @@ import { useEffect, useRef } from "react";
 import { emojiImageUrl } from "@/lib/emoji";
 import { formatMapCoordinates, googleMapsUrl, mapLocationShareText } from "@/lib/mapLocation";
 import { MAP_LAYER_DEFINITIONS, type MapLayerName } from "@/lib/mapLayers";
+import { EMPTY_MAP_CENTER, EMPTY_MAP_ZOOM } from "@/lib/mapViewport";
 import { normalizeMarkerColor } from "@/lib/markerColor";
 import { transportPresentation } from "@/lib/transportPath";
 import { appendTrailPoint, VISIBLE_TRAIL_POINT_LIMIT, type TrailLatLng } from "@/lib/trailPoints";
@@ -51,7 +52,7 @@ export default function TrackingMap(props: TrackingMapProps) {
     const markers = markersRef.current;
     const trails = trailsRef.current;
     const trailPoints = trailPointsRef.current;
-    const map = L.map("map", { center: [51.505, -0.09], zoom: 13, zoomControl: false, tapHold: true });
+    const map = L.map("map", { center: [...EMPTY_MAP_CENTER], zoom: EMPTY_MAP_ZOOM, zoomControl: false, tapHold: true });
     mapRef.current = map;
 
     const createTileLayer = (name: MapLayerName) => {

@@ -11,6 +11,7 @@ const INITIAL_INVITATION_STATE: InvitationActionState = {
   invitationUrl: null,
   invitedEmail: null,
   expiresAt: null,
+  emailDelivery: null,
 };
 
 interface FamilySettingsClientProps {
@@ -96,12 +97,13 @@ export function FamilySettingsClient({ currentUserId, activeFamily, families, me
           <form action={formAction} className="invite-form">
             <input type="hidden" name="householdId" value={activeFamily.householdId} />
             <label htmlFor="family-invite-email">Email address</label>
-            <div><input id="family-invite-email" name="email" type="email" autoComplete="email" maxLength={320} required placeholder="family@example.com" /><button className="btn-primary" type="submit" disabled={pending}>{pending ? "Creating…" : "Create invite"}</button></div>
+            <div><input id="family-invite-email" name="email" type="email" autoComplete="email" maxLength={320} required placeholder="family@example.com" /><button className="btn-primary" type="submit" disabled={pending}>{pending ? "Sending…" : "Send invite"}</button></div>
           </form>
           {state.error && <p className="settings-message error" role="alert">{state.error}</p>}
           {state.invitationUrl && (
             <div className="invite-share-card" role="status">
-              <strong>Invitation ready for {state.invitedEmail}</strong>
+              <strong>{state.emailDelivery === "sent" ? `Invitation emailed to ${state.invitedEmail}` : `Invitation created for ${state.invitedEmail}`}</strong>
+              {state.emailDelivery === "manual" && <p className="invite-delivery-warning">Automatic email delivery is not configured or was temporarily unavailable. The invitation is still valid—share it using one of the options below.</p>}
               <code>{state.invitationUrl}</code>
               <div className="share-actions">
                 <button className="btn-secondary" type="button" onClick={copyInvitation}>Copy</button>
