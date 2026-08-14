@@ -259,7 +259,7 @@ void setup() {
     loraSPI.begin();
     Serial.println("[LORA] Initialising SX1262...");
 
-    int state = lora.begin(LORA_FREQUENCY);  // e.g. 915.0 MHz
+    int state = lora.begin(LORA_FREQUENCY);  // Locked at 869.5 MHz
     if (state != RADIOLIB_ERR_NONE) {
         // Fatal error — can't operate without radio. Flash LED rapidly and halt.
         Serial.printf("[LORA] FATAL: init failed (%d)\n", state);
@@ -270,8 +270,8 @@ void setup() {
     // Configure radio parameters (must match hub's settings in bp_config.h)
     lora.setSpreadingFactor(LORA_SPREADING);     // SF10 — good range
     lora.setBandwidth(LORA_BANDWIDTH);           // 125 kHz
-    lora.setCodingRate(LORA_CODING_RATE);        // 4/5
-    lora.setPreambleLength(LORA_PREAMBLE_LEN);   // Long preamble for easier detection
+    lora.setCodingRate(LORA_CODING_RATE);        // Locked at 4/6
+    lora.setPreambleLength(LORA_PREAMBLE_LEN);   // Locked at 8 symbols
     lora.setSyncWord(LORA_SYNC_WORD);            // Private network sync word
     lora.setCRC(LORA_CRC_ENABLED);               // Hardware CRC
     lora.setOutputPower(currentConfig->tx_power_dBm);  // TX power from current profile

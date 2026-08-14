@@ -13,12 +13,14 @@
 
 // ═══════════════════════════════════════════════
 // LoRa Radio Parameters (must match on TX and RX)
+// Locked UK profile: only TX power changes with operating profile.
+// Frequency, SF, bandwidth, coding rate, preamble and packet format stay fixed.
 // ═══════════════════════════════════════════════
-#define LORA_FREQUENCY       915.0f   // MHz (US ISM band; EU: 868.0)
-#define LORA_SPREADING       8        // SF8
-#define LORA_BANDWIDTH       250.0f   // kHz
-#define LORA_CODING_RATE     5        // 4/5
-#define LORA_PREAMBLE_LEN    16
+#define LORA_FREQUENCY       869.5f   // MHz, UK 869.40-869.65 MHz SRD sub-band
+#define LORA_SPREADING       10       // SF10, long-range/airtime balance
+#define LORA_BANDWIDTH       125.0f   // kHz
+#define LORA_CODING_RATE     6        // 4/6 FEC
+#define LORA_PREAMBLE_LEN    8        // symbols
 #define LORA_SYNC_WORD       0x12     // Private network
 #define LORA_CRC_ENABLED     true
 
@@ -56,10 +58,10 @@ struct bp_profile_config_t {
 // Profile lookup table
 static const bp_profile_config_t BP_PROFILES[] = {
     //                        power  sleep   led  beacon  gps_cont  cell_ratio  heartbeat
-    { PROFILE_NORMAL,          19,    600,    5,  false,  false,    10,          6 },  // 10 min, hb ~1/hr
+    { PROFILE_NORMAL,          14,    600,    5,  false,  false,    10,          6 },  // 10 min, hb ~1/hr
     { PROFILE_POWERSAVE,       10,   1800,    3,  false,  false,    30,          2 },  // 30 min, hb ~1/hr
-    { PROFILE_ACTIVE,          19,     60,    5,  false,  false,     5,          0 },  // Active Find: no hb
-    { PROFILE_LOST,            22,      0,   10,  true,   true,      3,          0 },  // Emergency Lost: no hb
+    { PROFILE_ACTIVE,          20,     60,    5,  false,  false,     5,          0 },  // Active Find: higher TX power
+    { PROFILE_LOST,            20,      0,   10,  true,   true,      3,          0 },  // Emergency Lost: higher TX power
 };
 
 #define BP_PROFILE_COUNT  (sizeof(BP_PROFILES) / sizeof(BP_PROFILES[0]))
