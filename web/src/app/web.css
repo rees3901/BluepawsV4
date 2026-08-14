@@ -955,6 +955,377 @@ body.panel-open .map-loading {
   padding: 24px;
 }
 
+.account-menu-wrap {
+  position: relative;
+}
+
+.account-menu-trigger[aria-expanded="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.account-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 1800;
+  width: 220px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg-card);
+  box-shadow: 0 16px 36px rgb(0 0 0 / 38%);
+}
+
+.account-menu-summary {
+  display: grid;
+  gap: 2px;
+  padding: 9px 10px 11px;
+  border-bottom: 1px solid var(--border);
+}
+
+.account-menu-summary strong,
+.account-menu-summary small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-menu-summary small,
+.account-menu-summary span {
+  color: var(--text-secondary);
+  font-size: 0.67rem;
+}
+
+.account-menu a,
+.account-menu > button {
+  display: flex;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 0.73rem;
+  text-align: left;
+  text-decoration: none;
+}
+
+.account-menu a:hover,
+.account-menu > button:hover,
+.account-menu a:focus-visible,
+.account-menu > button:focus-visible {
+  outline: 0;
+  background: var(--bg-hover);
+}
+
+.account-menu > button {
+  color: var(--danger);
+}
+
+.account-shell {
+  width: 100vw;
+  height: 100vh;
+  min-height: 100vh;
+  padding: 34px clamp(18px, 5vw, 72px) 60px;
+  overflow-y: auto;
+  background:
+    radial-gradient(circle at 85% 0%, rgb(29 155 240 / 10%), transparent 30%),
+    var(--bg-primary);
+}
+
+.account-header {
+  display: flex;
+  max-width: 920px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin: 0 auto 24px;
+}
+
+.account-header .login-brand {
+  margin-bottom: 8px;
+}
+
+.account-header h1 {
+  font-size: clamp(1.45rem, 3vw, 2rem);
+}
+
+.account-header p,
+.settings-copy {
+  color: var(--text-secondary);
+  font-size: 0.79rem;
+  line-height: 1.55;
+}
+
+.account-header p {
+  margin-top: 5px;
+}
+
+.account-header > a,
+.share-actions a {
+  text-decoration: none;
+}
+
+.settings-stack {
+  display: grid;
+  max-width: 920px;
+  gap: 16px;
+  margin: 0 auto;
+}
+
+.settings-card {
+  padding: 22px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-card);
+  box-shadow: var(--shadow);
+}
+
+.settings-card-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 10px;
+}
+
+.settings-card-heading h2 {
+  margin-top: 3px;
+  font-size: 1.05rem;
+}
+
+.settings-eyebrow {
+  color: var(--accent);
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.role-pill,
+.invite-status {
+  display: inline-flex;
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border: 1px solid rgb(29 155 240 / 35%);
+  border-radius: 999px;
+  background: rgb(29 155 240 / 10%);
+  color: #73c4ff;
+  font-size: 0.65rem;
+  font-weight: 700;
+}
+
+.role-pill.secondary {
+  border-color: var(--border);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+}
+
+.member-list,
+.invitation-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 17px;
+}
+
+.member-row,
+.invitation-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 11px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-primary);
+}
+
+.member-avatar {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  place-items: center;
+  border-radius: 50%;
+  background: rgb(29 155 240 / 16%);
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.member-row > div,
+.invitation-row > div {
+  min-width: 0;
+  flex: 1;
+}
+
+.member-row strong,
+.member-row small,
+.invitation-row strong,
+.invitation-row small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.member-row strong,
+.invitation-row strong {
+  font-size: 0.78rem;
+}
+
+.member-row small,
+.invitation-row small {
+  margin-top: 2px;
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+}
+
+.family-switcher,
+.invite-form > div,
+.profile-form > div {
+  display: flex;
+  gap: 9px;
+}
+
+.family-switcher select,
+.invite-form input,
+.profile-form input {
+  min-width: 0;
+  flex: 1;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  outline: 0;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.invite-form,
+.profile-form {
+  margin-top: 17px;
+}
+
+.invite-form label,
+.profile-form label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 0.73rem;
+  font-weight: 700;
+}
+
+.invite-share-card {
+  display: grid;
+  gap: 9px;
+  margin-top: 15px;
+  padding: 13px;
+  border: 1px solid rgb(0 200 83 / 35%);
+  border-radius: 8px;
+  background: rgb(0 200 83 / 7%);
+}
+
+.invite-share-card strong {
+  font-size: 0.78rem;
+}
+
+.invite-share-card code {
+  overflow-wrap: anywhere;
+  color: var(--text-secondary);
+  font-size: 0.67rem;
+}
+
+.share-actions {
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+
+.share-actions .btn-secondary,
+.account-header .btn-secondary,
+.family-switcher .btn-primary,
+.invite-form .btn-primary,
+.profile-form .btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 11px;
+}
+
+.settings-message {
+  max-width: 920px;
+  margin: 10px auto;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  font-size: 0.73rem;
+}
+
+.settings-message.error {
+  border-color: rgb(255 23 68 / 45%);
+  color: #ff9d9d;
+}
+
+.settings-message.success {
+  border-color: rgb(0 200 83 / 40%);
+  color: #68df99;
+}
+
+.invite-status.pending { color: var(--warning); border-color: rgb(255 171 0 / 35%); background: rgb(255 171 0 / 8%); }
+.invite-status.accepted { color: var(--success); border-color: rgb(0 200 83 / 35%); background: rgb(0 200 83 / 8%); }
+.invite-status.revoked,
+.invite-status.expired { color: var(--text-secondary); border-color: var(--border); background: transparent; }
+
+.account-detail-list {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0;
+}
+
+.account-detail-list > div {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.account-detail-list dt {
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+}
+
+.account-detail-list dd {
+  font-size: 0.76rem;
+}
+
+@media (max-width: 620px) {
+  .account-header,
+  .family-switcher,
+  .invite-form > div,
+  .profile-form > div {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .member-row,
+  .invitation-row {
+    flex-wrap: wrap;
+  }
+
+  .invitation-row form {
+    width: 100%;
+  }
+
+  .invitation-row form button {
+    width: 100%;
+  }
+
+  .account-detail-list > div {
+    grid-template-columns: 1fr;
+    gap: 3px;
+  }
+}
+
 .onboarding-card {
   width: min(100%, 520px);
 }

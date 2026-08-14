@@ -74,12 +74,39 @@ added to `NEXT_PUBLIC_` variables or committed.
   remains available as a fallback.
 - Change the email template to include `{{ .Token }}` for six-digit OTP entry,
   then configure production SMTP, CAPTCHA, and appropriate Auth rate limits.
-- Sign in with the project owner's account before sharing the preview. The first
-  account created becomes owner of the test household containing devices
-  `1001`–`1005`; subsequent users receive isolated customer households.
+- New accounts create their own named Family during onboarding. Test devices
+  `1001`–`1005` remain explicitly assigned to the test Family rather than being
+  attached to whichever account signs in first.
 - Validate private Realtime delivery, then apply
   `20260809220003_cut_over_private_telemetry.sql` to remove the legacy anonymous
   surface and activate seven-day retention.
+
+### Family accounts and invitations
+
+The customer-facing word **Family** maps to the existing `households` tenancy
+boundary in Postgres; database table names remain stable. A person may belong to
+more than one Family and chooses an active Family before loading telemetry.
+
+- **Owner**: normal tracking access plus permanent member invitations and future
+  billing controls.
+- **Member**: normal access to the Family's pets, positions, map and trails, with
+  no invitation or billing administration.
+
+Owners create an email-bound, one-time link on `/family`. The raw 256-bit token
+is returned only when the invitation is created; Postgres stores only its
+SHA-256 hash. Opening the link moves it into a seven-day, `HttpOnly`,
+`SameSite=Lax` cookie, and the signed-in verified email must match before the
+invitation can even be previewed. Links can be copied or shared through the
+browser, WhatsApp, SMS or the user's email client. Automatic transactional
+email delivery will be added when a production mail provider is configured.
+
+Before deploying the Family settings application code, apply its database
+migration from the repository root:
+
+```powershell
+npx --yes supabase@latest db push --linked --dry-run
+npx --yes supabase@latest db push --linked
+```
 
 ### Realtime recovery and load testing
 

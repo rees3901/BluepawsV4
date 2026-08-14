@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import { sanitizeNextPath } from "@/lib/authRedirect";
 import type { AuthChangeEvent, Session } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 
 export function AuthBootstrap() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [message, setMessage] = useState("Completing your secure sign-in…");
 
   useEffect(() => {
@@ -16,7 +18,9 @@ export function AuthBootstrap() {
     const finishSignIn = () => {
       if (!active) return;
       window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
-      router.refresh();
+      const nextPath = sanitizeNextPath(searchParams.get("next"));
+      if (nextPath === "/") router.refresh();
+      else router.replace(nextPath);
     };
 
     const bootstrap = async () => {
@@ -47,7 +51,7 @@ export function AuthBootstrap() {
       active = false;
       authListener.subscription.unsubscribe();
     };
-  }, [router]);
+  }, [router, searchParams]);
 
   return (
     <main className="login-shell">

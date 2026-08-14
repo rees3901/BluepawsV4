@@ -1,20 +1,21 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { sanitizeNextPath } from "@/lib/authRedirect";
 
 export async function GET(request: NextRequest) {
   const requestUrl = new URL(request.url);
   const code = requestUrl.searchParams.get("code");
-  const requestedPath = requestUrl.searchParams.get("next") ?? "/";
-  const nextPath = requestedPath.startsWith("/") && !requestedPath.startsWith("//")
-    ? requestedPath
-    : "/";
+  const nextPath = sanitizeNextPath(requestUrl.searchParams.get("next"));
   const response = NextResponse.redirect(new URL(nextPath, requestUrl.origin));
 
   if (!code) {
     // The default Supabase email template can return an implicit-flow session
     // in the URL fragment. Fragments are browser-only, so send the browser to
     // the public bootstrap route and let the Supabase client persist it.
-    return NextResponse.redirect(new URL("/?auth_callback=implicit", requestUrl.origin));
+    const implicitUrl = new URL("/", requestUrl.origin);
+    implicitUrl.searchParams.set("auth_callback", "implicit");
+    if (nextPath !== "/") implicitUrl.searchParams.set("next", nextPath);
+    return NextResponse.redirect(implicitUrl);
   }
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;

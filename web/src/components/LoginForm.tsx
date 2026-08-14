@@ -7,7 +7,11 @@ import { createClient } from "@/lib/supabase/client";
 
 type LoginStep = "email" | "code";
 
-export function LoginForm() {
+interface LoginFormProps {
+  nextPath?: string;
+}
+
+export function LoginForm({ nextPath = "/" }: LoginFormProps) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
@@ -22,7 +26,7 @@ export function LoginForm() {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: getAuthCallbackUrl(window.location.origin),
+        redirectTo: getAuthCallbackUrl(window.location.origin, nextPath),
       },
     });
 
@@ -41,7 +45,7 @@ export function LoginForm() {
       email: email.trim(),
       options: {
         shouldCreateUser: true,
-        emailRedirectTo: getAuthCallbackUrl(window.location.origin),
+        emailRedirectTo: getAuthCallbackUrl(window.location.origin, nextPath),
       },
     });
 
@@ -71,7 +75,7 @@ export function LoginForm() {
       return;
     }
 
-    router.replace("/");
+    router.replace(nextPath);
     router.refresh();
   }
 
