@@ -37,8 +37,9 @@ The selected transport automatically uses the selected device bearer for direct
 LTE or the selected gateway bearer and GUID16 for a LoRa home-hub relay.
 
 The console supports valid packets and deliberate negative HMAC tests, custom
-TLVs, wrapper preview, repeated or advancing sequences and cancellable background
-HTTP posting. Request results appear in a colour-coded summary table with a clear
+TLVs, decoded payload and wrapper previews, repeated or advancing sequences and
+cancellable background HTTP posting. Request results appear on their own third
+tab in a colour-coded summary table with a clear
 success, duplicate, authorization, client, server or network status. Selecting a
 row shows its complete formatted JSON response for diagnosis. Use test devices
 only. Never put a Supabase service-role key in the credential file or bearer field.
@@ -61,10 +62,10 @@ and table when unchecked, making its inactive state visually unambiguous.
 **Use test cookbook** is an opt-in section at the top of the packet-builder tab.
 Enabling it applies the selected recipe, fixes its send count and interval, and
 leaves the generated packet fields visible for inspection. **Run selected recipe**
-starts the sequence and switches directly to tab 2 so its results are visible;
-the existing **Send** button there runs the same prepared sequence. Disabling the
-cookbook returns count, interval and live-mode controls to manual editing while
-leaving the last applied values visible.
+starts the sequence and switches directly to the **Send & Response Log** tab so
+its results are visible; the existing **Send** button there runs the same prepared
+sequence. Disabling the cookbook returns count, interval and live-mode controls to
+manual editing while leaving the last applied values visible.
 
 The cookbook includes:
 
@@ -82,14 +83,20 @@ transport authentication. Negative recipes should be used only with provisioned
 test devices and gateways. A corrupt inner HMAC is expected to produce an HTTP
 authentication failure; a valid new observation is expected to return `201`.
 
-Packet Base64, packet hex and JSON wrapper output update automatically after a
-short pause whenever an applicable field, selector, flag or TLV changes. The
-generated fields are read-only. **Send** also performs an immediate final rebuild,
-so a request cannot use an older preview when an edit has just been made. Invalid
-input clears the previous generated output instead of leaving stale data visible.
-The wrapper preview reports both the exact compact UTF-8 JSON request-body size
-sent by the console and the decoded TLV packet size. HTTP headers and TLS framing
-are intentionally excluded because their wire overhead depends on the connection.
+Packet Base64, packet hex, decoded payload JSON and HTTPS wrapper JSON update
+automatically after a short pause whenever an applicable field, selector, flag or
+TLV changes. The generated fields are read-only. **Send** also performs an immediate
+final rebuild, so a request cannot use an older preview when an edit has just been
+made. Invalid input clears the previous generated output instead of leaving stale
+data visible.
+The second tab uses the full available width for **Payload and packet previews**.
+Its first window decodes the transmitted Base64 bytes into human-readable JSON,
+including named status/profile/reason values, active flags, position data, decoded
+known and unknown TLVs, and local HMAC validation. Its second window shows the
+complete HTTPS JSON wrapper without the Authorization header. The wrapper summary
+reports both the exact compact UTF-8 JSON request-body size sent by the console and
+the decoded TLV packet size. HTTP headers and TLS framing are intentionally excluded
+because their wire overhead depends on the connection.
 
 ## Live movement simulation
 
