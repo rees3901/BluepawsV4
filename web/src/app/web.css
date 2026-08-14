@@ -1245,6 +1245,7 @@ body.panel-open .map-loading {
 }
 
 .family-switcher,
+.family-name-form > div,
 .invite-form > div,
 .profile-form > div {
   display: flex;
@@ -1252,6 +1253,7 @@ body.panel-open .map-loading {
 }
 
 .family-switcher select,
+.family-name-form input,
 .invite-form input,
 .profile-form input {
   min-width: 0;
@@ -1265,16 +1267,25 @@ body.panel-open .map-loading {
 }
 
 .invite-form,
+.family-name-form,
 .profile-form {
   margin-top: 17px;
 }
 
 .invite-form label,
+.family-name-form label,
 .profile-form label {
   display: block;
   margin-bottom: 6px;
   font-size: 0.73rem;
   font-weight: 700;
+}
+
+.form-help {
+  display: block;
+  margin-top: 6px;
+  color: var(--text-secondary);
+  font-size: 0.68rem;
 }
 
 .invite-share-card {
@@ -1313,6 +1324,7 @@ body.panel-open .map-loading {
 .share-actions .btn-secondary,
 .account-header .btn-secondary,
 .family-switcher .btn-primary,
+.family-name-form .btn-primary,
 .invite-form .btn-primary,
 .profile-form .btn-primary {
   display: inline-flex;
@@ -1371,6 +1383,7 @@ body.panel-open .map-loading {
 @media (max-width: 620px) {
   .account-header,
   .family-switcher,
+  .family-name-form > div,
   .invite-form > div,
   .profile-form > div {
     align-items: stretch;

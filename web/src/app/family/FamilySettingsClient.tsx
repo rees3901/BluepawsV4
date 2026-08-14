@@ -5,7 +5,7 @@ import { canRemoveFamilyMember } from "@/lib/familyAccess";
 import { invitationDeliveryMessage } from "@/lib/invitationDelivery";
 import type { FamilyInvitation, FamilyMember } from "@/lib/familySettings";
 import type { FamilyMembership } from "@/lib/familySelection";
-import { createInvitationAction, removeFamilyMemberAction, revokeInvitationAction, setActiveFamilyAction, type InvitationActionState } from "./actions";
+import { createInvitationAction, removeFamilyMemberAction, revokeInvitationAction, setActiveFamilyAction, updateFamilyNameAction, type FamilyNameActionState, type InvitationActionState } from "./actions";
 
 const INITIAL_INVITATION_STATE: InvitationActionState = {
   error: null,
@@ -13,6 +13,11 @@ const INITIAL_INVITATION_STATE: InvitationActionState = {
   invitedEmail: null,
   expiresAt: null,
   emailDelivery: null,
+};
+
+const INITIAL_FAMILY_NAME_STATE: FamilyNameActionState = {
+  error: null,
+  success: null,
 };
 
 interface FamilySettingsClientProps {
@@ -25,6 +30,7 @@ interface FamilySettingsClientProps {
 
 export function FamilySettingsClient({ currentUserId, activeFamily, families, members, invitations }: FamilySettingsClientProps) {
   const [state, formAction, pending] = useActionState(createInvitationAction, INITIAL_INVITATION_STATE);
+  const [familyNameState, familyNameFormAction, familyNamePending] = useActionState(updateFamilyNameAction, INITIAL_FAMILY_NAME_STATE);
   const [shareMessage, setShareMessage] = useState<string | null>(null);
   const isOwner = activeFamily.role === "owner";
   const deliveryWarning = invitationDeliveryMessage(state.emailDelivery);
@@ -69,6 +75,19 @@ export function FamilySettingsClient({ currentUserId, activeFamily, families, me
           <span className="role-pill">{isOwner ? "Owner" : "Member"}</span>
         </div>
         <p className="settings-copy">Owners manage invitations. Members can use the normal tracker, map, position and trail features.</p>
+        {isOwner && (
+          <form action={familyNameFormAction} className="family-name-form" key={activeFamily.name}>
+            <input type="hidden" name="householdId" value={activeFamily.householdId} />
+            <label htmlFor="family-name">Family name</label>
+            <div>
+              <input id="family-name" name="familyName" type="text" autoComplete="organization" defaultValue={activeFamily.name} minLength={1} maxLength={80} required />
+              <button className="btn-primary" type="submit" disabled={familyNamePending}>{familyNamePending ? "Saving…" : "Save name"}</button>
+            </div>
+            <small className="form-help">This changes the shared display name only. Tracker associations and the Family ID stay the same.</small>
+            {familyNameState.error && <p className="settings-message error" role="alert">{familyNameState.error}</p>}
+            {familyNameState.success && <p className="settings-message success" role="status">{familyNameState.success}</p>}
+          </form>
+        )}
         <div className="member-list">
           {members.map((member) => (
             <article className="member-row" key={member.userId}>

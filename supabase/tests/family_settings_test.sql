@@ -1,5 +1,5 @@
 begin;
-select plan(9);
+select plan(14);
 
 select has_function(
   'public',
@@ -58,7 +58,45 @@ select is(
   'Family list includes the member email needed for account management'
 );
 
+select lives_ok(
+  $$update public.households set name = 'Renamed Settings Family' where id = '20000000-0000-0000-0000-000000000010'$$,
+  'an Owner can update the human-readable Family name'
+);
+
+reset role;
+select is(
+  (select name from public.households where id = '20000000-0000-0000-0000-000000000010'),
+  'Renamed Settings Family',
+  'the Owner update changes the Family display name'
+);
+select is(
+  (select id from public.households where name = 'Renamed Settings Family'),
+  '20000000-0000-0000-0000-000000000010'::uuid,
+  'renaming a Family preserves its UUID'
+);
+
+set local role authenticated;
 select set_config('request.jwt.claim.sub', '20000000-0000-0000-0000-000000000002', true);
+select is(
+  (
+    with updated as (
+      update public.households
+      set name = 'Member Rename Attempt'
+      where id = '20000000-0000-0000-0000-000000000010'
+      returning id
+    )
+    select count(*) from updated
+  ),
+  0::bigint,
+  'a Member cannot rename the Family'
+);
+select throws_ok(
+  $$update public.households set id = '20000000-0000-0000-0000-000000000099' where id = '20000000-0000-0000-0000-000000000010'$$,
+  '42501',
+  'permission denied for table households',
+  'client roles cannot change the Family UUID'
+);
+
 select is(
   (select count(*) from public.bluepaws_list_family_members('20000000-0000-0000-0000-000000000010')),
   2::bigint,
