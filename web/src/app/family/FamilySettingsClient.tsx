@@ -2,6 +2,7 @@
 
 import { useActionState, useMemo, useState } from "react";
 import { canRemoveFamilyMember } from "@/lib/familyAccess";
+import { invitationDeliveryMessage } from "@/lib/invitationDelivery";
 import type { FamilyInvitation, FamilyMember } from "@/lib/familySettings";
 import type { FamilyMembership } from "@/lib/familySelection";
 import { createInvitationAction, removeFamilyMemberAction, revokeInvitationAction, setActiveFamilyAction, type InvitationActionState } from "./actions";
@@ -26,6 +27,7 @@ export function FamilySettingsClient({ currentUserId, activeFamily, families, me
   const [state, formAction, pending] = useActionState(createInvitationAction, INITIAL_INVITATION_STATE);
   const [shareMessage, setShareMessage] = useState<string | null>(null);
   const isOwner = activeFamily.role === "owner";
+  const deliveryWarning = invitationDeliveryMessage(state.emailDelivery);
   const shareText = useMemo(() => state.invitationUrl
     ? `Join ${activeFamily.name} on Bluepaws: ${state.invitationUrl}`
     : "", [activeFamily.name, state.invitationUrl]);
@@ -46,7 +48,7 @@ export function FamilySettingsClient({ currentUserId, activeFamily, families, me
   }
 
   return (
-    <div className="settings-stack">
+    <div className="settings-stack family-settings-stack" id="family">
       {families.length > 1 && (
         <section className="settings-card">
           <div className="settings-card-heading">
@@ -103,7 +105,7 @@ export function FamilySettingsClient({ currentUserId, activeFamily, families, me
           {state.invitationUrl && (
             <div className="invite-share-card" role="status">
               <strong>{state.emailDelivery === "sent" ? `Invitation emailed to ${state.invitedEmail}` : `Invitation created for ${state.invitedEmail}`}</strong>
-              {state.emailDelivery === "manual" && <p className="invite-delivery-warning">Automatic email delivery is not configured or was temporarily unavailable. The invitation is still valid—share it using one of the options below.</p>}
+              {deliveryWarning && <p className="invite-delivery-warning">{deliveryWarning}</p>}
               <code>{state.invitationUrl}</code>
               <div className="share-actions">
                 <button className="btn-secondary" type="button" onClick={copyInvitation}>Copy</button>

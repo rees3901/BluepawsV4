@@ -37,9 +37,7 @@ export function AccountMenu({ email, familyName, familyRole, onSignOut }: Accoun
       {open && (
         <div className="account-menu" role="menu">
           <div className="account-menu-summary"><strong>{familyName ?? "Bluepaws"}</strong><small>{email ?? "Signed-in user"}</small>{familyRole && <span>{familyRole === "owner" ? "Family Owner" : "Family Member"}</span>}</div>
-          <Link href="/account" role="menuitem" onClick={() => setOpen(false)}>Account settings</Link>
-          <Link href="/family" role="menuitem" onClick={() => setOpen(false)}>Family &amp; members</Link>
-          <Link href="/account#billing" role="menuitem" onClick={() => setOpen(false)}>Billing</Link>
+          <Link href="/account" role="menuitem" onClick={() => setOpen(false)}>Open account</Link>
           <button type="button" role="menuitem" onClick={onSignOut}>Sign out</button>
         </div>
       )}

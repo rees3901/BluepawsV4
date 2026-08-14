@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { CANONICAL_SITE_URL } from "@/lib/authRedirect";
+import { classifyInvitationEmailFailure, type InvitationEmailDelivery } from "@/lib/invitationDelivery";
 import { createClient } from "@/lib/supabase/server";
 
 export interface InvitationActionState {
@@ -10,7 +11,7 @@ export interface InvitationActionState {
   invitationUrl: string | null;
   invitedEmail: string | null;
   expiresAt: string | null;
-  emailDelivery: "sent" | "manual" | null;
+  emailDelivery: InvitationEmailDelivery;
 }
 
 export async function createInvitationAction(
@@ -25,7 +26,7 @@ export async function createInvitationAction(
 
   const supabase = await createClient();
   const { data: identity } = await supabase.auth.getClaims();
-  if (!identity?.claims?.sub) redirect("/login?next=/family");
+  if (!identity?.claims?.sub) redirect("/login?next=/account");
 
   const { data, error } = await supabase.rpc("bluepaws_create_family_invitation", {
     requested_household_id: householdId,
@@ -43,7 +44,7 @@ export async function createInvitationAction(
   }
 
   const invitationId = typeof invitation.invitation_id === "string" ? invitation.invitation_id : null;
-  let emailDelivery: "sent" | "manual" = "manual";
+  let emailDelivery: InvitationEmailDelivery = "failed";
   if (invitationId) {
     const emailResult = await supabase.functions.invoke("send-family-invitation", {
       body: {
@@ -54,14 +55,17 @@ export async function createInvitationAction(
     if (!emailResult.error && emailResult.data?.sent === true) {
       emailDelivery = "sent";
     } else {
+      const providerCode = await readFunctionErrorCode(emailResult.error, emailResult.data);
+      emailDelivery = classifyInvitationEmailFailure(providerCode);
       console.error("Family invitation was created but its email was not delivered", {
         errorName: emailResult.error?.name ?? "provider_response",
         message: emailResult.error?.message ?? "Email provider did not confirm delivery",
+        providerCode,
       });
     }
   }
 
-  revalidatePath("/family");
+  revalidatePath("/account");
   return {
     error: null,
     invitationUrl: `${CANONICAL_SITE_URL}/join?token=${invitation.invitation_token}`,
@@ -77,23 +81,23 @@ export async function revokeInvitationAction(formData: FormData) {
 
   const supabase = await createClient();
   const { data: identity } = await supabase.auth.getClaims();
-  if (!identity?.claims?.sub) redirect("/login?next=/family");
+  if (!identity?.claims?.sub) redirect("/login?next=/account");
 
   const { error } = await supabase.rpc("bluepaws_revoke_family_invitation", {
     requested_invitation_id: invitationId,
   });
   if (error) console.error("Unable to revoke Family invitation", { code: error.code, message: error.message });
-  revalidatePath("/family");
+  revalidatePath("/account");
 }
 
 export async function removeFamilyMemberAction(formData: FormData) {
   const householdId = String(formData.get("householdId") ?? "");
   const memberUserId = String(formData.get("memberUserId") ?? "");
-  if (!householdId || !memberUserId) redirect("/family?error=remove");
+  if (!householdId || !memberUserId) redirect("/account?error=remove#family");
 
   const supabase = await createClient();
   const { data: identity } = await supabase.auth.getClaims();
-  if (!identity?.claims?.sub) redirect("/login?next=/family");
+  if (!identity?.claims?.sub) redirect("/login?next=/account");
 
   const { error } = await supabase.rpc("bluepaws_remove_family_member", {
     requested_household_id: householdId,
@@ -101,12 +105,11 @@ export async function removeFamilyMemberAction(formData: FormData) {
   });
   if (error) {
     console.error("Unable to remove Family member", { code: error.code, message: error.message });
-    redirect("/family?error=remove");
+    redirect("/account?error=remove#family");
   }
 
-  revalidatePath("/family");
   revalidatePath("/account");
-  redirect("/family?removed=1");
+  redirect("/account?removed=1#family");
 }
 
 export async function setActiveFamilyAction(formData: FormData) {
@@ -115,15 +118,30 @@ export async function setActiveFamilyAction(formData: FormData) {
 
   const supabase = await createClient();
   const { data: identity } = await supabase.auth.getClaims();
-  if (!identity?.claims?.sub) redirect("/login?next=/family");
+  if (!identity?.claims?.sub) redirect("/login?next=/account");
 
   const { error } = await supabase.rpc("bluepaws_set_active_family", {
     requested_household_id: householdId,
   });
   if (error) {
     console.error("Unable to change active Family", { code: error.code, message: error.message });
-    redirect("/family?error=switch");
+    redirect("/account?error=switch#family");
   }
 
   redirect("/");
+}
+
+async function readFunctionErrorCode(error: unknown, data: unknown) {
+  if (data && typeof data === "object" && typeof (data as { error?: unknown }).error === "string") {
+    return (data as { error: string }).error;
+  }
+
+  const context = error && typeof error === "object" ? (error as { context?: unknown }).context : null;
+  if (!(context instanceof Response)) return null;
+  try {
+    const body = await context.clone().json() as { error?: unknown };
+    return typeof body.error === "string" ? body.error : null;
+  } catch {
+    return null;
+  }
 }

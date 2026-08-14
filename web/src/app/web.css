@@ -1068,6 +1068,38 @@ body.panel-open .map-loading {
   text-decoration: none;
 }
 
+.account-section-nav {
+  display: flex;
+  max-width: 920px;
+  gap: 7px;
+  margin: 0 auto 16px;
+  padding: 6px;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-card);
+}
+
+.account-section-nav a {
+  display: inline-flex;
+  flex: 1 0 auto;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 12px;
+  border-radius: 7px;
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.account-section-nav a:hover,
+.account-section-nav a:focus-visible {
+  outline: 0;
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
 .settings-stack {
   display: grid;
   max-width: 920px;
@@ -1076,11 +1108,29 @@ body.panel-open .map-loading {
 }
 
 .settings-card {
+  scroll-margin-top: 18px;
   padding: 22px;
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--bg-card);
   box-shadow: var(--shadow);
+}
+
+.family-settings-stack {
+  width: 100%;
+  scroll-margin-top: 18px;
+}
+
+.account-profile-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.9fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.account-security-summary {
+  padding-left: 22px;
+  border-left: 1px solid var(--border);
 }
 
 .settings-card-heading {
@@ -1343,6 +1393,17 @@ body.panel-open .map-loading {
   .account-detail-list > div {
     grid-template-columns: 1fr;
     gap: 3px;
+  }
+
+  .account-profile-grid {
+    grid-template-columns: 1fr;
+    gap: 18px;
+  }
+
+  .account-security-summary {
+    padding: 0;
+    border-top: 1px solid var(--border);
+    border-left: 0;
   }
 }
 

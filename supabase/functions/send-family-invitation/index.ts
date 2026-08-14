@@ -97,6 +97,10 @@ Deno.serve(async (request: Request) => {
     const resendApiKey = Deno.env.get("RESEND_API_KEY");
     const emailFrom = Deno.env.get("BLUEPAWS_EMAIL_FROM");
     if (!resendApiKey || !emailFrom) {
+      console.error("Family invitation email is not configured", {
+        requestId,
+        missing: [!resendApiKey ? "RESEND_API_KEY" : null, !emailFrom ? "BLUEPAWS_EMAIL_FROM" : null].filter(Boolean),
+      });
       return json({ error: "email_not_configured", request_id: requestId }, 503);
     }
 
@@ -118,7 +122,11 @@ Deno.serve(async (request: Request) => {
       }),
     });
     if (!emailResponse.ok) {
-      console.error("Family invitation email provider rejected request", { requestId, status: emailResponse.status });
+      console.error("Family invitation email provider rejected request", {
+        requestId,
+        providerRequestId: emailResponse.headers.get("x-request-id"),
+        status: emailResponse.status,
+      });
       return json({ error: "email_delivery_failed", request_id: requestId }, 502);
     }
 

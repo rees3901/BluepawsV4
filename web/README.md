@@ -104,7 +104,8 @@ Realtime channel version. Future telemetry stops going to the old channel;
 remaining Members reconnect to the new authorized topic while the removed
 person cannot join it.
 
-Owners create an email-bound, one-time link on `/family`. The raw 256-bit token
+Owners create an email-bound, one-time link in the Family section of `/account`.
+The raw 256-bit token
 is returned only when the invitation is created; Postgres stores only its
 SHA-256 hash. Opening the link moves it into a seven-day, `HttpOnly`,
 `SameSite=Lax` cookie, and the signed-in verified email must match before the
@@ -133,7 +134,8 @@ RLS, derives the recipient and Family name from Postgres rather than the
 request, verifies the raw token against its stored hash, rate-limits new
 Family invitation emails, and uses the invitation ID as the provider's
 idempotency key. If delivery is unavailable, the invitation remains valid and
-the interface clearly offers the manual sharing options.
+the interface clearly distinguishes missing provider configuration, rate
+limiting and delivery failure while offering the manual sharing options.
 
 Before deploying the Family settings application code, apply its database
 migration from the repository root:
