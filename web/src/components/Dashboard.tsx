@@ -11,6 +11,7 @@ import { followedDeviceAfterAction } from "@/lib/followState";
 import { createRealtimeTelemetrySource, loadDeviceTrail } from "@/lib/realtimeTelemetry";
 import { createClient } from "@/lib/supabase/client";
 import { getTutorialTelemetrySource } from "@/lib/telemetry";
+import { resolveTutorialStartup } from "@/lib/tutorialMode";
 import type { FamilyRole } from "@/lib/familySelection";
 import type { DeviceAction, DeviceAvatar, MapCommand, TelemetryConnectionStatus, TelemetryDevice, TrailPoint } from "@/types/telemetry";
 
@@ -111,11 +112,24 @@ export function Dashboard({ householdId, initialLiveDevices, liveTelemetryError,
     const restorePreferences = window.setTimeout(() => {
       try {
         setDarkMode(localStorage.getItem("bp_theme") !== "light");
-        const tutorialEnabled = localStorage.getItem(TUTORIAL_MODE_STORAGE_KEY) === "true";
-        const tutorialComplete = localStorage.getItem(TUTORIAL_COMPLETE_STORAGE_KEY) === "true";
-        setTutorialMode(tutorialEnabled);
-        setTutorialOpen(tutorialEnabled && !tutorialComplete);
-        setTutorialPromptOpen(!tutorialEnabled && !tutorialComplete && localStorage.getItem(TUTORIAL_PROMPT_STORAGE_KEY) !== "true");
+        const currentUrl = new URL(window.location.href);
+        const firstVisitTutorial = currentUrl.searchParams.get("tutorial") === "1";
+        if (firstVisitTutorial) {
+          localStorage.setItem(TUTORIAL_MODE_STORAGE_KEY, "true");
+          localStorage.removeItem(TUTORIAL_COMPLETE_STORAGE_KEY);
+          localStorage.setItem(TUTORIAL_PROMPT_STORAGE_KEY, "true");
+          currentUrl.searchParams.delete("tutorial");
+          window.history.replaceState(null, "", `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`);
+        }
+        const startup = resolveTutorialStartup(
+          firstVisitTutorial,
+          localStorage.getItem(TUTORIAL_MODE_STORAGE_KEY) === "true",
+          localStorage.getItem(TUTORIAL_COMPLETE_STORAGE_KEY) === "true",
+          localStorage.getItem(TUTORIAL_PROMPT_STORAGE_KEY) === "true",
+        );
+        setTutorialMode(startup.enabled);
+        setTutorialOpen(startup.open);
+        setTutorialPromptOpen(startup.prompt);
       } catch { /* localStorage can be unavailable in privacy modes */ }
       setPreferencesReady(true);
     }, 0);

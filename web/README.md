@@ -96,9 +96,32 @@ Owners create an email-bound, one-time link on `/family`. The raw 256-bit token
 is returned only when the invitation is created; Postgres stores only its
 SHA-256 hash. Opening the link moves it into a seven-day, `HttpOnly`,
 `SameSite=Lax` cookie, and the signed-in verified email must match before the
-invitation can even be previewed. Links can be copied or shared through the
-browser, WhatsApp, SMS or the user's email client. Automatic transactional
-email delivery will be added when a production mail provider is configured.
+invitation can even be previewed. The authenticated `send-family-invitation`
+Edge Function emails the link through Resend, while Copy, browser Share,
+WhatsApp, SMS and the user's email client remain available as fallbacks.
+
+Automatic delivery requires a verified Resend sending domain and a
+sending-only API key. Store these values only in Supabase Edge Function
+secrets; never add them to Vercel or a `NEXT_PUBLIC_` variable:
+
+```powershell
+$env:BLUEPAWS_RESEND_KEY = Read-Host "Paste the Resend sending-only API key"
+npx --yes supabase@latest secrets set --project-ref ykcdaonkvwemedotdpdr `
+  "RESEND_API_KEY=$env:BLUEPAWS_RESEND_KEY" `
+  "BLUEPAWS_EMAIL_FROM=Bluepaws <invites@your-verified-domain.example>" `
+  "BLUEPAWS_SITE_URL=https://bluepaws-v4-web.vercel.app"
+Remove-Item Env:BLUEPAWS_RESEND_KEY
+
+npx --yes supabase@latest functions deploy send-family-invitation `
+  --project-ref ykcdaonkvwemedotdpdr --use-api
+```
+
+The Function keeps JWT verification enabled, rechecks Owner access through
+RLS, derives the recipient and Family name from Postgres rather than the
+request, verifies the raw token against its stored hash, rate-limits new
+Family invitation emails, and uses the invitation ID as the provider's
+idempotency key. If delivery is unavailable, the invitation remains valid and
+the interface clearly offers the manual sharing options.
 
 Before deploying the Family settings application code, apply its database
 migration from the repository root:

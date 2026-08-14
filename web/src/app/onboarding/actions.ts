@@ -39,5 +39,5 @@ export async function createFamilyAction(
     return { error: "Your Family could not be created. Please try again." };
   }
 
-  redirect("/");
+  redirect("/?tutorial=1");
 }
