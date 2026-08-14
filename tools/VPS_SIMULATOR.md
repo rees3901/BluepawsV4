@@ -37,6 +37,23 @@ chmod 600 tools/vps_devices.json
 The real file is Git-ignored. `vps_devices.example.json` documents its format
 without containing valid secrets. Existing flat device arrays remain supported.
 
+To generate a fresh bundle with cryptographically secure bearer tokens and
+32-byte HMAC keys, plus matching one-time Supabase provisioning SQL:
+
+```bash
+python3 tools/generate_tlv_credentials.py \
+  --count 5 \
+  --start-device-id 1001 \
+  --household-id '<TEST-HOUSEHOLD-UUID>' \
+  --gateway-guid16 0016
+```
+
+The command refuses to overwrite either output unless `--force` is explicitly
+provided. Both outputs are Git-ignored and created with owner-only permissions
+where the operating system supports them. The SQL contains bearer hashes rather
+than bearer plaintext, but necessarily carries each HMAC once into Supabase
+Vault; run it once and securely remove it afterward.
+
 ## Run a bounded test
 
 From the repository root:

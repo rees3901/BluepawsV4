@@ -51,8 +51,43 @@ selected v1.1 and custom/unknown TLV editors. Response-table columns have useful
 starting widths and remain interactively resizable and movable.
 
 The manual send controls default to 5 packets at 5-second intervals with a
-15-second HTTP timeout. Cookbook recipes replace the count and interval with
-their own test-specific values while active.
+15-second HTTP timeout. In fleet mode this means five update cycles per checked
+device, not five requests in total. Devices in one cycle are sent together and
+the configured interval is applied between cycles. Cookbook recipes replace the
+count and interval with their own test-specific values while active.
+
+## Multi-device fleet mode
+
+Load a typed credentials bundle, enable **Fleet mode**, and check the collars to
+include. Every cycle then builds one packet per selected device using that
+device's own 32-byte HMAC key. LTE requests also use the corresponding device
+bearer; LoRa requests share the selected hub bearer while retaining independent
+collar HMACs. The first device keeps the entered starting coordinate and the
+remaining markers are fanned out by small 25 m steps so they are visible on the
+map immediately.
+
+Each collar maintains independent sequence, movement and measurement state
+between successful runs. The response log includes a Device column. **Select
+all** and **Select none** make larger bundles manageable. Single-device mode
+continues to use the currently selected credential and editable packet fields.
+
+Generate a private five-device bundle and its one-time Supabase provisioning SQL
+from the repository root:
+
+```powershell
+py -3.11 .\tools\generate_tlv_credentials.py `
+  --count 5 `
+  --start-device-id 1001 `
+  --household-id <TEST-HOUSEHOLD-UUID> `
+  --gateway-guid16 0016
+```
+
+Both generated files are Git-ignored. Run `tools/vps_devices.provision.sql` once
+in the Supabase SQL Editor, then securely delete the SQL file; it contains the
+one-time plaintext HMAC values needed to populate Vault. Keep
+`tools/vps_devices.json` private for the PySide/VPS simulator and hardware
+provisioning. Use a new `--key-version` for deliberate HMAC rotation rather than
+rerunning an existing version.
 
 The optional TLV container uses a fully muted background, border, nested panels
 and table when unchecked, making its inactive state visually unambiguous.

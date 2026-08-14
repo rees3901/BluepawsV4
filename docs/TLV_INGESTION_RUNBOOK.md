@@ -67,7 +67,27 @@ All six values must be `true`.
 ## 3. Provision a collar
 
 The LTE wrapper uses the device's existing bearer token. The binary packet
-also needs its own random 32-byte HMAC key. Generate the HMAC key locally:
+also needs its own random 32-byte HMAC key.
+
+For a fleet of test collars, prefer the repository generator. It creates a
+private simulator JSON bundle and matching one-time SQL for device rows, hashed
+LTE bearer credentials, and encrypted Vault HMAC secrets:
+
+```bash
+python3 tools/generate_tlv_credentials.py \
+  --count 5 \
+  --start-device-id 1001 \
+  --household-id '<TEST-HOUSEHOLD-UUID>' \
+  --gateway-guid16 0016
+```
+
+Run the generated `tools/vps_devices.provision.sql` once in the Supabase SQL
+Editor. Then securely delete it because it temporarily contains the plaintext
+HMAC values passed to Vault. Keep `tools/vps_devices.json` private and off Git.
+The command refuses accidental overwrite; key rotation must use a new
+`--key-version` and a deliberate rollout.
+
+For one manual collar, generate only its HMAC key locally:
 
 ```bash
 python3 -c "import base64,secrets; print(base64.b64encode(secrets.token_bytes(32)).decode())"
