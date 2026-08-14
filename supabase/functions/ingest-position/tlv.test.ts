@@ -63,6 +63,23 @@ test("rejects wrappers whose path metadata disagrees", () => {
   }), "transport_mismatch");
 });
 
+test("recognizes a valid direct cellular wrapper", () => {
+  const parsed = parseTlvRequest({
+    ingest_path: "cellular_direct",
+    link_type: "lte",
+    link_rssi_dbm: -103,
+    link_snr_db: 7.5,
+    cell_rsrp_dbm: -101,
+    cell_rsrq_db: -12,
+    cell_sinr_db: 9,
+    payload_b64: bytesToBase64(buildPacket()),
+  });
+
+  assert.equal(parsed.metadata.ingestPath, "cellular_direct");
+  assert.equal(parsed.metadata.linkType, "lte");
+  assert.equal(parsed.metadata.gatewayGuid16, null);
+});
+
 function buildPacket(tlvs = selectedTlvs()) {
   const body = new Uint8Array(32 + tlvs.length);
   const view = new DataView(body.buffer);

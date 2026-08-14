@@ -239,6 +239,8 @@ async function handleTlv(
     observation_id: row.observation_id,
     position_updated: row.position_id !== null,
     payload_hash: payloadHash,
+    ingest_path: metadata.ingestPath,
+    link_type: metadata.linkType,
     received_at: row.received_at,
     request_id: requestId,
   }, row.duplicate ? 200 : 201);

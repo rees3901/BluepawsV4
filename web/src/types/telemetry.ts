@@ -1,6 +1,7 @@
 export type CollarStatus = "Home" | "Out" | "Lost" | "Error";
 export type PowerProfile = "Normal" | "PowerSave" | "Active" | "Active Find" | "Emergency Lost";
 export type TelemetryError = "None" | "GPS" | "RF" | "Cellular" | "Module";
+export type IngestPath = "cellular_direct" | "lora_hub";
 
 export interface TelemetryDevice {
   id: number;
@@ -18,7 +19,7 @@ export interface TelemetryDevice {
   rssi: number | null;
   snr: number | null;
   bleHome: boolean;
-  cellular: boolean;
+  ingestPath: IngestPath | null;
   lastUpdate: number;
   source?: string | null;
 }

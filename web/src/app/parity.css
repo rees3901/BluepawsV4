@@ -1208,6 +1208,36 @@ body.light .leaflet-control-scale-line {
     letter-spacing: 0.02em;
 }
 
+.transport-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 22px;
+    height: 16px;
+    margin-left: 3px;
+    padding: 0 4px;
+    border: 1px solid currentColor;
+    border-radius: 5px;
+    font-size: 0.58rem;
+    font-weight: 800;
+    line-height: 1;
+    letter-spacing: 0.025em;
+    background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.transport-cellular {
+    color: #38bdf8;
+}
+
+.transport-lora {
+    color: #a78bfa;
+}
+
+.transport-unknown {
+    color: var(--text-secondary);
+    opacity: 0.65;
+}
+
 /* ── Scrollbar ── */
 #deviceCards::-webkit-scrollbar {
     width: 4px;

@@ -47,12 +47,22 @@ select
   to_regclass('public.observations') is not null as observations_exists,
   to_regclass('public.observation_paths') is not null as paths_exists,
   to_regclass('public.device_hmac_keys') is not null as keys_exist,
+  exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'positions'
+      and column_name = 'ingest_path'
+  ) as position_path_exists,
+  exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public' and table_name = 'device_latest_positions'
+      and column_name = 'ingest_path'
+  ) as latest_path_exists,
   to_regprocedure(
     'public.ingest_tlv_observation(smallint,integer,integer,bigint,smallint,smallint,smallint,smallint,boolean,double precision,double precision,integer,integer,integer,integer,jsonb,text,text,text,text,text,text,integer,bigint,double precision,double precision,double precision,double precision,double precision)'
   ) is not null as rpc_exists;
 ```
 
-All four values must be `true`.
+All six values must be `true`.
 
 ## 3. Provision a collar
 
@@ -206,6 +216,7 @@ select
   battery_mv,
   status_code,
   power_profile_code,
+  ingest_path,
   link_type
 from public.device_latest_positions
 order by recorded_at desc;

@@ -4,11 +4,11 @@ type TutorialTelemetryDevice = TelemetryDevice & { rssi: number; snr: number };
 type SeedDevice = Omit<TutorialTelemetryDevice, "seq" | "time" | "lastUpdate" | "error">;
 
 const seedDevices: SeedDevice[] = [
-  { id: 0x0001, name: "Whiskers", lat: 51.5055, lon: -0.09, status: "Out", profile: "Normal", batt: 4050, rssi: -86, snr: 7.4, hasGps: true, bleHome: false, cellular: false },
-  { id: 0x0002, name: "Mittens", lat: 51.504, lon: -0.088, status: "Home", profile: "PowerSave", batt: 3900, rssi: -103, snr: 8.1, hasGps: true, bleHome: true, cellular: false },
-  { id: 0x0003, name: "Shadow", lat: 51.507, lon: -0.092, status: "Out", profile: "Active", batt: 3750, rssi: -98, snr: 4.7, hasGps: true, bleHome: false, cellular: false },
-  { id: 0x0004, name: "Patches", lat: 51.503, lon: -0.086, status: "Out", profile: "Normal", batt: 4100, rssi: -108, snr: 2.6, hasGps: true, bleHome: false, cellular: false },
-  { id: 0x0005, name: "Luna", lat: 51.5062, lon: -0.094, status: "Home", profile: "Normal", batt: 3500, rssi: -82, snr: 9.2, hasGps: true, bleHome: true, cellular: false },
+  { id: 0x0001, name: "Whiskers", lat: 51.5055, lon: -0.09, status: "Out", profile: "Normal", batt: 4050, rssi: -86, snr: 7.4, hasGps: true, bleHome: false, ingestPath: "lora_hub" },
+  { id: 0x0002, name: "Mittens", lat: 51.504, lon: -0.088, status: "Home", profile: "PowerSave", batt: 3900, rssi: -103, snr: 8.1, hasGps: true, bleHome: true, ingestPath: "cellular_direct" },
+  { id: 0x0003, name: "Shadow", lat: 51.507, lon: -0.092, status: "Out", profile: "Active", batt: 3750, rssi: -98, snr: 4.7, hasGps: true, bleHome: false, ingestPath: "lora_hub" },
+  { id: 0x0004, name: "Patches", lat: 51.503, lon: -0.086, status: "Out", profile: "Normal", batt: 4100, rssi: -108, snr: 2.6, hasGps: true, bleHome: false, ingestPath: "lora_hub" },
+  { id: 0x0005, name: "Luna", lat: 51.5062, lon: -0.094, status: "Home", profile: "Normal", batt: 3500, rssi: -82, snr: 9.2, hasGps: true, bleHome: true, ingestPath: "cellular_direct" },
 ];
 
 function randomDrift() {
