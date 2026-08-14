@@ -12,7 +12,7 @@ import re
 import sys
 import threading
 import time
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote
@@ -20,8 +20,9 @@ from urllib.parse import unquote
 try:
     import PySide6
     from PySide6.QtCore import QObject, Qt, QTimer, QUrl, QUrlQuery, Signal
-    from PySide6.QtGui import QCloseEvent, QDesktopServices, QFont
+    from PySide6.QtGui import QBrush, QCloseEvent, QColor, QDesktopServices, QFont
     from PySide6.QtWidgets import (
+        QAbstractItemView,
         QApplication,
         QCheckBox,
         QComboBox,
@@ -54,6 +55,7 @@ except ModuleNotFoundError as error:
 from tlv_packet_codec import (
     DEFAULT_URL,
     FLAG_MASKS,
+    MAX_TLV_SIZE,
     POWER_PROFILE_CODES,
     STATUS_CODES,
     TX_REASON_CODES,
@@ -101,6 +103,143 @@ TRANSPORTS = {
 EARTH_RADIUS_METRES = 6_371_000.0
 EARTH_METRES_PER_DEGREE = math.tau * EARTH_RADIUS_METRES / 360.0
 LIVE_PREVIEW_DELAY_MS = 250
+DEFAULT_MOVEMENT_METRES = 200
+MAX_MOVEMENT_METRES = 300
+RESPONSE_HEADERS = ("Time", "#", "HTTP", "Result", "Seq", "ms", "Message")
+
+RESULT_STYLES = {
+    "success": ("#0B3A31", "#C3FFEB"),
+    "redirect": ("#183A55", "#D6EEFF"),
+    "auth": ("#38264A", "#F0DBFF"),
+    "client": ("#473716", "#FFE7A3"),
+    "server": ("#4A2028", "#FFD7DE"),
+    "network": ("#3B2D34", "#F0DCE5"),
+    "unknown": ("#24374A", "#D9E9F7"),
+}
+
+
+@dataclass(frozen=True)
+class TestRecipe:
+    description: str
+    count: int
+    interval: float
+    strategy: str = "all_valid"
+    tlv_mode: str = "none"
+    transport: str = "cellular_direct"
+    movement_metres: int | None = None
+
+
+TEST_RECIPES = {
+    "Basic sunny day": TestRecipe(
+        "10 valid LTE header-only packets with gentle live movement and measurement variation.",
+        10,
+        2.0,
+        movement_metres=50,
+    ),
+    "Moving pet": TestRecipe(
+        "12 valid LTE packets with a bounded 200 m random walk.",
+        12,
+        2.0,
+        movement_metres=200,
+    ),
+    "Rich known TLVs": TestRecipe(
+        "10 valid packets carrying every selected v1.1 known TLV.",
+        10,
+        2.0,
+        tlv_mode="full",
+        movement_metres=50,
+    ),
+    "Maximum TLV budget": TestRecipe(
+        "5 valid packets using the complete 24-byte optional TLV budget.",
+        5,
+        2.0,
+        tlv_mode="maximum",
+    ),
+    "Random TLV assortment": TestRecipe(
+        "10 valid packets with a different bounded selection of known and unknown TLVs.",
+        10,
+        2.0,
+        tlv_mode="random",
+        movement_metres=100,
+    ),
+    "Bad day — only 2 of 10 valid": TestRecipe(
+        "Exactly 2 valid packets and 8 packets with deliberately corrupt HMAC tags.",
+        10,
+        1.0,
+        strategy="bad_day",
+        movement_metres=100,
+    ),
+    "Mixed bag": TestRecipe(
+        "10 packets mixing valid/corrupt HMACs and randomized optional TLVs.",
+        10,
+        1.0,
+        strategy="mixed",
+        tlv_mode="random",
+        movement_metres=150,
+    ),
+    "Fully randomized": TestRecipe(
+        "12 bounded random packets mixing authentication outcomes, telemetry and TLVs.",
+        12,
+        1.0,
+        strategy="randomized",
+        tlv_mode="random",
+        movement_metres=300,
+    ),
+    "Duplicate retry storm": TestRecipe(
+        "Send the same valid packet 6 times to exercise idempotent retry handling.",
+        6,
+        1.0,
+        strategy="duplicates",
+    ),
+    "Sequence rollover": TestRecipe(
+        "5 valid packets beginning at sequence 65533 and wrapping through zero.",
+        5,
+        1.0,
+        strategy="rollover",
+        movement_metres=25,
+    ),
+    "Out-of-order delivery": TestRecipe(
+        "6 valid packets with sequence 3 delivered before sequence 2.",
+        6,
+        1.0,
+        strategy="out_of_order",
+        movement_metres=75,
+    ),
+    "LoRa relay sunny day": TestRecipe(
+        "10 valid header-only packets relayed through the selected provisioned gateway.",
+        10,
+        2.0,
+        transport="lora_hub",
+        movement_metres=50,
+    ),
+    "LTE radio fade": TestRecipe(
+        "10 valid packets whose LTE signal measurements progressively deteriorate.",
+        10,
+        2.0,
+        strategy="radio_fade",
+    ),
+    "HMAC rejection only": TestRecipe(
+        "5 packets with deliberately corrupt HMAC tags; none should be accepted.",
+        5,
+        1.0,
+        strategy="all_corrupt",
+    ),
+}
+
+LIVE_INTEGER_VARIATION = {
+    "battery_mv": (3, 0, 65_535),
+    "accuracy_m": (2, 0, 65_535),
+    "fix_age_s": (1, 0, 65_534),
+    "satellite_count": (1, 0, 254),
+    "activity_score": (2, 0, 255),
+}
+LIVE_RADIO_VARIATION = {
+    "link_rssi_dbm": (2.0, -200.0, 0.0, 1),
+    "link_snr_db": (0.5, -100.0, 100.0, 1),
+    "cell_rsrp_dbm": (2.0, -200.0, 0.0, 1),
+    "cell_rsrq_db": (0.5, -100.0, 0.0, 1),
+    "cell_sinr_db": (0.5, -100.0, 100.0, 1),
+}
 
 
 def parse_coordinates(value: str) -> tuple[float, float]:
@@ -131,8 +270,10 @@ def drift_coordinates(
     rng: Any = random,
 ) -> tuple[float, float]:
     """Return one uniformly distributed random-walk step within the radius."""
-    if not 0 < maximum_metres <= 10_000:
-        raise ValueError("maximum drift must be greater than 0 and at most 10000 metres")
+    if not 0 < maximum_metres <= MAX_MOVEMENT_METRES:
+        raise ValueError(
+            f"maximum drift must be greater than 0 and at most {MAX_MOVEMENT_METRES} metres"
+        )
     radius = maximum_metres * math.sqrt(rng.random())
     angle = rng.random() * math.tau
     latitude_delta = (radius * math.cos(angle)) / EARTH_METRES_PER_DEGREE
@@ -143,6 +284,34 @@ def drift_coordinates(
     next_latitude = max(-90.0, min(90.0, latitude + latitude_delta))
     next_longitude = ((longitude + longitude_delta + 180.0) % 360.0) - 180.0
     return next_latitude, next_longitude
+
+
+def vary_integer(
+    value: int,
+    maximum_delta: int,
+    minimum: int,
+    maximum: int,
+    *,
+    rng: Any = random,
+) -> int:
+    """Apply bounded integer measurement noise around a configured baseline."""
+    return max(minimum, min(maximum, value + rng.randint(-maximum_delta, maximum_delta)))
+
+
+def vary_float(
+    value: float | None,
+    maximum_delta: float,
+    minimum: float,
+    maximum: float,
+    decimals: int,
+    *,
+    rng: Any = random,
+) -> float | None:
+    """Apply bounded floating-point measurement noise, preserving omitted fields."""
+    if value is None:
+        return None
+    varied = max(minimum, min(maximum, value + rng.uniform(-maximum_delta, maximum_delta)))
+    return round(varied, decimals)
 
 
 STYLESHEET = f"""
@@ -188,6 +357,22 @@ QGroupBox::title {{
     left: 12px;
     padding: 0 5px;
 }}
+QGroupBox#optionalTlvGroup:unchecked,
+QGroupBox#recipeGroup:unchecked {{
+    background: #05111C;
+    border-color: #102A3F;
+    color: #587086;
+}}
+QGroupBox#optionalTlvGroup:unchecked QGroupBox {{
+    background: #061522;
+    border-color: #102A3F;
+    color: #587086;
+}}
+QGroupBox#optionalTlvGroup:unchecked QTableWidget {{
+    background: #04101A;
+    border-color: #102A3F;
+    color: #587086;
+}}
 QLineEdit, QComboBox, QPlainTextEdit, QTableWidget {{
     background: {SURFACE_RAISED};
     border: 1px solid {BORDER};
@@ -197,6 +382,25 @@ QLineEdit, QComboBox, QPlainTextEdit, QTableWidget {{
 }}
 QLineEdit:focus, QComboBox:focus, QPlainTextEdit:focus {{
     border: 1px solid {BLUE};
+}}
+QTableWidget {{
+    gridline-color: {BORDER};
+    padding: 0;
+}}
+QTableWidget::item {{
+    padding: 5px;
+}}
+QTableWidget::item:selected {{
+    border: 1px solid {BLUE};
+}}
+QHeaderView::section {{
+    background: {NAVY};
+    color: {MUTED};
+    border: 0;
+    border-right: 1px solid {BORDER};
+    border-bottom: 1px solid {BORDER};
+    padding: 6px;
+    font-weight: 600;
 }}
 QLineEdit:disabled {{
     background: #091B2A;
@@ -277,7 +481,7 @@ def secondary_button(text: str) -> QPushButton:
 
 
 class WorkerSignals(QObject):
-    log_line = Signal(str)
+    response = Signal(object)
     finished = Signal(int, int, object)
 
 
@@ -305,7 +509,7 @@ class BluepawsTlvConsole(QMainWindow):
         self._auto_preview_timer.setInterval(LIVE_PREVIEW_DELAY_MS)
         self._auto_preview_timer.timeout.connect(self.preview_wrapper)
         self.worker_signals = WorkerSignals()
-        self.worker_signals.log_line.connect(self._append_log)
+        self.worker_signals.response.connect(self._append_response)
         self.worker_signals.finished.connect(self._send_finished)
         self._build_ui()
         self._connect_live_previews()
@@ -330,10 +534,10 @@ class BluepawsTlvConsole(QMainWindow):
         heading.addWidget(subtitle)
         outer.addLayout(heading)
 
-        tabs = QTabWidget()
-        tabs.addTab(self._packet_tab(), "1. TLV Packet Builder")
-        tabs.addTab(self._wrapper_tab(), "2. HTTPS Wrapper & Send")
-        outer.addWidget(tabs, 1)
+        self.tabs = QTabWidget()
+        self.tabs.addTab(self._packet_tab(), "1. TLV Packet Builder")
+        self.tabs.addTab(self._wrapper_tab(), "2. HTTPS Wrapper & Send")
+        outer.addWidget(self.tabs, 1)
         self.setCentralWidget(central)
 
     def _packet_tab(self) -> QWidget:
@@ -347,6 +551,31 @@ class BluepawsTlvConsole(QMainWindow):
         grid.setVerticalSpacing(8)
         grid.setColumnStretch(0, 1)
         grid.setColumnStretch(1, 1)
+
+        self.cookbook_group = QGroupBox("Use test cookbook")
+        self.cookbook_group.setObjectName("recipeGroup")
+        self.cookbook_group.setCheckable(True)
+        self.cookbook_group.setChecked(False)
+        self.cookbook_group.setToolTip(
+            "Enable a predefined multi-packet test. Manual packet configuration remains "
+            "the default when this section is off."
+        )
+        cookbook_layout = QGridLayout(self.cookbook_group)
+        cookbook_layout.addWidget(QLabel("Recipe"), 0, 0)
+        self.recipe_combo = combo(list(TEST_RECIPES))
+        self.recipe_combo.currentTextChanged.connect(self._recipe_changed)
+        cookbook_layout.addWidget(self.recipe_combo, 0, 1)
+        self.run_recipe_button = QPushButton("Run selected recipe")
+        self.run_recipe_button.clicked.connect(self._run_recipe)
+        cookbook_layout.addWidget(self.run_recipe_button, 0, 2)
+        self.recipe_summary = QLabel()
+        self.recipe_summary.setWordWrap(True)
+        self.recipe_summary.setStyleSheet(f"color: {MUTED};")
+        cookbook_layout.addWidget(self.recipe_summary, 1, 0, 1, 3)
+        cookbook_layout.setColumnStretch(1, 1)
+        self.cookbook_group.toggled.connect(self._recipe_enabled)
+        grid.addWidget(self.cookbook_group, 0, 0, 1, 2)
+        self._update_recipe_summary()
 
         credentials = QGroupBox("Provisioned test credentials")
         credential_row = QGridLayout(credentials)
@@ -370,7 +599,7 @@ class BluepawsTlvConsole(QMainWindow):
         credential_row.addWidget(credential_note, 1, 0, 1, 5)
         credential_row.setColumnStretch(2, 1)
         credential_row.setColumnStretch(4, 1)
-        grid.addWidget(credentials, 0, 0, 1, 2)
+        grid.addWidget(credentials, 1, 0, 1, 2)
 
         header = QGroupBox("Fixed 32-byte header")
         header_form = QFormLayout(header)
@@ -384,17 +613,17 @@ class BluepawsTlvConsole(QMainWindow):
         self.reason = combo(REASON_CHOICES)
         header_form.addRow("Protocol version", protocol)
         header_form.addRow("Device ID (1–65535)", self.device_id)
-        header_form.addRow("Message sequence", self.sequence)
+        header_form.addRow("Message sequence  ↗", self.sequence)
         timestamp_row = QHBoxLayout()
         timestamp_row.addWidget(self.timestamp, 1)
         timestamp_now = QPushButton("Now")
         timestamp_now.clicked.connect(self._set_now)
         timestamp_row.addWidget(timestamp_now)
-        header_form.addRow("Unix timestamp", timestamp_row)
+        header_form.addRow("Unix timestamp  ↗", timestamp_row)
         header_form.addRow("Status", self.status)
         header_form.addRow("Power profile", self.profile)
         header_form.addRow("TX reason", self.reason)
-        grid.addWidget(header, 1, 0)
+        grid.addWidget(header, 2, 0)
 
         position = QGroupBox("Position and telemetry")
         position_form = QFormLayout(position)
@@ -405,15 +634,22 @@ class BluepawsTlvConsole(QMainWindow):
         self.fix_age_s = line_edit("0")
         self.satellites = line_edit("9")
         for label, field in (
-            ("Latitude", self.latitude),
-            ("Longitude", self.longitude),
-            ("Battery (mV)", self.battery_mv),
-            ("Accuracy (m)", self.accuracy_m),
-            ("Fix age (s)", self.fix_age_s),
-            ("Satellite count", self.satellites),
+            ("Latitude  ±", self.latitude),
+            ("Longitude  ±", self.longitude),
+            ("Battery (mV)  ±3", self.battery_mv),
+            ("Accuracy (m)  ±2", self.accuracy_m),
+            ("Fix age (s)  ±1", self.fix_age_s),
+            ("Satellite count  ±1", self.satellites),
         ):
             position_form.addRow(label, field)
-        position_form.addRow(QLabel("Use fix age 65535 or satellites 255 for unknown."))
+        variation_note = QLabel(
+            "Live markers: ↗ advances • ± bounded variation after the first packet. "
+            "Location varies only with movement enabled."
+        )
+        variation_note.setStyleSheet(f"color: {MUTED};")
+        variation_note.setWordWrap(True)
+        position_form.addRow(variation_note)
+        position_form.addRow(QLabel("Use fix age 65535 or satellites 255 for unknown; sentinels do not vary."))
         map_tools = QHBoxLayout()
         open_maps = QPushButton("Open Google Maps…")
         open_maps.clicked.connect(self._open_google_maps)
@@ -430,20 +666,22 @@ class BluepawsTlvConsole(QMainWindow):
 
         drift_row = QHBoxLayout()
         self.drift_enabled = QCheckBox("Random-walk movement")
+        self.drift_enabled.setChecked(True)
         self.drift_enabled.setToolTip(
-            "Move each packet after the first by a random distance within this radius."
+            "Move each packet after the first by a random distance within this radius "
+            f"(maximum {MAX_MOVEMENT_METRES} metres)."
         )
-        self.drift_enabled.toggled.connect(self._drift_mode_changed)
-        self.maximum_drift = line_edit("100")
+        self.maximum_drift = line_edit(str(DEFAULT_MOVEMENT_METRES))
         self.maximum_drift.setMaximumWidth(70)
-        self.maximum_drift.setEnabled(False)
+        self.maximum_drift.setEnabled(True)
+        self.drift_enabled.toggled.connect(self._drift_mode_changed)
         drift_row.addWidget(self.drift_enabled)
         drift_row.addWidget(QLabel("Maximum"))
         drift_row.addWidget(self.maximum_drift)
         drift_row.addWidget(QLabel("metres per packet"))
         drift_row.addStretch()
         position_form.addRow("Movement", drift_row)
-        grid.addWidget(position, 1, 1)
+        grid.addWidget(position, 2, 1)
 
         flags = QGroupBox("Header flags")
         flag_grid = QGridLayout(flags)
@@ -453,7 +691,18 @@ class BluepawsTlvConsole(QMainWindow):
             flag.setChecked(name in ("GNSS_VALID", "FIX_3D"))
             self.flag_checks[name] = flag
             flag_grid.addWidget(flag, index // 4, index % 4)
-        grid.addWidget(flags, 2, 0, 1, 2)
+        grid.addWidget(flags, 3, 0, 1, 2)
+
+        self.tlv_options = QGroupBox("Include optional TLVs in this packet")
+        self.tlv_options.setObjectName("optionalTlvGroup")
+        self.tlv_options.setCheckable(True)
+        self.tlv_options.setChecked(False)
+        self.tlv_options.setToolTip(
+            "Off by default for a basic authenticated 40-byte header packet. "
+            "Enable to edit selected or custom TLVs."
+        )
+        self.tlv_options.toggled.connect(self._schedule_packet_build)
+        tlv_options_layout = QHBoxLayout(self.tlv_options)
 
         known = QGroupBox("Selected v1.1 TLVs (24-byte total budget)")
         known_grid = QGridLayout(known)
@@ -470,7 +719,8 @@ class BluepawsTlvConsole(QMainWindow):
         self.known_checks: dict[str, QCheckBox] = {}
         self.known_values: dict[str, QLineEdit] = {}
         for row, (name, code, value, hint, enabled) in enumerate(specs, start=1):
-            check = QCheckBox(f"{code}  {name}")
+            live_marker = "  ↗" if name == "uptime_s" else "  ±2" if name == "activity_score" else ""
+            check = QCheckBox(f"{code}  {name}{live_marker}")
             check.setChecked(enabled)
             value_field = line_edit(value)
             self.known_checks[name] = check
@@ -478,7 +728,7 @@ class BluepawsTlvConsole(QMainWindow):
             known_grid.addWidget(check, row, 0)
             known_grid.addWidget(value_field, row, 1)
             known_grid.addWidget(QLabel(hint), row, 2)
-        grid.addWidget(known, 3, 0)
+        tlv_options_layout.addWidget(known, 1)
 
         custom = QGroupBox("Custom / unknown TLVs")
         custom_layout = QVBoxLayout(custom)
@@ -501,7 +751,8 @@ class BluepawsTlvConsole(QMainWindow):
         remove = secondary_button("Remove selected")
         remove.clicked.connect(self._remove_custom_tlv)
         custom_layout.addWidget(remove, alignment=Qt.AlignmentFlag.AlignRight)
-        grid.addWidget(custom, 3, 1)
+        tlv_options_layout.addWidget(custom, 1)
+        grid.addWidget(self.tlv_options, 4, 0, 1, 2)
 
         authentication = QGroupBox("HMAC-SHA256 authentication (first 8 bytes)")
         authentication_grid = QGridLayout(authentication)
@@ -517,11 +768,12 @@ class BluepawsTlvConsole(QMainWindow):
         authentication_grid.addWidget(show_hmac, 0, 2)
         authentication_grid.addWidget(QLabel("Tag mode"), 1, 0)
         self.tag_mode = combo(list(TAG_MODES))
+        self.tag_mode.setCurrentText("Valid HMAC (normal packet)")
         self.tag_mode.currentTextChanged.connect(self._tag_mode_changed)
         self.custom_tag = line_edit("0000000000000000")
         authentication_grid.addWidget(self.tag_mode, 1, 1)
         authentication_grid.addWidget(self.custom_tag, 1, 2)
-        grid.addWidget(authentication, 4, 0, 1, 2)
+        grid.addWidget(authentication, 5, 0, 1, 2)
 
         output = QGroupBox("Packet output")
         output_layout = QVBoxLayout(output)
@@ -554,7 +806,7 @@ class BluepawsTlvConsole(QMainWindow):
         self.packet_hex.setMaximumHeight(100)
         self.packet_hex.setReadOnly(True)
         output_layout.addWidget(self.packet_hex)
-        grid.addWidget(output, 5, 0, 1, 2)
+        grid.addWidget(output, 6, 0, 1, 2)
 
         scroll.setWidget(body)
         return scroll
@@ -606,11 +858,11 @@ class BluepawsTlvConsole(QMainWindow):
         gateway_time_row.addWidget(self.gateway_now)
         metadata_form.addRow("Gateway GUID16", self.gateway_guid)
         metadata_form.addRow("Gateway RX Unix", gateway_time_row)
-        metadata_form.addRow("Link RSSI (dBm)", self.link_rssi)
-        metadata_form.addRow("Link SNR (dB)", self.link_snr)
-        metadata_form.addRow("LTE RSRP (dBm)", self.cell_rsrp)
-        metadata_form.addRow("LTE RSRQ (dB)", self.cell_rsrq)
-        metadata_form.addRow("LTE SINR (dB)", self.cell_sinr)
+        metadata_form.addRow("Link RSSI (dBm)  ±2", self.link_rssi)
+        metadata_form.addRow("Link SNR (dB)  ±0.5", self.link_snr)
+        metadata_form.addRow("LTE RSRP (dBm)  ±2", self.cell_rsrp)
+        metadata_form.addRow("LTE RSRQ (dB)  ±0.5", self.cell_rsrq)
+        metadata_form.addRow("LTE SINR (dB)  ±0.5", self.cell_sinr)
         self.gateway_widgets = [self.gateway_guid, self.gateway_rx_time, self.gateway_now]
         self.cell_widgets = [self.cell_rsrp, self.cell_rsrq, self.cell_sinr]
         grid.addWidget(metadata, 0, 1)
@@ -621,6 +873,13 @@ class BluepawsTlvConsole(QMainWindow):
         refresh = QPushButton("Refresh preview")
         refresh.clicked.connect(self.preview_wrapper)
         preview_actions.addWidget(refresh)
+        self.wrapper_summary = QLabel("JSON body not available")
+        self.wrapper_summary.setStyleSheet(f"color: {SUCCESS};")
+        self.wrapper_summary.setToolTip(
+            "Compact UTF-8 JSON request body and decoded TLV packet sizes; "
+            "HTTPS headers and TLS overhead are not included."
+        )
+        preview_actions.addWidget(self.wrapper_summary)
         copy_json = secondary_button("Copy JSON")
         copy_json.clicked.connect(lambda: self._copy_text(self.wrapper_preview))
         preview_actions.addWidget(copy_json)
@@ -634,9 +893,9 @@ class BluepawsTlvConsole(QMainWindow):
         sender = QGroupBox("Send and response log")
         sender_layout = QVBoxLayout(sender)
         controls = QHBoxLayout()
-        self.send_count = line_edit("1")
+        self.send_count = line_edit("5")
         self.send_count.setMaximumWidth(72)
-        self.send_interval = line_edit("1")
+        self.send_interval = line_edit("5")
         self.send_interval.setMaximumWidth(72)
         self.timeout = line_edit("15")
         self.timeout.setMaximumWidth(72)
@@ -650,12 +909,12 @@ class BluepawsTlvConsole(QMainWindow):
         controls.addStretch()
         sender_layout.addLayout(controls)
         self.advance_packets = QCheckBox(
-            "Live simulation: advance sequence, current time and optional movement"
+            "Live simulation: advance time/sequence and vary marked measurements"
         )
         self.advance_packets.setChecked(True)
         self.advance_packets.setToolTip(
-            "Recommended for movement simulation. Turn off only to resend the exact same "
-            "packet for duplicate/idempotency testing."
+            "Recommended for realistic telemetry. Marked measurements vary within their "
+            "displayed bounds; turn off only to resend the exact same packet."
         )
         self.advance_packets.toggled.connect(self._live_mode_changed)
         sender_layout.addWidget(self.advance_packets)
@@ -671,8 +930,8 @@ class BluepawsTlvConsole(QMainWindow):
         self.stop_button.setProperty("danger", True)
         self.stop_button.setEnabled(False)
         self.stop_button.clicked.connect(self.stop_sending)
-        clear = secondary_button("Clear log")
-        clear.clicked.connect(lambda: self.response_log.clear())
+        clear = secondary_button("Clear results")
+        clear.clicked.connect(self._clear_responses)
         buttons.addWidget(self.send_button)
         buttons.addWidget(self.stop_button)
         buttons.addStretch()
@@ -681,9 +940,29 @@ class BluepawsTlvConsole(QMainWindow):
         self.sender_status = QLabel("Packet and wrapper previews update automatically.")
         self.sender_status.setStyleSheet(f"color: {MUTED};")
         sender_layout.addWidget(self.sender_status)
-        self.response_log = QPlainTextEdit()
-        self.response_log.setPlaceholderText("No requests sent yet.")
-        sender_layout.addWidget(self.response_log, 1)
+        self.response_table = QTableWidget(0, len(RESPONSE_HEADERS))
+        self.response_table.setHorizontalHeaderLabels(RESPONSE_HEADERS)
+        self.response_table.verticalHeader().setVisible(False)
+        self.response_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.response_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.response_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.response_table.setAlternatingRowColors(False)
+        self.response_table.itemSelectionChanged.connect(self._response_selected)
+        response_header = self.response_table.horizontalHeader()
+        response_header.setMinimumSectionSize(42)
+        response_header.setSectionsMovable(True)
+        for column in range(len(RESPONSE_HEADERS)):
+            response_header.setSectionResizeMode(column, QHeaderView.ResizeMode.Interactive)
+        for column, width in enumerate((72, 42, 58, 130, 84, 60, 260)):
+            self.response_table.setColumnWidth(column, width)
+        self.response_table.setMinimumHeight(190)
+        sender_layout.addWidget(self.response_table, 1)
+        sender_layout.addWidget(QLabel("Selected response JSON"))
+        self.response_detail = QPlainTextEdit()
+        self.response_detail.setReadOnly(True)
+        self.response_detail.setPlaceholderText("Select a result row to inspect its full response.")
+        self.response_detail.setMaximumHeight(120)
+        sender_layout.addWidget(self.response_detail)
         grid.addWidget(sender, 1, 1)
         return body
 
@@ -846,6 +1125,94 @@ class BluepawsTlvConsole(QMainWindow):
     def _drift_mode_changed(self, enabled: bool) -> None:
         self.maximum_drift.setEnabled(enabled and self.advance_packets.isChecked())
 
+    def _active_recipe(self) -> TestRecipe | None:
+        if not self.cookbook_group.isChecked():
+            return None
+        return TEST_RECIPES[self.recipe_combo.currentText()]
+
+    def _update_recipe_summary(self) -> None:
+        recipe = TEST_RECIPES[self.recipe_combo.currentText()]
+        movement = (
+            f"movement ≤ {recipe.movement_metres} m"
+            if recipe.movement_metres is not None
+            else "stationary"
+        )
+        self.recipe_summary.setText(
+            f"{recipe.count} packets • {recipe.interval:g} s interval • {movement} • "
+            f"{recipe.description}"
+        )
+
+    def _recipe_enabled(self, enabled: bool) -> None:
+        self.send_count.setEnabled(not enabled)
+        self.send_interval.setEnabled(not enabled)
+        self.advance_packets.setEnabled(not enabled)
+        if enabled:
+            self._apply_recipe()
+        else:
+            self.sender_status.setText(
+                "Manual mode restored. Recipe values remain visible and can now be edited."
+            )
+
+    def _recipe_changed(self, _name: str) -> None:
+        self._update_recipe_summary()
+        if self.cookbook_group.isChecked():
+            self._apply_recipe()
+
+    def _run_recipe(self) -> None:
+        if not self.cookbook_group.isChecked():
+            return
+        self.tabs.setCurrentIndex(1)
+        self.send_requests()
+
+    def _apply_recipe(self) -> None:
+        recipe = TEST_RECIPES[self.recipe_combo.currentText()]
+        self.send_count.setText(str(recipe.count))
+        self.send_interval.setText(f"{recipe.interval:g}")
+        self.advance_packets.setChecked(recipe.strategy != "duplicates")
+        self.drift_enabled.setChecked(recipe.movement_metres is not None)
+        self.maximum_drift.setText(
+            str(recipe.movement_metres or DEFAULT_MOVEMENT_METRES)
+        )
+        self.tag_mode.setCurrentText("Valid HMAC (normal packet)")
+        self.status.setCurrentText("OUT (1)")
+        self.profile.setCurrentText("NORMAL (1)")
+        self.reason.setCurrentText("TELEMETRY (0)")
+        for name, flag in self.flag_checks.items():
+            flag.setChecked(name in ("GNSS_VALID", "FIX_3D"))
+        for name, value in {
+            "battery_mv": "3900",
+            "accuracy_m": "8",
+            "fix_age_s": "0",
+            "satellites": "9",
+            "link_rssi": "-104",
+            "link_snr": "7.0",
+            "cell_rsrp": "-104",
+            "cell_rsrq": "-9.5",
+            "cell_sinr": "7.0",
+        }.items():
+            getattr(self, name).setText(value)
+        transport_label = next(
+            label for label, value in TRANSPORTS.items() if value == recipe.transport
+        )
+        self.transport.setCurrentText(transport_label)
+        self.sequence.setText(
+            "65533" if recipe.strategy == "rollover" else str(int(time.time()) & 0xFFFF)
+        )
+
+        include_tlvs = recipe.tlv_mode != "none"
+        self.tlv_options.setChecked(include_tlvs)
+        for check in self.known_checks.values():
+            check.setChecked(include_tlvs)
+        custom_entries: list[TlvEntry] = []
+        if recipe.tlv_mode == "maximum":
+            custom_entries.append(TlvEntry(0x7E, b"\x01\x02", "custom"))
+        self._set_custom_tlvs(custom_entries)
+        self._update_recipe_summary()
+        self.sender_status.setText(
+            f"Cookbook ready: {self.recipe_combo.currentText()}. Choose Send on tab 2."
+        )
+        self.build_packet()
+
     def _tag_mode_changed(self) -> None:
         self.custom_tag.setEnabled(TAG_MODES[self.tag_mode.currentText()] == "custom")
 
@@ -891,6 +1258,16 @@ class BluepawsTlvConsole(QMainWindow):
         self._custom_tlvs.append(entry)
         self.build_packet()
 
+    def _set_custom_tlvs(self, entries: list[TlvEntry]) -> None:
+        self._custom_tlvs = list(entries)
+        self.custom_table.setRowCount(0)
+        for entry in entries:
+            row = self.custom_table.rowCount()
+            self.custom_table.insertRow(row)
+            self.custom_table.setItem(row, 0, QTableWidgetItem(f"0x{entry.tlv_type:02X}"))
+            self.custom_table.setItem(row, 1, QTableWidgetItem(str(len(entry.value))))
+            self.custom_table.setItem(row, 2, QTableWidgetItem(entry.value.hex().upper()))
+
     def _remove_custom_tlv(self) -> None:
         rows = sorted({item.row() for item in self.custom_table.selectedItems()}, reverse=True)
         for row in rows:
@@ -919,6 +1296,8 @@ class BluepawsTlvConsole(QMainWindow):
         )
 
     def _packet_tlvs(self) -> list[TlvEntry]:
+        if not self.tlv_options.isChecked():
+            return []
         result: list[TlvEntry] = []
         if self.known_checks["fw_ver"].isChecked():
             result.append(firmware_tlv(self.known_values["fw_ver"].text()))
@@ -949,6 +1328,7 @@ class BluepawsTlvConsole(QMainWindow):
         except ValueError as error:
             self._last_built = None
             self.packet_summary.setText("Packet not built")
+            self.wrapper_summary.setText("JSON body not available")
             self.builder_status.setText(str(error))
             self.packet_b64.clear()
             self.packet_hex.clear()
@@ -973,6 +1353,7 @@ class BluepawsTlvConsole(QMainWindow):
         payload_b64: str | None = None,
         *,
         gateway_timestamp: int | None = None,
+        metadata_overrides: dict[str, float | None] | None = None,
     ) -> dict[str, Any]:
         transport = TRANSPORTS[self.transport.currentText()]
         payload = payload_b64 if payload_b64 is not None else self.packet_b64.toPlainText().strip()
@@ -980,6 +1361,14 @@ class BluepawsTlvConsole(QMainWindow):
             "link_rssi_dbm": self._optional_float(self.link_rssi.text(), "link RSSI"),
             "link_snr_db": self._optional_float(self.link_snr.text(), "link SNR"),
         }
+        if metadata_overrides is not None:
+            common.update(
+                {
+                    key: metadata_overrides[key]
+                    for key in ("link_rssi_dbm", "link_snr_db")
+                    if key in metadata_overrides
+                }
+            )
         if transport == "lora_hub":
             return build_transport_wrapper(
                 payload,
@@ -992,12 +1381,23 @@ class BluepawsTlvConsole(QMainWindow):
                 ),
                 **common,
             )
+        cellular = {
+            "cell_rsrp_dbm": self._optional_float(self.cell_rsrp.text(), "LTE RSRP"),
+            "cell_rsrq_db": self._optional_float(self.cell_rsrq.text(), "LTE RSRQ"),
+            "cell_sinr_db": self._optional_float(self.cell_sinr.text(), "LTE SINR"),
+        }
+        if metadata_overrides is not None:
+            cellular.update(
+                {
+                    key: metadata_overrides[key]
+                    for key in cellular
+                    if key in metadata_overrides
+                }
+            )
         return build_transport_wrapper(
             payload,
             transport,
-            cell_rsrp_dbm=self._optional_float(self.cell_rsrp.text(), "LTE RSRP"),
-            cell_rsrq_db=self._optional_float(self.cell_rsrq.text(), "LTE RSRQ"),
-            cell_sinr_db=self._optional_float(self.cell_sinr.text(), "LTE SINR"),
+            **cellular,
             **common,
         )
 
@@ -1007,9 +1407,15 @@ class BluepawsTlvConsole(QMainWindow):
             wrapper = self._wrapper()
         except ValueError as error:
             self.wrapper_preview.clear()
+            self.wrapper_summary.setText("JSON body not available")
             self.sender_status.setText(str(error))
             return None
         self.wrapper_preview.setPlainText(json.dumps(wrapper, indent=2))
+        compact_body = json.dumps(wrapper, separators=(",", ":")).encode("utf-8")
+        decoded_packet = base64.b64decode(wrapper["payload_b64"], validate=True)
+        self.wrapper_summary.setText(
+            f"JSON body {len(compact_body)} bytes • TLV packet {len(decoded_packet)} bytes"
+        )
         self.sender_status.setText(
             "Wrapper passes local validation. Authorization header is not shown."
         )
@@ -1044,7 +1450,12 @@ class BluepawsTlvConsole(QMainWindow):
         self._stop_event.clear()
         self.send_button.setEnabled(False)
         self.stop_button.setEnabled(True)
-        self.sender_status.setText(f"Sending {count} request(s)…")
+        recipe_name = self.recipe_combo.currentText() if self._active_recipe() else None
+        self.sender_status.setText(
+            f"Sending {count} request(s)"
+            + (f" from {recipe_name}" if recipe_name else "")
+            + "…"
+        )
         self._worker = threading.Thread(
             target=self._send_worker,
             args=(endpoint, token, requests, interval, timeout),
@@ -1056,6 +1467,7 @@ class BluepawsTlvConsole(QMainWindow):
         self, count: int, interval: float
     ) -> list[tuple[int, dict[str, Any]]]:
         self._prepared_fields = []
+        recipe = self._active_recipe()
         if not self.advance_packets.isChecked():
             wrapper = self._wrapper()
             sequence = self._int(self.sequence.text(), "message sequence")
@@ -1064,8 +1476,9 @@ class BluepawsTlvConsole(QMainWindow):
         base_fields = self._packet_fields()
         base_send_time = int(time.time())
         hmac_key = decode_hmac_key(self.hmac.text())
-        tlvs = self._packet_tlvs()
-        mode = TAG_MODES[self.tag_mode.currentText()]
+        base_tlvs = self._packet_tlvs()
+        base_metadata = self._base_transport_metadata()
+        default_mode = TAG_MODES[self.tag_mode.currentText()]
         base_gateway_time = (
             base_send_time
             if TRANSPORTS[self.transport.currentText()] == "lora_hub"
@@ -1074,25 +1487,59 @@ class BluepawsTlvConsole(QMainWindow):
         drift_radius = None
         if self.drift_enabled.isChecked():
             drift_radius = self._float(self.maximum_drift.text(), "maximum drift")
-            if not 0 < drift_radius <= 10_000:
+            if not 0 < drift_radius <= MAX_MOVEMENT_METRES:
                 raise ValueError(
-                    "maximum drift must be greater than 0 and at most 10000 metres"
+                    "maximum drift must be greater than 0 and at most "
+                    f"{MAX_MOVEMENT_METRES} metres"
                 )
         latitude = base_fields.latitude
         longitude = base_fields.longitude
         result: list[tuple[int, dict[str, Any]]] = []
         for index in range(count):
-            offset = round(index * interval)
+            sequence_offset = self._recipe_sequence_offset(recipe, index)
+            offset = round(sequence_offset * interval)
+            arrival_offset = round(index * interval)
             if index and drift_radius is not None:
                 latitude, longitude = drift_coordinates(latitude, longitude, drift_radius)
+            battery_mv = base_fields.battery_mv
+            accuracy_m = base_fields.accuracy_m
+            fix_age_s = base_fields.fix_age_s
+            satellite_count = base_fields.satellite_count
+            if index:
+                battery_mv = vary_integer(
+                    battery_mv, *LIVE_INTEGER_VARIATION["battery_mv"]
+                )
+                accuracy_m = vary_integer(
+                    accuracy_m, *LIVE_INTEGER_VARIATION["accuracy_m"]
+                )
+                if fix_age_s != 65_535:
+                    fix_age_s = vary_integer(
+                        fix_age_s, *LIVE_INTEGER_VARIATION["fix_age_s"]
+                    )
+                if satellite_count != 255:
+                    satellite_count = vary_integer(
+                        satellite_count, *LIVE_INTEGER_VARIATION["satellite_count"]
+                    )
+            if recipe is not None and recipe.strategy == "randomized":
+                battery_mv = random.randint(3_300, 4_200)
+                accuracy_m = random.randint(1, 100)
+                fix_age_s = random.randint(0, 60)
+                satellite_count = random.randint(4, 16)
             fields = replace(
                 base_fields,
-                message_sequence=(base_fields.message_sequence + index) & 0xFFFF,
+                message_sequence=(base_fields.message_sequence + sequence_offset) & 0xFFFF,
                 timestamp=min(0xFFFF_FFFF, base_send_time + offset),
                 latitude=latitude,
                 longitude=longitude,
+                battery_mv=battery_mv,
+                accuracy_m=accuracy_m,
+                fix_age_s=fix_age_s,
+                satellite_count=satellite_count,
             )
             self._prepared_fields.append(fields)
+            tlvs = self._vary_live_tlvs(base_tlvs, index, offset)
+            tlvs = self._recipe_tlvs(recipe, tlvs)
+            mode = self._recipe_tag_mode(recipe, index, default_mode)
             built = build_tlv_packet(
                 fields,
                 tlvs,
@@ -1101,14 +1548,150 @@ class BluepawsTlvConsole(QMainWindow):
                 custom_tag_hex=self.custom_tag.text(),
             )
             gateway_time = (
-                min(0xFFFF_FFFF, base_gateway_time + offset)
+                min(0xFFFF_FFFF, base_gateway_time + arrival_offset)
                 if base_gateway_time is not None
                 else None
             )
+            metadata = self._vary_live_metadata(base_metadata, index)
+            metadata = self._recipe_metadata(recipe, metadata, index)
             result.append(
-                (fields.message_sequence, self._wrapper(built.payload_b64, gateway_timestamp=gateway_time))
+                (
+                    fields.message_sequence,
+                    self._wrapper(
+                        built.payload_b64,
+                        gateway_timestamp=gateway_time,
+                        metadata_overrides=metadata,
+                    ),
+                )
             )
         return result
+
+    @staticmethod
+    def _recipe_sequence_offset(recipe: TestRecipe | None, index: int) -> int:
+        if recipe is not None and recipe.strategy == "out_of_order":
+            return (0, 1, 3, 2, 4, 5)[index]
+        return index
+
+    @staticmethod
+    def _recipe_tag_mode(
+        recipe: TestRecipe | None, index: int, default_mode: str
+    ) -> str:
+        if recipe is None:
+            return default_mode
+        if recipe.strategy == "bad_day":
+            return "valid" if index in (1, 6) else "corrupt"
+        if recipe.strategy == "mixed":
+            return "corrupt" if index in (1, 4, 6, 9) else "valid"
+        if recipe.strategy == "randomized":
+            if index == 0:
+                return "valid"
+            if index == 1:
+                return "corrupt"
+            return "valid" if random.random() < 0.6 else "corrupt"
+        if recipe.strategy == "all_corrupt":
+            return "corrupt"
+        return "valid"
+
+    @staticmethod
+    def _recipe_tlvs(
+        recipe: TestRecipe | None, base_tlvs: list[TlvEntry]
+    ) -> list[TlvEntry]:
+        if recipe is None or recipe.tlv_mode != "random":
+            return base_tlvs
+        selected = [entry for entry in base_tlvs if random.random() < 0.6]
+        used = sum(2 + len(entry.value) for entry in selected)
+        maximum_value_length = min(4, MAX_TLV_SIZE - used - 2)
+        if maximum_value_length >= 1 and random.random() < 0.75:
+            length = random.randint(1, maximum_value_length)
+            selected.append(
+                TlvEntry(
+                    random.randint(0x70, 0x7D),
+                    bytes(random.getrandbits(8) for _ in range(length)),
+                    "random_custom",
+                )
+            )
+        return selected
+
+    @staticmethod
+    def _recipe_metadata(
+        recipe: TestRecipe | None,
+        metadata: dict[str, float | None],
+        index: int,
+    ) -> dict[str, float | None]:
+        if recipe is None:
+            return metadata
+        if recipe.strategy == "radio_fade":
+            result = dict(metadata)
+            for name, decrement in {
+                "link_rssi_dbm": 3.0,
+                "link_snr_db": 1.0,
+                "cell_rsrp_dbm": 3.0,
+                "cell_rsrq_db": 0.7,
+                "cell_sinr_db": 1.2,
+            }.items():
+                value = result.get(name)
+                if value is not None:
+                    result[name] = round(value - decrement * index, 1)
+            return result
+        if recipe.strategy == "randomized":
+            result = dict(metadata)
+            ranges = {
+                "link_rssi_dbm": (-135.0, -65.0),
+                "link_snr_db": (-10.0, 15.0),
+                "cell_rsrp_dbm": (-140.0, -65.0),
+                "cell_rsrq_db": (-25.0, -3.0),
+                "cell_sinr_db": (-10.0, 25.0),
+            }
+            for name in result:
+                if result[name] is not None:
+                    result[name] = round(random.uniform(*ranges[name]), 1)
+            return result
+        return metadata
+
+    def _base_transport_metadata(self) -> dict[str, float | None]:
+        metadata = {
+            "link_rssi_dbm": self._optional_float(self.link_rssi.text(), "link RSSI"),
+            "link_snr_db": self._optional_float(self.link_snr.text(), "link SNR"),
+        }
+        if TRANSPORTS[self.transport.currentText()] == "cellular_direct":
+            metadata.update(
+                {
+                    "cell_rsrp_dbm": self._optional_float(self.cell_rsrp.text(), "LTE RSRP"),
+                    "cell_rsrq_db": self._optional_float(self.cell_rsrq.text(), "LTE RSRQ"),
+                    "cell_sinr_db": self._optional_float(self.cell_sinr.text(), "LTE SINR"),
+                }
+            )
+        return metadata
+
+    @staticmethod
+    def _vary_live_metadata(
+        base_metadata: dict[str, float | None], index: int
+    ) -> dict[str, float | None]:
+        if index == 0:
+            return dict(base_metadata)
+        return {
+            name: vary_float(value, *LIVE_RADIO_VARIATION[name])
+            for name, value in base_metadata.items()
+        }
+
+    @staticmethod
+    def _vary_live_tlvs(
+        base_tlvs: list[TlvEntry], index: int, elapsed_seconds: int
+    ) -> list[TlvEntry]:
+        varied: list[TlvEntry] = []
+        for entry in base_tlvs:
+            if entry.name == "uptime_s":
+                value = min(0xFFFF_FFFF, int.from_bytes(entry.value, "little") + elapsed_seconds)
+                varied.append(known_tlv(entry.tlv_type, value))
+            elif entry.name == "activity_score" and index:
+                value = vary_integer(
+                    int.from_bytes(entry.value, "little"),
+                    *LIVE_INTEGER_VARIATION["activity_score"],
+                )
+                varied.append(known_tlv(entry.tlv_type, value))
+            else:
+                varied.append(entry)
+        return varied
 
     def _send_worker(
         self,
@@ -1131,28 +1714,25 @@ class BluepawsTlvConsole(QMainWindow):
                     timeout,
                     user_agent="bluepaws-tlv-qt-console/1",
                 )
-                line = json.dumps(
-                    {
-                        "request": index,
-                        "status": status,
-                        "message_sequence": sequence,
-                        "elapsed_ms": round((time.monotonic() - started) * 1000),
-                        "response": response,
-                    },
-                    separators=(",", ":"),
-                )
+                entry = {
+                    "time": time.strftime("%H:%M:%S"),
+                    "request": index,
+                    "status": status,
+                    "message_sequence": sequence,
+                    "elapsed_ms": round((time.monotonic() - started) * 1000),
+                    "response": response,
+                }
             except (OSError, TimeoutError, ValueError) as error:
-                line = json.dumps(
-                    {
-                        "request": index,
-                        "status": 0,
-                        "message_sequence": sequence,
-                        "error": str(error),
-                    },
-                    separators=(",", ":"),
-                )
+                entry = {
+                    "time": time.strftime("%H:%M:%S"),
+                    "request": index,
+                    "status": 0,
+                    "message_sequence": sequence,
+                    "elapsed_ms": round((time.monotonic() - started) * 1000),
+                    "error": str(error),
+                }
             completed += 1
-            self.worker_signals.log_line.emit(line)
+            self.worker_signals.response.emit(entry)
             if index < len(requests) and self._stop_event.wait(interval):
                 break
         self.worker_signals.finished.emit(completed, len(requests), requests)
@@ -1186,8 +1766,104 @@ class BluepawsTlvConsole(QMainWindow):
         self._stop_event.set()
         self.sender_status.setText("Stopping after the current request…")
 
-    def _append_log(self, line: str) -> None:
-        self.response_log.appendPlainText(f"[{time.strftime('%H:%M:%S')}] {line}")
+    @staticmethod
+    def _classify_response(
+        status: int, response: Any
+    ) -> tuple[str, str, str]:
+        if status == 0:
+            return "🌐", "Network error", "network"
+        if 200 <= status < 300:
+            if isinstance(response, dict) and response.get("duplicate") is True:
+                return "🔁", "Duplicate", "success"
+            if status == 201:
+                return "✅", "Created", "success"
+            return "✅", "Success", "success"
+        if 300 <= status < 400:
+            return "↪", "Redirect", "redirect"
+        if status == 401:
+            return "🔒", "Unauthorized", "auth"
+        if status == 403:
+            return "🔒", "Forbidden", "auth"
+        if status == 400:
+            return "⚠", "Bad request", "client"
+        if status == 409:
+            return "⚠", "Conflict", "client"
+        if status == 429:
+            return "⏳", "Rate limited", "client"
+        if 400 <= status < 500:
+            return "⚠", "Client error", "client"
+        if 500 <= status < 600:
+            return "❌", "Server error", "server"
+        return "ℹ", "Unexpected", "unknown"
+
+    @staticmethod
+    def _response_message(entry: dict[str, Any]) -> str:
+        if entry.get("error"):
+            return str(entry["error"])
+        response = entry.get("response")
+        if isinstance(response, dict):
+            details: list[str] = []
+            for key in ("error", "message", "detail", "code", "stage"):
+                value = response.get(key)
+                if value not in (None, ""):
+                    details.append(str(value))
+            codes = response.get("codes")
+            if codes:
+                details.append(", ".join(str(code) for code in codes))
+            if details:
+                return " • ".join(details)
+            if response.get("duplicate") is True:
+                return "Accepted idempotent duplicate"
+            if response.get("accepted") is True:
+                return "Accepted new telemetry"
+        compact = json.dumps(response, separators=(",", ":"), ensure_ascii=False, default=str)
+        return compact if len(compact) <= 160 else compact[:157] + "…"
+
+    def _append_response(self, entry: object) -> None:
+        if not isinstance(entry, dict):
+            return
+        status = int(entry.get("status", 0))
+        icon, label, style = self._classify_response(status, entry.get("response"))
+        background, foreground = RESULT_STYLES[style]
+        row = self.response_table.rowCount()
+        self.response_table.insertRow(row)
+        values = (
+            entry.get("time", ""),
+            entry.get("request", ""),
+            status if status else "—",
+            f"{icon}  {label}",
+            entry.get("message_sequence", ""),
+            entry.get("elapsed_ms", ""),
+            self._response_message(entry),
+        )
+        detail = json.dumps(entry, indent=2, ensure_ascii=False, default=str)
+        for column, value in enumerate(values):
+            item = QTableWidgetItem(str(value))
+            item.setBackground(QBrush(QColor(background)))
+            item.setForeground(QBrush(QColor(foreground)))
+            item.setToolTip(detail)
+            if column == 0:
+                item.setData(Qt.ItemDataRole.UserRole, entry)
+            self.response_table.setItem(row, column, item)
+        self.response_table.selectRow(row)
+        self.response_table.scrollToBottom()
+
+    def _response_selected(self) -> None:
+        selected = self.response_table.selectedItems()
+        if not selected:
+            self.response_detail.clear()
+            return
+        first = self.response_table.item(selected[0].row(), 0)
+        entry = first.data(Qt.ItemDataRole.UserRole) if first is not None else None
+        self.response_detail.setPlainText(
+            json.dumps(entry, indent=2, ensure_ascii=False, default=str)
+            if isinstance(entry, dict)
+            else ""
+        )
+
+    def _clear_responses(self) -> None:
+        self.response_table.setRowCount(0)
+        self.response_detail.clear()
 
     @staticmethod
     def _copy_text(widget: QPlainTextEdit) -> None:

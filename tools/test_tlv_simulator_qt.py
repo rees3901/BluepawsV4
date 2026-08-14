@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import base64
+import hashlib
+import hmac
 import importlib.util
 import json
 import math
@@ -22,11 +24,14 @@ if PYSIDE_AVAILABLE:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from PySide6.QtCore import QUrlQuery
     from PySide6.QtTest import QTest
-    from PySide6.QtWidgets import QApplication
+    from PySide6.QtWidgets import QApplication, QHeaderView
 
     from tlv_simulator_qt import (
+        DEFAULT_MOVEMENT_METRES,
+        MAX_MOVEMENT_METRES,
         STYLESHEET,
         TAG_MODES,
+        TEST_RECIPES,
         TRANSPORTS,
         BluepawsTlvConsole,
         LIVE_PREVIEW_DELAY_MS,
@@ -57,6 +62,7 @@ class QtConsoleTests(unittest.TestCase):
         built = self.window.build_packet()
         self.assertIsNotNone(built)
         assert built is not None
+        self.assertEqual(len(built.packet), 40)
         self.assertEqual(built.transmitted_tag, built.expected_tag)
         self.assertEqual(self.window.packet_b64.toPlainText(), built.payload_b64)
 
@@ -66,6 +72,139 @@ class QtConsoleTests(unittest.TestCase):
         self.assertEqual(wrapper["ingest_path"], "cellular_direct")
         self.assertEqual(wrapper["payload_b64"], built.payload_b64)
         self.assertNotIn("authorization", json_keys_lower(wrapper))
+        compact_body = json.dumps(wrapper, separators=(",", ":")).encode("utf-8")
+        self.assertIn(
+            f"JSON body {len(compact_body)} bytes", self.window.wrapper_summary.text()
+        )
+        self.assertIn(
+            f"TLV packet {len(built.packet)} bytes", self.window.wrapper_summary.text()
+        )
+        self.assertIn("TLS overhead", self.window.wrapper_summary.toolTip())
+
+    def test_safe_defaults_use_valid_hmac_and_disable_optional_tlvs(self) -> None:
+        built = self.window.build_packet()
+
+        self.assertEqual(
+            self.window.tag_mode.currentText(), "Valid HMAC (normal packet)"
+        )
+        self.assertFalse(self.window.tlv_options.isChecked())
+        self.assertTrue(self.window.drift_enabled.isChecked())
+        self.assertTrue(self.window.maximum_drift.isEnabled())
+        self.assertEqual(
+            self.window.maximum_drift.text(), str(DEFAULT_MOVEMENT_METRES)
+        )
+        self.assertEqual(self.window.send_count.text(), "5")
+        self.assertEqual(self.window.send_interval.text(), "5")
+        self.assertEqual(self.window.timeout.text(), "15")
+        self.assertFalse(self.window.known_values["uptime_s"].isEnabled())
+        self.assertFalse(self.window.custom_type.isEnabled())
+        self.assertIsNotNone(built)
+        assert built is not None
+        self.assertEqual(built.tlv_length, 0)
+        self.assertEqual(len(built.packet), 40)
+        self.assertEqual(built.transmitted_tag, built.expected_tag)
+
+    def test_cookbook_is_opt_in_and_contains_useful_recipe_catalog(self) -> None:
+        self.assertFalse(self.window.cookbook_group.isChecked())
+        self.assertFalse(self.window.recipe_combo.isEnabled())
+        self.assertFalse(self.window.run_recipe_button.isEnabled())
+        self.assertGreaterEqual(len(TEST_RECIPES), 10)
+        for expected in (
+            "Basic sunny day",
+            "Bad day — only 2 of 10 valid",
+            "Mixed bag",
+            "Fully randomized",
+            "Maximum TLV budget",
+            "LoRa relay sunny day",
+        ):
+            self.assertIn(expected, TEST_RECIPES)
+
+        self.window.cookbook_group.setChecked(True)
+        with patch.object(self.window, "send_requests") as sender:
+            self.window._run_recipe()
+        self.assertEqual(self.window.tabs.currentIndex(), 1)
+        sender.assert_called_once_with()
+
+    def test_basic_recipe_configures_valid_header_only_sequence(self) -> None:
+        self.window.recipe_combo.setCurrentText("Basic sunny day")
+        self.window.cookbook_group.setChecked(True)
+        requests = self.window._prepare_requests(10, 2.0)
+        key = bytes(range(32))
+
+        self.assertEqual(self.window.send_count.text(), "10")
+        self.assertFalse(self.window.send_count.isEnabled())
+        self.assertEqual(TAG_MODES[self.window.tag_mode.currentText()], "valid")
+        self.assertFalse(self.window.tlv_options.isChecked())
+        self.assertTrue(all(packet_hmac_valid(wrapper, key) for _, wrapper in requests))
+        self.assertTrue(
+            all(base64.b64decode(wrapper["payload_b64"])[31] == 0 for _, wrapper in requests)
+        )
+
+    def test_bad_day_recipe_produces_exactly_two_valid_hmacs(self) -> None:
+        self.window.recipe_combo.setCurrentText("Bad day — only 2 of 10 valid")
+        self.window.cookbook_group.setChecked(True)
+        requests = self.window._prepare_requests(10, 1.0)
+        key = bytes(range(32))
+
+        self.assertEqual(
+            sum(packet_hmac_valid(wrapper, key) for _, wrapper in requests), 2
+        )
+
+    def test_specialized_recipes_cover_maximum_tlvs_duplicates_and_ordering(self) -> None:
+        self.window.recipe_combo.setCurrentText("Maximum TLV budget")
+        self.window.cookbook_group.setChecked(True)
+        built = self.window.build_packet()
+        self.assertIsNotNone(built)
+        assert built is not None
+        self.assertEqual(built.tlv_length, 24)
+
+        self.window.recipe_combo.setCurrentText("Duplicate retry storm")
+        duplicates = self.window._prepare_requests(6, 1.0)
+        self.assertEqual(len({wrapper["payload_b64"] for _, wrapper in duplicates}), 1)
+
+        self.window.recipe_combo.setCurrentText("Out-of-order delivery")
+        base_sequence = int(self.window.sequence.text())
+        reordered = self.window._prepare_requests(6, 1.0)
+        self.assertEqual(
+            [sequence for sequence, _ in reordered],
+            [
+                base_sequence,
+                (base_sequence + 1) & 0xFFFF,
+                (base_sequence + 3) & 0xFFFF,
+                (base_sequence + 2) & 0xFFFF,
+                (base_sequence + 4) & 0xFFFF,
+                (base_sequence + 5) & 0xFFFF,
+            ],
+        )
+
+    def test_recipes_apply_movement_bounds_that_match_their_purpose(self) -> None:
+        self.window.recipe_combo.setCurrentText("Basic sunny day")
+        self.window.cookbook_group.setChecked(True)
+        self.assertTrue(self.window.drift_enabled.isChecked())
+        self.assertEqual(self.window.maximum_drift.text(), "50")
+
+        self.window.recipe_combo.setCurrentText("Fully randomized")
+        self.assertTrue(self.window.drift_enabled.isChecked())
+        self.assertEqual(
+            self.window.maximum_drift.text(), str(MAX_MOVEMENT_METRES)
+        )
+
+        for stationary_recipe in (
+            "Maximum TLV budget",
+            "Duplicate retry storm",
+            "LTE radio fade",
+            "HMAC rejection only",
+        ):
+            with self.subTest(recipe=stationary_recipe):
+                self.window.recipe_combo.setCurrentText(stationary_recipe)
+                self.assertFalse(self.window.drift_enabled.isChecked())
+
+    def test_disabled_tlv_container_uses_full_section_muted_styling(self) -> None:
+        self.assertEqual(self.window.tlv_options.objectName(), "optionalTlvGroup")
+        self.assertIn("QGroupBox#optionalTlvGroup:unchecked", STYLESHEET)
+        self.assertIn(
+            "QGroupBox#optionalTlvGroup:unchecked QGroupBox", STYLESHEET
+        )
 
     def test_packet_and_wrapper_previews_update_automatically(self) -> None:
         original_payload = self.window.packet_b64.toPlainText()
@@ -94,6 +233,8 @@ class QtConsoleTests(unittest.TestCase):
 
     def test_send_forces_rebuild_before_debounce_expires(self) -> None:
         self.window.advance_packets.setChecked(False)
+        self.window.send_count.setText("1")
+        self.window.send_interval.setText("0")
         original_payload = self.window.packet_b64.toPlainText()
         self.window.latitude.setText("51.5090000")
         with patch(
@@ -113,6 +254,7 @@ class QtConsoleTests(unittest.TestCase):
         self.assertEqual(sent_payload, self.window.packet_b64.toPlainText())
 
     def test_custom_tlv_and_corrupt_hmac_negative_packet(self) -> None:
+        self.window.tlv_options.setChecked(True)
         self.window.custom_type.setText("7E")
         self.window.custom_value.setText("010203")
         self.window._add_custom_tlv()
@@ -187,6 +329,8 @@ class QtConsoleTests(unittest.TestCase):
         moved = drift_coordinates(*start, 100, rng=FixedRandom)
         self.assertLessEqual(haversine_metres(*start, *moved), 100.01)
         self.assertGreater(haversine_metres(*start, *moved), 99.9)
+        with self.assertRaisesRegex(ValueError, "at most 300 metres"):
+            drift_coordinates(*start, MAX_MOVEMENT_METRES + 1)
 
     def test_live_drift_changes_each_position_cumulatively(self) -> None:
         self.window.drift_enabled.setChecked(True)
@@ -208,6 +352,56 @@ class QtConsoleTests(unittest.TestCase):
         self.assertEqual(latitudes, [51.907055, 51.907155, 51.907255])
         self.assertEqual(longitudes, [-2.25666, -2.25676, -2.25686])
         self.assertEqual(len({wrapper["payload_b64"] for _, wrapper in requests}), 3)
+
+    def test_live_mode_varies_measurements_within_documented_bounds(self) -> None:
+        self.window.tlv_options.setChecked(True)
+        self.window.accuracy_m.setText("8")
+        self.window.fix_age_s.setText("0")
+        self.window.satellites.setText("9")
+        with (
+            patch("tlv_simulator_qt.time.time", return_value=4000),
+            patch("tlv_simulator_qt.random.randint", side_effect=lambda _low, high: high),
+            patch("tlv_simulator_qt.random.uniform", side_effect=lambda _low, high: high),
+        ):
+            requests = self.window._prepare_requests(2, 2.0)
+            varied_tlvs = self.window._vary_live_tlvs(
+                self.window._packet_tlvs(), 1, 2
+            )
+
+        second = self.window._prepared_fields[1]
+        self.assertEqual(second.battery_mv, 3903)
+        self.assertEqual(second.accuracy_m, 10)
+        self.assertEqual(second.fix_age_s, 1)
+        self.assertEqual(second.satellite_count, 10)
+        second_wrapper = requests[1][1]
+        self.assertEqual(second_wrapper["link_rssi_dbm"], -102.0)
+        self.assertEqual(second_wrapper["link_snr_db"], 7.5)
+        self.assertEqual(second_wrapper["cell_rsrp_dbm"], -102.0)
+        self.assertEqual(second_wrapper["cell_rsrq_db"], -9.0)
+        self.assertEqual(second_wrapper["cell_sinr_db"], 7.5)
+        values = {entry.name: int.from_bytes(entry.value, "little") for entry in varied_tlvs}
+        self.assertEqual(values["uptime_s"], 62)
+        self.assertEqual(values["activity_score"], 44)
+
+    def test_live_mode_preserves_unknown_measurement_sentinels(self) -> None:
+        self.window.fix_age_s.setText("65535")
+        self.window.satellites.setText("255")
+        with patch("tlv_simulator_qt.time.time", return_value=4000):
+            self.window._prepare_requests(2, 1.0)
+
+        second = self.window._prepared_fields[1]
+        self.assertEqual(second.fix_age_s, 65_535)
+        self.assertEqual(second.satellite_count, 255)
+
+    def test_response_columns_are_readable_and_interactively_resizable(self) -> None:
+        header = self.window.response_table.horizontalHeader()
+        for column in range(self.window.response_table.columnCount()):
+            self.assertEqual(
+                header.sectionResizeMode(column), QHeaderView.ResizeMode.Interactive
+            )
+        self.assertGreaterEqual(self.window.response_table.columnWidth(4), 80)
+        self.window.response_table.setColumnWidth(4, 140)
+        self.assertEqual(self.window.response_table.columnWidth(4), 140)
 
     def test_transport_switches_relevant_metadata_controls(self) -> None:
         self.window.transport.setCurrentText(next(iter(TRANSPORTS)))
@@ -296,13 +490,50 @@ class QtConsoleTests(unittest.TestCase):
             for _ in range(3):
                 self.app.processEvents()
 
-        self.assertEqual(self.window.response_log.toPlainText().count('"status":201'), 2)
+        self.assertEqual(self.window.response_table.rowCount(), 2)
+        self.assertEqual(self.window.response_table.item(0, 2).text(), "201")
+        self.assertIn("Created", self.window.response_table.item(0, 3).text())
+        self.assertIn('"accepted": true', self.window.response_detail.toPlainText())
         self.assertIn("Completed 2 of 2 request(s).", self.window.sender_status.text())
         self.assertTrue(self.window.send_button.isEnabled())
         self.assertFalse(self.window.stop_button.isEnabled())
         sent_payloads = [call.args[2]["payload_b64"] for call in mocked_post.call_args_list]
         self.assertEqual(len(sent_payloads), 2)
         self.assertEqual(len(set(sent_payloads)), 2)
+
+    def test_response_table_classifies_success_auth_server_and_network_results(self) -> None:
+        entries = (
+            {"status": 201, "request": 1, "response": {"accepted": True}},
+            {"status": 401, "request": 2, "response": {"error": "invalid token"}},
+            {"status": 503, "request": 3, "response": {"error": "database unavailable"}},
+            {"status": 0, "request": 4, "error": "connection timed out"},
+        )
+        for entry in entries:
+            self.window._append_response(entry)
+        self.app.processEvents()
+
+        self.assertEqual(self.window.response_table.rowCount(), 4)
+        labels = [self.window.response_table.item(row, 3).text() for row in range(4)]
+        self.assertIn("Created", labels[0])
+        self.assertIn("Unauthorized", labels[1])
+        self.assertIn("Server error", labels[2])
+        self.assertIn("Network error", labels[3])
+        colours = {
+            self.window.response_table.item(row, 3).background().color().name()
+            for row in range(4)
+        }
+        self.assertEqual(len(colours), 4)
+        self.assertIn("connection timed out", self.window.response_detail.toPlainText())
+
+        self.window._clear_responses()
+        self.assertEqual(self.window.response_table.rowCount(), 0)
+        self.assertEqual(self.window.response_detail.toPlainText(), "")
+
+
+def packet_hmac_valid(wrapper: dict[str, object], key: bytes) -> bool:
+    packet = base64.b64decode(str(wrapper["payload_b64"]), validate=True)
+    expected = hmac.new(key, packet[:-8], hashlib.sha256).digest()[:8]
+    return hmac.compare_digest(packet[-8:], expected)
 
 
 def json_keys_lower(value: dict[str, object]) -> set[str]:
