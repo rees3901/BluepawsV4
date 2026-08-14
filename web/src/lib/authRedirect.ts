@@ -19,11 +19,22 @@ export function isLegacyProductionHostname(hostname: string) {
   return LEGACY_PRODUCTION_HOSTNAMES.has(hostname.toLowerCase());
 }
 
-export function getAuthCallbackUrl(currentOrigin: string) {
+export function sanitizeNextPath(value: string | null | undefined) {
+  if (!value || !value.startsWith("/") || value.startsWith("//") || value.includes("\\")) {
+    return "/";
+  }
+
+  return value;
+}
+
+export function getAuthCallbackUrl(currentOrigin: string, nextPath = "/") {
   const currentHostname = new URL(currentOrigin).hostname.toLowerCase();
   const authOrigin = currentHostname === CANONICAL_HOSTNAME || isLegacyProductionHostname(currentHostname)
     ? CANONICAL_SITE_URL
     : withoutTrailingSlash(currentOrigin);
 
-  return `${authOrigin}/auth/callback`;
+  const callbackUrl = new URL("/auth/callback", authOrigin);
+  const safeNextPath = sanitizeNextPath(nextPath);
+  if (safeNextPath !== "/") callbackUrl.searchParams.set("next", safeNextPath);
+  return callbackUrl.toString();
 }

@@ -11,7 +11,7 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "next typegen && tsc --noEmit",
-    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test src/lib/emoji.test.ts src/lib/familyContext.test.ts src/lib/followState.test.ts src/lib/mapLayers.test.ts src/lib/mapLocation.test.ts src/lib/markerColor.test.ts src/lib/telemetryRows.test.ts src/lib/trailPoints.test.ts src/lib/transportPath.test.ts ../supabase/functions/ingest-position/tlv.test.ts",
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test src/lib/authRedirect.test.ts src/lib/emoji.test.ts src/lib/familyContext.test.ts src/lib/followState.test.ts src/lib/mapLayers.test.ts src/lib/mapLocation.test.ts src/lib/markerColor.test.ts src/lib/telemetryRows.test.ts src/lib/trailPoints.test.ts src/lib/transportPath.test.ts ../supabase/functions/ingest-position/tlv.test.ts",
     "loadtest:realtime": "node tools/realtime-load.mjs"
   },
   "dependencies": {

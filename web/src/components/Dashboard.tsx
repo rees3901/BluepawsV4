@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DeviceCard, DownloadIcon } from "@/components/DeviceCard";
 import { GuidedTour } from "@/components/GuidedTour";
+import { AccountMenu } from "@/components/AccountMenu";
 import { loadDeviceAppearances, revokeAvatarUrls } from "@/lib/deviceAppearances";
 import { followedDeviceAfterAction } from "@/lib/followState";
 import { createRealtimeTelemetrySource, loadDeviceTrail } from "@/lib/realtimeTelemetry";
@@ -331,6 +332,7 @@ export function Dashboard({ householdId, initialLiveDevices, liveTelemetryError,
             <span id="statusBanner" className={statusClass}>
               <span id="statusIcon">●</span><span id="statusText">{statusText}</span>
             </span>
+            <AccountMenu email={userEmail} familyName={familyName} familyRole={familyRole} onSignOut={handleSignOut} />
             <button
               className={`ctrl-btn global-trails-btn${allTrailsVisible ? " active" : ""}`}
               type="button"
