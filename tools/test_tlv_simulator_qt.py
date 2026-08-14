@@ -421,9 +421,9 @@ class QtConsoleTests(unittest.TestCase):
             self.assertEqual(
                 header.sectionResizeMode(column), QHeaderView.ResizeMode.Interactive
             )
-        self.assertGreaterEqual(self.window.response_table.columnWidth(4), 80)
-        self.window.response_table.setColumnWidth(4, 140)
-        self.assertEqual(self.window.response_table.columnWidth(4), 140)
+        self.assertGreaterEqual(self.window.response_table.columnWidth(5), 80)
+        self.window.response_table.setColumnWidth(5, 140)
+        self.assertEqual(self.window.response_table.columnWidth(5), 140)
 
     def test_transport_switches_relevant_metadata_controls(self) -> None:
         self.window.transport.setCurrentText(next(iter(TRANSPORTS)))
@@ -496,6 +496,77 @@ class QtConsoleTests(unittest.TestCase):
         self.window.transport.setCurrentText("LTE direct (cellular_direct)")
         self.assertEqual(self.window.bearer.text(), "d" * 48)
 
+    def test_fleet_mode_prepares_independently_signed_device_cycles(self) -> None:
+        keys = [bytes((offset + index) % 256 for index in range(32)) for offset in range(3)]
+        tokens = [character * 48 for character in ("a", "b", "c")]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "credentials.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "devices": [
+                            {
+                                "device_id": 1001 + index,
+                                "bearer_token": tokens[index],
+                                "hmac_key_b64": base64.b64encode(keys[index]).decode(),
+                            }
+                            for index in range(3)
+                        ],
+                        "gateways": [
+                            {
+                                "gateway_guid16": "0016",
+                                "display_name": "Fleet Hub",
+                                "bearer_token": "g" * 48,
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with patch(
+                "tlv_simulator_qt.QFileDialog.getOpenFileName",
+                return_value=(str(path), "JSON files (*.json)"),
+            ):
+                self.window.load_credentials_file()
+
+        self.window.fleet_mode.setChecked(True)
+        self.window.sequence.setText("500")
+        with patch("tlv_simulator_qt.time.time", return_value=5_000):
+            requests = self.window._prepare_requests(2, 0)
+
+        self.assertTrue(self.window.fleet_table.isEnabled())
+        self.assertEqual(len(requests), 6)
+        self.assertEqual([request.device_id for request in requests], [1001, 1002, 1003] * 2)
+        self.assertEqual([request.token for request in requests], tokens * 2)
+        for device_index, device_id in enumerate((1001, 1002, 1003)):
+            device_requests = [request for request in requests if request.device_id == device_id]
+            self.assertEqual(
+                [request.sequence for request in device_requests],
+                [500 + device_index, 501 + device_index],
+            )
+            for request in device_requests:
+                packet = base64.b64decode(request.wrapper["payload_b64"], validate=True)
+                self.assertEqual(int.from_bytes(packet[1:3], "little"), device_id)
+                self.assertTrue(packet_hmac_valid(request.wrapper, keys[device_index]))
+        first_cycle_positions = {
+            (request.fields.latitude, request.fields.longitude)
+            for request in requests
+            if request.cycle == 0
+        }
+        self.assertEqual(len(first_cycle_positions), 3)
+
+        self.window.transport.setCurrentText("LoRa home-hub relay (lora_hub)")
+        with patch("tlv_simulator_qt.time.time", return_value=5_001):
+            lora_requests = self.window._prepare_requests(1, 0)
+        self.assertEqual({request.token for request in lora_requests}, {"g" * 48})
+        self.assertEqual(
+            {request.wrapper["gateway_guid16"] for request in lora_requests},
+            {"0016"},
+        )
+        for device_index, request in enumerate(lora_requests):
+            self.assertTrue(packet_hmac_valid(request.wrapper, keys[device_index]))
+
     def test_background_send_returns_through_qt_signals(self) -> None:
         self.window.send_count.setText("2")
         self.window.send_interval.setText("0")
@@ -513,8 +584,8 @@ class QtConsoleTests(unittest.TestCase):
                 self.app.processEvents()
 
         self.assertEqual(self.window.response_table.rowCount(), 2)
-        self.assertEqual(self.window.response_table.item(0, 2).text(), "201")
-        self.assertIn("Created", self.window.response_table.item(0, 3).text())
+        self.assertEqual(self.window.response_table.item(0, 3).text(), "201")
+        self.assertIn("Created", self.window.response_table.item(0, 4).text())
         self.assertIn('"accepted": true', self.window.response_detail.toPlainText())
         self.assertIn("Completed 2 of 2 request(s).", self.window.sender_status.text())
         self.assertTrue(self.window.send_button.isEnabled())
@@ -535,13 +606,13 @@ class QtConsoleTests(unittest.TestCase):
         self.app.processEvents()
 
         self.assertEqual(self.window.response_table.rowCount(), 4)
-        labels = [self.window.response_table.item(row, 3).text() for row in range(4)]
+        labels = [self.window.response_table.item(row, 4).text() for row in range(4)]
         self.assertIn("Created", labels[0])
         self.assertIn("Unauthorized", labels[1])
         self.assertIn("Server error", labels[2])
         self.assertIn("Network error", labels[3])
         colours = {
-            self.window.response_table.item(row, 3).background().color().name()
+            self.window.response_table.item(row, 4).background().color().name()
             for row in range(4)
         }
         self.assertEqual(len(colours), 4)

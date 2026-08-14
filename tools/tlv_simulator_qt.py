@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+from collections.abc import Iterator
 import json
 import math
 import random
@@ -106,7 +107,7 @@ EARTH_METRES_PER_DEGREE = math.tau * EARTH_RADIUS_METRES / 360.0
 LIVE_PREVIEW_DELAY_MS = 250
 DEFAULT_MOVEMENT_METRES = 200
 MAX_MOVEMENT_METRES = 300
-RESPONSE_HEADERS = ("Time", "#", "HTTP", "Result", "Seq", "ms", "Message")
+RESPONSE_HEADERS = ("Time", "#", "Device", "HTTP", "Result", "Seq", "ms", "Message")
 
 RESULT_STYLES = {
     "success": ("#0B3A31", "#C3FFEB"),
@@ -128,6 +129,26 @@ class TestRecipe:
     tlv_mode: str = "none"
     transport: str = "cellular_direct"
     movement_metres: int | None = None
+
+
+@dataclass(frozen=True)
+class PreparedRequest:
+    """One authenticated request, including the device-specific send state."""
+
+    device_id: int
+    sequence: int
+    token: str
+    wrapper: dict[str, Any]
+    fields: PacketFields
+    cycle: int
+
+    def __iter__(self) -> Iterator[object]:
+        """Keep the historic ``sequence, wrapper = request`` test/API shape."""
+        yield self.sequence
+        yield self.wrapper
+
+    def __getitem__(self, index: int) -> object:
+        return (self.sequence, self.wrapper)[index]
 
 
 TEST_RECIPES = {
@@ -285,6 +306,26 @@ def drift_coordinates(
     next_latitude = max(-90.0, min(90.0, latitude + latitude_delta))
     next_longitude = ((longitude + longitude_delta + 180.0) % 360.0) - 180.0
     return next_latitude, next_longitude
+
+
+def fleet_start_coordinates(
+    latitude: float, longitude: float, index: int, total: int
+) -> tuple[float, float]:
+    """Fan loaded collars out slightly so their first map markers do not overlap."""
+    if total <= 1 or index == 0:
+        return latitude, longitude
+    ring = 1 + (index - 1) // 8
+    radius = min(150.0, 25.0 * ring)
+    angle = ((index - 1) % 8) * math.tau / min(8, max(1, total - 1))
+    latitude_delta = (radius * math.cos(angle)) / EARTH_METRES_PER_DEGREE
+    longitude_scale = EARTH_METRES_PER_DEGREE * max(
+        abs(math.cos(math.radians(latitude))), 1e-6
+    )
+    longitude_delta = (radius * math.sin(angle)) / longitude_scale
+    return (
+        max(-90.0, min(90.0, latitude + latitude_delta)),
+        ((longitude + longitude_delta + 180.0) % 360.0) - 180.0,
+    )
 
 
 def vary_integer(
@@ -496,6 +537,7 @@ class BluepawsTlvConsole(QMainWindow):
         self.setMinimumSize(980, 700)
         self._credentials: dict[str, DeviceCredential] = {}
         self._gateway_credentials: dict[str, GatewayCredential] = {}
+        self._device_states: dict[int, PacketFields] = {}
         self._custom_tlvs: list[TlvEntry] = []
         self._last_built: BuiltPacket | None = None
         self._prepared_fields: list[PacketFields] = []
@@ -602,6 +644,33 @@ class BluepawsTlvConsole(QMainWindow):
         )
         credential_note.setStyleSheet(f"color: {MUTED};")
         credential_row.addWidget(credential_note, 1, 0, 1, 5)
+        self.fleet_mode = QCheckBox("Fleet mode: send every checked device")
+        self.fleet_mode.setToolTip(
+            "Each cycle sends one independently signed packet per checked device. "
+            "Sequence, movement and telemetry state advance separately for each collar."
+        )
+        self.fleet_mode.toggled.connect(self._fleet_mode_changed)
+        credential_row.addWidget(self.fleet_mode, 2, 0, 1, 3)
+        select_all = secondary_button("Select all")
+        select_all.clicked.connect(lambda: self._set_all_fleet_devices(True))
+        credential_row.addWidget(select_all, 2, 3)
+        select_none = secondary_button("Select none")
+        select_none.clicked.connect(lambda: self._set_all_fleet_devices(False))
+        credential_row.addWidget(select_none, 2, 4)
+        self.fleet_table = QTableWidget(0, 2)
+        self.fleet_table.setHorizontalHeaderLabels(["Send", "Device ID"])
+        self.fleet_table.verticalHeader().setVisible(False)
+        self.fleet_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.fleet_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.fleet_table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.fleet_table.horizontalHeader().setSectionResizeMode(
+            1, QHeaderView.ResizeMode.Stretch
+        )
+        self.fleet_table.setMaximumHeight(125)
+        self.fleet_table.setEnabled(False)
+        credential_row.addWidget(self.fleet_table, 3, 0, 1, 5)
         credential_row.setColumnStretch(2, 1)
         credential_row.setColumnStretch(4, 1)
         grid.addWidget(credentials, 1, 0, 1, 2)
@@ -931,7 +1000,7 @@ class BluepawsTlvConsole(QMainWindow):
         self.timeout = line_edit("15")
         self.timeout.setMaximumWidth(72)
         for label, field in (
-            ("Count", self.send_count),
+            ("Cycles/device", self.send_count),
             ("Interval (s)", self.send_interval),
             ("Timeout (s)", self.timeout),
         ):
@@ -984,7 +1053,7 @@ class BluepawsTlvConsole(QMainWindow):
         response_header.setSectionsMovable(True)
         for column in range(len(RESPONSE_HEADERS)):
             response_header.setSectionResizeMode(column, QHeaderView.ResizeMode.Interactive)
-        for column, width in enumerate((72, 42, 58, 130, 84, 60, 260)):
+        for column, width in enumerate((72, 42, 72, 58, 130, 84, 60, 260)):
             self.response_table.setColumnWidth(column, width)
         self.response_table.setMinimumHeight(190)
         sender_layout.addWidget(self.response_table, 1)
@@ -1054,6 +1123,7 @@ class BluepawsTlvConsole(QMainWindow):
         self._gateway_credentials = {
             self._gateway_label(item): item for item in bundle.gateways
         }
+        self._device_states.clear()
         self.credential_combo.blockSignals(True)
         self.credential_combo.clear()
         self.credential_combo.addItems(list(self._credentials))
@@ -1068,10 +1138,58 @@ class BluepawsTlvConsole(QMainWindow):
         self._apply_credential(bundle.devices[0])
         if bundle.gateways:
             self._apply_gateway(bundle.gateways[0])
+        self._populate_fleet_table(bundle.devices)
+        self.fleet_table.setEnabled(self.fleet_mode.isChecked())
         self._transport_changed()
         self.builder_status.setText(
             f"Loaded {len(bundle.devices)} device(s) and {len(bundle.gateways)} gateway(s)."
         )
+
+    def _populate_fleet_table(self, devices: tuple[DeviceCredential, ...]) -> None:
+        self.fleet_table.setRowCount(0)
+        for credential in devices:
+            row = self.fleet_table.rowCount()
+            self.fleet_table.insertRow(row)
+            enabled = QTableWidgetItem("")
+            enabled.setFlags(
+                Qt.ItemFlag.ItemIsEnabled
+                | Qt.ItemFlag.ItemIsSelectable
+                | Qt.ItemFlag.ItemIsUserCheckable
+            )
+            enabled.setCheckState(Qt.CheckState.Checked)
+            enabled.setData(Qt.ItemDataRole.UserRole, credential.device_id)
+            self.fleet_table.setItem(row, 0, enabled)
+            self.fleet_table.setItem(row, 1, QTableWidgetItem(str(credential.device_id)))
+
+    def _set_all_fleet_devices(self, checked: bool) -> None:
+        state = Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked
+        for row in range(self.fleet_table.rowCount()):
+            item = self.fleet_table.item(row, 0)
+            if item is not None:
+                item.setCheckState(state)
+
+    def _fleet_mode_changed(self, enabled: bool) -> None:
+        self.fleet_table.setEnabled(enabled)
+        if enabled:
+            selected = len(self._selected_fleet_credentials())
+            self.sender_status.setText(
+                f"Fleet mode ready: {selected} checked device(s); count means cycles per device."
+            )
+        else:
+            self.sender_status.setText("Single-device mode ready.")
+
+    def _selected_fleet_credentials(self) -> list[DeviceCredential]:
+        by_id = {credential.device_id: credential for credential in self._credentials.values()}
+        selected: list[DeviceCredential] = []
+        for row in range(self.fleet_table.rowCount()):
+            item = self.fleet_table.item(row, 0)
+            if item is None or item.checkState() != Qt.CheckState.Checked:
+                continue
+            device_id = item.data(Qt.ItemDataRole.UserRole)
+            credential = by_id.get(device_id)
+            if credential is not None:
+                selected.append(credential)
+        return selected
 
     def _credential_selected(self, name: str) -> None:
         credential = self._credentials.get(name)
@@ -1088,6 +1206,16 @@ class BluepawsTlvConsole(QMainWindow):
         self.hmac.setText(base64.b64encode(credential.hmac_key).decode("ascii"))
         if TRANSPORTS[self.transport.currentText()] == "cellular_direct":
             self.bearer.setText(credential.token)
+        state = self._device_states.get(credential.device_id)
+        if state is not None:
+            self.sequence.setText(str((state.message_sequence + 1) & 0xFFFF))
+            self.timestamp.setText(str(int(time.time())))
+            self.latitude.setText(f"{state.latitude:.7f}")
+            self.longitude.setText(f"{state.longitude:.7f}")
+            self.battery_mv.setText(str(state.battery_mv))
+            self.accuracy_m.setText(str(state.accuracy_m))
+            self.fix_age_s.setText(str(state.fix_age_s))
+            self.satellites.setText(str(state.satellite_count))
         self.builder_status.setText(
             f"Device {credential.device_id} selected. Secrets remain masked."
         )
@@ -1240,7 +1368,7 @@ class BluepawsTlvConsole(QMainWindow):
         self._set_custom_tlvs(custom_entries)
         self._update_recipe_summary()
         self.sender_status.setText(
-            f"Cookbook ready: {self.recipe_combo.currentText()}. Choose Send on tab 2."
+            f"Cookbook ready: {self.recipe_combo.currentText()}. Choose Send on tab 3."
         )
         self.build_packet()
 
@@ -1492,12 +1620,11 @@ class BluepawsTlvConsole(QMainWindow):
             if not 0 < timeout <= 300:
                 raise ValueError("HTTP timeout must be from 0 to 300 seconds")
             endpoint = self.endpoint.text().strip()
-            token = self.bearer.text().strip()
             requests = self._prepare_requests(count, interval)
             if not endpoint.lower().startswith("https://"):
                 raise ValueError("Supabase endpoint must use HTTPS")
-            if not 32 <= len(token) <= 256:
-                raise ValueError("bearer token must contain 32..256 characters")
+            if not requests:
+                raise ValueError("select at least one device to send")
         except ValueError as error:
             QMessageBox.critical(self, "Cannot send", str(error))
             return
@@ -1506,37 +1633,55 @@ class BluepawsTlvConsole(QMainWindow):
         self.send_button.setEnabled(False)
         self.stop_button.setEnabled(True)
         recipe_name = self.recipe_combo.currentText() if self._active_recipe() else None
+        device_count = len({request.device_id for request in requests})
         self.sender_status.setText(
-            f"Sending {count} request(s)"
+            f"Sending {count} cycle(s) × {device_count} device(s) = {len(requests)} request(s)"
             + (f" from {recipe_name}" if recipe_name else "")
             + "…"
         )
         self._worker = threading.Thread(
             target=self._send_worker,
-            args=(endpoint, token, requests, interval, timeout),
+            args=(endpoint, requests, interval, timeout),
             daemon=True,
         )
         self._worker.start()
 
     def _prepare_requests(
         self, count: int, interval: float
-    ) -> list[tuple[int, dict[str, Any]]]:
+    ) -> list[PreparedRequest]:
         self._prepared_fields = []
         recipe = self._active_recipe()
-        if not self.advance_packets.isChecked():
-            wrapper = self._wrapper()
-            sequence = self._int(self.sequence.text(), "message sequence")
-            return [(sequence, wrapper) for _ in range(count)]
-
         base_fields = self._packet_fields()
         base_send_time = int(time.time())
-        hmac_key = decode_hmac_key(self.hmac.text())
         base_tlvs = self._packet_tlvs()
         base_metadata = self._base_transport_metadata()
         default_mode = TAG_MODES[self.tag_mode.currentText()]
+        is_lora = TRANSPORTS[self.transport.currentText()] == "lora_hub"
+        gateway_token = self.bearer.text().strip() if is_lora else None
+        if is_lora and not 32 <= len(gateway_token or "") <= 256:
+            raise ValueError("gateway bearer token must contain 32..256 characters")
+
+        if self.fleet_mode.isChecked():
+            credentials = self._selected_fleet_credentials()
+            if not self._credentials:
+                raise ValueError("load a credentials JSON file before enabling fleet mode")
+            if not credentials:
+                raise ValueError("select at least one fleet device")
+        else:
+            manual_token = self.bearer.text().strip()
+            if not 32 <= len(manual_token) <= 256:
+                raise ValueError("bearer token must contain 32..256 characters")
+            credentials = [
+                DeviceCredential(
+                    base_fields.device_id,
+                    manual_token,
+                    decode_hmac_key(self.hmac.text()),
+                )
+            ]
+
         base_gateway_time = (
             base_send_time
-            if TRANSPORTS[self.transport.currentText()] == "lora_hub"
+            if is_lora
             else None
         )
         drift_radius = None
@@ -1547,78 +1692,133 @@ class BluepawsTlvConsole(QMainWindow):
                     "maximum drift must be greater than 0 and at most "
                     f"{MAX_MOVEMENT_METRES} metres"
                 )
-        latitude = base_fields.latitude
-        longitude = base_fields.longitude
-        result: list[tuple[int, dict[str, Any]]] = []
-        for index in range(count):
-            sequence_offset = self._recipe_sequence_offset(recipe, index)
-            offset = round(sequence_offset * interval)
-            arrival_offset = round(index * interval)
-            if index and drift_radius is not None:
-                latitude, longitude = drift_coordinates(latitude, longitude, drift_radius)
-            battery_mv = base_fields.battery_mv
-            accuracy_m = base_fields.accuracy_m
-            fix_age_s = base_fields.fix_age_s
-            satellite_count = base_fields.satellite_count
-            if index:
-                battery_mv = vary_integer(
-                    battery_mv, *LIVE_INTEGER_VARIATION["battery_mv"]
+        device_fields: dict[int, PacketFields] = {}
+        for device_index, credential in enumerate(credentials):
+            previous = self._device_states.get(credential.device_id)
+            if previous is not None and self.advance_packets.isChecked():
+                initial = replace(
+                    previous,
+                    message_sequence=(previous.message_sequence + 1) & 0xFFFF,
+                    timestamp=base_send_time,
                 )
-                accuracy_m = vary_integer(
-                    accuracy_m, *LIVE_INTEGER_VARIATION["accuracy_m"]
+            else:
+                latitude, longitude = fleet_start_coordinates(
+                    base_fields.latitude,
+                    base_fields.longitude,
+                    device_index,
+                    len(credentials),
                 )
-                if fix_age_s != 65_535:
-                    fix_age_s = vary_integer(
-                        fix_age_s, *LIVE_INTEGER_VARIATION["fix_age_s"]
+                initial = replace(
+                    base_fields,
+                    device_id=credential.device_id,
+                    message_sequence=(base_fields.message_sequence + device_index) & 0xFFFF,
+                    latitude=latitude,
+                    longitude=longitude,
+                )
+            device_fields[credential.device_id] = initial
+
+        result: list[PreparedRequest] = []
+        last_cycle_fields: dict[int, PacketFields] = {}
+        for cycle in range(count):
+            sequence_offset = (
+                self._recipe_sequence_offset(recipe, cycle)
+                if self.advance_packets.isChecked()
+                else 0
+            )
+            elapsed = (
+                round(sequence_offset * interval)
+                if self.advance_packets.isChecked()
+                else 0
+            )
+            arrival_offset = round(cycle * interval)
+            for credential in credentials:
+                initial = device_fields[credential.device_id]
+                previous_cycle = last_cycle_fields.get(credential.device_id)
+                latitude = initial.latitude
+                longitude = initial.longitude
+                battery_mv = initial.battery_mv
+                accuracy_m = initial.accuracy_m
+                fix_age_s = initial.fix_age_s
+                satellite_count = initial.satellite_count
+                if self.advance_packets.isChecked() and cycle:
+                    assert previous_cycle is not None
+                    latitude = previous_cycle.latitude
+                    longitude = previous_cycle.longitude
+                    if drift_radius is not None:
+                        latitude, longitude = drift_coordinates(
+                            latitude, longitude, drift_radius
+                        )
+                    battery_mv = vary_integer(
+                        previous_cycle.battery_mv,
+                        *LIVE_INTEGER_VARIATION["battery_mv"],
                     )
-                if satellite_count != 255:
-                    satellite_count = vary_integer(
-                        satellite_count, *LIVE_INTEGER_VARIATION["satellite_count"]
+                    accuracy_m = vary_integer(
+                        previous_cycle.accuracy_m,
+                        *LIVE_INTEGER_VARIATION["accuracy_m"],
                     )
-            if recipe is not None and recipe.strategy == "randomized":
-                battery_mv = random.randint(3_300, 4_200)
-                accuracy_m = random.randint(1, 100)
-                fix_age_s = random.randint(0, 60)
-                satellite_count = random.randint(4, 16)
-            fields = replace(
-                base_fields,
-                message_sequence=(base_fields.message_sequence + sequence_offset) & 0xFFFF,
-                timestamp=min(0xFFFF_FFFF, base_send_time + offset),
-                latitude=latitude,
-                longitude=longitude,
-                battery_mv=battery_mv,
-                accuracy_m=accuracy_m,
-                fix_age_s=fix_age_s,
-                satellite_count=satellite_count,
-            )
-            self._prepared_fields.append(fields)
-            tlvs = self._vary_live_tlvs(base_tlvs, index, offset)
-            tlvs = self._recipe_tlvs(recipe, tlvs)
-            mode = self._recipe_tag_mode(recipe, index, default_mode)
-            built = build_tlv_packet(
-                fields,
-                tlvs,
-                hmac_key,
-                tag_mode=mode,
-                custom_tag_hex=self.custom_tag.text(),
-            )
-            gateway_time = (
-                min(0xFFFF_FFFF, base_gateway_time + arrival_offset)
-                if base_gateway_time is not None
-                else None
-            )
-            metadata = self._vary_live_metadata(base_metadata, index)
-            metadata = self._recipe_metadata(recipe, metadata, index)
-            result.append(
-                (
-                    fields.message_sequence,
-                    self._wrapper(
-                        built.payload_b64,
-                        gateway_timestamp=gateway_time,
-                        metadata_overrides=metadata,
+                    if previous_cycle.fix_age_s != 65_535:
+                        fix_age_s = vary_integer(
+                            previous_cycle.fix_age_s,
+                            *LIVE_INTEGER_VARIATION["fix_age_s"],
+                        )
+                    if previous_cycle.satellite_count != 255:
+                        satellite_count = vary_integer(
+                            previous_cycle.satellite_count,
+                            *LIVE_INTEGER_VARIATION["satellite_count"],
+                        )
+                if recipe is not None and recipe.strategy == "randomized":
+                    battery_mv = random.randint(3_300, 4_200)
+                    accuracy_m = random.randint(1, 100)
+                    fix_age_s = random.randint(0, 60)
+                    satellite_count = random.randint(4, 16)
+                fields = replace(
+                    initial,
+                    message_sequence=(initial.message_sequence + sequence_offset) & 0xFFFF,
+                    timestamp=(
+                        min(0xFFFF_FFFF, base_send_time + elapsed)
+                        if self.advance_packets.isChecked()
+                        else initial.timestamp
                     ),
+                    latitude=latitude,
+                    longitude=longitude,
+                    battery_mv=battery_mv,
+                    accuracy_m=accuracy_m,
+                    fix_age_s=fix_age_s,
+                    satellite_count=satellite_count,
                 )
-            )
+                self._prepared_fields.append(fields)
+                last_cycle_fields[credential.device_id] = fields
+                tlvs = self._vary_live_tlvs(base_tlvs, cycle, elapsed)
+                tlvs = self._recipe_tlvs(recipe, tlvs)
+                mode = self._recipe_tag_mode(recipe, cycle, default_mode)
+                built = build_tlv_packet(
+                    fields,
+                    tlvs,
+                    credential.hmac_key,
+                    tag_mode=mode,
+                    custom_tag_hex=self.custom_tag.text(),
+                )
+                gateway_time = (
+                    min(0xFFFF_FFFF, base_gateway_time + arrival_offset)
+                    if base_gateway_time is not None
+                    else None
+                )
+                metadata = self._vary_live_metadata(base_metadata, cycle)
+                metadata = self._recipe_metadata(recipe, metadata, cycle)
+                result.append(
+                    PreparedRequest(
+                        device_id=credential.device_id,
+                        sequence=fields.message_sequence,
+                        token=(gateway_token or "") if is_lora else credential.token,
+                        wrapper=self._wrapper(
+                            built.payload_b64,
+                            gateway_timestamp=gateway_time,
+                            metadata_overrides=metadata,
+                        ),
+                        fields=fields,
+                        cycle=cycle,
+                    )
+                )
         return result
 
     @staticmethod
@@ -1751,29 +1951,29 @@ class BluepawsTlvConsole(QMainWindow):
     def _send_worker(
         self,
         endpoint: str,
-        token: str,
-        requests: list[tuple[int, dict[str, Any]]],
+        requests: list[PreparedRequest],
         interval: float,
         timeout: float,
     ) -> None:
         completed = 0
-        for index, (sequence, wrapper) in enumerate(requests, start=1):
+        for index, request in enumerate(requests, start=1):
             if self._stop_event.is_set():
                 break
             started = time.monotonic()
             try:
                 status, response = post_wrapper(
                     endpoint,
-                    token,
-                    wrapper,
+                    request.token,
+                    request.wrapper,
                     timeout,
                     user_agent="bluepaws-tlv-qt-console/1",
                 )
                 entry = {
                     "time": time.strftime("%H:%M:%S"),
                     "request": index,
+                    "device_id": request.device_id,
                     "status": status,
-                    "message_sequence": sequence,
+                    "message_sequence": request.sequence,
                     "elapsed_ms": round((time.monotonic() - started) * 1000),
                     "response": response,
                 }
@@ -1781,14 +1981,19 @@ class BluepawsTlvConsole(QMainWindow):
                 entry = {
                     "time": time.strftime("%H:%M:%S"),
                     "request": index,
+                    "device_id": request.device_id,
                     "status": 0,
-                    "message_sequence": sequence,
+                    "message_sequence": request.sequence,
                     "elapsed_ms": round((time.monotonic() - started) * 1000),
                     "error": str(error),
                 }
             completed += 1
             self.worker_signals.response.emit(entry)
-            if index < len(requests) and self._stop_event.wait(interval):
+            next_request = requests[index] if index < len(requests) else None
+            cycle_complete = (
+                next_request is not None and next_request.cycle != request.cycle
+            )
+            if cycle_complete and self._stop_event.wait(interval):
                 break
         self.worker_signals.finished.emit(completed, len(requests), requests)
 
@@ -1804,15 +2009,24 @@ class BluepawsTlvConsole(QMainWindow):
         completion_status = (
             f"{'Stopped after' if stopped else 'Completed'} {completed} of {total} request(s)."
         )
-        if completed and self.advance_packets.isChecked():
-            last_fields = self._prepared_fields[completed - 1]
-            self.sequence.setText(str((last_fields.message_sequence + 1) & 0xFFFF))
-            self.timestamp.setText(str(int(time.time())))
-            self.latitude.setText(f"{last_fields.latitude:.7f}")
-            self.longitude.setText(f"{last_fields.longitude:.7f}")
-            if TRANSPORTS[self.transport.currentText()] == "lora_hub":
-                self._set_gateway_now()
-            self.build_packet()
+        requests = _requests if isinstance(_requests, list) else []
+        completed_requests = requests[:completed]
+        if completed_requests and self.advance_packets.isChecked():
+            latest_by_device: dict[int, PacketFields] = {}
+            for request in completed_requests:
+                if isinstance(request, PreparedRequest):
+                    latest_by_device[request.device_id] = request.fields
+            self._device_states.update(latest_by_device)
+            selected_device_id = self._int(self.device_id.text(), "device ID")
+            last_fields = latest_by_device.get(selected_device_id)
+            if last_fields is not None:
+                self.sequence.setText(str((last_fields.message_sequence + 1) & 0xFFFF))
+                self.timestamp.setText(str(int(time.time())))
+                self.latitude.setText(f"{last_fields.latitude:.7f}")
+                self.longitude.setText(f"{last_fields.longitude:.7f}")
+                if TRANSPORTS[self.transport.currentText()] == "lora_hub":
+                    self._set_gateway_now()
+                self.build_packet()
         self.sender_status.setText(completion_status)
         self._prepared_fields = []
         self._worker = None
@@ -1885,6 +2099,7 @@ class BluepawsTlvConsole(QMainWindow):
         values = (
             entry.get("time", ""),
             entry.get("request", ""),
+            entry.get("device_id", ""),
             status if status else "—",
             f"{icon}  {label}",
             entry.get("message_sequence", ""),
