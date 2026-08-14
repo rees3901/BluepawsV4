@@ -4,6 +4,7 @@ import L from "leaflet";
 import { useEffect, useRef } from "react";
 import { emojiImageUrl } from "@/lib/emoji";
 import { formatMapCoordinates, googleMapsUrl, mapLocationShareText } from "@/lib/mapLocation";
+import { MAP_LAYER_DEFINITIONS, type MapLayerName } from "@/lib/mapLayers";
 import { normalizeMarkerColor } from "@/lib/markerColor";
 import { transportPresentation } from "@/lib/transportPath";
 import { appendTrailPoint, VISIBLE_TRAIL_POINT_LIMIT, type TrailLatLng } from "@/lib/trailPoints";
@@ -26,12 +27,6 @@ interface TrackingMapProps {
   onAction: (device: TelemetryDevice, action: DeviceAction) => void;
 }
 
-const STANDARD_DISPLAY_MAX_ZOOM = 22;
-const TOPOGRAPHIC_DISPLAY_MAX_ZOOM = 20;
-const ESRI_DISPLAY_MAX_ZOOM = 23;
-const OSM_NATIVE_MAX_ZOOM = 19;
-const OPEN_TOPO_NATIVE_MAX_ZOOM = 17;
-const ESRI_NATIVE_MAX_ZOOM = 23;
 const JUMP_TO_ZOOM = 17;
 
 export default function TrackingMap(props: TrackingMapProps) {
@@ -59,38 +54,22 @@ export default function TrackingMap(props: TrackingMapProps) {
     const map = L.map("map", { center: [51.505, -0.09], zoom: 13, zoomControl: false, tapHold: true });
     mapRef.current = map;
 
-    const street = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      attribution: "&copy; OpenStreetMap",
-      maxNativeZoom: OSM_NATIVE_MAX_ZOOM,
-      maxZoom: STANDARD_DISPLAY_MAX_ZOOM,
-    });
-    const satellite = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
-      attribution: "&copy; Esri World Imagery",
-      maxNativeZoom: ESRI_NATIVE_MAX_ZOOM,
-      maxZoom: ESRI_DISPLAY_MAX_ZOOM,
-    });
-    const clarity = L.tileLayer("https://clarity.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
-      attribution: "&copy; Esri Clarity",
-      maxNativeZoom: ESRI_NATIVE_MAX_ZOOM,
-      maxZoom: ESRI_DISPLAY_MAX_ZOOM,
-    });
-    const topo = L.tileLayer("https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", {
-      attribution: "&copy; OpenTopoMap",
-      maxNativeZoom: OPEN_TOPO_NATIVE_MAX_ZOOM,
-      maxZoom: TOPOGRAPHIC_DISPLAY_MAX_ZOOM,
-    });
-    const humanitarian = L.tileLayer("https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png", {
-      attribution: "&copy; OpenStreetMap, Tiles: HOT",
-      maxNativeZoom: OSM_NATIVE_MAX_ZOOM,
-      maxZoom: STANDARD_DISPLAY_MAX_ZOOM,
-    });
-    const esriTopo = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}", {
-      attribution: "&copy; Esri",
-      maxNativeZoom: ESRI_NATIVE_MAX_ZOOM,
-      maxZoom: ESRI_DISPLAY_MAX_ZOOM,
-    });
-    street.addTo(map);
-    L.control.layers({ Street: street, Satellite: satellite, "Satellite HD": clarity, Topographic: topo, Humanitarian: humanitarian, "Esri Topo": esriTopo }, undefined, { position: "topright", collapsed: true }).addTo(map);
+    const createTileLayer = (name: MapLayerName) => {
+      const definition = MAP_LAYER_DEFINITIONS[name];
+      return L.tileLayer(definition.url, {
+        attribution: definition.attribution,
+        maxNativeZoom: definition.maxNativeZoom,
+        maxZoom: definition.maxZoom,
+      });
+    };
+    const baseLayers = Object.fromEntries(
+      (Object.keys(MAP_LAYER_DEFINITIONS) as MapLayerName[]).map((name) => [
+        name,
+        createTileLayer(name),
+      ]),
+    ) as Record<MapLayerName, L.TileLayer>;
+    baseLayers.Street.addTo(map);
+    L.control.layers(baseLayers, undefined, { position: "topright", collapsed: true }).addTo(map);
     L.control.zoom({ position: "bottomleft" }).addTo(map);
     L.control.scale({ position: "bottomright", imperial: true, metric: true }).addTo(map);
 
