@@ -5,7 +5,8 @@ const supabaseUrl = requiredEnvironment("SUPABASE_URL");
 const publishableKey = requiredEnvironment("SUPABASE_PUBLISHABLE_KEY");
 const accessToken = requiredEnvironment("SUPABASE_ACCESS_TOKEN");
 const householdId = requiredEnvironment("HOUSEHOLD_ID");
-const topic = `household:${householdId}`;
+const householdAccessVersion = requiredEnvironment("HOUSEHOLD_ACCESS_VERSION");
+const topic = `household:${householdId}:v${householdAccessVersion}`;
 
 const clients = [];
 const channels = [];

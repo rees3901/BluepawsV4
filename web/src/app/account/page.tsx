@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { loadOwnedFamilyBillingAccounts } from "@/lib/familyBilling";
 import { getFamilyContext } from "@/lib/familyContext";
 import { createClient } from "@/lib/supabase/server";
 import { AccountForm } from "./AccountForm";
@@ -11,7 +12,10 @@ export default async function AccountPage() {
   const userId = typeof claims?.sub === "string" ? claims.sub : null;
   if (!userId || !claims) redirect("/login?next=/account");
 
-  const context = await getFamilyContext(userId);
+  const [context, ownedBillingAccounts] = await Promise.all([
+    getFamilyContext(userId),
+    loadOwnedFamilyBillingAccounts(userId),
+  ]);
   const email = typeof claims.email === "string" ? claims.email : "Unavailable";
   const appMetadata = claims.app_metadata && typeof claims.app_metadata === "object" ? claims.app_metadata as Record<string, unknown> : null;
   const provider = typeof appMetadata?.provider === "string" ? appMetadata.provider : "email";
@@ -36,10 +40,20 @@ export default async function AccountPage() {
         </section>
 
         <section className="settings-card" id="billing">
-          <div className="settings-card-heading"><div><span className="settings-eyebrow">Billing</span><h2>Subscription</h2></div><span className="role-pill secondary">Coming later</span></div>
-          {context.activeFamily?.role === "owner"
-            ? <p className="settings-copy">This is the future home for plan, payment and cancellation controls. It is intentionally read-only until Bluepaws plans and the billing provider are finalised.</p>
-            : <p className="settings-copy">Only a Family Owner will be able to make billing decisions.</p>}
+          <div className="settings-card-heading"><div><span className="settings-eyebrow">Billing</span><h2>Your Bluepaws accounts</h2></div><span className="role-pill secondary">Coming later</span></div>
+          {ownedBillingAccounts.length > 0 ? (
+            <>
+              <p className="settings-copy">Only Families for which you are the billing owner appear here. Membership in somebody else&apos;s Family never exposes their payment or account controls.</p>
+              <div className="billing-family-list">
+                {ownedBillingAccounts.map((account) => (
+                  <article className="billing-family-row" key={account.householdId}>
+                    <div><strong>{account.familyName}</strong><small>Billing owner</small></div>
+                    <span className="role-pill secondary">Setup pending</span>
+                  </article>
+                ))}
+              </div>
+            </>
+          ) : <p className="settings-copy">You can track pets shared with you, but you do not own a Bluepaws billing account.</p>}
         </section>
       </div>
     </main>

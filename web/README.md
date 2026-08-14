@@ -55,7 +55,7 @@ Hub/collar service
     -> Supabase Edge Function (validation and normalization)
     -> append-only Postgres positions table
     -> maintained device_latest_positions table
-    -> private household:<uuid> Realtime Broadcast channel
+    -> versioned private household:<uuid>:v<access-version> Realtime Broadcast channel
     -> authenticated Next.js dashboard
     -> dashboard components (4G/RF transport badge beside signal quality)
 ```
@@ -92,6 +92,18 @@ more than one Family and chooses an active Family before loading telemetry.
 - **Member**: normal access to the Family's pets, positions, map and trails, with
   no invitation or billing administration.
 
+One authenticated person can be an Owner in one Family and a Member in another.
+The dashboard deliberately loads one selected active Family at a time. Family
+membership does not confer billing access: `family_billing_accounts` records
+the billing owner separately, and `/account` returns only records owned by the
+signed-in person.
+
+An Owner can remove an accepted Member without deleting that person's profile,
+login, or other Family memberships. Removal also rotates the Family's private
+Realtime channel version. Future telemetry stops going to the old channel;
+remaining Members reconnect to the new authorized topic while the removed
+person cannot join it.
+
 Owners create an email-bound, one-time link on `/family`. The raw 256-bit token
 is returned only when the invitation is created; Postgres stores only its
 SHA-256 hash. Opening the link moves it into a seven-day, `HttpOnly`,
@@ -122,6 +134,7 @@ $env:SUPABASE_URL='https://project-ref.supabase.co'
 $env:SUPABASE_PUBLISHABLE_KEY='sb_publishable_...'
 $env:SUPABASE_ACCESS_TOKEN='short-lived-user-jwt'
 $env:HOUSEHOLD_ID='household-uuid'
+$env:HOUSEHOLD_ACCESS_VERSION='1'
 npm run loadtest:realtime -- --clients 10 --duration 60
 ```
 

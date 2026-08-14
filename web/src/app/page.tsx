@@ -20,12 +20,13 @@ export default async function Home() {
 
   const snapshot = familyContext.activeFamily
     ? await getLiveTelemetrySnapshot(familyContext.activeFamily.householdId)
-    : { devices: [], householdId: null, error: familyContext.error };
+    : { devices: [], householdId: null, accessVersion: null, error: familyContext.error };
   const userEmail = typeof claims.email === "string" ? claims.email : null;
 
   return (
     <Dashboard
       householdId={snapshot.householdId}
+      householdAccessVersion={snapshot.accessVersion}
       initialLiveDevices={snapshot.devices}
       liveTelemetryError={snapshot.error}
       userEmail={userEmail}

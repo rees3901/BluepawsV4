@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/client";
+import { familyRealtimeTopic, nextFamilyAccessVersion } from "@/lib/familyRealtime";
 import { isPositionRow, positionToTelemetryDevice, type PositionRow } from "@/lib/telemetryRows";
 import { VISIBLE_TRAIL_POINT_LIMIT } from "@/lib/trailPoints";
 import type { TelemetryDevice, TelemetrySource, TrailPoint } from "@/types/telemetry";
@@ -9,6 +10,7 @@ const POSITION_COLUMNS = "position_id,device_uid,household_id,message_id,latitud
 
 export function createRealtimeTelemetrySource(
   householdId: string,
+  initialAccessVersion: number,
   initialDevices: TelemetryDevice[],
 ): TelemetrySource {
   return {
@@ -20,6 +22,7 @@ export function createRealtimeTelemetrySource(
       let fallbackTimer: number | null = null;
       let realtimeConnected = false;
       let channel: ReturnType<typeof supabase.channel> | null = null;
+      let accessVersion = initialAccessVersion;
 
       const publish = () => {
         listener([...devices.values()].sort((left, right) => left.id - right.id));
@@ -72,9 +75,23 @@ export function createRealtimeTelemetrySource(
         }, fallbackDelay);
       };
 
-      const handleBroadcast = (payload: unknown) => {
+      const handlePositionBroadcast = (payload: unknown) => {
         const row = extractBroadcastRecord(payload);
         updateFromRow(row);
+      };
+
+      const handleAccessChange = (payload: unknown) => {
+        const row = extractBroadcastRecord(payload);
+        const nextAccessVersion = nextFamilyAccessVersion(row, householdId, accessVersion);
+        if (nextAccessVersion === null) return;
+        accessVersion = nextAccessVersion;
+        realtimeConnected = false;
+        clearFallback();
+        const previousChannel = channel;
+        channel = null;
+        if (previousChannel) void supabase.removeChannel(previousChannel);
+        void refresh();
+        void connect();
       };
 
       publish();
@@ -84,12 +101,13 @@ export function createRealtimeTelemetrySource(
         await supabase.realtime.setAuth();
         if (!active) return;
 
-        channel = supabase
-          .channel(`household:${householdId}`, { config: { private: true } })
-          .on("broadcast", { event: "INSERT" }, handleBroadcast)
-          .on("broadcast", { event: "UPDATE" }, handleBroadcast)
+        const nextChannel = supabase
+          .channel(familyRealtimeTopic(householdId, accessVersion), { config: { private: true } })
+          .on("broadcast", { event: "INSERT" }, handlePositionBroadcast)
+          .on("broadcast", { event: "UPDATE" }, handlePositionBroadcast)
+          .on("broadcast", { event: "ACCESS_CHANGED" }, handleAccessChange)
           .subscribe((status: "SUBSCRIBED" | "TIMED_OUT" | "CLOSED" | "CHANNEL_ERROR", error?: Error) => {
-            if (!active) return;
+            if (!active || channel !== nextChannel) return;
             if (status === "SUBSCRIBED") {
               realtimeConnected = true;
               fallbackDelay = INITIAL_FALLBACK_DELAY_MS;
@@ -105,6 +123,7 @@ export function createRealtimeTelemetrySource(
               scheduleFallback();
             }
           });
+        channel = nextChannel;
       };
 
       void connect().catch((error: unknown) => {
