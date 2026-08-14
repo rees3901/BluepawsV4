@@ -347,6 +347,38 @@ There is no JSON and no Base64 over LoRa.
 
 The SX1262/LoRa layer may add its own radio-layer preamble, sync word, FEC, LoRa header and PHY CRC depending on radio configuration. Those are not part of this application payload.
 
+#### Locked UK LoRa radio profile
+
+The collar and Home Hub use one fixed PHY profile. Only transmit power changes with the operating profile, preventing collar/hub setting mismatches.
+
+| Parameter | Locked value |
+|---|---|
+| Frequency | 869.500 MHz |
+| Spreading factor | SF10 |
+| Bandwidth | 125 kHz |
+| Coding rate | 4/6 |
+| Forward error correction | Enabled through CR4/6 |
+| Preamble | 8 symbols |
+| Header mode | Explicit |
+| Payload CRC | Enabled |
+| Low data-rate optimisation | Disabled |
+| Sync word | 0x12, fixed private-network value |
+| Maximum raw application payload | 64 bytes |
+| Dynamic SF/BW/CR profiles | Not used |
+
+CR4/6 adds 50 percent FEC overhead relative to the uncoded data. Equivalently, one third of the coded bits are redundancy. Actual LoRa airtime is determined by PHY symbol packing and is not calculated by simply treating a 64-byte application payload as a literal 96-byte LoRa payload.
+
+Transmit-power policy:
+
+| Operating profile | TX power |
+|---|---:|
+| POWER_SAVE | 10 dBm |
+| NORMAL | 14 dBm |
+| ACTIVE | 20 dBm |
+| LOST_ALERT | 20 dBm |
+
+The higher-power profiles remain subject to the final product's UK regulatory compliance, including complete-system ERP after antenna gain and feeder losses.
+
 ### 15.2 Hub to Supabase over HTTPS
 
 The hub sends a JSON wrapper because it needs to include relay metadata as well as the original binary packet.
