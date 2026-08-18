@@ -1,267 +1,408 @@
 # BluePaws V4 Master TODO
 
-This file is the consolidated implementation backlog for BluePaws V4. It captures design ideas, deferred work, and agreed architectural directions from project discussions so they can be expanded into detailed specifications and implemented later.
+This file is the consolidated implementation backlog for BluePaws V4. It captures design ideas, deferred work, agreed architectural directions, and completed milestones.
+
+Completed items are retained as `[x]` and struck through so the file also acts as a lightweight implementation history.
 
 ## 1. Home Hub Communications Architecture
 
-### Online / Home Mode
-- [ ] Implement normal Home Hub online mode when the configured home Wi-Fi connection is available.
-- [ ] Receive collar LoRa packets and forward them to the cloud ingestion endpoint without altering the original collar payload.
-- [ ] Add hub-generated HTTP wrapper metadata around forwarded collar packets.
-- [ ] Include ingestion path metadata in the wrapper so the backend can distinguish traffic received via Home Hub, portable hub, direct LTE, simulator, and other future paths.
-- [ ] Add hub self-reporting telemetry using the HTTP wrapper rather than modifying the collar TLV payload.
-- [ ] Define hub self-reporting fields such as hub ID, firmware version, uptime, connectivity state, Wi-Fi RSSI, LoRa statistics, power state, and last cloud contact.
-- [ ] Ensure backend deduplication still operates on the original collar identity/message sequence regardless of ingress path.
+### Design principle
+
+The Home Hub is always a LoRa receiver/gateway. Its communications profile determines how the user reaches the hub and whether received collar traffic can also be forwarded to the cloud. Internet availability must never interrupt the core LoRa receive path.
+
+The hub should expose three clear user-facing communications profiles:
+
+1. **Home**: fixed at home, connected to the customer's normal Wi-Fi, cloud connected.
+2. **Portable**: deliberately selected by the user when taking the hub away from home. It may use a phone hotspot or other Wi-Fi uplink and remains cloud connected when that uplink is usable.
+3. **Off-Grid**: deliberately selected local-only mode. The hub creates/uses its own AP and serves the local tracking interface with no dependency on internet connectivity.
+
+The distinction between Portable and Off-Grid is intentional. A weak or intermittent phone connection must not cause the interface or operating model to flap unpredictably between cloud and local modes while the user is searching for a pet.
+
+### Home Mode
+
+- [x] ~~Implement baseline ESP32-S3 Home Hub firmware with LoRa receive, web server, BLE beacon and cloud relay tasks.~~
+- [x] ~~Receive collar LoRa packets on the hub.~~
+- [x] ~~Maintain receiver-side LoRa RSSI/SNR separately from the original collar payload.~~
+- [x] ~~Implement Wi-Fi STA connectivity for an internet uplink.~~
+- [x] ~~Implement baseline cloud relay queue/HTTP POST path.~~
+- [x] ~~Implement local hub web server and local telemetry state table.~~
+- [x] ~~Advertise the BLE home beacon from the hub.~~
+- [ ] Refactor the current hub implementation into an explicit `HOME` communications state.
+- [ ] In Home Mode automatically reconnect to the configured household Wi-Fi after temporary loss.
+- [ ] Continue LoRa receive, local state updates and command handling regardless of temporary cloud/Wi-Fi loss.
+- [ ] Use the cloud web application as the normal customer interface while the hub is online.
+- [ ] Define clear hub status fields: `mode`, `wifi_connected`, `internet_reachable`, `cloud_reachable`, `last_cloud_success`, and `lora_rx_active`.
 
 ### Portable Mode
-- [ ] Implement a user-selectable Portable Mode for taking the Home Hub away from the configured home network.
-- [ ] Allow the hub to use an available internet uplink while portable, such as a phone hotspot.
-- [ ] Continue forwarding LoRa collar packets to Supabase while internet connectivity is available.
-- [ ] Expose the same user-facing tracking interface while portable.
-- [ ] Define a clear UI indication that the hub is operating in Portable Mode.
-- [ ] Decide whether Portable Mode should be explicitly selected by the user rather than inferred automatically.
+
+- [x] ~~A basic Home/Portable mode concept already exists in the hub firmware.~~
+- [x] ~~Portable-mode BLE scanning support exists in the current hub firmware for Active Find proximity use.~~
+- [ ] Make Portable Mode an **explicit user-selected mode**, not a mode inferred simply because home Wi-Fi disappeared.
+- [ ] Provide a simple UI action such as `Take Hub Portable` / `Portable Mode`.
+- [ ] When Portable Mode is selected, stop treating loss of the configured home SSID as a fault condition.
+- [ ] Allow the user to connect the hub STA interface to a phone hotspot or other temporary Wi-Fi network.
+- [ ] Continue receiving collar packets over LoRa at all times.
+- [ ] Continue forwarding collar packets to Supabase whenever the portable internet uplink is actually usable.
+- [ ] Keep local hub data and controls available even when the portable internet uplink becomes intermittent.
+- [ ] Do not automatically drop into Off-Grid Mode because a phone hotspot temporarily loses mobile data.
+- [ ] Show separate indicators for `Portable Mode`, `Wi-Fi associated`, and `Internet/cloud reachable`.
+- [ ] Preserve BLE Active Find scanning behaviour while portable where useful.
 
 ### Off-Grid Mode
-- [ ] Implement explicit Off-Grid Mode for operation with no internet connection.
-- [ ] Have the hub create its own Wi-Fi access point in Off-Grid Mode.
-- [ ] Serve a local version of the BluePaws tracking web interface from the hub.
-- [ ] Display collar positions and recent telemetry received directly over LoRa without requiring cloud connectivity.
-- [ ] Define what local history is retained while off-grid.
-- [ ] Decide whether old off-grid position data should be backfilled to Supabase after reconnection or simply discarded as stale data.
-- [ ] Keep off-grid behaviour understandable during a lost-pet event, prioritising simplicity over automatic mode switching.
 
-### Hub Mode Switching and Anti-Flapping
-- [ ] Design a formal Home / Portable / Off-Grid communications state machine.
-- [ ] Prevent rapid flapping between online and off-grid states when internet connectivity is intermittent.
-- [ ] Consider explicit user control for Portable and Off-Grid modes while keeping Home mode automatic.
-- [ ] Add connectivity hysteresis / stability timers before declaring an internet path restored or lost.
-- [ ] Ensure LoRa reception continues during internet transitions so collar packets are not lost because of hub state changes.
-- [ ] Define UI status indicators for hub mode, internet state, cloud reachability, and LoRa reception.
+- [x] ~~The current hub already creates a local Wi-Fi AP and hosts a local web GUI baseline.~~
+- [x] ~~The current hub already stores recent received telemetry locally in LittleFS/logging structures.~~
+- [ ] Make Off-Grid Mode an **explicit user-selected communications profile**.
+- [ ] In Off-Grid Mode present the hub's local AP as the primary user connection.
+- [ ] Serve a local version of the BluePaws tracking GUI directly from the hub.
+- [ ] Display live LoRa-derived collar positions, battery, status, RSSI/SNR and last-seen information with no cloud dependency.
+- [ ] Maintain command transmission from hub to collar while off-grid.
+- [ ] Ensure Lost/Active Find can be initiated locally without Supabase/Vercel availability.
+- [ ] Clearly label the interface `OFF-GRID / LOCAL` so the user understands cloud services are not in use.
+- [ ] Define how much recent position history should be retained by the hub for local viewing.
+- [ ] Current preference: **do not make cloud backfill a launch-critical feature**. Old offline points are normally stale once connectivity returns.
+- [ ] If backfill is implemented later, mark records as historical/offline observations so they can never appear as current positions.
+
+### Mode Switching and Anti-Flapping
+
+- [ ] Implement formal `HOME`, `PORTABLE`, and `OFF_GRID` hub states.
+- [ ] Home Mode may automatically reconnect to its configured home Wi-Fi, but the user's selected communications profile should not change merely because internet connectivity fluctuates.
+- [ ] Portable and Off-Grid should be conscious user choices during a search event.
+- [ ] Separate **mode state** from **connectivity state**. Example: `mode=PORTABLE`, `internet=DOWN` is valid and should not force `mode=OFF_GRID`.
+- [ ] Add connectivity hysteresis before changing UI/cloud-health indicators, for example several consecutive failed probes before declaring cloud unreachable and several consecutive successes before declaring it restored.
+- [ ] Never restart/reconfigure the LoRa receive path solely because Wi-Fi or cloud connectivity changed.
+- [ ] Queue or gracefully drop cloud-forward work without blocking LoRa reception.
+- [ ] Ensure a temporary phone signal outage cannot cause repeated GUI switching, AP resets, dropped local sessions or confusing status changes.
+- [ ] Provide one clear mode selector and separate passive indicators for Wi-Fi, internet/cloud and LoRa status.
+
+### HTTP Ingestion Wrapper and Ingress Paths
+
+The collar's binary TLV packet should remain transport-neutral. Receiver/network observations belong in the HTTP wrapper created by whichever gateway sends the packet to Supabase.
+
+- [x] ~~Supabase TLV ingestion already accepts ingress-path metadata separately from the collar packet.~~
+- [x] ~~Backend ingestion already supports distinct gateway and `cellular_direct` authentication paths.~~
+- [x] ~~Backend ingestion already records gateway GUID, receiver RSSI/SNR, gateway receive time and cellular RSRP/RSRQ/SINR metadata.~~
+- [x] ~~Backend deduplication already uses collar message identity while retaining observation/ingress metadata.~~
+- [ ] Standardise final ingest-path enum names for production, including at minimum `home_hub`, `portable_hub`, `cellular_direct`, `simulator`, and any future gateway class.
+- [ ] Ensure Home and Portable traffic can use the same physical hub ID while reporting the current hub communications profile separately.
+- [ ] Keep all gateway-derived RF/network fields outside the authenticated collar TLV body.
+- [ ] Document the exact production HTTP wrapper JSON schema.
+
+### Hub Self-Reporting
+
+Hub health is gateway telemetry, not collar telemetry. It should therefore use a dedicated hub self-report payload/wrapper and must not alter the collar TLV protocol.
+
+- [ ] Add periodic hub self-reporting to the cloud.
+- [ ] Assign every hub a persistent gateway/hub identifier and credential.
+- [ ] Include current communications profile: `HOME`, `PORTABLE`, or `OFF_GRID` where relevant.
+- [ ] Include firmware version and uptime.
+- [ ] Include Wi-Fi association state and Wi-Fi RSSI when applicable.
+- [ ] Include internet/cloud reachability and timestamp of last successful cloud contact.
+- [ ] Include LoRa receiver health and useful counters such as valid RX count, failed packet count and command TX count.
+- [ ] Include power/source information where available, especially if a future portable hub is battery powered.
+- [ ] Keep hub self-reports in a separate backend table/model from collar observations.
+- [ ] Use self-reporting for dashboard diagnostics, fleet support and identifying hubs that have gone offline.
 
 ## 2. Collar Communications Profiles
 
-- [ ] Formalise communications profiles for Home, Roaming/Out, Active, Lost Alert, and other required operational states.
-- [ ] Keep LoRa as the primary transport for the majority of routine communications.
-- [ ] Use LTE-M / NB-IoT as the secondary direct-to-cloud path when appropriate.
-- [ ] Maintain identical logical collar payloads regardless of whether the packet reaches the backend through LoRa/Home Hub or LTE.
-- [ ] Keep path-specific telemetry out of the collar TLV payload where it can instead be added by the receiving transport wrapper.
-- [ ] Define the final decision logic that moves a collar between Home, Out, Active, and Lost states.
+- [x] ~~Implement baseline NORMAL, POWERSAVE, ACTIVE and LOST firmware profiles.~~
+- [x] ~~Implement profile-specific sleep intervals, LoRa TX power and cellular ratios in shared configuration.~~
+- [ ] Formalise the distinction between **status** (`home`, `out`, `lost`, etc.) and **power/communications profile** (`powersave`, `normal`, `active`, `lost`).
+- [ ] Keep LoRa as the primary transport for routine communications.
+- [ ] Use LTE-M / NB-IoT as the secondary direct-to-cloud path.
+- [ ] Maintain identical logical collar payloads regardless of LoRa/Home Hub or direct cellular ingress.
+- [ ] Keep path-specific telemetry in the transport wrapper rather than the collar TLV.
+- [ ] Finalise automatic transitions between Home, Out, Active and Lost states.
 
 ## 3. Collar Wake / Check-In Workflow
 
-- [ ] Implement the agreed wake-up sequence.
-- [ ] On wake, transmit a lightweight presence / wake-up check-in message.
-- [ ] Add `wake-up check-in` to the TX reason enum and ensure the backend recognises it as a presence event rather than full telemetry.
-- [ ] Perform BLE home-beacon detection during the wake cycle.
-- [ ] If the home beacon is detected, send the required low-power presence update and return to sleep without unnecessary GNSS/LTE work.
-- [ ] If away from home, begin GNSS acquisition.
-- [ ] Run the GNSS warm-start acquisition in parallel with the LoRa command window where practical.
-- [ ] Keep the LoRa radio continuously listening during the approximately 10-second command window rather than duty-cycling one-second RX pauses.
-- [ ] Allow queued configuration commands to be delivered during this RX window.
-- [ ] Define behaviour when GNSS gets a fix before the command window ends and vice versa.
+### Agreed target behaviour
+
+The original power-saving design was: wake, scan for the BLE home beacon, and if home immediately return to sleep. The newer design deliberately adds a very small LoRa exchange on **every home wake cycle** so that the system gets a fresh presence indication and the collar provides a predictable over-the-air configuration opportunity.
+
+#### Home wake path
+
+1. Collar wakes from deep sleep.
+2. Scan for the Home Hub BLE beacon.
+3. Home beacon detected.
+4. Do **not** start GNSS.
+5. Do **not** attach LTE solely for this routine home check.
+6. Build and send a small LoRa **wake-up check-in / presence packet**.
+7. Backend/hub uses this to refresh `last_seen` and confirm the collar is alive and still at home.
+8. Immediately open the LoRa RX command window.
+9. Keep LoRa RX continuously active for the agreed command window rather than short duty-cycled listening bursts.
+10. Receive/apply any pending configuration or mode command and ACK as required.
+11. If no command is received, return to deep sleep.
+
+#### Away-from-home wake path
+
+1. Collar wakes and scans for the Home Hub BLE beacon.
+2. Beacon is not detected according to the final departure/debounce rules.
+3. Start GNSS acquisition.
+4. Open the LoRa command RX opportunity in parallel with GNSS warm-start/acquisition where practical.
+5. Obtain/finalise GNSS fix.
+6. Build and send normal telemetry over LoRa.
+7. Use cellular according to the current communications/profile policy.
+8. Return to sleep unless operating in Active/Lost behaviour.
+
+### Existing implementation
+
+- [x] ~~BLE home-beacon scanning exists in collar firmware.~~
+- [x] ~~Current firmware suppresses GNSS when home.~~
+- [x] ~~Current firmware contains a LoRa command-listening mechanism.~~
+- [x] ~~Command ACK/retry/deduplication foundations already exist between hub and collar.~~
+- [ ] Replace the current old behaviour of `home -> usually sleep, occasional heartbeat` with the new **presence/check-in on every scheduled home wake** behaviour.
+- [ ] Remove/retire the existing `heartbeat_ratio` logic if it becomes redundant under the every-wake presence design.
+- [ ] Increase the current firmware command listen window from 2 seconds to the agreed **10-second RX window**.
+- [ ] Keep the radio continuously in RX for that window. Do not implement one-second on/off listening pauses.
+- [ ] Add the final `WAKE_CHECK_IN` / equivalent TX reason enum value to the shared protocol if not already represented in the current protocol version.
+- [ ] Ensure Supabase interprets this packet as a presence/check-in event rather than requiring a GNSS position.
+- [ ] Ensure a home presence packet can omit latitude/longitude and other unnecessary telemetry while still containing device identity, sequence, status/profile, battery and authentication fields as appropriate.
+- [ ] Run GNSS acquisition and the command window concurrently on the away-from-home path where firmware architecture permits.
 
 ## 4. LoRa Radio Configuration
 
-- [ ] Lock the standard UK LoRa profile into firmware and documentation.
-- [ ] Frequency: 869.5 MHz.
-- [ ] Spreading Factor: SF10.
-- [ ] Bandwidth: 125 kHz.
-- [ ] Coding Rate: 4/6.
-- [ ] CRC: enabled.
-- [ ] Preamble: 8 symbols.
-- [ ] Keep a single fixed radio profile rather than dynamic profile switching to avoid configuration mismatch and lost connectivity.
-- [ ] Keep normal TX power at or below 14 dBm.
-- [ ] Permit increased transmit power only under the explicitly defined emergency / lost profile if required and legally compliant.
-- [ ] Document expected airtime for representative 64-byte and approximately 100-byte packets.
-- [ ] Validate airtime calculations against Semtech reference tooling / formulas.
+- [x] ~~Lock frequency to 869.5 MHz.~~
+- [x] ~~Lock spreading factor to SF10.~~
+- [x] ~~Lock bandwidth to 125 kHz.~~
+- [x] ~~Lock coding rate to 4/6.~~
+- [x] ~~Enable LoRa PHY CRC.~~
+- [x] ~~Lock preamble to 8 symbols.~~
+- [x] ~~Use a single fixed modulation profile shared by hub and collar.~~
+- [x] ~~Implement normal profile TX power of 14 dBm in shared configuration.~~
+- [x] ~~Implement increased TX power for Active/Lost profiles in shared configuration.~~
+- [ ] Verify final UK regulatory assumptions for increased Active/Lost TX power before commercial release.
+- [ ] Document measured/reference airtime for representative packet sizes.
 
 ## 5. TLV Protocol
 
-- [ ] Keep the V4 collar payload based on the binary TLV protocol.
-- [ ] Maintain the target packet structure of fixed header + TLV area + truncated keyed MAC.
-- [ ] Keep the 8-byte keyed MAC for payload authenticity/integrity.
-- [ ] Keep LoRa PHY CRC and FEC enabled.
-- [ ] Do not add a separate application CRC-16 unless a new requirement justifies it.
-- [ ] Keep `msg_seq_id` for deduplication and ACK targeting.
-- [ ] Review device UID width against realistic commercial scale before hardware/firmware protocol freeze.
-- [ ] Keep RF RSSI/SNR and ingress-path metrics outside the collar TLV where they are generated by the receiving infrastructure.
-- [ ] Ensure the LTE HTTP transport Base64-encodes the same binary TLV payload used over LoRa.
-- [ ] Maintain the canonical TLV documentation in `docs/TLV_PROTOCOL_V1_1.md`.
-- [ ] Keep the ingestion runbook synchronised with any protocol changes.
+- [x] ~~Binary TLV protocol library exists and is shared by hub/collar.~~
+- [x] ~~Canonical protocol documentation exists at `docs/TLV_PROTOCOL_V1_1.md`.~~
+- [x] ~~Ingestion runbook exists at `docs/TLV_INGESTION_RUNBOOK.md`.~~
+- [x] ~~`msg_seq_id` is used by the ingestion/deduplication model.~~
+- [x] ~~Ingress RF/network metadata is represented outside the collar payload by the backend ingest model.~~
+- [ ] Keep protocol documentation synchronised with the newest wake-check-in TX reason and any resulting presence-packet example.
+- [ ] Revisit device UID width before final commercial protocol freeze.
+- [ ] Resolve any remaining mismatch between older firmware encryption/authentication code and the current documented keyed-MAC/HMAC protocol design.
 
 ## 6. Backend / Supabase Ingestion
 
-- [ ] Maintain Supabase Edge Function ingestion as the common backend entry point.
-- [ ] Validate the keyed MAC before parsing or accepting telemetry.
-- [ ] Parse the TLV payload into normalised database fields.
-- [ ] Deduplicate using device identity + message sequence ID.
-- [ ] Record ingress path separately from the collar payload.
-- [ ] Record receiver-side LoRa metrics such as RSSI and SNR when packets arrive through a hub.
-- [ ] Record relevant LTE-side network metrics when supplied by the cellular transport.
-- [ ] Add hub health/self-report records to the backend without conflating them with collar telemetry.
-- [ ] Define authentication/authorisation for collars, hubs, simulator tools, and web clients.
-- [ ] Review bearer-token handling and whether device-specific credentials / allow-listing require further hardening.
+- [x] ~~Supabase `ingest-position` Edge Function exists.~~
+- [x] ~~TLV decoding/parser exists.~~
+- [x] ~~TLV ingestion tests exist.~~
+- [x] ~~Bearer-token credential lookup exists for device-direct and gateway ingestion.~~
+- [x] ~~Gateway/device household association is checked for gateway ingress.~~
+- [x] ~~Device + message identity deduplication exists.~~
+- [x] ~~Ingress path is recorded independently of the collar TLV.~~
+- [x] ~~Gateway RSSI/SNR and cellular network metrics are accepted by ingestion.~~
+- [ ] Add/confirm keyed-MAC verification against the final protocol specification before accepting a packet as authentic.
+- [ ] Add dedicated hub health/self-report ingestion and storage.
+- [ ] Add/confirm wake-check-in handling that updates presence/last-seen without requiring a fresh GNSS point.
+- [ ] Review credential lifecycle, rotation, revocation and rate limiting before launch.
 
 ## 7. Local / Cloud Web Interface
 
-- [ ] Maintain the primary web application as Next.js + TypeScript.
-- [ ] Keep Leaflet / OpenStreetMap as the mapping stack unless requirements change.
-- [ ] Display current position, state, battery, last-seen information, and recent history for each registered collar.
-- [ ] Support up to the intended household collar count cleanly in the main dashboard.
-- [ ] Implement recent breadcrumb/history display for each collar.
-- [ ] Develop a local hub-hosted version of the interface for Off-Grid Mode.
-- [ ] Reuse as much UI logic as practical between cloud and local versions.
-- [ ] Clearly show whether data is live from cloud, live from local LoRa, or historical/cached.
-- [ ] Clearly display current hub communications mode.
+- [x] ~~Primary Next.js + TypeScript web application exists.~~
+- [x] ~~Leaflet-based mapping implementation exists.~~
+- [x] ~~Dashboard components and telemetry types exist.~~
+- [x] ~~Breadcrumb/trail support exists in the web codebase.~~
+- [x] ~~A baseline local Hub HTML/CSS/JS GUI exists.~~
+- [ ] Bring the local/off-grid GUI to functional parity with the cloud UI for critical tracking features.
+- [ ] Clearly show `HOME`, `PORTABLE`, or `OFF-GRID` hub mode.
+- [ ] Separately show cloud reachability from hub operating mode.
+- [ ] Clearly distinguish live local LoRa data from cloud/historical data.
+- [ ] Ensure local Lost/Active Find controls work without internet access.
 
 ## 8. LTE-M / NB-IoT / Cellular
 
-- [ ] Continue integration work for the Sequans Monarch 2 GM02SP cellular/GNSS subsystem.
-- [ ] Implement direct HTTPS POST of Base64-encoded TLV packets to the ingestion endpoint.
-- [ ] Define LTE attach/session policy for minimum energy consumption.
-- [ ] Determine when LTE should be used for routine telemetry versus fallback or lost-pet operation.
-- [ ] Maintain the approximate LoRa:LTE traffic preference of 10:1 unless power testing suggests a better value.
-- [ ] Use cellular for OTA where practical.
-- [ ] Validate LTE-M and NB-IoT behaviour with the intended production SIM/provider.
-- [ ] Capture useful modem/network diagnostics for troubleshooting without bloating collar telemetry.
+- [x] ~~GM02SP cellular/GNSS firmware integration scaffolding exists in collar firmware.~~
+- [x] ~~Cellular ratio/profile configuration exists.~~
+- [ ] Complete and hardware-test the production GM02SP HTTPS ingestion path.
+- [ ] Ensure the exact same authenticated TLV body is transported through cellular and LoRa gateway paths.
+- [ ] Optimise LTE attach/session/PSM behaviour from measured power data.
+- [ ] Validate LTE-M/NB-IoT operation with the intended production SIM/provider.
+- [ ] Define OTA path and recovery behaviour.
 
 ## 9. GNSS
 
-- [ ] Integrate GM02SP GNSS acquisition into the collar state machine.
-- [ ] Optimise warm-start behaviour for low energy and acceptable time-to-fix.
-- [ ] Track fix age and satellite count as currently defined by the protocol.
-- [ ] Evaluate whether GNSS TTFF should remain diagnostic-only or become a TLV field.
-- [ ] Define fallback behaviour when no valid GNSS fix is obtained within the permitted wake window.
+- [x] ~~GM02SP GNSS integration scaffolding and fix parsing exist in collar firmware.~~
+- [x] ~~Warm/cold acquisition timing constants exist.~~
+- [ ] Hardware-test acquisition performance and power consumption on the production design.
+- [ ] Tune TTFF/stabilisation limits using real field data.
+- [ ] Confirm fallback behaviour when no valid fix is obtained.
 
 ## 10. BLE Home Detection
 
-- [ ] Implement BLE home-beacon detection on the nRF52840.
-- [ ] Use confirmed home presence to suppress unnecessary GNSS and LTE usage.
-- [ ] Still transmit a lightweight presence/check-in so the backend updates collar `last seen` status.
-- [ ] Determine beacon-loss thresholds so momentary BLE fading does not incorrectly classify a collar as away.
-- [ ] Decide how multiple home beacons / hubs should be handled in future.
+### Purpose
+
+BLE home detection is primarily a **power-saving mechanism**. Presence of the trusted Home Hub beacon tells the collar that it can avoid the expensive GNSS and cellular portions of its normal wake cycle.
+
+### Target behaviour
+
+- [x] ~~Implement BLE scanning on the nRF52840 collar.~~
+- [x] ~~Implement Home Hub BLE beacon advertising.~~
+- [x] ~~Use a defined BluePaws home beacon identity/name in shared configuration.~~
+- [x] ~~Stop/short-circuit GNSS work when home is confirmed.~~
+- [ ] On every scheduled wake, perform the BLE home check before deciding whether GNSS is required.
+- [ ] If home is confirmed, skip GNSS and routine LTE attachment.
+- [ ] Send a lightweight LoRa **wake-up check-in / presence packet on every scheduled home wake**.
+- [ ] Immediately follow that transmission with the **10-second continuous LoRa RX command window**.
+- [ ] Permit OTA configuration/profile commands during that window so a collar that remains at home for days is still predictably reachable.
+- [ ] Return to deep sleep after the command window when no action requires the collar to remain awake.
+- [ ] Ensure `last_seen` is refreshed by the presence packet even though no new position is generated.
+
+### Home/departure confidence
+
+The current shared configuration contains a consecutive-detection threshold. The final algorithm should prevent a single missed BLE advertisement from unnecessarily starting GNSS/LTE, while also avoiding a long delay after the cat genuinely leaves home.
+
+- [ ] Review the current `BLE_HOME_CYCLE_THRESHOLD` approach against the actual wake interval. Five whole wake cycles may be too slow depending on profile timing.
+- [ ] Prefer a confidence/debounce policy based on repeated advertisements within the current BLE scan and/or a small number of consecutive wake cycles.
+- [ ] Define the RSSI/advertisement criteria for accepting the configured home beacon as present.
+- [ ] Define how many consecutive missed home checks are required before declaring the collar `OUT`.
+- [ ] Make the threshold conservative enough to tolerate normal indoor RF fading but fast enough to begin tracking soon after departure.
+- [ ] Consider retaining the previous confirmed-home state across deep sleep so one weak scan does not immediately trigger a full GNSS/LTE cycle.
+- [ ] Define behaviour when the hub is deliberately taken into Portable Mode. Its home beacon should not accidentally tell collars that they are physically at home if the hub has left the property.
+- [ ] Therefore explicitly define whether the hub advertises `BLUEPAWS_HOME` only in Home Mode and disables/changes that beacon in Portable/Off-Grid contexts.
+- [ ] Define future handling of multiple authorised home beacons/hubs if required.
 
 ## 11. Commands / Downlink
 
-- [ ] Define the cloud-side command queue.
-- [ ] Deliver pending commands during the collar LoRa RX command window.
-- [ ] Use message-sequence-based ACKs for command acknowledgement where suitable.
-- [ ] Keep the command protocol minimal and avoid unnecessary `command_id` fields unless future requirements justify them.
-- [ ] Define retry, expiry, and duplicate-command behaviour.
-- [ ] Define critical commands such as profile change, lost-mode activation, reporting interval change, and configuration update.
+- [x] ~~Hub command TX queue exists.~~
+- [x] ~~Hub pending-command ACK tracking/retry structure exists.~~
+- [x] ~~Collar command deduplication foundation exists.~~
+- [x] ~~Mode/find command foundations exist.~~
+- [ ] Extend collar command RX window to the agreed 10 seconds.
+- [ ] Define the cloud-to-hub command queue and delivery path end to end.
+- [ ] Finalise retry/expiry rules and ACK semantics against the current TLV protocol.
+- [ ] Define configuration commands required for launch.
 
 ## 12. Power Management
 
-- [ ] Measure real current consumption of the nRF52840, SX1262, GM02SP, GNSS, and supporting power rails in each operating state.
-- [ ] Build a realistic battery-life model using measured wake frequency, LoRa airtime, GNSS acquisition time, BLE scanning, RX command windows, and LTE sessions.
+- [ ] Measure real current consumption of nRF52840, SX1262, GM02SP, GNSS and supporting rails in every state.
+- [ ] Measure the cost of the 10-second home RX window and confirm the battery-life tradeoff is acceptable.
+- [ ] Build a realistic battery model using actual wake frequency, BLE scan, presence TX, RX window, LoRa telemetry, GNSS and LTE figures.
 - [ ] Validate deep-sleep current on the production PCB.
-- [ ] Integrate battery voltage / fuel-gauge reporting from the MAX17048.
-- [ ] Confirm charger and buck-regulator behaviour with the final battery chemistry and capacity.
-- [ ] Define low-battery behaviour and reporting thresholds.
+- [ ] Integrate/test MAX17048 fuel-gauge reporting.
+- [ ] Define low-battery policy and reporting thresholds.
 
 ## 13. Collar Hardware / PCB
 
-- [ ] Continue nRF52840 + SX1262 collar PCB development.
-- [ ] Complete Sequans GM02SP integration.
-- [ ] Validate BQ24074 charger implementation.
-- [ ] Validate TPS62840 regulator implementation.
-- [ ] Validate MAX17048 fuel gauge implementation.
-- [ ] Validate battery measurement path and P0.04 / AIN2 assignment.
-- [ ] Validate USB D+/D- routing and USB functionality.
-- [ ] Validate Tag-Connect SWD programming/debug interface.
-- [ ] Validate button, RGB LED, and buzzer circuits.
-- [ ] Review antenna placement, matching, isolation, and enclosure interaction for LoRa, BLE, LTE, and GNSS.
-- [ ] Produce a hardware bring-up checklist before ordering production prototypes.
+- [ ] Continue nRF52840 + SX1262 production PCB development.
+- [ ] Complete and validate GM02SP hardware integration.
+- [ ] Validate BQ24074 charger.
+- [ ] Validate TPS62840 regulator.
+- [ ] Validate MAX17048 fuel gauge.
+- [ ] Validate battery measurement path / P0.04 AIN2.
+- [ ] Validate USB D+/D-.
+- [ ] Validate Tag-Connect SWD.
+- [ ] Validate button, RGB LED and buzzer.
+- [ ] Review LoRa/BLE/LTE/GNSS antenna placement, matching, isolation and enclosure interaction.
+- [ ] Produce hardware bring-up checklist before production prototypes.
 
 ## 14. Home Hub Hardware / Firmware
 
-- [ ] Define the final Home Hub hardware platform and production PCB.
-- [ ] Implement ESP32-S3 hub firmware around LoRa receive, Wi-Fi, cloud forwarding, local AP mode, and local web serving.
-- [ ] Add persistent storage for required configuration and recent telemetry.
-- [ ] Define hub provisioning / onboarding to the customer's home Wi-Fi.
-- [ ] Implement secure hub identity and credentials.
-- [ ] Implement hub firmware update mechanism.
-- [ ] Add diagnostics for LoRa receive health, Wi-Fi, cloud connectivity, and uptime.
+- [x] ~~ESP32-S3 + SX1262 hub firmware baseline exists.~~
+- [x] ~~LoRa RX/TX task exists.~~
+- [x] ~~Local web server/SSE GUI baseline exists.~~
+- [x] ~~Wi-Fi AP+STA baseline exists.~~
+- [x] ~~BLE home beacon and portable BLE scanning baseline exist.~~
+- [x] ~~Local LittleFS storage/logging baseline exists.~~
+- [x] ~~Cloud relay queue/task baseline exists.~~
+- [ ] Refactor hub firmware around the final three communications profiles.
+- [ ] Implement final Wi-Fi onboarding/provisioning experience.
+- [ ] Implement secure persistent hub identity/credentials.
+- [ ] Implement hub OTA.
+- [ ] Add production diagnostics and self-reporting.
+- [ ] Define final hub hardware/PCB and portable-power requirements.
 
 ## 15. Testing / Simulation Tooling
 
-- [ ] Maintain the standalone Python simulator for generating spoofed collar positions.
-- [ ] Point simulator traffic at the production-style Supabase ingestion Edge Function rather than the old MapApp API.
-- [ ] Keep simulated devices centred around Sandhurst, Gloucestershire for current testing scenarios.
-- [ ] Maintain approximately 10-second fleet update intervals to avoid unnecessary traffic/data usage.
-- [ ] Add test cases for duplicate packets arriving simultaneously via LTE and hub forwarding.
-- [ ] Add test cases for invalid MACs, malformed TLVs, unknown TLV types, out-of-order sequence IDs, stale positions, and command ACKs.
-- [ ] Add hub-mode test scenarios covering Home -> Portable -> Off-Grid -> reconnect transitions.
-- [ ] Add intermittent-internet tests specifically to verify anti-flapping logic.
-- [ ] Add end-to-end test scenarios from simulated collar packet through ingestion, database, and web display.
+- [x] ~~Standalone VPS position simulator exists and is documented.~~
+- [x] ~~TLV packet codec/simulator tooling exists.~~
+- [x] ~~GUI/Qt simulator tooling and tests exist.~~
+- [x] ~~Ingestion smoke-test tooling exists.~~
+- [x] ~~TLV codec and credential-generation tests exist.~~
+- [ ] Add explicit duplicate-path tests where the same collar message arrives through hub and cellular ingress.
+- [ ] Add wake-check-in/no-GNSS ingestion tests.
+- [ ] Add Home -> Portable -> Off-Grid -> Home transition tests.
+- [ ] Add intermittent phone/hotspot connectivity tests to validate anti-flapping behaviour.
+- [ ] Add end-to-end command-window tests including ACK and retry.
 
 ## 16. Security
 
-- [ ] Threat-model collar, hub, cloud ingestion, local AP, web application, device provisioning, and OTA paths.
-- [ ] Ensure each collar and hub has a unique identity and secret material.
-- [ ] Protect device secrets against accidental exposure in firmware repositories or provisioning tools.
-- [ ] Verify TLS certificate validation on cellular and hub HTTPS clients.
-- [ ] Protect Off-Grid Mode local AP and local web interface against unauthorised access.
-- [ ] Define credential rotation/revocation for lost or compromised hubs/collars.
-- [ ] Define rate limits and abuse protections on public ingestion endpoints.
-- [ ] Review Supabase RLS and API permissions before customer launch.
+- [x] ~~Backend has separate hashed bearer credential models for direct devices and gateways.~~
+- [x] ~~Gateway/device household association checks exist in ingestion.~~
+- [x] ~~Credential generation tooling exists.~~
+- [ ] Reconcile firmware-side crypto implementation with the final TLV HMAC/keyed-MAC design.
+- [ ] Threat-model collar, hub, cloud ingestion, local AP, web app, provisioning and OTA.
+- [ ] Remove/default-disable development credentials and fixed secrets before production.
+- [ ] Verify TLS certificate validation on cellular and hub HTTP clients.
+- [ ] Secure local/off-grid AP and local GUI.
+- [ ] Define credential rotation/revocation.
+- [ ] Define ingestion rate limits/abuse controls.
+- [ ] Review Supabase RLS/API permissions before launch.
 
 ## 17. Data Retention / Offline History
 
-- [ ] Define how much recent position history is retained on the collar, hub, and cloud.
-- [ ] Keep the previously considered approximately 24-hour local history requirement under review.
-- [ ] Decide whether off-grid hub data is uploaded after reconnection.
-- [ ] If backfill is implemented, mark historical records clearly and avoid confusing stale positions with live positions.
-- [ ] Define retention periods and deletion behaviour for customer privacy/GDPR requirements.
+- [x] ~~Hub has baseline LittleFS telemetry logging.~~
+- [ ] Define final local history duration/size.
+- [ ] Decide whether the collar itself needs approximately 24 hours of local telemetry retention.
+- [ ] Treat off-grid backfill as optional rather than launch-critical unless a clear customer requirement emerges.
+- [ ] If implemented, mark backfilled observations as historical.
+- [ ] Define cloud retention/deletion policy for GDPR/privacy.
 
 ## 18. Provisioning / Customer Onboarding
 
-- [ ] Design factory provisioning for device UID, cryptographic secrets, firmware, and SIM configuration.
-- [ ] Build customer collar-registration flow.
-- [ ] Support multiple collars per customer account.
-- [ ] Design Home Hub onboarding and Wi-Fi configuration flow.
-- [ ] Define replacement, ownership-transfer, and device-reset procedures.
+- [x] ~~Backend credential-generation tooling exists.~~
+- [x] ~~Web onboarding/join application structure exists.~~
+- [ ] Define factory device UID/key/SIM provisioning process.
+- [ ] Complete customer collar registration flow.
+- [ ] Validate multiple collars per household/account end to end.
+- [ ] Complete Home Hub Wi-Fi onboarding flow.
+- [ ] Define replacement, ownership-transfer and reset procedures.
 
 ## 19. OTA / Firmware Lifecycle
 
-- [ ] Define collar firmware OTA strategy, primarily using cellular where appropriate.
-- [ ] Define Home Hub OTA strategy over Wi-Fi.
-- [ ] Add firmware-version reporting to backend diagnostics.
-- [ ] Define rollback/recovery behaviour for failed updates.
-- [ ] Define signed firmware / authenticity requirements before commercial deployment.
+- [ ] Define collar OTA strategy, primarily using cellular where appropriate.
+- [ ] Define hub OTA strategy over Wi-Fi.
+- [ ] Add firmware-version reporting to hub/collar backend diagnostics.
+- [ ] Define rollback/recovery.
+- [ ] Define signed firmware/authenticity requirements.
 
 ## 20. Manufacturing / Productisation
 
 - [ ] Produce manufacturable collar and hub revisions after prototype validation.
-- [ ] Define China PCB assembly workflow and UK QA/provisioning process.
-- [ ] Create production test fixtures and programming procedures.
-- [ ] Define per-device final RF, GNSS, LTE, charging, battery, and functional test steps.
-- [ ] Plan staged manufacturing quantities from prototype to approximately 100-unit and 1,000-unit batches.
-- [ ] Capture UK regulatory, radio, battery, EMC, product safety, and certification requirements before sale.
+- [ ] Define China PCB assembly and UK QA/provisioning workflow.
+- [ ] Create production test fixtures/programming procedures.
+- [ ] Define final RF, GNSS, LTE, charging, battery and functional test steps.
+- [ ] Plan prototype -> 100-unit -> 1,000-unit manufacturing stages.
+- [ ] Capture UK radio, EMC, battery, product safety and certification requirements.
 
 ## 21. Scalability / Commercial Architecture
 
-- [ ] Revisit device UID address space before protocol freeze to ensure sufficient commercial scale.
-- [ ] Estimate realistic customer/device counts and database growth.
-- [ ] Validate Supabase/Vercel architecture for intended fleet scale.
+- [ ] Revisit device UID address space before protocol freeze.
+- [ ] Estimate realistic customer/device and observation volumes.
+- [ ] Validate Supabase/Vercel scaling assumptions.
 - [ ] Define subscription/account model if recurring connectivity/cloud costs require it.
-- [ ] Keep backend architecture simple enough for an initially small team / single-founder operation.
+- [ ] Keep operational architecture practical for an initially very small team.
 
 ## 22. Documentation
 
-- [ ] Keep this TODO file as the master project backlog.
-- [ ] Expand major TODO entries into dedicated architecture/design documents as decisions become mature.
-- [ ] Keep protocol decisions in the TLV protocol document rather than duplicating normative definitions here.
-- [ ] Add architecture diagrams for collar -> LoRa -> hub -> cloud and collar -> LTE -> cloud paths.
-- [ ] Add a Hub Communications Modes design document covering Home, Portable, and Off-Grid operation.
-- [ ] Add a Collar State Machine design document.
-- [ ] Add a Security Architecture / Threat Model document.
+- [x] ~~Master `docs/TODO.md` backlog created.~~
+- [x] ~~TLV protocol document exists.~~
+- [x] ~~TLV ingestion runbook exists.~~
+- [x] ~~Simulator documentation exists.~~
+- [ ] Create a dedicated **Hub Communications Modes** design document after the TODO design is finalised.
+- [ ] Create a dedicated **Collar Wake / BLE Home Behaviour** state-machine document.
+- [ ] Document the production HTTP ingress wrapper schema.
+- [ ] Add architecture diagrams for LoRa-via-hub and cellular-direct paths.
+- [ ] Add Security Architecture / Threat Model.
 - [ ] Add hardware bring-up and production-test documentation.
 
 ## Immediate Next Elaboration Candidates
 
-- [ ] **Hub Communications Modes:** fully specify Home, Portable, Off-Grid, anti-flapping, local AP, cloud reconnection, self-reporting, and wrapper metadata.
-- [ ] **HTTP Ingestion Wrapper:** specify the exact JSON schema used around the Base64 collar payload, including path and receiver metrics.
-- [ ] **Collar Wake State Machine:** produce the exact sequence/timing for wake-up check-in, BLE scan, GNSS, RX window, LoRa telemetry, LTE fallback, and sleep.
-- [ ] **Backend Dedupe + Ingress Model:** define database fields and how identical collar packets arriving through multiple paths are stored/ignored.
-- [ ] **Security:** document device identity, MAC keys, API authentication, provisioning, credential rotation, OTA trust, and local AP security.
+- [ ] **Hub Communications Modes implementation:** turn the agreed Home / Portable / Off-Grid behaviour above into an explicit firmware state machine.
+- [ ] **BLE Home + Wake Check-In implementation:** replace the old periodic-heartbeat home path with every-wake presence + 10-second command RX.
+- [ ] **HTTP Ingestion Wrapper:** lock the exact JSON schema and ingest-path enum.
+- [ ] **Hub Self-Reporting:** define backend table and reporting cadence/fields.
+- [ ] **Crypto reconciliation:** align collar/hub firmware authentication with the current documented TLV keyed-MAC/HMAC ingestion model.
