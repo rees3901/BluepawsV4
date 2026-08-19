@@ -4,6 +4,24 @@ This file is the consolidated implementation backlog for BluePaws V4. It capture
 
 Completed items are retained as `[x]` and struck through so the file also acts as a lightweight implementation history.
 
+## Quick Fixes / UX Polish
+
+Short-term bugs, minor changes, and quality-of-life improvements that can be picked up independently of the larger architecture work.
+
+- [ ] Make the animal-card panel vertically scrollable so all cards remain accessible when the list exceeds the visible panel height.
+- [ ] Allow users to drag and reorder animal cards so preferred/favourite animals can be kept at the top.
+- [ ] Persist each user's chosen animal-card order, preferably as authenticated per-user preferences in Supabase.
+- [ ] Investigate slow initial population of a user's animals/markers after login. A newly authenticated user can currently see an apparently empty dashboard for roughly 10-30 seconds, or until a page refresh, even when existing telemetry is available.
+- [ ] Trace the complete post-login hydration path: authenticated user -> household/account lookup -> registered animals/devices -> latest-position retrieval -> dashboard cards -> map markers.
+- [ ] Verify that the latest-position query/function is triggered immediately when authentication/session state becomes ready, rather than waiting for a later realtime event or unrelated component refresh.
+- [ ] Ensure initial dashboard population does not depend on receiving new telemetry. Existing latest positions should be fetched immediately on login/page load.
+- [ ] Check for authentication/session timing races where the first position/device query runs before the Supabase user/session or household context is available and is never retried.
+- [ ] Add an explicit loading state such as `Loading your pets...` while the initial device/latest-position fetch is in progress, rather than temporarily presenting an empty/no-telemetry state.
+- [ ] Distinguish `loading`, `no registered animals`, `registered but no telemetry`, and `data loaded` states so users are not incorrectly told they have no telemetry while data is still being retrieved.
+- [ ] Add a controlled retry/refetch if the initial device/latest-position request fails or returns before required user context is ready.
+- [ ] Confirm Supabase Realtime subscriptions are supplementary to initial hydration. The page should first fetch current state, then subscribe for subsequent updates.
+- [ ] Measure and log initial-login query timings to identify whether the delay is caused by auth hydration, household/device lookup, latest-position retrieval, client rendering, or realtime subscription setup.
+
 ## 1. Home Hub Communications Architecture
 
 ### Design principle
