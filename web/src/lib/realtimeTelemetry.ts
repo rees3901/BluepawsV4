@@ -60,6 +60,13 @@ export function createRealtimeTelemetrySource(
         publish();
       };
 
+      const refreshSafely = () => {
+        void refresh().catch((error: unknown) => {
+          if (!active) return;
+          statusListener?.("degraded", error instanceof Error ? error.message : "Unable to refresh latest positions");
+        });
+      };
+
       const clearFallback = () => {
         if (fallbackTimer !== null) window.clearTimeout(fallbackTimer);
         fallbackTimer = null;
@@ -69,7 +76,10 @@ export function createRealtimeTelemetrySource(
         if (!active || realtimeConnected || fallbackTimer !== null) return;
         fallbackTimer = window.setTimeout(async () => {
           fallbackTimer = null;
-          await refresh();
+          await refresh().catch((error: unknown) => {
+            if (!active) return;
+            statusListener?.("degraded", error instanceof Error ? error.message : "Unable to refresh latest positions");
+          });
           fallbackDelay = Math.min(fallbackDelay * 2, MAX_FALLBACK_DELAY_MS);
           scheduleFallback();
         }, fallbackDelay);
@@ -90,12 +100,13 @@ export function createRealtimeTelemetrySource(
         const previousChannel = channel;
         channel = null;
         if (previousChannel) void supabase.removeChannel(previousChannel);
-        void refresh();
+        refreshSafely();
         void connect();
       };
 
       publish();
       statusListener?.("connecting");
+      refreshSafely();
 
       const connect = async () => {
         await supabase.realtime.setAuth();
@@ -113,7 +124,7 @@ export function createRealtimeTelemetrySource(
               fallbackDelay = INITIAL_FALLBACK_DELAY_MS;
               clearFallback();
               statusListener?.("connected");
-              void refresh();
+              refreshSafely();
               return;
             }
 
@@ -134,7 +145,7 @@ export function createRealtimeTelemetrySource(
       });
 
       const recoverSnapshot = () => {
-        if (document.visibilityState === "visible") void refresh();
+        if (document.visibilityState === "visible") refreshSafely();
       };
       document.addEventListener("visibilitychange", recoverSnapshot);
       window.addEventListener("online", recoverSnapshot);

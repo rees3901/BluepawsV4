@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DeviceCard, DownloadIcon } from "@/components/DeviceCard";
 import { GuidedTour } from "@/components/GuidedTour";
 import { AccountMenu } from "@/components/AccountMenu";
+import { deviceCardOrderStorageKey, moveDeviceBefore, orderDeviceIds, pinDeviceFirst } from "@/lib/deviceCardOrder";
 import { loadDeviceAppearances, revokeAvatarUrls } from "@/lib/deviceAppearances";
 import { followedDeviceAfterAction } from "@/lib/followState";
 import { createRealtimeTelemetrySource, loadDeviceTrail } from "@/lib/realtimeTelemetry";
@@ -31,6 +32,7 @@ const HOME = { lat: 51.5055, lon: -0.09 };
 const TUTORIAL_MODE_STORAGE_KEY = "bp_tutorial_mode";
 const TUTORIAL_COMPLETE_STORAGE_KEY = "bp_tutorial_complete";
 const TUTORIAL_PROMPT_STORAGE_KEY = "bp_tutorial_prompt_seen";
+const FAMILY_HYDRATION_RETRY_DELAYS_MS = [750, 1_500, 3_000, 6_000, 10_000];
 
 interface SelectedDevice {
   id: number;
@@ -73,13 +75,31 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
   const [logs, setLogs] = useState<string[]>([]);
   const [customAvatars, setCustomAvatars] = useState<Record<number, DeviceAvatar>>({});
   const [avatarDevice, setAvatarDevice] = useState<TelemetryDevice | null>(null);
+  const [cardOrder, setCardOrder] = useState<number[]>([]);
+  const [cardOrderLoadedKey, setCardOrderLoadedKey] = useState<string | null>(null);
+  const [draggingDeviceId, setDraggingDeviceId] = useState<number | null>(null);
+  const [dragOverDeviceId, setDragOverDeviceId] = useState<number | null>(null);
+  const [familyRetryCount, setFamilyRetryCount] = useState(0);
   const sequences = useRef(new Map<number, number>());
   const customAvatarsRef = useRef<Record<number, DeviceAvatar>>({});
+  const cardOrderKey = useMemo(() => deviceCardOrderStorageKey(userEmail, householdId), [householdId, userEmail]);
+  const hasFamilyContext = !tutorialMode && householdId !== null && householdAccessVersion !== null;
+  const familyContextMissing = !tutorialMode && (householdId === null || householdAccessVersion === null);
+  const familyHydrating = familyContextMissing && (!preferencesReady || familyRetryCount < FAMILY_HYDRATION_RETRY_DELAYS_MS.length);
 
-  const avatars = useMemo<Record<number, DeviceAvatar>>(() => Object.fromEntries(devices.map((device, index) => [
+  const orderedDeviceIds = useMemo(() => orderDeviceIds(devices.map((device) => device.id), cardOrder), [cardOrder, devices]);
+  const orderedDevices = useMemo(() => {
+    const devicesById = new Map(devices.map((device) => [device.id, device]));
+    return orderedDeviceIds.flatMap((deviceId) => {
+      const device = devicesById.get(deviceId);
+      return device ? [device] : [];
+    });
+  }, [devices, orderedDeviceIds]);
+
+  const avatars = useMemo<Record<number, DeviceAvatar>>(() => Object.fromEntries(orderedDevices.map((device, index) => [
     device.id,
     (!tutorialMode ? customAvatars[device.id] : undefined) ?? { kind: "emoji", emoji: EMOJIS[index % EMOJIS.length], color: COLORS[index % COLORS.length] },
-  ])), [customAvatars, devices, tutorialMode]);
+  ])), [customAvatars, orderedDevices, tutorialMode]);
 
   const replaceCustomAvatars = useCallback((next: Record<number, DeviceAvatar>) => {
     revokeAvatarUrls(customAvatarsRef.current);
@@ -140,6 +160,47 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
       window.clearInterval(clock);
     };
   }, []);
+
+  useEffect(() => {
+    const loadTimer = window.setTimeout(() => {
+      try {
+        const saved = localStorage.getItem(cardOrderKey);
+        const parsed: unknown = saved ? JSON.parse(saved) : [];
+        setCardOrder(Array.isArray(parsed) ? parsed.filter((value): value is number => Number.isInteger(value)) : []);
+      } catch {
+        setCardOrder([]);
+      }
+      setCardOrderLoadedKey(cardOrderKey);
+    }, 0);
+
+    return () => window.clearTimeout(loadTimer);
+  }, [cardOrderKey]);
+
+  useEffect(() => {
+    if (cardOrderLoadedKey !== cardOrderKey) return;
+    try {
+      if (cardOrder.length === 0) localStorage.removeItem(cardOrderKey);
+      else localStorage.setItem(cardOrderKey, JSON.stringify(cardOrder));
+    } catch { /* non-critical preference */ }
+  }, [cardOrder, cardOrderKey, cardOrderLoadedKey]);
+
+  useEffect(() => {
+    if (!familyContextMissing || tutorialMode) {
+      if (familyRetryCount === 0) return;
+      const resetTimer = window.setTimeout(() => setFamilyRetryCount(0), 0);
+      return () => window.clearTimeout(resetTimer);
+    }
+    if (!preferencesReady || familyRetryCount >= FAMILY_HYDRATION_RETRY_DELAYS_MS.length) {
+      return;
+    }
+
+    const retryTimer = window.setTimeout(() => {
+      setFamilyRetryCount((count) => count + 1);
+      router.refresh();
+    }, FAMILY_HYDRATION_RETRY_DELAYS_MS[familyRetryCount]);
+
+    return () => window.clearTimeout(retryTimer);
+  }, [familyContextMissing, familyRetryCount, preferencesReady, router, tutorialMode]);
 
   useEffect(() => {
     if (!preferencesReady) return;
@@ -250,6 +311,23 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
     requestTrailHistory(deviceIds);
   }, [allTrailsVisible, devices, requestTrailHistory]);
 
+  const handleCardDrop = useCallback((targetId: number) => {
+    setDragOverDeviceId(null);
+    setCardOrder((current) => moveDeviceBefore(orderDeviceIds(devices.map((device) => device.id), current), draggingDeviceId ?? targetId, targetId));
+    setDraggingDeviceId(null);
+  }, [devices, draggingDeviceId]);
+
+  const handleCardPin = useCallback((deviceId: number) => {
+    setCardOrder((current) => pinDeviceFirst(orderDeviceIds(devices.map((device) => device.id), current), deviceId));
+    setToast("Pet pinned to the top of this browser");
+  }, [devices]);
+
+  const handleRefreshNow = useCallback(() => {
+    setFamilyRetryCount(0);
+    setConnectionDetail("Refreshing latest Family and pet data...");
+    router.refresh();
+  }, [router]);
+
   const handleTutorialModeChange = useCallback((enabled: boolean) => {
     try {
       localStorage.setItem(TUTORIAL_MODE_STORAGE_KEY, String(enabled));
@@ -305,23 +383,34 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
   const skipTutorial = useCallback(() => finishTutorial(false), [finishTutorial]);
 
   const effectiveError = connectionDetail ?? liveTelemetryError;
-  const liveUnavailable = !tutorialMode && effectiveError !== null && devices.length === 0;
+  const liveRecovering = !tutorialMode && hasFamilyContext && devices.length === 0 && liveTelemetryError !== null && connectionStatus === "connecting";
+  const liveUnavailable = !tutorialMode && !familyHydrating && !liveRecovering && effectiveError !== null && devices.length === 0;
   const statusClass = connected ? (tutorialMode ? "tutorial" : "connected") : "waiting";
-  const statusText = liveUnavailable
+  const statusText = familyHydrating || liveRecovering
+    ? "Connecting"
+    : liveUnavailable
     ? "Unavailable"
     : connectionStatus === "degraded"
       ? "Reconnecting"
       : connected
         ? (tutorialMode ? "Tutorial" : "Live")
         : "Connecting";
-  const emptyTitle = !householdId && !tutorialMode
+  const emptyTitle = familyHydrating
+    ? "Loading your Family..."
+    : liveRecovering
+      ? "Loading latest pet positions..."
+      : !householdId && !tutorialMode
     ? "Family unavailable"
     : liveUnavailable
       ? "Live telemetry unavailable"
       : connected
         ? "Connected to Supabase"
         : "Waiting for live telemetry";
-  const emptyMessage = !householdId && !tutorialMode
+  const emptyMessage = familyHydrating
+    ? "Checking your account, Family membership and last known pet positions."
+    : liveRecovering
+      ? "Starting the live telemetry connection and refreshing the latest snapshot."
+      : !householdId && !tutorialMode
     ? "Your Family membership could not be loaded."
     : liveUnavailable
       ? effectiveError
@@ -373,15 +462,20 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
               <span className="telemetry-empty-icon" aria-hidden="true">⌁</span>
               <strong>{emptyTitle}</strong>
               <span>{emptyMessage}</span>
-              <button type="button" onClick={() => setSettingsOpen(true)}>Open Settings</button>
+              <div className="empty-state-actions">
+                {(familyHydrating || liveRecovering || liveUnavailable) && <button type="button" onClick={handleRefreshNow}>Refresh now</button>}
+                {!familyHydrating && !liveRecovering && <button type="button" onClick={() => setSettingsOpen(true)}>Open Settings</button>}
+              </div>
             </div>
           )}
-          {devices.map((device) => (
+          {orderedDevices.map((device) => (
             <DeviceCard
               key={device.id}
               device={device}
               avatar={avatars[device.id]}
               expanded={expandedId === device.id}
+              dragging={draggingDeviceId === device.id}
+              dragOver={dragOverDeviceId === device.id && draggingDeviceId !== device.id}
               followed={followedId === device.id}
               trailVisible={trailIds.has(device.id)}
               portableMode={portableMode}
@@ -390,6 +484,11 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
               onExpand={() => setExpandedId((current) => current === device.id ? null : device.id)}
               onAction={(action) => handleAction(device, action)}
               onAvatarEdit={tutorialMode ? undefined : () => setAvatarDevice(device)}
+              onDragStart={() => setDraggingDeviceId(device.id)}
+              onDragOver={() => setDragOverDeviceId(device.id)}
+              onDrop={() => handleCardDrop(device.id)}
+              onDragEnd={() => { setDraggingDeviceId(null); setDragOverDeviceId(null); }}
+              onPinTop={() => handleCardPin(device.id)}
             />
           ))}
         </div>

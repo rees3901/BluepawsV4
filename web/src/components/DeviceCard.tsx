@@ -15,6 +15,8 @@ interface DeviceCardProps {
   device: TelemetryDevice;
   avatar: DeviceAvatar;
   expanded: boolean;
+  dragging: boolean;
+  dragOver: boolean;
   followed: boolean;
   trailVisible: boolean;
   portableMode: boolean;
@@ -22,11 +24,16 @@ interface DeviceCardProps {
   ageSeconds: number;
   onExpand: () => void;
   onAction: (action: DeviceAction) => void;
+  onDragStart: () => void;
+  onDragOver: () => void;
+  onDrop: () => void;
+  onDragEnd: () => void;
+  onPinTop: () => void;
   onAvatarEdit?: () => void;
 }
 
 export function DeviceCard(props: DeviceCardProps) {
-  const { device, avatar, expanded, followed, trailVisible, portableMode, distance, ageSeconds, onExpand, onAction, onAvatarEdit } = props;
+  const { device, avatar, expanded, dragging, dragOver, followed, trailVisible, portableMode, distance, ageSeconds, onExpand, onAction, onDragStart, onDragOver, onDrop, onDragEnd, onPinTop, onAvatarEdit } = props;
   const status = STATUS[device.status.toLowerCase() as keyof typeof STATUS] ?? STATUS.error;
   const profileLower = device.profile.toLowerCase();
   const profileClass = `profile-${profileLower.replace("save", "").replaceAll(" ", "-")}`;
@@ -34,8 +41,38 @@ export function DeviceCard(props: DeviceCardProps) {
   const lastSeen = formatLastSeen(ageSeconds);
 
   return (
-    <article className={`device-card${ageSeconds > 600 ? " stale" : ""}${expanded ? " expanded" : ""}`}>
+    <article
+      className={`device-card${ageSeconds > 600 ? " stale" : ""}${expanded ? " expanded" : ""}${dragging ? " dragging" : ""}${dragOver ? " drag-over" : ""}`}
+      onDragOver={(event) => {
+        event.preventDefault();
+        onDragOver();
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        onDrop();
+      }}
+    >
       <div className="card-summary" onClick={onExpand}>
+        <button
+          type="button"
+          className="card-reorder-handle"
+          title={`Drag to reorder ${device.name}; click to pin to top`}
+          aria-label={`Drag to reorder ${device.name}; click to pin to top`}
+          draggable
+          onClick={(event) => { event.stopPropagation(); onPinTop(); }}
+          onDragStart={(event) => {
+            event.stopPropagation();
+            event.dataTransfer.effectAllowed = "move";
+            event.dataTransfer.setData("text/plain", String(device.id));
+            onDragStart();
+          }}
+          onDragEnd={(event) => {
+            event.stopPropagation();
+            onDragEnd();
+          }}
+        >
+          <span aria-hidden="true">⋮⋮</span>
+        </button>
         <div className="card-avatar-wrap">
           <div
             className={`card-avatar${avatar.kind === "photo" ? " has-photo" : ""}`}
