@@ -19,6 +19,16 @@ export interface FamilyInvitation {
   status: "Pending" | "Accepted" | "Revoked" | "Expired";
 }
 
+export interface SearchPartyShare {
+  id: string;
+  createdAt: string;
+  expiresAt: string;
+  revokedAt: string | null;
+  lastUsedAt: string | null;
+  useCount: number;
+  status: "Active" | "Revoked" | "Expired";
+}
+
 interface MemberRow {
   user_id: unknown;
   display_name: unknown;
@@ -55,15 +65,25 @@ export async function loadFamilySettings(householdId: string, role: FamilyRole) 
   });
 
   let invitations: FamilyInvitation[] = [];
+  let searchShares: SearchPartyShare[] = [];
   if (role === "owner") {
-    const invitationResult = await supabase
-      .from("household_invitations")
-      .select("id,email,created_at,expires_at,accepted_at,revoked_at")
-      .eq("household_id", householdId)
-      .order("created_at", { ascending: false })
-      .limit(50);
+    const [invitationResult, searchShareResult] = await Promise.all([
+      supabase
+        .from("household_invitations")
+        .select("id,email,created_at,expires_at,accepted_at,revoked_at")
+        .eq("household_id", householdId)
+        .order("created_at", { ascending: false })
+        .limit(50),
+      supabase
+        .from("family_search_shares")
+        .select("id,created_at,expires_at,revoked_at,last_used_at,use_count")
+        .eq("household_id", householdId)
+        .order("created_at", { ascending: false })
+        .limit(20),
+    ]);
 
     if (invitationResult.error) throw invitationResult.error;
+    if (searchShareResult.error) throw searchShareResult.error;
     const currentTime = Date.now();
     invitations = (invitationResult.data ?? []).map((invitation) => {
       const status = invitation.accepted_at
@@ -83,7 +103,23 @@ export async function loadFamilySettings(householdId: string, role: FamilyRole) 
         status,
       };
     });
+    searchShares = (searchShareResult.data ?? []).map((share) => {
+      const status = share.revoked_at
+        ? "Revoked"
+        : new Date(share.expires_at).getTime() <= currentTime
+          ? "Expired"
+          : "Active";
+      return {
+        id: share.id,
+        createdAt: share.created_at,
+        expiresAt: share.expires_at,
+        revokedAt: share.revoked_at,
+        lastUsedAt: share.last_used_at,
+        useCount: share.use_count,
+        status,
+      };
+    });
   }
 
-  return { members, invitations };
+  return { members, invitations, searchShares };
 }

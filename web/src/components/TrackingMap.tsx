@@ -26,6 +26,7 @@ interface TrackingMapProps {
   trailHistory: Record<number, TrailPoint[]>;
   command: MapCommand | null;
   onAction: (device: TelemetryDevice, action: DeviceAction) => void;
+  readOnly?: boolean;
 }
 
 const JUMP_TO_ZOOM = 17;
@@ -33,7 +34,7 @@ const MARKER_SLIDE_DURATION_MS = 750;
 const MAX_ANIMATED_MARKER_DISTANCE_METRES = 2_000;
 
 export default function TrackingMap(props: TrackingMapProps) {
-  const { devices, avatars, sidebarOpen, followedId, trailIds, trailHistory, command, onAction } = props;
+  const { devices, avatars, sidebarOpen, followedId, trailIds, trailHistory, command, onAction, readOnly = false } = props;
   const mapRef = useRef<L.Map | null>(null);
   const markersRef = useRef(new Map<number, L.Marker>());
   const markerAnimationsRef = useRef(new Map<number, number>());
@@ -324,7 +325,7 @@ export default function TrackingMap(props: TrackingMapProps) {
         marker.setIcon(icon);
         slideMarkerTo(marker, L.latLng(device.lat, device.lon), markerAnimationsRef.current, device.id);
       }
-      marker.bindPopup(popupHtml(device, avatar));
+      marker.bindPopup(popupHtml(device, avatar, readOnly));
 
       const points = appendTrailPoint(trailPointsRef.current.get(device.id) ?? [], latLng);
       trailPointsRef.current.set(device.id, points);
@@ -339,7 +340,7 @@ export default function TrackingMap(props: TrackingMapProps) {
       if (trailIdsRef.current.has(device.id) && !map.hasLayer(trail)) trail.addTo(map);
       if (!trailIdsRef.current.has(device.id) && map.hasLayer(trail)) map.removeLayer(trail);
     });
-  }, [avatars, devices]);
+  }, [avatars, devices, readOnly]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -405,7 +406,7 @@ export default function TrackingMap(props: TrackingMapProps) {
   return <div id="map" aria-label="Live animal tracking map" />;
 }
 
-function popupHtml(device: TelemetryDevice, avatar: DeviceAvatar) {
+function popupHtml(device: TelemetryDevice, avatar: DeviceAvatar, readOnly = false) {
   const name = escapeHtml(device.name);
   const transport = transportPresentation(device.ingestPath);
   const signalMeasurements = device.rssi === null || device.snr === null ? "Not reported" : `${device.rssi} dBm / ${device.snr} dB`;
@@ -414,7 +415,8 @@ function popupHtml(device: TelemetryDevice, avatar: DeviceAvatar) {
   const source = device.source ? `<span class="label">Source</span><span class="value">${escapeHtml(device.source)}</span>` : "";
   const coordinates = formatMapCoordinates(device.lat, device.lon);
   const mapsUrl = googleMapsUrl(device.lat, device.lon);
-  return `<div class="popup-content"><div class="popup-header">${avatarHtml(avatar, "popup-avatar")}<strong>${name}</strong><span class="card-status status-${device.status.toLowerCase()}" style="margin-left:6px;font-size:10px">${device.status}</span></div><div class="popup-grid"><span class="label">Coordinates</span><span class="value"><a class="card-coords card-coords-link" href="${mapsUrl}" target="_blank" rel="noopener noreferrer" title="Open this location in Google Maps">${coordinates}</a></span><span class="label">Signal</span><span class="value">${signal}</span><span class="label">Battery</span><span class="value">${battery}</span><span class="label">Profile</span><span class="value">${escapeHtml(device.profile)}</span>${source}</div><div class="card-actions popup-actions"><button class="btn-action btn-jump" data-map-action="jump" data-device-id="${device.id}">↗ Jump To</button><button class="btn-action btn-follow" data-map-action="follow" data-device-id="${device.id}">● Follow</button><button class="btn-action btn-trail" data-map-action="trail" data-device-id="${device.id}">⌁ Trail</button><button class="btn-action btn-find" data-map-action="find" data-device-id="${device.id}">♟ Find Alert</button><button class="btn-action btn-cmd" data-map-action="command" data-device-id="${device.id}">⌘ Cmd</button></div></div>`;
+  const actions = readOnly ? "" : `<div class="card-actions popup-actions"><button class="btn-action btn-jump" data-map-action="jump" data-device-id="${device.id}">↗ Jump To</button><button class="btn-action btn-follow" data-map-action="follow" data-device-id="${device.id}">● Follow</button><button class="btn-action btn-trail" data-map-action="trail" data-device-id="${device.id}">⌁ Trail</button><button class="btn-action btn-find" data-map-action="find" data-device-id="${device.id}">♟ Find Alert</button><button class="btn-action btn-cmd" data-map-action="command" data-device-id="${device.id}">⌘ Cmd</button></div>`;
+  return `<div class="popup-content"><div class="popup-header">${avatarHtml(avatar, "popup-avatar")}<strong>${name}</strong><span class="card-status status-${device.status.toLowerCase()}" style="margin-left:6px;font-size:10px">${device.status}</span></div><div class="popup-grid"><span class="label">Coordinates</span><span class="value"><a class="card-coords card-coords-link" href="${mapsUrl}" target="_blank" rel="noopener noreferrer" title="Open this location in Google Maps">${coordinates}</a></span><span class="label">Signal</span><span class="value">${signal}</span><span class="label">Battery</span><span class="value">${battery}</span><span class="label">Profile</span><span class="value">${escapeHtml(device.profile)}</span>${source}</div>${actions}</div>`;
 }
 
 function contextMenuHtml(point: L.LatLng) {
