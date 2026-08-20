@@ -51,8 +51,12 @@ export function DeviceCard(props: DeviceCardProps) {
         event.preventDefault();
         onDrop();
       }}
+      onClick={(event) => {
+        if (isInteractiveCardTarget(event.target)) return;
+        onExpand();
+      }}
     >
-      <div className="card-summary" onClick={onExpand}>
+      <div className="card-summary">
         <button
           type="button"
           className="card-reorder-handle"
@@ -186,4 +190,8 @@ function formatAge(seconds: number) {
   if (seconds < 60) return `${seconds}s ago`;
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
   return `${Math.floor(seconds / 3600)}h ago`;
+}
+
+function isInteractiveCardTarget(target: EventTarget | null) {
+  return target instanceof Element && target.closest("a,button,input,label,select,textarea,[role='button']") !== null;
 }
