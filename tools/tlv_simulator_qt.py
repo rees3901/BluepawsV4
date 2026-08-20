@@ -950,6 +950,13 @@ class BluepawsTlvConsole(QMainWindow):
         )
         credential_note.setStyleSheet(f"color: {MUTED};")
         credential_row.addWidget(credential_note, 1, 0, 1, 5)
+        self.current_credentials_path = QLabel("Current JSON file: none loaded")
+        self.current_credentials_path.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        self.current_credentials_path.setWordWrap(True)
+        self.current_credentials_path.setStyleSheet(f"color: {MUTED};")
+        credential_row.addWidget(self.current_credentials_path, 2, 0, 1, 5)
         manage_credentials = QHBoxLayout()
         add_device = secondary_button("Add device…")
         add_device.clicked.connect(self._add_device_dialog)
@@ -968,25 +975,25 @@ class BluepawsTlvConsole(QMainWindow):
         manage_credentials.addStretch()
         manage_credentials.addWidget(export_sql)
         manage_credentials.addWidget(save_credentials)
-        credential_row.addLayout(manage_credentials, 2, 0, 1, 5)
+        credential_row.addLayout(manage_credentials, 3, 0, 1, 5)
         self.fleet_mode = QCheckBox("Fleet mode: send every checked device")
         self.fleet_mode.setToolTip(
             "Each cycle sends one independently signed packet per checked device. "
             "Sequence, movement and telemetry state advance separately for each collar."
         )
         self.fleet_mode.toggled.connect(self._fleet_mode_changed)
-        credential_row.addWidget(self.fleet_mode, 3, 0, 1, 3)
+        credential_row.addWidget(self.fleet_mode, 4, 0, 1, 3)
         select_all = secondary_button("Select all")
         select_all.clicked.connect(lambda: self._set_all_fleet_devices(True))
-        credential_row.addWidget(select_all, 3, 3)
+        credential_row.addWidget(select_all, 4, 3)
         select_none = secondary_button("Select none")
         select_none.clicked.connect(lambda: self._set_all_fleet_devices(False))
-        credential_row.addWidget(select_none, 3, 4)
+        credential_row.addWidget(select_none, 4, 4)
         remove_device = secondary_button("Remove selected device")
         remove_device.setProperty("danger", True)
         remove_device.clicked.connect(self.remove_selected_device)
         remove_device.setToolTip("Delete the selected device credential from this local bundle.")
-        credential_row.addWidget(remove_device, 4, 0, 1, 2)
+        credential_row.addWidget(remove_device, 5, 0, 1, 2)
         self.fleet_table = QTableWidget(0, 2)
         self.fleet_table.setHorizontalHeaderLabels(["Send", "Device ID"])
         self.fleet_table.verticalHeader().setVisible(False)
@@ -999,7 +1006,7 @@ class BluepawsTlvConsole(QMainWindow):
             1, QHeaderView.ResizeMode.Stretch
         )
         self.fleet_table.setMaximumHeight(125)
-        credential_row.addWidget(self.fleet_table, 5, 0, 1, 5)
+        credential_row.addWidget(self.fleet_table, 6, 0, 1, 5)
         credential_row.setColumnStretch(2, 1)
         credential_row.setColumnStretch(4, 1)
         grid.addWidget(credentials, 1, 0, 1, 2)
@@ -1441,6 +1448,16 @@ class BluepawsTlvConsole(QMainWindow):
     def _schedule_wrapper_preview(self, *_unused: object) -> None:
         self._auto_preview_timer.start()
 
+    def _set_current_credentials_path(self, path: Path | None, *, note: str = "") -> None:
+        if path is None:
+            text = "Current JSON file: none loaded"
+        else:
+            text = f"Current JSON file: {path.expanduser().resolve()}"
+        if note:
+            text = f"{text} ({note})"
+        self.current_credentials_path.setText(text)
+        self.current_credentials_path.setToolTip(text)
+
     def load_credentials_file(self) -> None:
         selected, _ = QFileDialog.getOpenFileName(
             self, "Load Bluepaws credential bundle", "", "JSON files (*.json);;All files (*.*)"
@@ -1465,23 +1482,28 @@ class BluepawsTlvConsole(QMainWindow):
                 f"No default tools/devices.json found at {DEFAULT_CREDENTIAL_BUNDLE_PATH}.{nearby_hint} "
                 "Load a credentials JSON or add devices manually."
             )
+            self._set_current_credentials_path(None)
             return
         self._load_credentials_path(DEFAULT_CREDENTIAL_BUNDLE_PATH, show_errors=False)
 
     def _load_credentials_path(self, path: Path, *, show_errors: bool) -> bool:
+        resolved_path = path.expanduser().resolve()
         try:
-            bundle = load_credential_bundle(path)
+            bundle = load_credential_bundle(resolved_path)
         except (OSError, ValueError, json.JSONDecodeError) as error:
-            message = f"Unable to load {path.name}: {error}"
+            message = f"Unable to load {resolved_path.name}: {error}"
             if show_errors:
                 QMessageBox.critical(self, "Unable to load credentials", message)
             self.builder_status.setText(message)
+            if self._credential_bundle_path is None:
+                self._set_current_credentials_path(None, note=f"failed to load {resolved_path}")
             return False
-        self._credential_bundle_path = path
+        self._credential_bundle_path = resolved_path
         self._device_states.clear()
         self._replace_credential_bundle(bundle)
+        self._set_current_credentials_path(resolved_path)
         self.builder_status.setText(
-            f"Loaded {len(bundle.devices)} device(s) and {len(bundle.gateways)} gateway(s) from {path.name}."
+            f"Loaded {len(bundle.devices)} device(s) and {len(bundle.gateways)} gateway(s) from {resolved_path.name}."
         )
         return True
 
@@ -1735,6 +1757,7 @@ class BluepawsTlvConsole(QMainWindow):
             encoding="utf-8",
         )
         self._credential_bundle_path = path
+        self._set_current_credentials_path(path)
         self.builder_status.setText(
             f"Saved {len(self._credentials)} device(s) and "
             f"{len(self._gateway_credentials)} gateway(s) to {path.name}."
