@@ -28,6 +28,7 @@ if PYSIDE_AVAILABLE:
 
     from tlv_simulator_qt import (
         DEFAULT_MOVEMENT_METRES,
+        DEFAULT_CREDENTIAL_BUNDLE_PATH,
         MAX_MOVEMENT_METRES,
         STYLESHEET,
         TAG_MODES,
@@ -36,9 +37,11 @@ if PYSIDE_AVAILABLE:
         BluepawsTlvConsole,
         LIVE_PREVIEW_DELAY_MS,
         drift_coordinates,
+        DeviceCredentialDialog,
+        generate_provisioning_sql,
         parse_coordinates,
     )
-    from tlv_packet_codec import CredentialBundle, DeviceCredential
+    from tlv_packet_codec import CredentialBundle, DeviceCredential, GatewayCredential
 
 
 @unittest.skipUnless(PYSIDE_AVAILABLE, "PySide6 GUI dependency is not installed")
@@ -50,7 +53,7 @@ class QtConsoleTests(unittest.TestCase):
         cls.app.setStyleSheet(STYLESHEET)
 
     def setUp(self) -> None:
-        self.window = BluepawsTlvConsole()
+        self.window = BluepawsTlvConsole(auto_load_credentials=False)
         self.window.hmac.setText(base64.b64encode(bytes(range(32))).decode("ascii"))
         self.window.bearer.setText("t" * 48)
         self.window.build_packet()
@@ -496,6 +499,39 @@ class QtConsoleTests(unittest.TestCase):
         self.window.transport.setCurrentText("LTE direct (cellular_direct)")
         self.assertEqual(self.window.bearer.text(), "d" * 48)
 
+    def test_startup_auto_loads_default_devices_json_when_present(self) -> None:
+        key = bytes(range(32))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "devices.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "devices": [
+                            {
+                                "device_id": 3001,
+                                "bearer_token": "auto" + "a" * 44,
+                                "hmac_key_b64": base64.b64encode(key).decode(),
+                            }
+                        ],
+                        "gateways": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with patch("tlv_simulator_qt.DEFAULT_CREDENTIAL_BUNDLE_PATH", path):
+                window = BluepawsTlvConsole()
+        try:
+            self.assertEqual(window.device_id.text(), "3001")
+            self.assertEqual(window.bearer.text(), "auto" + "a" * 44)
+            self.assertEqual(window.hmac.text(), base64.b64encode(key).decode())
+            self.assertIn("from devices.json", window.builder_status.text())
+        finally:
+            window.close()
+
+    def test_default_credential_bundle_is_tools_devices_json(self) -> None:
+        self.assertEqual(DEFAULT_CREDENTIAL_BUNDLE_PATH.name, "devices.json")
+
     def test_gui_can_append_devices_and_gateways_to_one_credentials_bundle(self) -> None:
         first_key = bytes(range(32))
         first_device = self.window._add_device_credential(
@@ -554,6 +590,107 @@ class QtConsoleTests(unittest.TestCase):
         self.assertEqual(
             self.window.hmac.text(), base64.b64encode(second_key).decode("ascii")
         )
+
+    def test_add_device_dialog_prefills_existing_loaded_json_credential(self) -> None:
+        key = bytes(reversed(range(32)))
+        credential = DeviceCredential(2002, "known-token-2002_" + "z" * 30, key)
+        dialog = DeviceCredentialDialog(
+            2001,
+            {credential.device_id: credential},
+            self.window,
+        )
+
+        dialog.device_id.setText("2002")
+        self.app.processEvents()
+
+        self.assertEqual(dialog.bearer_token.text(), credential.token)
+        self.assertEqual(dialog.hmac_key.text(), base64.b64encode(key).decode("ascii"))
+        self.assertIn("Loaded existing credential", dialog.known_hint.text())
+        dialog.close()
+
+    def test_upserting_known_device_refreshes_without_duplicating(self) -> None:
+        old_key = bytes(range(32))
+        new_key = bytes(reversed(range(32)))
+        self.window._replace_credential_bundle(
+            CredentialBundle(
+                devices=(DeviceCredential(2002, "a" * 48, old_key),),
+                gateways=(),
+            )
+        )
+
+        credential, updated_existing = self.window._upsert_device_credential(
+            DeviceCredential(2002, "b" * 48, new_key)
+        )
+
+        self.assertTrue(updated_existing)
+        self.assertEqual(credential.token, "b" * 48)
+        self.assertEqual(self.window.credential_combo.count(), 1)
+        self.assertEqual(self.window.fleet_table.rowCount(), 1)
+        self.assertEqual(self.window._credential_by_id(2002).hmac_key, new_key)
+
+    def test_removing_device_deletes_it_from_bundle_and_fleet_table(self) -> None:
+        first_key = bytes(range(32))
+        second_key = bytes(reversed(range(32)))
+        self.window._replace_credential_bundle(
+            CredentialBundle(
+                devices=(
+                    DeviceCredential(2001, "a" * 48, first_key),
+                    DeviceCredential(2002, "b" * 48, second_key),
+                ),
+                gateways=(),
+            )
+        )
+
+        self.window._remove_device_credential(2001)
+
+        self.assertIsNone(self.window._credential_by_id(2001))
+        self.assertIsNotNone(self.window._credential_by_id(2002))
+        self.assertEqual(self.window.credential_combo.count(), 1)
+        self.assertEqual(self.window.credential_combo.currentText(), "Device 2002")
+        self.assertEqual(self.window.fleet_table.rowCount(), 1)
+        self.assertEqual(self.window.fleet_table.item(0, 1).text(), "2002")
+        data = self.window._credentials_bundle_json()
+        self.assertEqual([device["device_id"] for device in data["devices"]], [2002])
+
+    def test_removing_last_device_clears_secret_fields(self) -> None:
+        self.window._replace_credential_bundle(
+            CredentialBundle(
+                devices=(DeviceCredential(2001, "a" * 48, bytes(range(32))),),
+                gateways=(),
+            )
+        )
+
+        self.window._remove_device_credential(2001)
+
+        self.assertEqual(self.window.credential_combo.count(), 0)
+        self.assertEqual(self.window.fleet_table.rowCount(), 0)
+        self.assertEqual(self.window.hmac.text(), "")
+        self.assertEqual(self.window.bearer.text(), "")
+
+    def test_provisioning_sql_hashes_bearers_and_keeps_hmac_for_vault(self) -> None:
+        device_token = "device-token-2001_" + "a" * 30
+        gateway_token = "gateway-token-0016_" + "b" * 30
+        key = bytes(range(32))
+        household_id = "6e799f91-3027-4c8f-b239-09531939e79e"
+
+        sql = generate_provisioning_sql(
+            (DeviceCredential(2001, device_token, key),),
+            (GatewayCredential("0016", gateway_token, "Kitchen Hub"),),
+            household_id,
+            3,
+        )
+
+        self.assertIn("insert into public.devices", sql)
+        self.assertIn("insert into public.device_ingest_credentials", sql)
+        self.assertIn("vault.create_secret", sql)
+        self.assertIn("insert into public.gateways", sql)
+        self.assertIn("insert into public.gateway_ingest_credentials", sql)
+        self.assertIn("'bluepaws-device-2001-hmac-v3'", sql)
+        self.assertIn(base64.b64encode(key).decode("ascii"), sql)
+        self.assertIn(hashlib.sha256(device_token.encode()).hexdigest(), sql)
+        self.assertIn(hashlib.sha256(gateway_token.encode()).hexdigest(), sql)
+        self.assertNotIn(device_token, sql)
+        self.assertNotIn(gateway_token, sql)
 
     def test_fleet_mode_prepares_independently_signed_device_cycles(self) -> None:
         keys = [bytes((offset + index) % 256 for index in range(32)) for offset in range(3)]

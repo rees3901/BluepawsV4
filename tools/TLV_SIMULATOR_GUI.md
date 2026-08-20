@@ -54,7 +54,7 @@ python3 tools/tlv_simulator_gui.py --check
 ## Credentials
 
 Choose **Load credentials JSON** on the packet-builder tab and select the private
-`vps_devices.json`. Selecting a device fills its ID, HMAC key and HTTPS bearer
+`devices.json`. Selecting a device fills its ID, HMAC key and HTTPS bearer
 token. Both secrets stay masked and are not copied into the JSON preview or
 response log.
 

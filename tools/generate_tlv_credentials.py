@@ -204,12 +204,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--key-version", type=int, default=1, help="HMAC key version")
     parser.add_argument(
-        "--output", type=Path, default=Path("tools/vps_devices.json"), help="private JSON output"
+        "--output", type=Path, default=Path("tools/devices.json"), help="private JSON output"
     )
     parser.add_argument(
         "--sql-output",
         type=Path,
-        default=Path("tools/vps_devices.provision.sql"),
+        default=Path("tools/devices.provision.sql"),
         help="private Supabase SQL output",
     )
     parser.add_argument(
