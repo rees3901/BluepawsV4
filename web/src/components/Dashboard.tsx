@@ -8,6 +8,7 @@ import { GuidedTour } from "@/components/GuidedTour";
 import { AccountMenu } from "@/components/AccountMenu";
 import { deviceCardOrderStorageKey, moveDeviceBefore, orderDeviceIds, pinDeviceFirst } from "@/lib/deviceCardOrder";
 import { loadDeviceAppearances, revokeAvatarUrls } from "@/lib/deviceAppearances";
+import { nextExpandedDeviceCards } from "@/lib/expandedCards";
 import { followedDeviceAfterAction } from "@/lib/followState";
 import { createRealtimeTelemetrySource, loadDeviceTrail } from "@/lib/realtimeTelemetry";
 import { createClient } from "@/lib/supabase/client";
@@ -61,7 +62,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
   const [tutorialPromptOpen, setTutorialPromptOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [darkMode, setDarkMode] = useState(true);
-  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [expandedIds, setExpandedIds] = useState<number[]>([]);
   const [followedId, setFollowedId] = useState<number | null>(null);
   const [trailIds, setTrailIds] = useState<Set<number>>(() => new Set());
   const [trailHistory, setTrailHistory] = useState<Record<number, TrailPoint[]>>({});
@@ -341,7 +342,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
     setDevices([]);
     setLogs([]);
     sequences.current.clear();
-    setExpandedId(null);
+    setExpandedIds([]);
     setFollowedId(null);
     setTrailIds(new Set());
     setTrailHistory({});
@@ -370,14 +371,14 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
   const replayTutorial = useCallback(() => {
     setSettingsOpen(false);
     setSidebarOpen(true);
-    setExpandedId(null);
+    setExpandedIds([]);
     setTutorialOpen(true);
   }, []);
 
   const firstTutorialDeviceId = devices[0]?.id;
   const handleTutorialStepChange = useCallback((step: number) => {
     if (step >= 1 && step <= 3) setSidebarOpen(true);
-    if (step === 3 && firstTutorialDeviceId !== undefined) setExpandedId(firstTutorialDeviceId);
+    if (step === 3 && firstTutorialDeviceId !== undefined) setExpandedIds((current) => current.includes(firstTutorialDeviceId) ? current : nextExpandedDeviceCards(current, firstTutorialDeviceId));
   }, [firstTutorialDeviceId]);
   const completeTutorial = useCallback(() => finishTutorial(true), [finishTutorial]);
   const skipTutorial = useCallback(() => finishTutorial(false), [finishTutorial]);
@@ -473,7 +474,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
               key={device.id}
               device={device}
               avatar={avatars[device.id]}
-              expanded={expandedId === device.id}
+              expanded={expandedIds.includes(device.id)}
               dragging={draggingDeviceId === device.id}
               dragOver={dragOverDeviceId === device.id && draggingDeviceId !== device.id}
               followed={followedId === device.id}
@@ -481,7 +482,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
               portableMode={portableMode}
               distance={formatDistance(haversine(HOME.lat, HOME.lon, device.lat, device.lon))}
               ageSeconds={Math.max(0, Math.floor((now - device.lastUpdate) / 1000))}
-              onExpand={() => setExpandedId((current) => current === device.id ? null : device.id)}
+              onExpand={() => setExpandedIds((current) => nextExpandedDeviceCards(current, device.id))}
               onAction={(action) => handleAction(device, action)}
               onAvatarEdit={tutorialMode ? undefined : () => setAvatarDevice(device)}
               onDragStart={() => setDraggingDeviceId(device.id)}
