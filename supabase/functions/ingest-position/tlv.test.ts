@@ -80,6 +80,41 @@ test("recognizes a valid direct cellular wrapper", () => {
   assert.equal(parsed.metadata.gatewayGuid16, null);
 });
 
+test("decodes every v1.1 status, power profile, and TX reason code from the header", () => {
+  for (let status = 0; status <= 3; status += 1) {
+    for (let powerProfile = 0; powerProfile <= 3; powerProfile += 1) {
+      for (let txReason = 0; txReason <= 6; txReason += 1) {
+        const packet = buildPacket();
+        packet[9] = (powerProfile << 4) | status;
+        packet[11] = txReason;
+
+        const parsed = parseTlvPacket(packet);
+
+        assert.equal(parsed.status, status);
+        assert.equal(parsed.powerProfile, powerProfile);
+        assert.equal(parsed.txReason, txReason);
+      }
+    }
+  }
+});
+
+test("rejects reserved v1.1 status, power profile, and TX reason codes", () => {
+  const reservedStatus = buildPacket();
+  reservedStatus[9] = 0x04;
+  assertDecodeError(() => parseTlvPacket(reservedStatus), "reserved_status");
+
+  const reservedPowerProfile = buildPacket();
+  reservedPowerProfile[9] = 0x40;
+  assertDecodeError(
+    () => parseTlvPacket(reservedPowerProfile),
+    "reserved_power_profile",
+  );
+
+  const reservedTxReason = buildPacket();
+  reservedTxReason[11] = 7;
+  assertDecodeError(() => parseTlvPacket(reservedTxReason), "reserved_tx_reason");
+});
+
 function buildPacket(tlvs = selectedTlvs()) {
   const body = new Uint8Array(32 + tlvs.length);
   const view = new DataView(body.buffer);

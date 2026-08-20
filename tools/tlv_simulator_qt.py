@@ -210,6 +210,13 @@ TEST_RECIPES = {
         tlv_mode="random",
         movement_metres=100,
     ),
+    "Status/profile sweep": TestRecipe(
+        "16 valid packets covering every status and power-profile code so the web tile can be checked end-to-end.",
+        16,
+        2.0,
+        strategy="protocol_sweep",
+        movement_metres=50,
+    ),
     "Bad day — only 2 of 10 valid": TestRecipe(
         "Exactly 2 valid packets and 8 packets with deliberately corrupt HMAC tags.",
         10,
@@ -2426,6 +2433,11 @@ class BluepawsTlvConsole(QMainWindow):
             if previous is not None and self.advance_packets.isChecked():
                 initial = replace(
                     previous,
+                    protocol_version=base_fields.protocol_version,
+                    status=base_fields.status,
+                    power_profile=base_fields.power_profile,
+                    flags=base_fields.flags,
+                    tx_reason=base_fields.tx_reason,
                     message_sequence=(previous.message_sequence + 1) & 0xFFFF,
                     timestamp=base_send_time,
                 )
@@ -2514,6 +2526,7 @@ class BluepawsTlvConsole(QMainWindow):
                     fix_age_s=fix_age_s,
                     satellite_count=satellite_count,
                 )
+                fields = self._recipe_protocol_fields(recipe, fields, cycle)
                 self._prepared_fields.append(fields)
                 last_cycle_fields[credential.device_id] = fields
                 tlvs = self._vary_live_tlvs(base_tlvs, cycle, elapsed)
@@ -2574,6 +2587,36 @@ class BluepawsTlvConsole(QMainWindow):
         if recipe.strategy == "all_corrupt":
             return "corrupt"
         return "valid"
+
+    @staticmethod
+    def _recipe_protocol_fields(
+        recipe: TestRecipe | None,
+        fields: PacketFields,
+        index: int,
+    ) -> PacketFields:
+        if recipe is None or recipe.strategy != "protocol_sweep":
+            return fields
+
+        status_order = (
+            STATUS_CODES["HOME"],
+            STATUS_CODES["OUT"],
+            STATUS_CODES["LOST"],
+            STATUS_CODES["ERROR"],
+        )
+        profile_order = (
+            POWER_PROFILE_CODES["NORMAL"],
+            POWER_PROFILE_CODES["POWER_SAVE"],
+            POWER_PROFILE_CODES["ACTIVE"],
+            POWER_PROFILE_CODES["LOST_ALERT"],
+        )
+        reason_order = tuple(TX_REASON_CODES.values())
+
+        return replace(
+            fields,
+            status=status_order[index % len(status_order)],
+            power_profile=profile_order[(index // len(status_order)) % len(profile_order)],
+            tx_reason=reason_order[index % len(reason_order)],
+        )
 
     @staticmethod
     def _recipe_tlvs(
