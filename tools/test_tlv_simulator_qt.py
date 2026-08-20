@@ -36,9 +36,10 @@ if PYSIDE_AVAILABLE:
         BluepawsTlvConsole,
         LIVE_PREVIEW_DELAY_MS,
         drift_coordinates,
+        generate_provisioning_sql,
         parse_coordinates,
     )
-    from tlv_packet_codec import CredentialBundle, DeviceCredential
+    from tlv_packet_codec import CredentialBundle, DeviceCredential, GatewayCredential
 
 
 @unittest.skipUnless(PYSIDE_AVAILABLE, "PySide6 GUI dependency is not installed")
@@ -554,6 +555,31 @@ class QtConsoleTests(unittest.TestCase):
         self.assertEqual(
             self.window.hmac.text(), base64.b64encode(second_key).decode("ascii")
         )
+
+    def test_provisioning_sql_hashes_bearers_and_keeps_hmac_for_vault(self) -> None:
+        device_token = "device-token-2001_" + "a" * 30
+        gateway_token = "gateway-token-0016_" + "b" * 30
+        key = bytes(range(32))
+        household_id = "6e799f91-3027-4c8f-b239-09531939e79e"
+
+        sql = generate_provisioning_sql(
+            (DeviceCredential(2001, device_token, key),),
+            (GatewayCredential("0016", gateway_token, "Kitchen Hub"),),
+            household_id,
+            3,
+        )
+
+        self.assertIn("insert into public.devices", sql)
+        self.assertIn("insert into public.device_ingest_credentials", sql)
+        self.assertIn("vault.create_secret", sql)
+        self.assertIn("insert into public.gateways", sql)
+        self.assertIn("insert into public.gateway_ingest_credentials", sql)
+        self.assertIn("'bluepaws-device-2001-hmac-v3'", sql)
+        self.assertIn(base64.b64encode(key).decode("ascii"), sql)
+        self.assertIn(hashlib.sha256(device_token.encode()).hexdigest(), sql)
+        self.assertIn(hashlib.sha256(gateway_token.encode()).hexdigest(), sql)
+        self.assertNotIn(device_token, sql)
+        self.assertNotIn(gateway_token, sql)
 
     def test_fleet_mode_prepares_independently_signed_device_cycles(self) -> None:
         keys = [bytes((offset + index) % 256 for index in range(32)) for offset in range(3)]
