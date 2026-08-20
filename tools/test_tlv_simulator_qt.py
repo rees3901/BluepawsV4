@@ -317,6 +317,22 @@ class QtConsoleTests(unittest.TestCase):
         repeated = self.window._prepare_requests(3, 1.0)
         self.assertEqual(len({wrapper["payload_b64"] for _, wrapper in repeated}), 1)
 
+    def test_visible_profile_overrides_cached_device_state(self) -> None:
+        self.window.profile.setCurrentText("ACTIVE (2)")
+        with patch("tlv_simulator_qt.time.time", return_value=3000):
+            active_request = self.window._prepare_requests(1, 0)[0]
+        self.window._device_states[active_request.device_id] = active_request.fields
+
+        self.window.profile.setCurrentText("LOST_ALERT (3)")
+        with patch("tlv_simulator_qt.time.time", return_value=3001):
+            lost_alert_request = self.window._prepare_requests(1, 0)[0]
+
+        packet = base64.b64decode(
+            lost_alert_request.wrapper["payload_b64"], validate=True
+        )
+        self.assertEqual(packet[9] >> 4, 3)
+        self.assertEqual(lost_alert_request.fields.power_profile, 3)
+
     def test_coordinate_parser_accepts_google_maps_formats(self) -> None:
         expected = (51.5074, -0.1278)
         samples = (

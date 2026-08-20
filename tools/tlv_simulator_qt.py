@@ -2426,6 +2426,11 @@ class BluepawsTlvConsole(QMainWindow):
             if previous is not None and self.advance_packets.isChecked():
                 initial = replace(
                     previous,
+                    protocol_version=base_fields.protocol_version,
+                    status=base_fields.status,
+                    power_profile=base_fields.power_profile,
+                    flags=base_fields.flags,
+                    tx_reason=base_fields.tx_reason,
                     message_sequence=(previous.message_sequence + 1) & 0xFFFF,
                     timestamp=base_send_time,
                 )
