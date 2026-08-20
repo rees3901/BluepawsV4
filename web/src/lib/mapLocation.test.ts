@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { formatMapCoordinates, googleMapsUrl, mapLocationShareText } from "./mapLocation.ts";
+import { formatMapCoordinates, googleMapsUrl } from "./mapLocation.ts";
 
 test("formats map coordinates to the requested precision", () => {
   assert.equal(formatMapCoordinates(51.50408, -0.08791), "51.50408, -0.08791");
@@ -14,8 +14,3 @@ test("creates a Google Maps search link for an exact coordinate", () => {
   );
 });
 
-test("creates share text containing coordinates and a Google Maps link", () => {
-  const text = mapLocationShareText(51.50408, -0.08791);
-  assert.match(text, /51\.504080, -0\.087910/);
-  assert.match(text, /google\.com\/maps\/search/);
-});
