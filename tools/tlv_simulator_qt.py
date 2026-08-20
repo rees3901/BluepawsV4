@@ -28,6 +28,8 @@ try:
         QApplication,
         QCheckBox,
         QComboBox,
+        QDialog,
+        QDialogButtonBox,
         QFileDialog,
         QFormLayout,
         QGridLayout,
@@ -77,6 +79,7 @@ from tlv_packet_codec import (
     load_credential_bundle,
     normalize_gateway_guid16,
     post_wrapper,
+    validate_bearer_token,
 )
 
 
@@ -525,6 +528,71 @@ def secondary_button(text: str) -> QPushButton:
     return button
 
 
+class DeviceCredentialDialog(QDialog):
+    """Add a device by typing or pasting the exact credential material."""
+
+    def __init__(self, suggested_device_id: int, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Add device credentials")
+        self._credential: DeviceCredential | None = None
+
+        layout = QVBoxLayout(self)
+        intro = QLabel(
+            "Paste an existing provisioned device credential, or generate fresh local "
+            "test secrets and save/provision them afterwards."
+        )
+        intro.setWordWrap(True)
+        intro.setStyleSheet(f"color: {MUTED};")
+        layout.addWidget(intro)
+
+        form = QFormLayout()
+        self.device_id = line_edit(str(suggested_device_id))
+        self.bearer_token = line_edit(secrets.token_urlsafe(32))
+        self.hmac_key = line_edit(base64.b64encode(secrets.token_bytes(32)).decode("ascii"))
+        form.addRow("Device ID (1–65535)", self.device_id)
+        form.addRow("Bearer token", self.bearer_token)
+        form.addRow("HMAC key (Base64)", self.hmac_key)
+        layout.addLayout(form)
+
+        generate = secondary_button("Generate fresh secrets")
+        generate.clicked.connect(self._generate_fresh_secrets)
+        layout.addWidget(generate, alignment=Qt.AlignmentFlag.AlignLeft)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    @property
+    def credential(self) -> DeviceCredential:
+        if self._credential is None:
+            raise RuntimeError("device credential dialog was not accepted")
+        return self._credential
+
+    def accept(self) -> None:
+        try:
+            device_id = int(self.device_id.text().strip(), 10)
+            if not 1 <= device_id <= 65_535:
+                raise ValueError("device_id must be an integer from 1 to 65535")
+            token = validate_bearer_token(
+                self.bearer_token.text().strip(), f"device_id {device_id} bearer token"
+            )
+            hmac_key = decode_hmac_key(
+                self.hmac_key.text().strip(), f"device_id {device_id} HMAC key"
+            )
+        except ValueError as error:
+            QMessageBox.critical(self, "Invalid device credential", str(error))
+            return
+        self._credential = DeviceCredential(device_id, token, hmac_key)
+        super().accept()
+
+    def _generate_fresh_secrets(self) -> None:
+        self.bearer_token.setText(secrets.token_urlsafe(32))
+        self.hmac_key.setText(base64.b64encode(secrets.token_bytes(32)).decode("ascii"))
+
+
 class WorkerSignals(QObject):
     response = Signal(object)
     finished = Signal(int, int, object)
@@ -649,9 +717,9 @@ class BluepawsTlvConsole(QMainWindow):
         credential_note.setStyleSheet(f"color: {MUTED};")
         credential_row.addWidget(credential_note, 1, 0, 1, 5)
         manage_credentials = QHBoxLayout()
-        add_device = secondary_button("Generate device…")
+        add_device = secondary_button("Add device…")
         add_device.clicked.connect(self._add_device_dialog)
-        add_device.setToolTip("Create a new random bearer token and HMAC key for a typed device ID.")
+        add_device.setToolTip("Type or paste a device ID, bearer token and HMAC key into the credentials list.")
         add_gateway = secondary_button("Generate gateway…")
         add_gateway.clicked.connect(self._add_gateway_dialog)
         add_gateway.setToolTip("Create a new random bearer token for a typed LoRa gateway GUID16.")
@@ -1234,24 +1302,17 @@ class BluepawsTlvConsole(QMainWindow):
         self._transport_changed()
 
     def _add_device_dialog(self) -> None:
-        device_id, accepted = QInputDialog.getInt(
-            self,
-            "Generate test device credentials",
-            "Device ID (1–65535)",
-            self._next_available_device_id(),
-            1,
-            65_535,
-        )
-        if not accepted:
+        dialog = DeviceCredentialDialog(self._next_available_device_id(), self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         try:
-            credential = self._add_generated_device(device_id)
+            credential = self._add_device_credential(dialog.credential)
         except ValueError as error:
             QMessageBox.critical(self, "Unable to add device", str(error))
             return
         QMessageBox.information(
             self,
-            "Device generated",
+            "Device added",
             (
                 f"Device {credential.device_id} was added to the credentials list.\n\n"
                 "Save the bundle JSON and provision the same credential in Supabase before "
@@ -1292,19 +1353,28 @@ class BluepawsTlvConsole(QMainWindow):
         )
 
     def _add_generated_device(self, device_id: int) -> DeviceCredential:
-        if not isinstance(device_id, int) or isinstance(device_id, bool) or not 1 <= device_id <= 65_535:
-            raise ValueError("device_id must be an integer from 1 to 65535")
-        if self._credential_by_id(device_id) is not None:
-            raise ValueError(f"device_id {device_id} already exists in this bundle")
-        credential = DeviceCredential(
+        return self._add_device_credential(DeviceCredential(
             device_id=device_id,
             token=secrets.token_urlsafe(32),
             hmac_key=secrets.token_bytes(32),
-        )
+        ))
+
+    def _add_device_credential(self, credential: DeviceCredential) -> DeviceCredential:
+        if (
+            not isinstance(credential.device_id, int)
+            or isinstance(credential.device_id, bool)
+            or not 1 <= credential.device_id <= 65_535
+        ):
+            raise ValueError("device_id must be an integer from 1 to 65535")
+        validate_bearer_token(credential.token, f"device_id {credential.device_id} bearer token")
+        if len(credential.hmac_key) != 32:
+            raise ValueError(f"device_id {credential.device_id} HMAC key must contain 32 bytes")
+        if self._credential_by_id(credential.device_id) is not None:
+            raise ValueError(f"device_id {credential.device_id} already exists in this bundle")
         self._credentials[self._device_label(credential)] = credential
-        self._refresh_credential_controls(select_device_id=device_id)
+        self._refresh_credential_controls(select_device_id=credential.device_id)
         self.builder_status.setText(
-            f"Generated Device {device_id}. Save the credentials bundle before closing."
+            f"Added Device {credential.device_id}. Save the credentials bundle before closing."
         )
         return credential
 

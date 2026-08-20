@@ -497,7 +497,10 @@ class QtConsoleTests(unittest.TestCase):
         self.assertEqual(self.window.bearer.text(), "d" * 48)
 
     def test_gui_can_append_devices_and_gateways_to_one_credentials_bundle(self) -> None:
-        first_device = self.window._add_generated_device(2001)
+        first_key = bytes(range(32))
+        first_device = self.window._add_device_credential(
+            DeviceCredential(2001, "pasted-token-2001_" + "a" * 30, first_key)
+        )
         gateway = self.window._add_generated_gateway("0016", "Kitchen Hub")
         second_device = self.window._add_generated_device(2002)
 
@@ -526,8 +529,9 @@ class QtConsoleTests(unittest.TestCase):
         )
         self.assertEqual(data["gateways"][0]["gateway_guid16"], gateway.gateway_guid16)
         self.assertEqual(data["gateways"][0]["display_name"], "Kitchen Hub")
-        self.assertEqual(len(base64.b64decode(data["devices"][0]["hmac_key_b64"])), 32)
-        self.assertGreaterEqual(len(data["devices"][0]["bearer_token"]), 32)
+        self.assertEqual(base64.b64decode(data["devices"][0]["hmac_key_b64"]), first_key)
+        self.assertEqual(data["devices"][0]["bearer_token"], first_device.token)
+        self.assertGreaterEqual(len(data["devices"][1]["bearer_token"]), 32)
 
     def test_typed_device_id_selects_loaded_credentials(self) -> None:
         first_key = bytes(range(32))
