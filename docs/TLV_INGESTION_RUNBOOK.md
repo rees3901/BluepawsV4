@@ -81,9 +81,9 @@ python3 tools/generate_tlv_credentials.py \
   --gateway-guid16 0016
 ```
 
-Run the generated `tools/vps_devices.provision.sql` once in the Supabase SQL
+Run the generated `tools/devices.provision.sql` once in the Supabase SQL
 Editor. Then securely delete it because it temporarily contains the plaintext
-HMAC values passed to Vault. Keep `tools/vps_devices.json` private and off Git.
+HMAC values passed to Vault. Keep `tools/devices.json` private and off Git.
 The command refuses accidental overwrite; key rotation must use a new
 `--key-version` and a deliberate rollout.
 
@@ -165,7 +165,7 @@ Never add the service-role key to the VPS simulator.
 
 ## 6. Configure the VPS simulator
 
-In the VPS's private `tools/vps_devices.json`, keep collar and gateway identities
+In the VPS's private `tools/devices.json`, keep collar and gateway identities
 in separate arrays inside one credentials bundle:
 
 ```json
@@ -191,7 +191,7 @@ in separate arrays inside one credentials bundle:
 Protect the file and send a short LTE test:
 
 ```bash
-chmod 600 tools/vps_devices.json
+chmod 600 tools/devices.json
 python3 tools/tlv_telemetry_simulator.py --device-count 1 --iterations 5 --interval 2
 ```
 

@@ -28,6 +28,7 @@ if PYSIDE_AVAILABLE:
 
     from tlv_simulator_qt import (
         DEFAULT_MOVEMENT_METRES,
+        DEFAULT_CREDENTIAL_BUNDLE_PATH,
         MAX_MOVEMENT_METRES,
         STYLESHEET,
         TAG_MODES,
@@ -52,7 +53,7 @@ class QtConsoleTests(unittest.TestCase):
         cls.app.setStyleSheet(STYLESHEET)
 
     def setUp(self) -> None:
-        self.window = BluepawsTlvConsole()
+        self.window = BluepawsTlvConsole(auto_load_credentials=False)
         self.window.hmac.setText(base64.b64encode(bytes(range(32))).decode("ascii"))
         self.window.bearer.setText("t" * 48)
         self.window.build_packet()
@@ -497,6 +498,39 @@ class QtConsoleTests(unittest.TestCase):
 
         self.window.transport.setCurrentText("LTE direct (cellular_direct)")
         self.assertEqual(self.window.bearer.text(), "d" * 48)
+
+    def test_startup_auto_loads_default_devices_json_when_present(self) -> None:
+        key = bytes(range(32))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "devices.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "devices": [
+                            {
+                                "device_id": 3001,
+                                "bearer_token": "auto" + "a" * 44,
+                                "hmac_key_b64": base64.b64encode(key).decode(),
+                            }
+                        ],
+                        "gateways": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with patch("tlv_simulator_qt.DEFAULT_CREDENTIAL_BUNDLE_PATH", path):
+                window = BluepawsTlvConsole()
+        try:
+            self.assertEqual(window.device_id.text(), "3001")
+            self.assertEqual(window.bearer.text(), "auto" + "a" * 44)
+            self.assertEqual(window.hmac.text(), base64.b64encode(key).decode())
+            self.assertIn("from devices.json", window.builder_status.text())
+        finally:
+            window.close()
+
+    def test_default_credential_bundle_is_tools_devices_json(self) -> None:
+        self.assertEqual(DEFAULT_CREDENTIAL_BUNDLE_PATH.name, "devices.json")
 
     def test_gui_can_append_devices_and_gateways_to_one_credentials_bundle(self) -> None:
         first_key = bytes(range(32))

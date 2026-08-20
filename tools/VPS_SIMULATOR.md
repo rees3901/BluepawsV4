@@ -22,20 +22,19 @@ Supabase stores only the SHA-256 token hash. TLV devices also have a random
 encrypted copy in Vault.
 
 Plaintext tokens are issued once during provisioning and must be kept in the
-private `vps_devices.json` credentials bundle. Its `devices` and `gateways`
+private `devices.json` credentials bundle. Its `devices` and `gateways`
 arrays keep the two identity types distinct. It cannot be recovered from the
 Supabase dashboard after provisioning; if both private copies are lost, rotate
 the affected identity to a newly generated token and replace its stored hash.
 
-Copy the separately supplied `vps_devices.json` to the VPS beside the repository
+Copy the separately supplied `devices.json` to the VPS beside the repository
 and protect it:
 
 ```bash
-chmod 600 tools/vps_devices.json
+chmod 600 tools/devices.json
 ```
 
-The real file is Git-ignored. `vps_devices.example.json` documents its format
-without containing valid secrets. Existing flat device arrays remain supported.
+The real file is Git-ignored. Existing flat device arrays remain supported.
 
 To generate a fresh bundle with cryptographically secure bearer tokens and
 32-byte HMAC keys, plus matching one-time Supabase provisioning SQL:
@@ -100,7 +99,7 @@ identical retry, a conflicting retry, and an unprovisioned device.
 Useful overrides:
 
 ```bash
-export BLUEPAWS_DEVICE_FILE=/secure/path/vps_devices.json
+export BLUEPAWS_DEVICE_FILE=/secure/path/devices.json
 export BLUEPAWS_INGEST_URL=https://ykcdaonkvwemedotdpdr.supabase.co/functions/v1/ingest-position
 python3 tools/vps_position_simulator.py --iterations 100 --interval 1 --seed 42
 ```
