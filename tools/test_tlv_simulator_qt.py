@@ -41,7 +41,14 @@ if PYSIDE_AVAILABLE:
         generate_provisioning_sql,
         parse_coordinates,
     )
-    from tlv_packet_codec import CredentialBundle, DeviceCredential, GatewayCredential
+    from tlv_packet_codec import (
+        CredentialBundle,
+        DeviceCredential,
+        GatewayCredential,
+        POWER_PROFILE_CODES,
+        STATUS_CODES,
+        TX_REASON_CODES,
+    )
 
 
 @unittest.skipUnless(PYSIDE_AVAILABLE, "PySide6 GUI dependency is not installed")
@@ -136,6 +143,7 @@ class QtConsoleTests(unittest.TestCase):
             "Bad day — only 2 of 10 valid",
             "Mixed bag",
             "Fully randomized",
+            "Status/profile sweep",
             "Maximum TLV budget",
             "LoRa relay sunny day",
         ):
@@ -198,6 +206,51 @@ class QtConsoleTests(unittest.TestCase):
                 (base_sequence + 5) & 0xFFFF,
             ],
         )
+
+    def test_status_profile_sweep_recipe_cycles_visible_protocol_modes(self) -> None:
+        self.window.recipe_combo.setCurrentText("Status/profile sweep")
+        self.window.cookbook_group.setChecked(True)
+        with patch("tlv_simulator_qt.time.time", return_value=6_000):
+            requests = self.window._prepare_requests(16, 2.0)
+
+        self.assertEqual(self.window.send_count.text(), "16")
+        self.assertEqual(TAG_MODES[self.window.tag_mode.currentText()], "valid")
+        self.assertTrue(all(packet_hmac_valid(wrapper, bytes(range(32))) for _, wrapper in requests))
+
+        expected_statuses = [
+            STATUS_CODES["HOME"],
+            STATUS_CODES["OUT"],
+            STATUS_CODES["LOST"],
+            STATUS_CODES["ERROR"],
+        ] * 4
+        expected_profiles = [
+            POWER_PROFILE_CODES["NORMAL"],
+            POWER_PROFILE_CODES["NORMAL"],
+            POWER_PROFILE_CODES["NORMAL"],
+            POWER_PROFILE_CODES["NORMAL"],
+            POWER_PROFILE_CODES["POWER_SAVE"],
+            POWER_PROFILE_CODES["POWER_SAVE"],
+            POWER_PROFILE_CODES["POWER_SAVE"],
+            POWER_PROFILE_CODES["POWER_SAVE"],
+            POWER_PROFILE_CODES["ACTIVE"],
+            POWER_PROFILE_CODES["ACTIVE"],
+            POWER_PROFILE_CODES["ACTIVE"],
+            POWER_PROFILE_CODES["ACTIVE"],
+            POWER_PROFILE_CODES["LOST_ALERT"],
+            POWER_PROFILE_CODES["LOST_ALERT"],
+            POWER_PROFILE_CODES["LOST_ALERT"],
+            POWER_PROFILE_CODES["LOST_ALERT"],
+        ]
+        expected_reasons = list(TX_REASON_CODES.values()) * 3
+
+        for index, request in enumerate(requests):
+            packet = base64.b64decode(request.wrapper["payload_b64"], validate=True)
+            self.assertEqual(request.fields.status, expected_statuses[index])
+            self.assertEqual(request.fields.power_profile, expected_profiles[index])
+            self.assertEqual(request.fields.tx_reason, expected_reasons[index])
+            self.assertEqual(packet[9] & 0x0F, expected_statuses[index])
+            self.assertEqual(packet[9] >> 4, expected_profiles[index])
+            self.assertEqual(packet[11], expected_reasons[index])
 
     def test_recipes_apply_movement_bounds_that_match_their_purpose(self) -> None:
         self.window.recipe_combo.setCurrentText("Basic sunny day")
@@ -317,21 +370,37 @@ class QtConsoleTests(unittest.TestCase):
         repeated = self.window._prepare_requests(3, 1.0)
         self.assertEqual(len({wrapper["payload_b64"] for _, wrapper in repeated}), 1)
 
-    def test_visible_profile_overrides_cached_device_state(self) -> None:
+    def test_visible_protocol_choices_override_cached_device_state(self) -> None:
         self.window.profile.setCurrentText("ACTIVE (2)")
+        self.window.status.setCurrentText("LOST (2)")
+        self.window.reason.setCurrentText("ALERT (5)")
         with patch("tlv_simulator_qt.time.time", return_value=3000):
             active_request = self.window._prepare_requests(1, 0)[0]
         self.window._device_states[active_request.device_id] = active_request.fields
 
-        self.window.profile.setCurrentText("LOST_ALERT (3)")
-        with patch("tlv_simulator_qt.time.time", return_value=3001):
-            lost_alert_request = self.window._prepare_requests(1, 0)[0]
+        for status_name, status_code in STATUS_CODES.items():
+            for profile_name, profile_code in POWER_PROFILE_CODES.items():
+                for reason_name, reason_code in TX_REASON_CODES.items():
+                    with self.subTest(
+                        status=status_name,
+                        profile=profile_name,
+                        reason=reason_name,
+                    ):
+                        self.window.status.setCurrentText(f"{status_name} ({status_code})")
+                        self.window.profile.setCurrentText(f"{profile_name} ({profile_code})")
+                        self.window.reason.setCurrentText(f"{reason_name} ({reason_code})")
+                        with patch("tlv_simulator_qt.time.time", return_value=3001):
+                            request = self.window._prepare_requests(1, 0)[0]
 
-        packet = base64.b64decode(
-            lost_alert_request.wrapper["payload_b64"], validate=True
-        )
-        self.assertEqual(packet[9] >> 4, 3)
-        self.assertEqual(lost_alert_request.fields.power_profile, 3)
+                        packet = base64.b64decode(
+                            request.wrapper["payload_b64"], validate=True
+                        )
+                        self.assertEqual(packet[9] & 0x0F, status_code)
+                        self.assertEqual(packet[9] >> 4, profile_code)
+                        self.assertEqual(packet[11], reason_code)
+                        self.assertEqual(request.fields.status, status_code)
+                        self.assertEqual(request.fields.power_profile, profile_code)
+                        self.assertEqual(request.fields.tx_reason, reason_code)
 
     def test_coordinate_parser_accepts_google_maps_formats(self) -> None:
         expected = (51.5074, -0.1278)

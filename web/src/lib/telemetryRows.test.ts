@@ -37,3 +37,40 @@ test("maps TLV projection fields into the live dashboard model", () => {
   assert.equal(device.bleHome, true);
   assert.equal(device.ingestPath, "cellular_direct");
 });
+
+test("maps every TLV status and power profile code into stable dashboard labels", () => {
+  const baseRow: PositionRow = {
+    position_id: 1,
+    device_uid: 1001,
+    household_id: "household",
+    message_id: 42,
+    latitude: 51.5,
+    longitude: -0.1,
+    battery: null,
+    battery_mv: 3700,
+    status_code: 1,
+    power_profile_code: 1,
+    flags: 0,
+    tx_reason: 0,
+    ingest_path: "cellular_direct",
+    link_type: "lte",
+    link_rssi_dbm: -104,
+    link_snr_db: 7,
+    source: "tlv",
+    recorded_at: "2026-08-13T08:00:00.000Z",
+    received_at: "2026-08-13T08:00:01.000Z",
+    schema_version: 1,
+  };
+  const statuses = ["Home", "Out", "Lost", "Error"] as const;
+  const profiles = ["PowerSave", "Normal", "Active", "Emergency Lost"] as const;
+
+  for (const [statusCode, statusLabel] of statuses.entries()) {
+    const device = positionToTelemetryDevice({ ...baseRow, status_code: statusCode });
+    assert.equal(device.status, statusLabel);
+  }
+
+  for (const [profileCode, profileLabel] of profiles.entries()) {
+    const device = positionToTelemetryDevice({ ...baseRow, power_profile_code: profileCode });
+    assert.equal(device.profile, profileLabel);
+  }
+});
