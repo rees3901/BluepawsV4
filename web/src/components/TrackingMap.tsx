@@ -29,7 +29,7 @@ interface TrackingMapProps {
 }
 
 const JUMP_TO_ZOOM = 17;
-const MARKER_SLIDE_DURATION_MS = 750;
+const MARKER_SLIDE_DURATION_MS = 1_000;
 const MAX_ANIMATED_MARKER_DISTANCE_METRES = 2_000;
 
 export default function TrackingMap(props: TrackingMapProps) {
