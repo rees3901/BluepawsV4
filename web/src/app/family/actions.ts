@@ -25,6 +25,7 @@ export interface SearchPartyActionState {
   searchUrl: string | null;
   helperEmail: string | null;
   expiresAt: string | null;
+  emailDelivery: InvitationEmailDelivery;
 }
 
 export async function updateFamilyNameAction(
@@ -125,10 +126,10 @@ export async function createSearchPartyShareAction(
   const householdId = String(formData.get("householdId") ?? "");
   const helperEmail = String(formData.get("helperEmail") ?? "").trim().toLowerCase();
   if (!householdId) {
-    return { error: "Choose a Family before creating a search-party link.", searchUrl: null, helperEmail: null, expiresAt: null };
+    return { error: "Choose a Family before creating a search-party link.", searchUrl: null, helperEmail: null, expiresAt: null, emailDelivery: null };
   }
   if (helperEmail.length < 3 || helperEmail.length > 320 || !helperEmail.includes("@")) {
-    return { error: "Enter a valid helper email address.", searchUrl: null, helperEmail: null, expiresAt: null };
+    return { error: "Enter a valid helper email address.", searchUrl: null, helperEmail: null, expiresAt: null, emailDelivery: null };
   }
 
   const supabase = await createClient();
@@ -142,12 +143,34 @@ export async function createSearchPartyShareAction(
 
   if (error) {
     console.error("Unable to create search party link", { code: error.code, message: error.message });
-    return { error: "The search-party link could not be created. Check your Owner access and try again.", searchUrl: null, helperEmail: null, expiresAt: null };
+    return { error: "The search-party link could not be created. Check your Owner access and try again.", searchUrl: null, helperEmail: null, expiresAt: null, emailDelivery: null };
   }
 
   const share = Array.isArray(data) ? data[0] : null;
   if (!share || typeof share.share_token !== "string") {
-    return { error: "The search-party link was created without a shareable token.", searchUrl: null, helperEmail: null, expiresAt: null };
+    return { error: "The search-party link was created without a shareable token.", searchUrl: null, helperEmail: null, expiresAt: null, emailDelivery: null };
+  }
+
+  const shareId = typeof share.share_id === "string" ? share.share_id : null;
+  let emailDelivery: InvitationEmailDelivery = "failed";
+  if (shareId) {
+    const emailResult = await supabase.functions.invoke("send-search-party-link", {
+      body: {
+        shareId,
+        shareToken: share.share_token,
+      },
+    });
+    if (!emailResult.error && emailResult.data?.sent === true) {
+      emailDelivery = "sent";
+    } else {
+      const providerCode = await readFunctionErrorCode(emailResult.error, emailResult.data);
+      emailDelivery = classifyInvitationEmailFailure(providerCode);
+      console.error("Search-party link was created but its email was not delivered", {
+        errorName: emailResult.error?.name ?? "provider_response",
+        message: emailResult.error?.message ?? "Email provider did not confirm delivery",
+        providerCode,
+      });
+    }
   }
 
   revalidatePath("/account");
@@ -156,6 +179,7 @@ export async function createSearchPartyShareAction(
     searchUrl: `${CANONICAL_SITE_URL}/search/${share.share_token}`,
     helperEmail,
     expiresAt: typeof share.share_expires_at === "string" ? share.share_expires_at : null,
+    emailDelivery,
   };
 }
 
