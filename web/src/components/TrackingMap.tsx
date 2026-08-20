@@ -29,11 +29,14 @@ interface TrackingMapProps {
 }
 
 const JUMP_TO_ZOOM = 17;
+const MARKER_SLIDE_DURATION_MS = 750;
+const MAX_ANIMATED_MARKER_DISTANCE_METRES = 2_000;
 
 export default function TrackingMap(props: TrackingMapProps) {
   const { devices, avatars, sidebarOpen, followedId, trailIds, trailHistory, command, onAction } = props;
   const mapRef = useRef<L.Map | null>(null);
   const markersRef = useRef(new Map<number, L.Marker>());
+  const markerAnimationsRef = useRef(new Map<number, number>());
   const trailsRef = useRef(new Map<number, L.Polyline>());
   const trailPointsRef = useRef(new Map<number, TrailLatLng[]>());
   const devicesRef = useRef(devices);
@@ -50,6 +53,7 @@ export default function TrackingMap(props: TrackingMapProps) {
 
   useEffect(() => {
     const markers = markersRef.current;
+    const markerAnimations = markerAnimationsRef.current;
     const trails = trailsRef.current;
     const trailPoints = trailPointsRef.current;
     const map = L.map("map", { center: [...EMPTY_MAP_CENTER], zoom: EMPTY_MAP_ZOOM, zoomControl: false, tapHold: true });
@@ -266,6 +270,8 @@ export default function TrackingMap(props: TrackingMapProps) {
 
     return () => {
       mapContainer.removeEventListener("click", handleMapAction);
+      markerAnimations.forEach((frameId) => window.cancelAnimationFrame(frameId));
+      markerAnimations.clear();
       map.remove();
       mapRef.current = null;
       markers.clear();
@@ -288,6 +294,7 @@ export default function TrackingMap(props: TrackingMapProps) {
     const activeDeviceIds = new Set(devices.map((device) => device.id));
     markersRef.current.forEach((marker, deviceId) => {
       if (activeDeviceIds.has(deviceId)) return;
+      cancelMarkerAnimation(markerAnimationsRef.current, deviceId);
       map.removeLayer(marker);
       markersRef.current.delete(deviceId);
     });
@@ -314,7 +321,8 @@ export default function TrackingMap(props: TrackingMapProps) {
         marker = L.marker(latLng, { icon }).addTo(map);
         markersRef.current.set(device.id, marker);
       } else {
-        marker.setLatLng(latLng).setIcon(icon);
+        marker.setIcon(icon);
+        slideMarkerTo(marker, L.latLng(device.lat, device.lon), markerAnimationsRef.current, device.id);
       }
       marker.bindPopup(popupHtml(device, avatar));
 
@@ -482,6 +490,51 @@ function markerElement(avatar: DeviceAvatar, markerColor: string, status: Teleme
 function fitMarkers(map: L.Map, markers: Map<number, L.Marker>) {
   const points = [...markers.values()].map((marker) => marker.getLatLng());
   if (points.length) map.fitBounds(L.latLngBounds(points), { padding: [50, 50], maxZoom: 16 });
+}
+
+function slideMarkerTo(marker: L.Marker, target: L.LatLng, animations: Map<number, number>, deviceId: number) {
+  cancelMarkerAnimation(animations, deviceId);
+
+  const start = marker.getLatLng();
+  const distance = start.distanceTo(target);
+  if (
+    distance === 0 ||
+    distance > MAX_ANIMATED_MARKER_DISTANCE_METRES ||
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  ) {
+    marker.setLatLng(target);
+    return;
+  }
+
+  const startTime = window.performance.now();
+  const tick = (now: number) => {
+    const progress = easeOutCubic(Math.min((now - startTime) / MARKER_SLIDE_DURATION_MS, 1));
+    marker.setLatLng([
+      start.lat + (target.lat - start.lat) * progress,
+      start.lng + (target.lng - start.lng) * progress,
+    ]);
+
+    if (progress < 1) {
+      animations.set(deviceId, window.requestAnimationFrame(tick));
+      return;
+    }
+
+    marker.setLatLng(target);
+    animations.delete(deviceId);
+  };
+
+  animations.set(deviceId, window.requestAnimationFrame(tick));
+}
+
+function cancelMarkerAnimation(animations: Map<number, number>, deviceId: number) {
+  const frameId = animations.get(deviceId);
+  if (frameId === undefined) return;
+  window.cancelAnimationFrame(frameId);
+  animations.delete(deviceId);
+}
+
+function easeOutCubic(value: number) {
+  return 1 - (1 - value) ** 3;
 }
 
 function toDms(value: number, positive: string, negative: string) {
