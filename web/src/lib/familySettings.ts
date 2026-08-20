@@ -21,6 +21,7 @@ export interface FamilyInvitation {
 
 export interface SearchPartyShare {
   id: string;
+  helperEmail: string;
   createdAt: string;
   expiresAt: string;
   revokedAt: string | null;
@@ -76,7 +77,7 @@ export async function loadFamilySettings(householdId: string, role: FamilyRole) 
         .limit(50),
       supabase
         .from("family_search_shares")
-        .select("id,created_at,expires_at,revoked_at,last_used_at,use_count")
+        .select("id,helper_email,created_at,expires_at,revoked_at,last_used_at,use_count")
         .eq("household_id", householdId)
         .order("created_at", { ascending: false })
         .limit(20),
@@ -111,6 +112,7 @@ export async function loadFamilySettings(householdId: string, role: FamilyRole) 
           : "Active";
       return {
         id: share.id,
+        helperEmail: share.helper_email,
         createdAt: share.created_at,
         expiresAt: share.expires_at,
         revokedAt: share.revoked_at,

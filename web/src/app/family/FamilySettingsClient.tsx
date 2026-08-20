@@ -23,6 +23,7 @@ const INITIAL_FAMILY_NAME_STATE: FamilyNameActionState = {
 const INITIAL_SEARCH_PARTY_STATE: SearchPartyActionState = {
   error: null,
   searchUrl: null,
+  helperEmail: null,
   expiresAt: null,
 };
 
@@ -175,19 +176,23 @@ export function FamilySettingsClient({ currentUserId, activeFamily, families, me
           <p className="settings-copy">Create a guest link for friends or neighbours helping search. It shows current Family pet positions only, refreshes slowly and cannot send commands or change settings.</p>
           <form action={searchPartyFormAction} className="search-party-form">
             <input type="hidden" name="householdId" value={activeFamily.householdId} />
-            <button className="btn-primary" type="submit" disabled={searchPartyPending}>{searchPartyPending ? "Creating…" : "Create search-party link"}</button>
+            <label htmlFor="search-party-email">Helper email address</label>
+            <div>
+              <input id="search-party-email" name="helperEmail" type="email" autoComplete="email" maxLength={320} required placeholder="helper@example.com" />
+              <button className="btn-primary" type="submit" disabled={searchPartyPending}>{searchPartyPending ? "Creating…" : "Create link"}</button>
+            </div>
           </form>
           {searchPartyState.error && <p className="settings-message error" role="alert">{searchPartyState.error}</p>}
           {searchPartyState.searchUrl && (
             <div className="invite-share-card search-party-share-card" role="status">
-              <strong>Search-party link ready{searchPartyState.expiresAt ? ` until ${new Date(searchPartyState.expiresAt).toLocaleTimeString()}` : ""}</strong>
+              <strong>Search-party link created for {searchPartyState.helperEmail}{searchPartyState.expiresAt ? ` until ${new Date(searchPartyState.expiresAt).toLocaleTimeString()}` : ""}</strong>
               <code>{searchPartyState.searchUrl}</code>
               <div className="share-actions">
                 <button className="btn-secondary" type="button" onClick={copySearchPartyLink}>Copy</button>
                 <button className="btn-secondary" type="button" onClick={shareSearchPartyLink}>Share</button>
                 <a className="btn-secondary" href={`https://wa.me/?text=${encodeURIComponent(searchPartyText)}`} target="_blank" rel="noreferrer">WhatsApp</a>
                 <a className="btn-secondary" href={`sms:?body=${encodeURIComponent(searchPartyText)}`}>SMS</a>
-                <a className="btn-secondary" href={`mailto:?subject=${encodeURIComponent(`Help search with ${activeFamily.name}`)}&body=${encodeURIComponent(searchPartyText)}`}>Email</a>
+                <a className="btn-secondary" href={`mailto:${encodeURIComponent(searchPartyState.helperEmail ?? "")}?subject=${encodeURIComponent(`Help search with ${activeFamily.name}`)}&body=${encodeURIComponent(searchPartyText)}`}>Email</a>
               </div>
               {searchShareMessage && <small>{searchShareMessage}</small>}
             </div>
@@ -198,7 +203,7 @@ export function FamilySettingsClient({ currentUserId, activeFamily, families, me
               {searchShares.map((share) => (
                 <article className="invitation-row" key={share.id}>
                   <div>
-                    <strong>Search link created {new Date(share.createdAt).toLocaleString()}</strong>
+                    <strong>{share.helperEmail}</strong>
                     <small>Expires {new Date(share.expiresAt).toLocaleString()} · Used {share.useCount} time{share.useCount === 1 ? "" : "s"}{share.lastUsedAt ? ` · Last opened ${new Date(share.lastUsedAt).toLocaleString()}` : ""}</small>
                   </div>
                   <span className={`invite-status ${share.status.toLowerCase()}`}>{share.status}</span>
