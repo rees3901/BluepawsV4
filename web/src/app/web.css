@@ -197,7 +197,9 @@ button, input, select {
 }
 
 .bp-click-layer-control.bp-layer-open .leaflet-control-layers-toggle {
-  display: none !important;
+  display: block !important;
+  float: none !important;
+  margin: 0 0 8px auto !important;
 }
 
 .bp-click-layer-control.bp-layer-open .leaflet-control-layers-list {

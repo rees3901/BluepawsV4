@@ -78,28 +78,19 @@ export default function TrackingMap(props: TrackingMapProps) {
     const layerControl = L.control.layers(baseLayers, undefined, { position: "topright", collapsed: true }).addTo(map);
     const layerControlElement = layerControl.getContainer();
     let layerControlOpen = false;
-    let layerCollapseTimer: number | undefined;
     const setLayerControlOpen = (open: boolean) => {
       layerControlOpen = open;
       layerControlElement?.classList.toggle("bp-layer-open", open);
       if (open) layerControl.expand();
       else layerControl.collapse();
     };
-    const scheduleLayerControlCollapse = () => {
-      window.clearTimeout(layerCollapseTimer);
-      layerCollapseTimer = window.setTimeout(() => setLayerControlOpen(false), 1000);
-    };
     if (layerControlElement) {
       layerControlElement.classList.add("bp-click-layer-control");
       const toggle = layerControlElement.querySelector<HTMLElement>(".leaflet-control-layers-toggle");
       L.DomEvent.on(toggle ?? layerControlElement, "click", (event: Event) => {
         L.DomEvent.stop(event);
-        window.clearTimeout(layerCollapseTimer);
         setLayerControlOpen(!layerControlOpen);
       });
-      L.DomEvent.on(layerControlElement, "mouseenter", () => window.clearTimeout(layerCollapseTimer));
-      L.DomEvent.on(layerControlElement, "mouseleave", scheduleLayerControlCollapse);
-      map.on("baselayerchange", scheduleLayerControlCollapse);
     }
     L.control.zoom({ position: "bottomleft" }).addTo(map);
 
@@ -184,6 +175,7 @@ export default function TrackingMap(props: TrackingMapProps) {
       if (element) element.innerHTML = `${event.latlng.lat.toFixed(6)}, ${event.latlng.lng.toFixed(6)}<br>${toDms(event.latlng.lat, "N", "S")} ${toDms(event.latlng.lng, "E", "W")}`;
     });
     map.on("click", (event) => {
+      if (layerControlOpen) setLayerControlOpen(false);
       if (!measuring) return;
       addMeasurementPoint(event.latlng);
     });
@@ -261,7 +253,6 @@ export default function TrackingMap(props: TrackingMapProps) {
     mapContainer.addEventListener("click", handleMapAction);
 
     return () => {
-      window.clearTimeout(layerCollapseTimer);
       mapContainer.removeEventListener("click", handleMapAction);
       markerAnimations.forEach((frameId) => window.cancelAnimationFrame(frameId));
       markerAnimations.clear();
