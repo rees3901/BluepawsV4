@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DeviceCard, DownloadIcon } from "@/components/DeviceCard";
 import { GuidedTour } from "@/components/GuidedTour";
 import { AccountMenu } from "@/components/AccountMenu";
+import { defaultDeviceAvatar } from "@/lib/defaultDeviceAvatar";
 import { deviceCardOrderStorageKey, moveDeviceBefore, orderDeviceIds, pinDeviceFirst } from "@/lib/deviceCardOrder";
 import { loadDeviceAppearances, revokeAvatarUrls } from "@/lib/deviceAppearances";
 import { nextExpandedDeviceCards } from "@/lib/expandedCards";
@@ -27,8 +28,6 @@ const AvatarEditorModal = dynamic(
   { ssr: false, loading: () => <div className="modal" role="status"><span className="avatar-picker-loading">Loading emoji palette…</span></div> },
 );
 
-const EMOJIS = ["🐱", "🐶", "🐰", "🐾", "🦊", "🐹", "🦉", "🐼"];
-const COLORS = ["#1d9bf0", "#ff6b35", "#a855f7", "#22c55e", "#f97316", "#06b6d4", "#84cc16", "#ec4899"];
 const HOME = { lat: 51.5055, lon: -0.09 };
 const TUTORIAL_MODE_STORAGE_KEY = "bp_tutorial_mode";
 const TUTORIAL_COMPLETE_STORAGE_KEY = "bp_tutorial_complete";
@@ -97,9 +96,9 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
     });
   }, [devices, orderedDeviceIds]);
 
-  const avatars = useMemo<Record<number, DeviceAvatar>>(() => Object.fromEntries(orderedDevices.map((device, index) => [
+  const avatars = useMemo<Record<number, DeviceAvatar>>(() => Object.fromEntries(orderedDevices.map((device) => [
     device.id,
-    (!tutorialMode ? customAvatars[device.id] : undefined) ?? { kind: "emoji", emoji: EMOJIS[index % EMOJIS.length], color: COLORS[index % COLORS.length] },
+    (!tutorialMode ? customAvatars[device.id] : undefined) ?? defaultDeviceAvatar(device.id),
   ])), [customAvatars, orderedDevices, tutorialMode]);
 
   const replaceCustomAvatars = useCallback((next: Record<number, DeviceAvatar>) => {
