@@ -2,7 +2,7 @@
 
 import { useActionState, useMemo, useState } from "react";
 import { canRemoveFamilyMember } from "@/lib/familyAccess";
-import { invitationDeliveryMessage } from "@/lib/invitationDelivery";
+import { invitationDeliveryMessage, searchPartyDeliveryMessage } from "@/lib/invitationDelivery";
 import type { FamilyInvitation, FamilyMember, SearchPartyShare } from "@/lib/familySettings";
 import type { FamilyMembership } from "@/lib/familySelection";
 import { createInvitationAction, createSearchPartyShareAction, removeFamilyMemberAction, revokeInvitationAction, revokeSearchPartyShareAction, setActiveFamilyAction, updateFamilyNameAction, type FamilyNameActionState, type InvitationActionState, type SearchPartyActionState } from "./actions";
@@ -25,6 +25,7 @@ const INITIAL_SEARCH_PARTY_STATE: SearchPartyActionState = {
   searchUrl: null,
   helperEmail: null,
   expiresAt: null,
+  emailDelivery: null,
 };
 
 interface FamilySettingsClientProps {
@@ -44,6 +45,7 @@ export function FamilySettingsClient({ currentUserId, activeFamily, families, me
   const [searchShareMessage, setSearchShareMessage] = useState<string | null>(null);
   const isOwner = activeFamily.role === "owner";
   const deliveryWarning = invitationDeliveryMessage(state.emailDelivery);
+  const searchPartyDeliveryWarning = searchPartyDeliveryMessage(searchPartyState.emailDelivery);
   const shareText = useMemo(() => state.invitationUrl
     ? `Join ${activeFamily.name} on Bluepaws: ${state.invitationUrl}`
     : "", [activeFamily.name, state.invitationUrl]);
@@ -185,7 +187,8 @@ export function FamilySettingsClient({ currentUserId, activeFamily, families, me
           {searchPartyState.error && <p className="settings-message error" role="alert">{searchPartyState.error}</p>}
           {searchPartyState.searchUrl && (
             <div className="invite-share-card search-party-share-card" role="status">
-              <strong>Search-party link created for {searchPartyState.helperEmail}{searchPartyState.expiresAt ? ` until ${new Date(searchPartyState.expiresAt).toLocaleTimeString()}` : ""}</strong>
+              <strong>{searchPartyState.emailDelivery === "sent" ? `Search-party link emailed to ${searchPartyState.helperEmail}` : `Search-party link created for ${searchPartyState.helperEmail}`}{searchPartyState.expiresAt ? ` until ${new Date(searchPartyState.expiresAt).toLocaleTimeString()}` : ""}</strong>
+              {searchPartyDeliveryWarning && <p className="invite-delivery-warning">{searchPartyDeliveryWarning}</p>}
               <code>{searchPartyState.searchUrl}</code>
               <div className="share-actions">
                 <button className="btn-secondary" type="button" onClick={copySearchPartyLink}>Copy</button>

@@ -18,3 +18,16 @@ export function invitationDeliveryMessage(delivery: InvitationEmailDelivery) {
   }
   return null;
 }
+
+export function searchPartyDeliveryMessage(delivery: InvitationEmailDelivery) {
+  if (delivery === "not_configured") {
+    return "Automatic search-party email delivery has not been configured yet. The link is active—share it using one of the options below.";
+  }
+  if (delivery === "rate_limited") {
+    return "Too many search-party emails were requested for this Family. Wait an hour or share the active link below.";
+  }
+  if (delivery === "failed") {
+    return "The email provider could not deliver this search-party link. The link is still active—share it using one of the options below.";
+  }
+  return null;
+}

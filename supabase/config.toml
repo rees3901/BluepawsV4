@@ -5,3 +5,6 @@ verify_jwt = false
 
 [functions.send-family-invitation]
 verify_jwt = true
+
+[functions.send-search-party-link]
+verify_jwt = true
