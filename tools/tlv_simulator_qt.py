@@ -533,15 +533,21 @@ def secondary_button(text: str) -> QPushButton:
 class DeviceCredentialDialog(QDialog):
     """Add a device by typing or pasting the exact credential material."""
 
-    def __init__(self, suggested_device_id: int, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        suggested_device_id: int,
+        known_credentials: dict[int, DeviceCredential] | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Add device credentials")
         self._credential: DeviceCredential | None = None
+        self._known_credentials = known_credentials or {}
 
         layout = QVBoxLayout(self)
         intro = QLabel(
-            "Paste an existing provisioned device credential, or generate fresh local "
-            "test secrets and save/provision them afterwards."
+            "Type a Device ID. If it already exists in the loaded credentials JSON, "
+            "the bearer token and HMAC key will be filled in from that local bundle."
         )
         intro.setWordWrap(True)
         intro.setStyleSheet(f"color: {MUTED};")
@@ -551,9 +557,12 @@ class DeviceCredentialDialog(QDialog):
         self.device_id = line_edit(str(suggested_device_id))
         self.bearer_token = line_edit(secrets.token_urlsafe(32))
         self.hmac_key = line_edit(base64.b64encode(secrets.token_bytes(32)).decode("ascii"))
+        self.known_hint = QLabel("New local test credential")
+        self.known_hint.setStyleSheet(f"color: {MUTED};")
         form.addRow("Device ID (1–65535)", self.device_id)
         form.addRow("Bearer token", self.bearer_token)
         form.addRow("HMAC key (Base64)", self.hmac_key)
+        form.addRow("Lookup", self.known_hint)
         layout.addLayout(form)
 
         generate = secondary_button("Generate fresh secrets")
@@ -566,6 +575,8 @@ class DeviceCredentialDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+        self.device_id.textChanged.connect(self._device_id_changed)
+        self._device_id_changed()
 
     @property
     def credential(self) -> DeviceCredential:
@@ -593,6 +604,25 @@ class DeviceCredentialDialog(QDialog):
     def _generate_fresh_secrets(self) -> None:
         self.bearer_token.setText(secrets.token_urlsafe(32))
         self.hmac_key.setText(base64.b64encode(secrets.token_bytes(32)).decode("ascii"))
+        self.known_hint.setText("Generated fresh local test secrets")
+        self.known_hint.setStyleSheet(f"color: {MUTED};")
+
+    def _device_id_changed(self) -> None:
+        try:
+            device_id = int(self.device_id.text().strip(), 10)
+        except ValueError:
+            self.known_hint.setText("Enter a numeric Device ID")
+            self.known_hint.setStyleSheet(f"color: {MUTED};")
+            return
+        credential = self._known_credentials.get(device_id)
+        if credential is None:
+            self.known_hint.setText("Not found in loaded JSON — enter or generate secrets")
+            self.known_hint.setStyleSheet(f"color: {MUTED};")
+            return
+        self.bearer_token.setText(credential.token)
+        self.hmac_key.setText(base64.b64encode(credential.hmac_key).decode("ascii"))
+        self.known_hint.setText("Loaded existing credential from current JSON bundle")
+        self.known_hint.setStyleSheet(f"color: {SUCCESS};")
 
 
 class ProvisioningSqlDialog(QDialog):
@@ -1527,19 +1557,24 @@ class BluepawsTlvConsole(QMainWindow):
         self._transport_changed()
 
     def _add_device_dialog(self) -> None:
-        dialog = DeviceCredentialDialog(self._next_available_device_id(), self)
+        dialog = DeviceCredentialDialog(
+            self._next_available_device_id(),
+            self._credentials_by_id(),
+            self,
+        )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         try:
-            credential = self._add_device_credential(dialog.credential)
+            credential, updated_existing = self._upsert_device_credential(dialog.credential)
         except ValueError as error:
             QMessageBox.critical(self, "Unable to add device", str(error))
             return
+        action = "updated in" if updated_existing else "added to"
         QMessageBox.information(
             self,
-            "Device added",
+            "Device saved",
             (
-                f"Device {credential.device_id} was added to the credentials list.\n\n"
+                f"Device {credential.device_id} was {action} the credentials list.\n\n"
                 "Save the bundle JSON and provision the same credential in Supabase before "
                 "expecting the live endpoint to accept it."
             ),
@@ -1585,6 +1620,18 @@ class BluepawsTlvConsole(QMainWindow):
         ))
 
     def _add_device_credential(self, credential: DeviceCredential) -> DeviceCredential:
+        saved, _updated_existing = self._upsert_device_credential(
+            credential,
+            allow_existing=False,
+        )
+        return saved
+
+    def _upsert_device_credential(
+        self,
+        credential: DeviceCredential,
+        *,
+        allow_existing: bool = True,
+    ) -> tuple[DeviceCredential, bool]:
         if (
             not isinstance(credential.device_id, int)
             or isinstance(credential.device_id, bool)
@@ -1594,14 +1641,18 @@ class BluepawsTlvConsole(QMainWindow):
         validate_bearer_token(credential.token, f"device_id {credential.device_id} bearer token")
         if len(credential.hmac_key) != 32:
             raise ValueError(f"device_id {credential.device_id} HMAC key must contain 32 bytes")
-        if self._credential_by_id(credential.device_id) is not None:
+        existing = self._credential_by_id(credential.device_id)
+        if existing is not None and not allow_existing:
             raise ValueError(f"device_id {credential.device_id} already exists in this bundle")
+        if existing is not None:
+            del self._credentials[self._device_label(existing)]
         self._credentials[self._device_label(credential)] = credential
         self._refresh_credential_controls(select_device_id=credential.device_id)
         self.builder_status.setText(
-            f"Added Device {credential.device_id}. Save the credentials bundle before closing."
+            f"{'Updated' if existing is not None else 'Added'} Device {credential.device_id}. "
+            "Save the credentials bundle before closing."
         )
-        return credential
+        return credential, existing is not None
 
     def _add_generated_gateway(
         self, gateway_guid16: str, display_name: str
@@ -1677,14 +1728,10 @@ class BluepawsTlvConsole(QMainWindow):
     def _credential_by_id(self, device_id: int | None) -> DeviceCredential | None:
         if device_id is None:
             return None
-        return next(
-            (
-                credential
-                for credential in self._credentials.values()
-                if credential.device_id == device_id
-            ),
-            None,
-        )
+        return self._credentials_by_id().get(device_id)
+
+    def _credentials_by_id(self) -> dict[int, DeviceCredential]:
+        return {credential.device_id: credential for credential in self._credentials.values()}
 
     def _gateway_by_guid16(self, gateway_guid16: str | None) -> GatewayCredential | None:
         if gateway_guid16 is None:

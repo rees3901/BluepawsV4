@@ -36,6 +36,7 @@ if PYSIDE_AVAILABLE:
         BluepawsTlvConsole,
         LIVE_PREVIEW_DELAY_MS,
         drift_coordinates,
+        DeviceCredentialDialog,
         generate_provisioning_sql,
         parse_coordinates,
     )
@@ -555,6 +556,43 @@ class QtConsoleTests(unittest.TestCase):
         self.assertEqual(
             self.window.hmac.text(), base64.b64encode(second_key).decode("ascii")
         )
+
+    def test_add_device_dialog_prefills_existing_loaded_json_credential(self) -> None:
+        key = bytes(reversed(range(32)))
+        credential = DeviceCredential(2002, "known-token-2002_" + "z" * 30, key)
+        dialog = DeviceCredentialDialog(
+            2001,
+            {credential.device_id: credential},
+            self.window,
+        )
+
+        dialog.device_id.setText("2002")
+        self.app.processEvents()
+
+        self.assertEqual(dialog.bearer_token.text(), credential.token)
+        self.assertEqual(dialog.hmac_key.text(), base64.b64encode(key).decode("ascii"))
+        self.assertIn("Loaded existing credential", dialog.known_hint.text())
+        dialog.close()
+
+    def test_upserting_known_device_refreshes_without_duplicating(self) -> None:
+        old_key = bytes(range(32))
+        new_key = bytes(reversed(range(32)))
+        self.window._replace_credential_bundle(
+            CredentialBundle(
+                devices=(DeviceCredential(2002, "a" * 48, old_key),),
+                gateways=(),
+            )
+        )
+
+        credential, updated_existing = self.window._upsert_device_credential(
+            DeviceCredential(2002, "b" * 48, new_key)
+        )
+
+        self.assertTrue(updated_existing)
+        self.assertEqual(credential.token, "b" * 48)
+        self.assertEqual(self.window.credential_combo.count(), 1)
+        self.assertEqual(self.window.fleet_table.rowCount(), 1)
+        self.assertEqual(self.window._credential_by_id(2002).hmac_key, new_key)
 
     def test_removing_device_deletes_it_from_bundle_and_fleet_table(self) -> None:
         first_key = bytes(range(32))
