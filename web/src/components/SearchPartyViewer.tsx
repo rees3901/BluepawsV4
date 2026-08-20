@@ -1,8 +1,11 @@
 "use client";
 
+/* eslint-disable @next/next/no-img-element -- Tiny pre-sized emoji artwork is intentionally served directly from the picker CDN. */
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { BatteryIndicator, HomeDistance, LastSeen, SignalIndicator } from "@/components/Indicators";
 import { defaultDeviceAvatar } from "@/lib/defaultDeviceAvatar";
+import { emojiImageUrl } from "@/lib/emoji";
 import { formatMapCoordinates, googleMapsUrl, mapLocationShareText } from "@/lib/mapLocation";
 import type { SearchPartySnapshot } from "@/lib/searchParty";
 import type { DeviceAction, DeviceAvatar, MapCommand, TelemetryDevice, TrailPoint } from "@/types/telemetry";
@@ -13,6 +16,14 @@ const TrackingMap = dynamic(() => import("@/components/TrackingMap"), {
 });
 
 const REFRESH_INTERVAL_MS = 10_000;
+const HOME = { lat: 51.5055, lon: -0.09 };
+
+const STATUS = {
+  home: { emoji: "🏠", label: "Home", css: "status-home" },
+  out: { emoji: "🐾", label: "Out", css: "status-out" },
+  lost: { emoji: "‼", label: "Lost", css: "status-lost" },
+  error: { emoji: "❓", label: "Error", css: "status-error" },
+};
 
 interface SearchPartyViewerProps {
   token: string;
@@ -22,8 +33,10 @@ interface SearchPartyViewerProps {
 export function SearchPartyViewer({ token, initialSnapshot }: SearchPartyViewerProps) {
   const [snapshot, setSnapshot] = useState(initialSnapshot);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(() => new Date());
+  const [now, setNow] = useState(() => Date.now());
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [mapCommand, setMapCommand] = useState<MapCommand | null>(null);
+  const [panelOpen, setPanelOpen] = useState(true);
 
   const refresh = useCallback(async () => {
     try {
@@ -33,6 +46,7 @@ export function SearchPartyViewer({ token, initialSnapshot }: SearchPartyViewerP
       });
       const next = await response.json() as SearchPartySnapshot;
       setSnapshot(next);
+      setNow(Date.now());
       setLastRefresh(new Date());
       setRefreshError(response.ok ? null : next.error ?? "The search-party link is no longer available.");
     } catch {
@@ -50,6 +64,11 @@ export function SearchPartyViewer({ token, initialSnapshot }: SearchPartyViewerP
     const timer = window.setTimeout(() => setMapCommand({ type: "fit", nonce: Date.now() }), 250);
     return () => window.clearTimeout(timer);
   }, [snapshot.devices.length]);
+
+  useEffect(() => {
+    document.body.classList.toggle("panel-open", panelOpen && snapshot.valid);
+    return () => document.body.classList.remove("panel-open");
+  }, [panelOpen, snapshot.valid]);
 
   const devices = useMemo(() => snapshot.valid ? snapshot.devices : [], [snapshot.devices, snapshot.valid]);
   const avatars = useMemo<Record<number, DeviceAvatar>>(() => Object.fromEntries(devices.map((device) => [
@@ -79,10 +98,13 @@ export function SearchPartyViewer({ token, initialSnapshot }: SearchPartyViewerP
 
   return (
     <main className="search-party-shell">
+      <button className="hamburger-btn" title="Toggle search-party panel" aria-label="Toggle search-party panel" onClick={() => setPanelOpen((open) => !open)}>
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><rect x="2" y="4" width="16" height="2" rx="1" /><rect x="2" y="9" width="16" height="2" rx="1" /><rect x="2" y="14" width="16" height="2" rx="1" /></svg>
+      </button>
       <TrackingMap
         devices={devices}
         avatars={avatars}
-        sidebarOpen={false}
+        sidebarOpen={panelOpen}
         followedId={null}
         trailIds={new Set<number>()}
         trailHistory={{} as Record<number, TrailPoint[]>}
@@ -90,37 +112,56 @@ export function SearchPartyViewer({ token, initialSnapshot }: SearchPartyViewerP
         onAction={handleAction}
         readOnly
       />
-      <aside className="search-party-panel" aria-label="Search-party map details">
-        <span className="settings-eyebrow">Search party map</span>
-        <h1>{snapshot.familyName}</h1>
-        <p>Read-only helper view. Positions refresh every 10 seconds; collar commands and account settings are unavailable.</p>
-        <dl className="search-party-meta">
-          <div><dt>Expires</dt><dd>{expiresText}</dd></div>
-          <div><dt>Last refresh</dt><dd>{refreshedText}</dd></div>
-        </dl>
-        <button className="btn-primary" type="button" onClick={() => { void refresh(); }}>Refresh now</button>
-        {refreshError && <p className="settings-message error" role="alert">{refreshError}</p>}
-        <div className="search-party-device-list">
-          {devices.length === 0 ? (
-            <p className="settings-copy">No pets have reported yet.</p>
-          ) : devices.map((device) => (
-            <SearchPartyDeviceRow
-              key={device.id}
-              device={device}
-              avatar={avatars[device.id] ?? defaultDeviceAvatar(device.id)}
-              onCentre={() => setMapCommand({ type: "jump", deviceId: device.id, nonce: Date.now() })}
-            />
-          ))}
+      <aside id="panel" className={`search-party-panel${panelOpen ? " open" : ""}`} aria-label="Search-party map details">
+        <div id="panelHeader">
+          <span className="panel-title">Bluepaws V4</span>
+          <div className="panel-header-btns">
+            <span id="statusBanner" className="connected">
+              <span id="statusIcon">●</span><span id="statusText">Read-only</span>
+            </span>
+          </div>
+        </div>
+        <div className="search-party-panel-body">
+          <section className="search-party-summary-card">
+            <span className="settings-eyebrow">Search party map</span>
+            <h1>{snapshot.familyName}</h1>
+            <p>Read-only helper view. Positions refresh every 10 seconds; collar commands and account settings are unavailable.</p>
+            <dl className="search-party-meta">
+              <div><dt>Expires</dt><dd>{expiresText}</dd></div>
+              <div><dt>Last refresh</dt><dd>{refreshedText}</dd></div>
+            </dl>
+            <button className="btn-primary" type="button" onClick={() => { void refresh(); }}>Refresh now</button>
+            {refreshError && <p className="settings-message error" role="alert">{refreshError}</p>}
+          </section>
+          <div id="deviceCards" className="search-party-device-list">
+            {devices.length === 0 ? (
+              <p className="settings-copy">No pets have reported yet.</p>
+            ) : devices.map((device) => (
+              <SearchPartyDeviceRow
+                key={device.id}
+                device={device}
+                avatar={avatars[device.id] ?? defaultDeviceAvatar(device.id)}
+                now={now}
+                onCentre={() => setMapCommand({ type: "jump", deviceId: device.id, nonce: Date.now() })}
+              />
+            ))}
+          </div>
         </div>
       </aside>
     </main>
   );
 }
 
-function SearchPartyDeviceRow({ device, avatar, onCentre }: { device: TelemetryDevice; avatar: DeviceAvatar; onCentre: () => void }) {
+function SearchPartyDeviceRow({ device, avatar, now, onCentre }: { device: TelemetryDevice; avatar: DeviceAvatar; now: number; onCentre: () => void }) {
   const coordinates = formatMapCoordinates(device.lat, device.lon, 5);
   const mapsUrl = googleMapsUrl(device.lat, device.lon);
   const shareText = mapLocationShareText(device.lat, device.lon);
+  const ageSeconds = Math.max(0, Math.floor((now - device.lastUpdate) / 1000));
+  const status = STATUS[device.status.toLowerCase() as keyof typeof STATUS] ?? STATUS.error;
+  const profileLower = device.profile.toLowerCase();
+  const profileClass = `profile-${profileLower.replace("save", "").replaceAll(" ", "-")}`;
+  const profileLabel = profileLower === "powersave" ? "💤 PowerSave" : device.profile;
+  const distance = formatDistance(haversine(HOME.lat, HOME.lon, device.lat, device.lon));
 
   async function copyCoordinates() {
     await navigator.clipboard.writeText(shareText);
@@ -135,26 +176,82 @@ function SearchPartyDeviceRow({ device, avatar, onCentre }: { device: TelemetryD
   }
 
   return (
-    <article className="search-party-device-row">
-      <span className="card-avatar search-party-avatar" style={{ borderColor: avatar.color }} aria-hidden="true">
-        {avatar.emoji}
-      </span>
-      <div>
-        <strong>{device.name}</strong>
-        <a href={mapsUrl} target="_blank" rel="noreferrer">{coordinates}</a>
-        <small>{timeAgo(device.lastUpdate)} · {device.status} · {device.batteryPercent ?? Math.round(device.batt / 100)}%</small>
+    <article className={`device-card search-party-device-card${ageSeconds > 600 ? " stale" : ""}`}>
+      <div className="card-summary">
+        <div className="card-avatar-wrap">
+          <div
+            className={`card-avatar${avatar.kind === "photo" ? " has-photo" : ""}`}
+            style={{ borderColor: avatar.color, backgroundImage: avatar.photoUrl ? `url(${JSON.stringify(avatar.photoUrl)})` : undefined }}
+            aria-hidden="true"
+          >
+            {avatar.kind === "photo" && avatar.photoUrl ? null : (
+              <img className="avatar-emoji-image" src={emojiImageUrl(avatar.emoji)} alt={avatar.emoji} draggable={false} />
+            )}
+          </div>
+        </div>
+        <div className="card-identity">
+          <div className="card-name-row">
+            <span className="card-name">{device.name}</span>
+            <span className={`card-status ${status.css}`}>{status.emoji} {status.label}</span>
+            <span className={`card-profile ${profileClass}`}>{profileLabel}</span>
+          </div>
+          <div className="card-indicators">
+            <span className="card-indicator-group"><BatteryIndicator millivolts={device.batt} percent={device.batteryPercent} /></span>
+            <span className="card-indicator-group"><SignalIndicator rssi={device.rssi} snr={device.snr} ingestPath={device.ingestPath} /></span>
+          </div>
+          <div className="card-indicators card-indicators-row3">
+            <HomeDistance>{distance}</HomeDistance>
+            <LastSeen>{formatLastSeen(ageSeconds)}</LastSeen>
+          </div>
+        </div>
       </div>
-      <button className="btn-secondary" type="button" onClick={onCentre}>Centre</button>
-      <button className="btn-secondary" type="button" onClick={copyCoordinates}>Copy</button>
-      <button className="btn-secondary" type="button" onClick={shareCoordinates}>Share</button>
+      <div className="card-detail-reveal" aria-hidden={false}>
+        <div className="card-detail-reveal-inner">
+          <div className="card-detail">
+            <div className="card-grid">
+              <span className="label">Coordinates</span>
+              <span className="value">
+                <a className="card-coords card-coords-link" href={mapsUrl} target="_blank" rel="noopener noreferrer">
+                  {formatMapCoordinates(device.lat, device.lon)}
+                </a>
+              </span>
+              <span className="label">Dist From Hub</span><span className="value">{distance}</span>
+              <span className="label">Last seen</span><span className="value">{formatAge(ageSeconds)}</span>
+            </div>
+            <div className="card-actions search-party-card-actions">
+              <button className="btn-action btn-jump" type="button" onClick={onCentre}>↗ Centre</button>
+              <button className="btn-action" type="button" onClick={copyCoordinates}>⧉ Copy</button>
+              <button className="btn-action" type="button" onClick={shareCoordinates}>↗ Share</button>
+            </div>
+          </div>
+        </div>
+      </div>
     </article>
   );
 }
 
-function timeAgo(timestamp: number) {
-  const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+function formatLastSeen(seconds: number) {
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+  return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
+}
+
+function formatAge(seconds: number) {
   if (seconds < 60) return `${seconds}s ago`;
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${minutes}m ago`;
   return `${Math.floor(minutes / 60)}h ago`;
+}
+
+function haversine(lat1: number, lon1: number, lat2: number, lon2: number) {
+  const toRad = (degrees: number) => degrees * Math.PI / 180;
+  const radius = 6371000;
+  const deltaLat = toRad(lat2 - lat1);
+  const deltaLon = toRad(lon2 - lon1);
+  const a = Math.sin(deltaLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(deltaLon / 2) ** 2;
+  return 2 * radius * Math.asin(Math.sqrt(a));
+}
+
+function formatDistance(metres: number) {
+  return metres >= 2000 ? `${(metres / 1000).toFixed(1)} km` : `${Math.round(metres)} m`;
 }
