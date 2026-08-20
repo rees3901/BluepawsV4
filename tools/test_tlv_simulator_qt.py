@@ -556,6 +556,45 @@ class QtConsoleTests(unittest.TestCase):
             self.window.hmac.text(), base64.b64encode(second_key).decode("ascii")
         )
 
+    def test_removing_device_deletes_it_from_bundle_and_fleet_table(self) -> None:
+        first_key = bytes(range(32))
+        second_key = bytes(reversed(range(32)))
+        self.window._replace_credential_bundle(
+            CredentialBundle(
+                devices=(
+                    DeviceCredential(2001, "a" * 48, first_key),
+                    DeviceCredential(2002, "b" * 48, second_key),
+                ),
+                gateways=(),
+            )
+        )
+
+        self.window._remove_device_credential(2001)
+
+        self.assertIsNone(self.window._credential_by_id(2001))
+        self.assertIsNotNone(self.window._credential_by_id(2002))
+        self.assertEqual(self.window.credential_combo.count(), 1)
+        self.assertEqual(self.window.credential_combo.currentText(), "Device 2002")
+        self.assertEqual(self.window.fleet_table.rowCount(), 1)
+        self.assertEqual(self.window.fleet_table.item(0, 1).text(), "2002")
+        data = self.window._credentials_bundle_json()
+        self.assertEqual([device["device_id"] for device in data["devices"]], [2002])
+
+    def test_removing_last_device_clears_secret_fields(self) -> None:
+        self.window._replace_credential_bundle(
+            CredentialBundle(
+                devices=(DeviceCredential(2001, "a" * 48, bytes(range(32))),),
+                gateways=(),
+            )
+        )
+
+        self.window._remove_device_credential(2001)
+
+        self.assertEqual(self.window.credential_combo.count(), 0)
+        self.assertEqual(self.window.fleet_table.rowCount(), 0)
+        self.assertEqual(self.window.hmac.text(), "")
+        self.assertEqual(self.window.bearer.text(), "")
+
     def test_provisioning_sql_hashes_bearers_and_keeps_hmac_for_vault(self) -> None:
         device_token = "device-token-2001_" + "a" * 30
         gateway_token = "gateway-token-0016_" + "b" * 30

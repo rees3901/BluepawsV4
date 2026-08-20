@@ -927,6 +927,11 @@ class BluepawsTlvConsole(QMainWindow):
         select_none = secondary_button("Select none")
         select_none.clicked.connect(lambda: self._set_all_fleet_devices(False))
         credential_row.addWidget(select_none, 3, 4)
+        remove_device = secondary_button("Remove selected device")
+        remove_device.setProperty("danger", True)
+        remove_device.clicked.connect(self.remove_selected_device)
+        remove_device.setToolTip("Delete the selected device credential from this local bundle.")
+        credential_row.addWidget(remove_device, 4, 0, 1, 2)
         self.fleet_table = QTableWidget(0, 2)
         self.fleet_table.setHorizontalHeaderLabels(["Send", "Device ID"])
         self.fleet_table.verticalHeader().setVisible(False)
@@ -939,8 +944,7 @@ class BluepawsTlvConsole(QMainWindow):
             1, QHeaderView.ResizeMode.Stretch
         )
         self.fleet_table.setMaximumHeight(125)
-        self.fleet_table.setEnabled(False)
-        credential_row.addWidget(self.fleet_table, 4, 0, 1, 5)
+        credential_row.addWidget(self.fleet_table, 5, 0, 1, 5)
         credential_row.setColumnStretch(2, 1)
         credential_row.setColumnStretch(4, 1)
         grid.addWidget(credentials, 1, 0, 1, 2)
@@ -1441,6 +1445,30 @@ class BluepawsTlvConsole(QMainWindow):
         )
         dialog.exec()
 
+    def remove_selected_device(self) -> None:
+        device_id = self._selected_fleet_table_device_id()
+        if device_id is None:
+            QMessageBox.information(
+                self,
+                "No device selected",
+                "Select a device row in the fleet table first.",
+            )
+            return
+        if self._credential_by_id(device_id) is None:
+            return
+        reply = QMessageBox.question(
+            self,
+            "Remove device credential?",
+            (
+                f"Remove Device {device_id} from this local credentials bundle?\n\n"
+                "This removes its bearer token and HMAC key from the editable list. "
+                "It does not delete anything from Supabase until you run your own SQL."
+            ),
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        self._remove_device_credential(device_id)
+
     def _replace_credential_bundle(
         self,
         bundle: CredentialBundle,
@@ -1496,7 +1524,6 @@ class BluepawsTlvConsole(QMainWindow):
         if selected_gateway is not None:
             self._apply_gateway(selected_gateway)
         self._populate_fleet_table(tuple(self._credentials.values()))
-        self.fleet_table.setEnabled(self.fleet_mode.isChecked())
         self._transport_changed()
 
     def _add_device_dialog(self) -> None:
@@ -1693,6 +1720,36 @@ class BluepawsTlvConsole(QMainWindow):
             candidate += 1
         return f"{candidate:04X}"
 
+    def _selected_fleet_table_device_id(self) -> int | None:
+        selected_rows = self.fleet_table.selectionModel().selectedRows()
+        if selected_rows:
+            row = selected_rows[0].row()
+            item = self.fleet_table.item(row, 0)
+            value = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+            return value if isinstance(value, int) else None
+        return None
+
+    def _remove_device_credential(self, device_id: int) -> None:
+        credential = self._credential_by_id(device_id)
+        if credential is None:
+            raise ValueError(f"device_id {device_id} does not exist in this bundle")
+        del self._credentials[self._device_label(credential)]
+        self._device_states.pop(device_id, None)
+        next_device_id = next(iter(self._credentials.values())).device_id if self._credentials else None
+        self._refresh_credential_controls(select_device_id=next_device_id)
+        if self._credentials:
+            self.builder_status.setText(
+                f"Removed Device {device_id}. Save the credentials bundle to keep this change."
+            )
+        else:
+            self.device_id.setText(str(device_id))
+            self.hmac.clear()
+            if TRANSPORTS[self.transport.currentText()] == "cellular_direct":
+                self.bearer.clear()
+            self.builder_status.setText(
+                f"Removed Device {device_id}. Add or load a device before sending."
+            )
+
     def _populate_fleet_table(self, devices: tuple[DeviceCredential, ...]) -> None:
         self.fleet_table.setRowCount(0)
         for credential in devices:
@@ -1717,7 +1774,6 @@ class BluepawsTlvConsole(QMainWindow):
                 item.setCheckState(state)
 
     def _fleet_mode_changed(self, enabled: bool) -> None:
-        self.fleet_table.setEnabled(enabled)
         if enabled:
             selected = len(self._selected_fleet_credentials())
             self.sender_status.setText(
