@@ -10,6 +10,7 @@ import json
 import math
 import random
 import re
+import secrets
 import sys
 import threading
 import time
@@ -61,6 +62,7 @@ from tlv_packet_codec import (
     STATUS_CODES,
     TX_REASON_CODES,
     BuiltPacket,
+    CredentialBundle,
     DeviceCredential,
     GatewayCredential,
     PacketFields,
@@ -73,6 +75,7 @@ from tlv_packet_codec import (
     firmware_tlv,
     known_tlv,
     load_credential_bundle,
+    normalize_gateway_guid16,
     post_wrapper,
 )
 
@@ -537,6 +540,7 @@ class BluepawsTlvConsole(QMainWindow):
         self.setMinimumSize(980, 700)
         self._credentials: dict[str, DeviceCredential] = {}
         self._gateway_credentials: dict[str, GatewayCredential] = {}
+        self._credential_bundle_path: Path | None = None
         self._device_states: dict[int, PacketFields] = {}
         self._custom_tlvs: list[TlvEntry] = []
         self._last_built: BuiltPacket | None = None
@@ -640,23 +644,38 @@ class BluepawsTlvConsole(QMainWindow):
         credential_row.addWidget(self.gateway_combo, 0, 4)
         credential_note = QLabel(
             "The selected transport chooses the device or gateway bearer automatically. "
-            "Secrets stay masked and are never logged."
+            "Secrets stay masked and are never logged. Devices and gateways live in one bundle."
         )
         credential_note.setStyleSheet(f"color: {MUTED};")
         credential_row.addWidget(credential_note, 1, 0, 1, 5)
+        manage_credentials = QHBoxLayout()
+        add_device = secondary_button("Generate device…")
+        add_device.clicked.connect(self._add_device_dialog)
+        add_device.setToolTip("Create a new random bearer token and HMAC key for a typed device ID.")
+        add_gateway = secondary_button("Generate gateway…")
+        add_gateway.clicked.connect(self._add_gateway_dialog)
+        add_gateway.setToolTip("Create a new random bearer token for a typed LoRa gateway GUID16.")
+        save_credentials = secondary_button("Save bundle JSON…")
+        save_credentials.clicked.connect(self.save_credentials_file)
+        save_credentials.setToolTip("Save the current devices and gateways as one credentials JSON bundle.")
+        manage_credentials.addWidget(add_device)
+        manage_credentials.addWidget(add_gateway)
+        manage_credentials.addStretch()
+        manage_credentials.addWidget(save_credentials)
+        credential_row.addLayout(manage_credentials, 2, 0, 1, 5)
         self.fleet_mode = QCheckBox("Fleet mode: send every checked device")
         self.fleet_mode.setToolTip(
             "Each cycle sends one independently signed packet per checked device. "
             "Sequence, movement and telemetry state advance separately for each collar."
         )
         self.fleet_mode.toggled.connect(self._fleet_mode_changed)
-        credential_row.addWidget(self.fleet_mode, 2, 0, 1, 3)
+        credential_row.addWidget(self.fleet_mode, 3, 0, 1, 3)
         select_all = secondary_button("Select all")
         select_all.clicked.connect(lambda: self._set_all_fleet_devices(True))
-        credential_row.addWidget(select_all, 2, 3)
+        credential_row.addWidget(select_all, 3, 3)
         select_none = secondary_button("Select none")
         select_none.clicked.connect(lambda: self._set_all_fleet_devices(False))
-        credential_row.addWidget(select_none, 2, 4)
+        credential_row.addWidget(select_none, 3, 4)
         self.fleet_table = QTableWidget(0, 2)
         self.fleet_table.setHorizontalHeaderLabels(["Send", "Device ID"])
         self.fleet_table.verticalHeader().setVisible(False)
@@ -670,7 +689,7 @@ class BluepawsTlvConsole(QMainWindow):
         )
         self.fleet_table.setMaximumHeight(125)
         self.fleet_table.setEnabled(False)
-        credential_row.addWidget(self.fleet_table, 3, 0, 1, 5)
+        credential_row.addWidget(self.fleet_table, 4, 0, 1, 5)
         credential_row.setColumnStretch(2, 1)
         credential_row.setColumnStretch(4, 1)
         grid.addWidget(credentials, 1, 0, 1, 2)
@@ -680,6 +699,10 @@ class BluepawsTlvConsole(QMainWindow):
         protocol = line_edit("1")
         protocol.setEnabled(False)
         self.device_id = line_edit("1001")
+        self.device_id.setToolTip(
+            "Type a provisioned device ID here to auto-select its credentials from the loaded bundle."
+        )
+        self.device_id.editingFinished.connect(self._sync_device_credentials_from_field)
         self.sequence = line_edit(str(int(time.time()) & 0xFFFF))
         self.timestamp = line_edit(str(int(time.time())))
         self.status = combo(STATUS_CHOICES)
@@ -1115,35 +1138,292 @@ class BluepawsTlvConsole(QMainWindow):
         if not selected:
             return
         try:
-            bundle = load_credential_bundle(Path(selected))
+            path = Path(selected)
+            bundle = load_credential_bundle(path)
         except (OSError, ValueError, json.JSONDecodeError) as error:
             QMessageBox.critical(self, "Unable to load credentials", str(error))
             return
-        self._credentials = {f"Device {item.device_id}": item for item in bundle.devices}
+        self._credential_bundle_path = path
+        self._device_states.clear()
+        self._replace_credential_bundle(bundle)
+        self.builder_status.setText(
+            f"Loaded {len(bundle.devices)} device(s) and {len(bundle.gateways)} gateway(s)."
+        )
+
+    def save_credentials_file(self) -> None:
+        default_path = str(
+            self._credential_bundle_path
+            if self._credential_bundle_path is not None
+            else Path("tlv_devices.json")
+        )
+        selected, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Bluepaws credential bundle",
+            default_path,
+            "JSON files (*.json);;All files (*.*)",
+        )
+        if not selected:
+            return
+        try:
+            self._save_credentials_bundle(Path(selected))
+        except (OSError, ValueError) as error:
+            QMessageBox.critical(self, "Unable to save credentials", str(error))
+            return
+        QMessageBox.information(
+            self,
+            "Credentials saved",
+            "The credentials bundle was saved. Treat this file as secret material.",
+        )
+
+    def _replace_credential_bundle(
+        self,
+        bundle: CredentialBundle,
+        *,
+        select_device_id: int | None = None,
+        select_gateway_guid16: str | None = None,
+    ) -> None:
+        self._credentials = {self._device_label(item): item for item in bundle.devices}
         self._gateway_credentials = {
             self._gateway_label(item): item for item in bundle.gateways
         }
-        self._device_states.clear()
+        self._refresh_credential_controls(select_device_id, select_gateway_guid16)
+
+    def _refresh_credential_controls(
+        self,
+        select_device_id: int | None = None,
+        select_gateway_guid16: str | None = None,
+    ) -> None:
+        previous_device_label = self.credential_combo.currentText()
+        previous_gateway_label = self.gateway_combo.currentText()
+        selected_credential = self._credential_by_id(select_device_id)
+        current_device_label = (
+            self._device_label(selected_credential)
+            if selected_credential is not None
+            else previous_device_label
+        )
         self.credential_combo.blockSignals(True)
         self.credential_combo.clear()
         self.credential_combo.addItems(list(self._credentials))
         self.credential_combo.blockSignals(False)
-        self.credential_combo.setCurrentIndex(0)
+        if current_device_label in self._credentials:
+            self.credential_combo.setCurrentText(current_device_label)
+        elif self.credential_combo.count():
+            self.credential_combo.setCurrentIndex(0)
         self.gateway_combo.blockSignals(True)
         self.gateway_combo.clear()
         self.gateway_combo.addItems(list(self._gateway_credentials))
         self.gateway_combo.blockSignals(False)
-        if self._gateway_credentials:
+        current_gateway_label = None
+        if select_gateway_guid16 is not None:
+            gateway = self._gateway_by_guid16(select_gateway_guid16)
+            if gateway is not None:
+                current_gateway_label = self._gateway_label(gateway)
+        current_gateway_label = current_gateway_label or previous_gateway_label
+        if current_gateway_label in self._gateway_credentials:
+            self.gateway_combo.setCurrentText(current_gateway_label)
+        elif self._gateway_credentials:
             self.gateway_combo.setCurrentIndex(0)
-        self._apply_credential(bundle.devices[0])
-        if bundle.gateways:
-            self._apply_gateway(bundle.gateways[0])
-        self._populate_fleet_table(bundle.devices)
+        selected_device = self._credentials.get(self.credential_combo.currentText())
+        if selected_device is not None:
+            self._apply_credential(selected_device)
+        selected_gateway = self._gateway_credentials.get(self.gateway_combo.currentText())
+        if selected_gateway is not None:
+            self._apply_gateway(selected_gateway)
+        self._populate_fleet_table(tuple(self._credentials.values()))
         self.fleet_table.setEnabled(self.fleet_mode.isChecked())
         self._transport_changed()
-        self.builder_status.setText(
-            f"Loaded {len(bundle.devices)} device(s) and {len(bundle.gateways)} gateway(s)."
+
+    def _add_device_dialog(self) -> None:
+        device_id, accepted = QInputDialog.getInt(
+            self,
+            "Generate test device credentials",
+            "Device ID (1–65535)",
+            self._next_available_device_id(),
+            1,
+            65_535,
         )
+        if not accepted:
+            return
+        try:
+            credential = self._add_generated_device(device_id)
+        except ValueError as error:
+            QMessageBox.critical(self, "Unable to add device", str(error))
+            return
+        QMessageBox.information(
+            self,
+            "Device generated",
+            (
+                f"Device {credential.device_id} was added to the credentials list.\n\n"
+                "Save the bundle JSON and provision the same credential in Supabase before "
+                "expecting the live endpoint to accept it."
+            ),
+        )
+
+    def _add_gateway_dialog(self) -> None:
+        gateway_guid16, accepted = QInputDialog.getText(
+            self,
+            "Generate gateway credentials",
+            "Gateway GUID16, for example 0016",
+            text=self._next_available_gateway_guid16(),
+        )
+        if not accepted:
+            return
+        display_name, accepted = QInputDialog.getText(
+            self,
+            "Gateway display name",
+            "Display name",
+            text=f"Bluepaws Test Hub {gateway_guid16.strip().upper()}",
+        )
+        if not accepted:
+            return
+        try:
+            gateway = self._add_generated_gateway(gateway_guid16, display_name)
+        except ValueError as error:
+            QMessageBox.critical(self, "Unable to add gateway", str(error))
+            return
+        QMessageBox.information(
+            self,
+            "Gateway generated",
+            (
+                f"Gateway {gateway.gateway_guid16} was added to the credentials list.\n\n"
+                "Save the bundle JSON and provision the gateway bearer hash in Supabase "
+                "before testing LoRa relay ingestion."
+            ),
+        )
+
+    def _add_generated_device(self, device_id: int) -> DeviceCredential:
+        if not isinstance(device_id, int) or isinstance(device_id, bool) or not 1 <= device_id <= 65_535:
+            raise ValueError("device_id must be an integer from 1 to 65535")
+        if self._credential_by_id(device_id) is not None:
+            raise ValueError(f"device_id {device_id} already exists in this bundle")
+        credential = DeviceCredential(
+            device_id=device_id,
+            token=secrets.token_urlsafe(32),
+            hmac_key=secrets.token_bytes(32),
+        )
+        self._credentials[self._device_label(credential)] = credential
+        self._refresh_credential_controls(select_device_id=device_id)
+        self.builder_status.setText(
+            f"Generated Device {device_id}. Save the credentials bundle before closing."
+        )
+        return credential
+
+    def _add_generated_gateway(
+        self, gateway_guid16: str, display_name: str
+    ) -> GatewayCredential:
+        normalized = normalize_gateway_guid16(gateway_guid16)
+        if self._gateway_by_guid16(normalized) is not None:
+            raise ValueError(f"gateway_guid16 {normalized} already exists in this bundle")
+        clean_name = display_name.strip()
+        if not 1 <= len(clean_name) <= 80:
+            raise ValueError("gateway display name must contain 1..80 characters")
+        gateway = GatewayCredential(
+            gateway_guid16=normalized,
+            token=secrets.token_urlsafe(32),
+            display_name=clean_name,
+        )
+        self._gateway_credentials[self._gateway_label(gateway)] = gateway
+        self._refresh_credential_controls(select_gateway_guid16=normalized)
+        self.builder_status.setText(
+            f"Generated Gateway {normalized}. Save the credentials bundle before closing."
+        )
+        return gateway
+
+    def _save_credentials_bundle(self, path: Path) -> None:
+        if not self._credentials:
+            raise ValueError("add at least one device before saving a credentials bundle")
+        path = path.expanduser().resolve()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(self._credentials_bundle_json(), indent=2) + "\n",
+            encoding="utf-8",
+        )
+        self._credential_bundle_path = path
+        self.builder_status.setText(
+            f"Saved {len(self._credentials)} device(s) and "
+            f"{len(self._gateway_credentials)} gateway(s) to {path.name}."
+        )
+
+    def _credentials_bundle_json(self) -> dict[str, object]:
+        return {
+            "schema_version": 1,
+            "devices": [
+                {
+                    "device_id": credential.device_id,
+                    "bearer_token": credential.token,
+                    "hmac_key_b64": base64.b64encode(credential.hmac_key).decode("ascii"),
+                }
+                for credential in self._credentials.values()
+            ],
+            "gateways": [
+                {
+                    "gateway_guid16": gateway.gateway_guid16,
+                    "display_name": gateway.display_name or f"Gateway {gateway.gateway_guid16}",
+                    "bearer_token": gateway.token,
+                }
+                for gateway in self._gateway_credentials.values()
+            ],
+        }
+
+    def _sync_device_credentials_from_field(self) -> None:
+        try:
+            device_id = int(self.device_id.text().strip(), 10)
+        except ValueError:
+            return
+        credential = self._credential_by_id(device_id)
+        if credential is None:
+            return
+        label = self._device_label(credential)
+        if self.credential_combo.currentText() != label:
+            self.credential_combo.setCurrentText(label)
+        else:
+            self._apply_credential(credential)
+
+    def _credential_by_id(self, device_id: int | None) -> DeviceCredential | None:
+        if device_id is None:
+            return None
+        return next(
+            (
+                credential
+                for credential in self._credentials.values()
+                if credential.device_id == device_id
+            ),
+            None,
+        )
+
+    def _gateway_by_guid16(self, gateway_guid16: str | None) -> GatewayCredential | None:
+        if gateway_guid16 is None:
+            return None
+        normalized = normalize_gateway_guid16(gateway_guid16)
+        return next(
+            (
+                gateway
+                for gateway in self._gateway_credentials.values()
+                if gateway.gateway_guid16 == normalized
+            ),
+            None,
+        )
+
+    def _next_available_device_id(self) -> int:
+        try:
+            candidate = int(self.device_id.text().strip(), 10)
+        except ValueError:
+            candidate = 1001
+        candidate = min(max(candidate, 1), 65_535)
+        used = {credential.device_id for credential in self._credentials.values()}
+        while candidate in used and candidate < 65_535:
+            candidate += 1
+        return candidate
+
+    def _next_available_gateway_guid16(self) -> str:
+        used = {
+            int(gateway.gateway_guid16, 16)
+            for gateway in self._gateway_credentials.values()
+        }
+        candidate = 0x0016
+        while candidate in used and candidate < 0xFFFF:
+            candidate += 1
+        return f"{candidate:04X}"
 
     def _populate_fleet_table(self, devices: tuple[DeviceCredential, ...]) -> None:
         self.fleet_table.setRowCount(0)
@@ -1231,6 +1511,10 @@ class BluepawsTlvConsole(QMainWindow):
     def _gateway_label(credential: GatewayCredential) -> str:
         suffix = f" — {credential.display_name}" if credential.display_name else ""
         return f"Gateway {credential.gateway_guid16}{suffix}"
+
+    @staticmethod
+    def _device_label(credential: DeviceCredential | None) -> str:
+        return f"Device {credential.device_id}" if credential is not None else ""
 
     def _set_now(self) -> None:
         self.timestamp.setText(str(int(time.time())))

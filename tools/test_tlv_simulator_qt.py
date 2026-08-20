@@ -38,7 +38,7 @@ if PYSIDE_AVAILABLE:
         drift_coordinates,
         parse_coordinates,
     )
-    from tlv_packet_codec import DeviceCredential
+    from tlv_packet_codec import CredentialBundle, DeviceCredential
 
 
 @unittest.skipUnless(PYSIDE_AVAILABLE, "PySide6 GUI dependency is not installed")
@@ -495,6 +495,61 @@ class QtConsoleTests(unittest.TestCase):
 
         self.window.transport.setCurrentText("LTE direct (cellular_direct)")
         self.assertEqual(self.window.bearer.text(), "d" * 48)
+
+    def test_gui_can_append_devices_and_gateways_to_one_credentials_bundle(self) -> None:
+        first_device = self.window._add_generated_device(2001)
+        gateway = self.window._add_generated_gateway("0016", "Kitchen Hub")
+        second_device = self.window._add_generated_device(2002)
+
+        self.assertEqual(self.window.credential_combo.currentText(), "Device 2002")
+        self.assertEqual(self.window.device_id.text(), "2002")
+        self.assertEqual(self.window.fleet_table.rowCount(), 2)
+        self.assertEqual(
+            [
+                self.window.fleet_table.item(row, 1).text()
+                for row in range(self.window.fleet_table.rowCount())
+            ],
+            ["2001", "2002"],
+        )
+        self.assertEqual(self.window.gateway_combo.count(), 1)
+        self.assertIn("Kitchen Hub", self.window.gateway_combo.currentText())
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "credentials.json"
+            self.window._save_credentials_bundle(path)
+            data = json.loads(path.read_text(encoding="utf-8"))
+
+        self.assertEqual(data["schema_version"], 1)
+        self.assertEqual(
+            [device["device_id"] for device in data["devices"]],
+            [first_device.device_id, second_device.device_id],
+        )
+        self.assertEqual(data["gateways"][0]["gateway_guid16"], gateway.gateway_guid16)
+        self.assertEqual(data["gateways"][0]["display_name"], "Kitchen Hub")
+        self.assertEqual(len(base64.b64decode(data["devices"][0]["hmac_key_b64"])), 32)
+        self.assertGreaterEqual(len(data["devices"][0]["bearer_token"]), 32)
+
+    def test_typed_device_id_selects_loaded_credentials(self) -> None:
+        first_key = bytes(range(32))
+        second_key = bytes(reversed(range(32)))
+        self.window._replace_credential_bundle(
+            CredentialBundle(
+                devices=(
+                    DeviceCredential(2001, "a" * 48, first_key),
+                    DeviceCredential(2002, "b" * 48, second_key),
+                ),
+                gateways=(),
+            )
+        )
+
+        self.window.device_id.setText("2002")
+        self.window._sync_device_credentials_from_field()
+
+        self.assertEqual(self.window.credential_combo.currentText(), "Device 2002")
+        self.assertEqual(self.window.bearer.text(), "b" * 48)
+        self.assertEqual(
+            self.window.hmac.text(), base64.b64encode(second_key).decode("ascii")
+        )
 
     def test_fleet_mode_prepares_independently_signed_device_cycles(self) -> None:
         keys = [bytes((offset + index) % 256 for index in range(32)) for offset in range(3)]
