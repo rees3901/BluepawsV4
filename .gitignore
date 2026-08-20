@@ -1,6 +1,7 @@
-# Per-device ingestion credentials. Commit only sanitized example files.
+# Per-device ingestion credentials. Keep local-only; do not commit plaintext secrets.
+tools/devices.json
+tools/devices.provision.sql
 tools/*devices*.json
-!tools/*devices*.example.json
 tools/*.provision.sql
 
 # Python simulator/test artefacts.

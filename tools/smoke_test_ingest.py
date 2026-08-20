@@ -41,7 +41,7 @@ def check(name: str, actual: int, expected: int, body: dict[str, Any]) -> None:
 
 
 def main() -> int:
-    credentials = load_credentials(Path("tools/vps_devices.json"))
+    credentials = load_credentials(Path("tools/devices.json"))
     credential = credentials[0]
     timestamp = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace(
         "+00:00", "Z"

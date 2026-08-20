@@ -145,7 +145,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--devices-file",
         type=Path,
-        default=Path(os.getenv("BLUEPAWS_DEVICE_FILE", "tools/vps_devices.json")),
+        default=Path(os.getenv("BLUEPAWS_DEVICE_FILE", "tools/devices.json")),
     )
     parser.add_argument("--device-count", type=int, default=0, help="0 uses every device")
     parser.add_argument(

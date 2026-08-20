@@ -30,7 +30,9 @@ Bluepaws Qt console dependencies available (PySide6 6.11.1).
 
 ## Safe use
 
-Load the private typed credentials bundle on the packet-builder tab. It contains
+By default the console looks for `tools/devices.json` on startup and loads it
+automatically when present. The manual **Load credentials JSON…** button remains
+available for selecting another private bundle. The typed bundle contains
 separate `devices` and `gateways` arrays; the legacy flat device array remains
 supported. Secrets stay masked and are excluded from wrapper previews and logs.
 The selected transport automatically uses the selected device bearer for direct
@@ -82,10 +84,10 @@ py -3.11 .\tools\generate_tlv_credentials.py `
   --gateway-guid16 0016
 ```
 
-Both generated files are Git-ignored. Run `tools/vps_devices.provision.sql` once
+Both generated files are Git-ignored. Run `tools/devices.provision.sql` once
 in the Supabase SQL Editor, then securely delete the SQL file; it contains the
 one-time plaintext HMAC values needed to populate Vault. Keep
-`tools/vps_devices.json` private for the PySide/VPS simulator and hardware
+`tools/devices.json` private for the PySide/VPS simulator and hardware
 provisioning. Use a new `--key-version` for deliberate HMAC rotation rather than
 rerunning an existing version.
 

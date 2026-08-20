@@ -116,6 +116,7 @@ LIVE_PREVIEW_DELAY_MS = 250
 DEFAULT_MOVEMENT_METRES = 200
 MAX_MOVEMENT_METRES = 300
 RESPONSE_HEADERS = ("Time", "#", "Device", "HTTP", "Result", "Seq", "ms", "Message")
+DEFAULT_CREDENTIAL_BUNDLE_PATH = Path(__file__).resolve().with_name("devices.json")
 
 RESULT_STYLES = {
     "success": ("#0B3A31", "#C3FFEB"),
@@ -810,7 +811,7 @@ class WorkerSignals(QObject):
 class BluepawsTlvConsole(QMainWindow):
     """Feature-complete Qt interface backed by the shared packet codec."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, auto_load_credentials: bool = True) -> None:
         super().__init__()
         self.setWindowTitle("Bluepaws TLV Telemetry Test Console")
         self.resize(1220, 860)
@@ -840,6 +841,8 @@ class BluepawsTlvConsole(QMainWindow):
         self._transport_changed()
         self._tag_mode_changed()
         self.statusBar().showMessage("Ready • protocol v1.1 • secrets remain on this computer")
+        if auto_load_credentials:
+            self._auto_load_default_credentials()
         self._schedule_packet_build()
 
     def _build_ui(self) -> None:
@@ -1422,24 +1425,38 @@ class BluepawsTlvConsole(QMainWindow):
         )
         if not selected:
             return
+        self._load_credentials_path(Path(selected), show_errors=True)
+
+    def _auto_load_default_credentials(self) -> None:
+        if not DEFAULT_CREDENTIAL_BUNDLE_PATH.exists():
+            self.builder_status.setText(
+                "No default tools/devices.json found. Load a credentials JSON or add devices manually."
+            )
+            return
+        self._load_credentials_path(DEFAULT_CREDENTIAL_BUNDLE_PATH, show_errors=False)
+
+    def _load_credentials_path(self, path: Path, *, show_errors: bool) -> bool:
         try:
-            path = Path(selected)
             bundle = load_credential_bundle(path)
         except (OSError, ValueError, json.JSONDecodeError) as error:
-            QMessageBox.critical(self, "Unable to load credentials", str(error))
-            return
+            message = f"Unable to load {path.name}: {error}"
+            if show_errors:
+                QMessageBox.critical(self, "Unable to load credentials", message)
+            self.builder_status.setText(message)
+            return False
         self._credential_bundle_path = path
         self._device_states.clear()
         self._replace_credential_bundle(bundle)
         self.builder_status.setText(
-            f"Loaded {len(bundle.devices)} device(s) and {len(bundle.gateways)} gateway(s)."
+            f"Loaded {len(bundle.devices)} device(s) and {len(bundle.gateways)} gateway(s) from {path.name}."
         )
+        return True
 
     def save_credentials_file(self) -> None:
         default_path = str(
             self._credential_bundle_path
             if self._credential_bundle_path is not None
-            else Path("tlv_devices.json")
+            else DEFAULT_CREDENTIAL_BUNDLE_PATH
         )
         selected, _ = QFileDialog.getSaveFileName(
             self,
