@@ -12,13 +12,19 @@ Short-term bugs, minor changes, and quality-of-life improvements that can be pic
 - [ ] Allow users to drag and reorder animal cards so preferred/favourite animals can be kept at the top.
 - [ ] Persist each user's chosen animal-card order, preferably as authenticated per-user preferences in Supabase.
 - [ ] Investigate slow initial population of a user's animals/markers after login. A newly authenticated user can currently see an apparently empty dashboard for roughly 10-30 seconds, or until a page refresh, even when existing telemetry is available.
+- [ ] **Observed login failure state:** a fresh session can render `Family unavailable` / `Your Family membership could not be loaded` rather than merely waiting for telemetry. Current evidence suggests this occurs before telemetry retrieval, because the dashboard receives `householdId = null` and therefore never starts the normal live telemetry source.
+- [ ] Treat the current leading hypothesis as an **authentication/household hydration race**: login succeeds, but the first household/family-membership lookup may run before the Supabase session/user context is fully ready, return no household, and then fail to retry.
+- [ ] Inspect the server/page code that supplies `householdId`, `householdAccessVersion`, `initialLiveDevices`, and `liveTelemetryError` to `Dashboard` and identify where the transient null/error originates.
+- [ ] Verify post-login navigation/session refresh behaviour. Confirm whether the first dashboard render can use stale unauthenticated server state and whether an explicit router/server refresh is needed after successful authentication.
+- [ ] Do not immediately treat a first failed household lookup as a permanent `Family unavailable` state. Introduce a short controlled retry/backoff while authentication is valid but household context has not resolved.
+- [ ] Use an intermediate state such as `Loading your family...` / `Loading your pets...` while auth and household membership are resolving. Only show `Family unavailable` after a genuine repeated/terminal lookup failure.
+- [ ] Confirm the dashboard's early-return condition for missing `householdId` / `householdAccessVersion` does not permanently prevent telemetry startup after those values later become available.
 - [ ] Trace the complete post-login hydration path: authenticated user -> household/account lookup -> registered animals/devices -> latest-position retrieval -> dashboard cards -> map markers.
 - [ ] Verify that the latest-position query/function is triggered immediately when authentication/session state becomes ready, rather than waiting for a later realtime event or unrelated component refresh.
 - [ ] Ensure initial dashboard population does not depend on receiving new telemetry. Existing latest positions should be fetched immediately on login/page load.
 - [ ] Check for authentication/session timing races where the first position/device query runs before the Supabase user/session or household context is available and is never retried.
-- [ ] Add an explicit loading state such as `Loading your pets...` while the initial device/latest-position fetch is in progress, rather than temporarily presenting an empty/no-telemetry state.
-- [ ] Distinguish `loading`, `no registered animals`, `registered but no telemetry`, and `data loaded` states so users are not incorrectly told they have no telemetry while data is still being retrieved.
-- [ ] Add a controlled retry/refetch if the initial device/latest-position request fails or returns before required user context is ready.
+- [ ] Distinguish `auth loading`, `family loading`, `no registered animals`, `registered but no telemetry`, `backend unavailable`, and `data loaded` states so users are not shown a misleading terminal error during normal startup.
+- [ ] Add a controlled retry/refetch if the initial household/device/latest-position request fails or returns before required user context is ready.
 - [ ] Confirm Supabase Realtime subscriptions are supplementary to initial hydration. The page should first fetch current state, then subscribe for subsequent updates.
 - [ ] Measure and log initial-login query timings to identify whether the delay is caused by auth hydration, household/device lookup, latest-position retrieval, client rendering, or realtime subscription setup.
 
