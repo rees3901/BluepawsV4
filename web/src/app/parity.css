@@ -47,7 +47,7 @@
     --border: #2f3e4e;
     --radius: 8px;
     --shadow: 0 2px 8px rgba(0,0,0,0.3);
-    --panel-width: 340px;
+    --panel-width: 390px;
 }
 
 /* ── Light Theme ──
@@ -843,7 +843,7 @@ body.light .measure-label {
    Panel width shrinks to 280px. */
 @media (max-width: 768px) {
     :root {
-        --panel-width: 280px;
+        --panel-width: min(322px, calc(100vw - 48px));
     }
 
     /* On mobile, panel overlays the map */

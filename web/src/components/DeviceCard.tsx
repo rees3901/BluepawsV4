@@ -56,10 +56,10 @@ export function DeviceCard(props: DeviceCardProps) {
         <button
           type="button"
           className="card-reorder-handle"
-          title={`Drag to reorder ${device.name}; click to pin to top`}
-          aria-label={`Drag to reorder ${device.name}; click to pin to top`}
+          title={`Drag to reorder ${device.name}`}
+          aria-label={`Drag to reorder ${device.name}`}
           draggable
-          onClick={(event) => { event.stopPropagation(); onPinTop(); }}
+          onClick={(event) => { event.stopPropagation(); }}
           onDragStart={(event) => {
             event.stopPropagation();
             event.dataTransfer.effectAllowed = "move";
@@ -82,6 +82,15 @@ export function DeviceCard(props: DeviceCardProps) {
               <img className="avatar-emoji-image" src={emojiImageUrl(avatar.emoji)} alt={avatar.emoji} draggable={false} />
             )}
           </div>
+          <button
+            type="button"
+            className="card-pin-button"
+            title={`Pin ${device.name} to the top`}
+            aria-label={`Pin ${device.name} to the top`}
+            onClick={(event) => { event.stopPropagation(); onPinTop(); }}
+          >
+            <PinIcon />
+          </button>
           {onAvatarEdit && (
             <button
               type="button"
@@ -156,6 +165,14 @@ export function ActionButtons({ followed, trailVisible, onAction }: { followed: 
 
 export function DownloadIcon() {
   return <svg className="icon-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"><path d="M12 4v12m0 0l-4-4m4 4l4-4" /><path d="M5 20h14" /></svg>;
+}
+
+function PinIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">
+      <path d="M14.9 3.6 20.4 9l-1.9 1.9-1.2-1.2-4.1 4.1.3 3.1-1 1-3.4-3.4-4.1 4.1-1.4-1.4 4.1-4.1-3.4-3.4 1-1 3.1.3 4.1-4.1-1.2-1.2 1.9-1.9 1.7 1.8Z" />
+    </svg>
+  );
 }
 
 function formatLastSeen(seconds: number) {
