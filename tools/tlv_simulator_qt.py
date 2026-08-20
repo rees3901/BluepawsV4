@@ -12,6 +12,7 @@ import math
 import random
 import re
 import secrets
+import subprocess
 import sys
 import threading
 import time
@@ -117,6 +118,7 @@ DEFAULT_MOVEMENT_METRES = 200
 MAX_MOVEMENT_METRES = 300
 RESPONSE_HEADERS = ("Time", "#", "Device", "HTTP", "Result", "Seq", "ms", "Message")
 DEFAULT_CREDENTIAL_BUNDLE_PATH = Path(__file__).resolve().with_name("devices.json")
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 RESULT_STYLES = {
     "success": ("#0B3A31", "#C3FFEB"),
@@ -127,6 +129,21 @@ RESULT_STYLES = {
     "network": ("#3B2D34", "#F0DCE5"),
     "unknown": ("#24374A", "#D9E9F7"),
 }
+
+
+def git_build_label() -> str:
+    """Return a short local Git identifier for the running checkout."""
+
+    try:
+        commit = subprocess.check_output(
+            ["git", "-C", str(REPO_ROOT), "rev-parse", "--short", "HEAD"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=2,
+        ).strip()
+    except (OSError, subprocess.SubprocessError):
+        return "commit unknown"
+    return f"commit {commit}" if commit else "commit unknown"
 
 
 @dataclass(frozen=True)
@@ -813,7 +830,8 @@ class BluepawsTlvConsole(QMainWindow):
 
     def __init__(self, *, auto_load_credentials: bool = True) -> None:
         super().__init__()
-        self.setWindowTitle("Bluepaws TLV Telemetry Test Console")
+        self._build_label = git_build_label()
+        self.setWindowTitle(f"Bluepaws TLV Telemetry Test Console • {self._build_label}")
         self.resize(1220, 860)
         self.setMinimumSize(980, 700)
         self._credentials: dict[str, DeviceCredential] = {}
@@ -840,7 +858,9 @@ class BluepawsTlvConsole(QMainWindow):
         self._connect_live_previews()
         self._transport_changed()
         self._tag_mode_changed()
-        self.statusBar().showMessage("Ready • protocol v1.1 • secrets remain on this computer")
+        self.statusBar().showMessage(
+            f"Ready • protocol v1.1 • {self._build_label} • secrets remain on this computer"
+        )
         if auto_load_credentials:
             self._auto_load_default_credentials()
         self._schedule_packet_build()
@@ -856,7 +876,9 @@ class BluepawsTlvConsole(QMainWindow):
         title.setFont(QFont("Segoe UI", 20, QFont.Weight.Bold))
         heading.addWidget(title)
         heading.addStretch()
-        subtitle = QLabel("Protocol v1.1 • local validation • secrets remain on this computer")
+        subtitle = QLabel(
+            f"Protocol v1.1 • {self._build_label} • local validation • secrets remain on this computer"
+        )
         subtitle.setStyleSheet(f"color: {MUTED};")
         heading.addWidget(subtitle)
         outer.addLayout(heading)
@@ -1429,8 +1451,19 @@ class BluepawsTlvConsole(QMainWindow):
 
     def _auto_load_default_credentials(self) -> None:
         if not DEFAULT_CREDENTIAL_BUNDLE_PATH.exists():
+            nearby = sorted(
+                path.name
+                for path in DEFAULT_CREDENTIAL_BUNDLE_PATH.parent.glob("*devices*.json")
+                if path.name != DEFAULT_CREDENTIAL_BUNDLE_PATH.name
+            )
+            nearby_hint = (
+                f" Found instead: {', '.join(nearby)}. Rename or save the intended bundle as devices.json."
+                if nearby
+                else ""
+            )
             self.builder_status.setText(
-                "No default tools/devices.json found. Load a credentials JSON or add devices manually."
+                f"No default tools/devices.json found at {DEFAULT_CREDENTIAL_BUNDLE_PATH}.{nearby_hint} "
+                "Load a credentials JSON or add devices manually."
             )
             return
         self._load_credentials_path(DEFAULT_CREDENTIAL_BUNDLE_PATH, show_errors=False)
