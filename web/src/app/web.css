@@ -142,6 +142,76 @@ button, input, select {
   margin-top: 8px;
 }
 
+.hamburger-btn {
+  width: 46px;
+  height: 46px;
+}
+
+.hamburger-btn svg {
+  width: 24px;
+  height: 24px;
+}
+
+.leaflet-top.leaflet-left {
+  top: 64px;
+}
+
+.leaflet-map-btn {
+  width: 41px;
+  height: 41px;
+  margin-bottom: 8px;
+}
+
+.leaflet-map-btn svg {
+  width: 19px;
+  height: 19px;
+}
+
+.leaflet-control-zoom a {
+  width: 36px !important;
+  height: 36px !important;
+  line-height: 36px !important;
+  font-size: 22px !important;
+}
+
+.leaflet-control-layers-toggle {
+  width: 46px !important;
+  height: 46px !important;
+  background-size: 24px 24px !important;
+}
+
+.bp-click-layer-control:not(.bp-layer-open) {
+  padding: 0 !important;
+}
+
+.bp-click-layer-control:not(.bp-layer-open) .leaflet-control-layers-toggle {
+  display: block !important;
+}
+
+.bp-click-layer-control:not(.bp-layer-open) .leaflet-control-layers-list {
+  display: none !important;
+}
+
+.bp-click-layer-control.bp-layer-open {
+  padding: 8px 10px !important;
+}
+
+.bp-click-layer-control.bp-layer-open .leaflet-control-layers-toggle {
+  display: none !important;
+}
+
+.bp-click-layer-control.bp-layer-open .leaflet-control-layers-list {
+  display: block !important;
+}
+
+.bp-click-layer-control .leaflet-control-layers-base label {
+  display: flex;
+  min-height: 28px;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+}
+
 .map-loading {
   position: fixed;
   inset: 0;
@@ -224,6 +294,22 @@ body.panel-open .map-loading {
   gap: 8px;
   flex-wrap: wrap;
   justify-content: center;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.modal-content .modal-header h2 {
+  margin-bottom: 0;
+}
+
+.settings-theme-btn {
+  flex: 0 0 auto;
 }
 
 #panel {

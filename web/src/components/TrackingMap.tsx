@@ -75,9 +75,33 @@ export default function TrackingMap(props: TrackingMapProps) {
       ]),
     ) as Record<MapLayerName, L.TileLayer>;
     baseLayers.Street.addTo(map);
-    L.control.layers(baseLayers, undefined, { position: "topright", collapsed: true }).addTo(map);
+    const layerControl = L.control.layers(baseLayers, undefined, { position: "topright", collapsed: true }).addTo(map);
+    const layerControlElement = layerControl.getContainer();
+    let layerControlOpen = false;
+    let layerCollapseTimer: number | undefined;
+    const setLayerControlOpen = (open: boolean) => {
+      layerControlOpen = open;
+      layerControlElement?.classList.toggle("bp-layer-open", open);
+      if (open) layerControl.expand();
+      else layerControl.collapse();
+    };
+    const scheduleLayerControlCollapse = () => {
+      window.clearTimeout(layerCollapseTimer);
+      layerCollapseTimer = window.setTimeout(() => setLayerControlOpen(false), 1000);
+    };
+    if (layerControlElement) {
+      layerControlElement.classList.add("bp-click-layer-control");
+      const toggle = layerControlElement.querySelector<HTMLElement>(".leaflet-control-layers-toggle");
+      L.DomEvent.on(toggle ?? layerControlElement, "click", (event: Event) => {
+        L.DomEvent.stop(event);
+        window.clearTimeout(layerCollapseTimer);
+        setLayerControlOpen(!layerControlOpen);
+      });
+      L.DomEvent.on(layerControlElement, "mouseenter", () => window.clearTimeout(layerCollapseTimer));
+      L.DomEvent.on(layerControlElement, "mouseleave", scheduleLayerControlCollapse);
+      map.on("baselayerchange", scheduleLayerControlCollapse);
+    }
     L.control.zoom({ position: "bottomleft" }).addTo(map);
-    L.control.scale({ position: "bottomright", imperial: true, metric: true }).addTo(map);
 
     const FitControl = L.Control.extend({
       options: { position: "topleft" },
@@ -153,6 +177,7 @@ export default function TrackingMap(props: TrackingMapProps) {
       },
     });
     new CoordsControl().addTo(map);
+    L.control.scale({ position: "bottomright", imperial: true, metric: true }).addTo(map);
 
     map.on("mousemove", (event) => {
       const element = document.getElementById("cursorCoords");
@@ -236,6 +261,7 @@ export default function TrackingMap(props: TrackingMapProps) {
     mapContainer.addEventListener("click", handleMapAction);
 
     return () => {
+      window.clearTimeout(layerCollapseTimer);
       mapContainer.removeEventListener("click", handleMapAction);
       markerAnimations.forEach((frameId) => window.cancelAnimationFrame(frameId));
       markerAnimations.clear();

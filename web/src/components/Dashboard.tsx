@@ -422,6 +422,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
     router.replace("/login");
     router.refresh();
   }, [router]);
+  const handleThemeToggle = useCallback(() => setDarkMode((dark) => !dark), []);
 
   return (
     <>
@@ -447,9 +448,6 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
               onClick={handleAllTrailsToggle}
             >
               <span className="global-trails-icon" aria-hidden="true" />
-            </button>
-            <button className="ctrl-btn" title="Toggle dark/light theme" aria-label="Toggle theme" onClick={() => setDarkMode((dark) => !dark)}>
-              {darkMode ? <MoonIcon /> : <SunIcon />}
             </button>
             <button className="ctrl-btn" data-tour="settings" title="Settings" aria-label="Settings" onClick={() => setSettingsOpen(true)}><SettingsIcon /></button>
           </div>
@@ -508,9 +506,11 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
           userEmail={userEmail}
           familyName={familyName}
           familyRole={familyRole}
+          darkMode={darkMode}
           onTutorialModeChange={handleTutorialModeChange}
           onReplayTutorial={replayTutorial}
           onModeChange={setPortableMode}
+          onThemeToggle={handleThemeToggle}
           onSignOut={handleSignOut}
           onClose={() => setSettingsOpen(false)}
         />
@@ -553,19 +553,26 @@ interface SettingsModalProps {
   userEmail: string | null;
   familyName: string | null;
   familyRole: FamilyRole | null;
+  darkMode: boolean;
   onTutorialModeChange: (enabled: boolean) => void;
   onReplayTutorial: () => void;
   onModeChange: (portable: boolean) => void;
+  onThemeToggle: () => void;
   onSignOut: () => void;
   onClose: () => void;
 }
 
-function SettingsModal({ logs, portableMode, devices, tutorialMode, connected, liveTelemetryError, connectionDetail, userEmail, familyName, familyRole, onTutorialModeChange, onReplayTutorial, onModeChange, onSignOut, onClose }: SettingsModalProps) {
+function SettingsModal({ logs, portableMode, devices, tutorialMode, connected, liveTelemetryError, connectionDetail, userEmail, familyName, familyRole, darkMode, onTutorialModeChange, onReplayTutorial, onModeChange, onThemeToggle, onSignOut, onClose }: SettingsModalProps) {
   const [consoleOpen, setConsoleOpen] = useState(false);
   return (
     <div className="modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
       <div className="modal-content">
-        <h2 id="settings-title">Hub Settings</h2>
+        <div className="modal-header">
+          <h2 id="settings-title">Hub Settings</h2>
+          <button className="ctrl-btn settings-theme-btn" type="button" title="Toggle dark/light theme" aria-label="Toggle theme" onClick={onThemeToggle}>
+            {darkMode ? <MoonIcon /> : <SunIcon />}
+          </button>
+        </div>
         <div className="form-group"><label htmlFor="cfgSSID">WiFi SSID</label><input id="cfgSSID" type="text" placeholder="Home network name" /></div>
         <div className="form-group"><label htmlFor="cfgPass">WiFi Password</label><input id="cfgPass" type="password" placeholder="Password" /></div>
         <div className="form-group"><label htmlFor="cfgCloud">Cloud Endpoint</label><input id="cfgCloud" type="url" placeholder="https://..." /></div>
