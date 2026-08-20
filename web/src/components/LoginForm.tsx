@@ -1,21 +1,15 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { useRouter } from "next/navigation";
 import { getAuthCallbackUrl } from "@/lib/authRedirect";
 import { createClient } from "@/lib/supabase/client";
-
-type LoginStep = "email" | "code";
 
 interface LoginFormProps {
   nextPath?: string;
 }
 
 export function LoginForm({ nextPath = "/" }: LoginFormProps) {
-  const router = useRouter();
   const [email, setEmail] = useState("");
-  const [code, setCode] = useState("");
-  const [step, setStep] = useState<LoginStep>("email");
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -36,7 +30,7 @@ export function LoginForm({ nextPath = "/" }: LoginFormProps) {
     }
   }
 
-  async function requestCode(event: FormEvent<HTMLFormElement>) {
+  async function requestSignInLink(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
     setMessage(null);
@@ -52,31 +46,9 @@ export function LoginForm({ nextPath = "/" }: LoginFormProps) {
     if (error) {
       setMessage(error.message);
     } else {
-      setStep("code");
-      setMessage("Check your email for the six-digit code or secure sign-in link.");
+      setMessage("Check your email for your secure Bluepaws sign-in link.");
     }
     setBusy(false);
-  }
-
-  async function verifyCode(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setBusy(true);
-    setMessage(null);
-    const supabase = createClient();
-    const { error } = await supabase.auth.verifyOtp({
-      email: email.trim(),
-      token: code.trim(),
-      type: "email",
-    });
-
-    if (error) {
-      setMessage(error.message);
-      setBusy(false);
-      return;
-    }
-
-    router.replace(nextPath);
-    router.refresh();
   }
 
   return (
@@ -91,45 +63,21 @@ export function LoginForm({ nextPath = "/" }: LoginFormProps) {
 
       <div className="login-divider"><span>or use email</span></div>
 
-      {step === "email" ? (
-        <form onSubmit={requestCode}>
-          <label htmlFor="login-email">Email address</label>
-          <input
-            id="login-email"
-            name="email"
-            type="email"
-            autoComplete="email"
-            required
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-          />
-          <button className="btn-primary login-submit" type="submit" disabled={busy}>
-            {busy ? "Sending…" : "Email me a code"}
-          </button>
-        </form>
-      ) : (
-        <form onSubmit={verifyCode}>
-          <label htmlFor="login-code">Six-digit code</label>
-          <input
-            id="login-code"
-            name="code"
-            type="text"
-            inputMode="numeric"
-            autoComplete="one-time-code"
-            pattern="[0-9]{6}"
-            maxLength={6}
-            required
-            value={code}
-            onChange={(event) => setCode(event.target.value.replace(/\D/g, ""))}
-          />
-          <button className="btn-primary login-submit" type="submit" disabled={busy || code.length !== 6}>
-            {busy ? "Checking…" : "Sign in"}
-          </button>
-          <button className="login-back" type="button" disabled={busy} onClick={() => { setStep("email"); setCode(""); setMessage(null); }}>
-            Use a different email
-          </button>
-        </form>
-      )}
+      <form onSubmit={requestSignInLink}>
+        <label htmlFor="login-email">Email address</label>
+        <input
+          id="login-email"
+          name="email"
+          type="email"
+          autoComplete="email"
+          required
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
+        />
+        <button className="btn-primary login-submit" type="submit" disabled={busy}>
+          {busy ? "Sending…" : "Email me a sign-in link"}
+        </button>
+      </form>
 
       {message && <p className="login-message" role="status">{message}</p>}
       <small>Tracker data is private to members of your Family.</small>
