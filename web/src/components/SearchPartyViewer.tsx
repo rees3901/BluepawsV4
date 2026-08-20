@@ -6,7 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { BatteryIndicator, HomeDistance, LastSeen, SignalIndicator } from "@/components/Indicators";
 import { defaultDeviceAvatar } from "@/lib/defaultDeviceAvatar";
 import { emojiImageUrl } from "@/lib/emoji";
-import { formatMapCoordinates, googleMapsUrl, mapLocationShareText } from "@/lib/mapLocation";
+import { formatMapCoordinates, googleMapsUrl } from "@/lib/mapLocation";
 import type { SearchPartySnapshot } from "@/lib/searchParty";
 import type { DeviceAction, DeviceAvatar, MapCommand, TelemetryDevice, TrailPoint } from "@/types/telemetry";
 
@@ -130,7 +130,6 @@ export function SearchPartyViewer({ token, initialSnapshot }: SearchPartyViewerP
               <div><dt>Expires</dt><dd>{expiresText}</dd></div>
               <div><dt>Last refresh</dt><dd>{refreshedText}</dd></div>
             </dl>
-            <button className="btn-primary" type="button" onClick={() => { void refresh(); }}>Refresh now</button>
             {refreshError && <p className="settings-message error" role="alert">{refreshError}</p>}
           </section>
           <div id="deviceCards" className="search-party-device-list">
@@ -153,27 +152,13 @@ export function SearchPartyViewer({ token, initialSnapshot }: SearchPartyViewerP
 }
 
 function SearchPartyDeviceRow({ device, avatar, now, onCentre }: { device: TelemetryDevice; avatar: DeviceAvatar; now: number; onCentre: () => void }) {
-  const coordinates = formatMapCoordinates(device.lat, device.lon, 5);
   const mapsUrl = googleMapsUrl(device.lat, device.lon);
-  const shareText = mapLocationShareText(device.lat, device.lon);
   const ageSeconds = Math.max(0, Math.floor((now - device.lastUpdate) / 1000));
   const status = STATUS[device.status.toLowerCase() as keyof typeof STATUS] ?? STATUS.error;
   const profileLower = device.profile.toLowerCase();
   const profileClass = `profile-${profileLower.replace("save", "").replaceAll(" ", "-")}`;
   const profileLabel = profileLower === "powersave" ? "💤 PowerSave" : device.profile;
   const distance = formatDistance(haversine(HOME.lat, HOME.lon, device.lat, device.lon));
-
-  async function copyCoordinates() {
-    await navigator.clipboard.writeText(shareText);
-  }
-
-  async function shareCoordinates() {
-    if (navigator.share) {
-      await navigator.share({ title: `${device.name} location`, text: coordinates, url: mapsUrl });
-      return;
-    }
-    await copyCoordinates();
-  }
 
   return (
     <article className={`device-card search-party-device-card${ageSeconds > 600 ? " stale" : ""}`}>
@@ -220,8 +205,6 @@ function SearchPartyDeviceRow({ device, avatar, now, onCentre }: { device: Telem
             </div>
             <div className="card-actions search-party-card-actions">
               <button className="btn-action btn-jump" type="button" onClick={onCentre}>↗ Centre</button>
-              <button className="btn-action" type="button" onClick={copyCoordinates}>⧉ Copy</button>
-              <button className="btn-action" type="button" onClick={shareCoordinates}>↗ Share</button>
             </div>
           </div>
         </div>
