@@ -20,6 +20,12 @@ export interface FamilyNameActionState {
   success: string | null;
 }
 
+export interface SearchPartyActionState {
+  error: string | null;
+  searchUrl: string | null;
+  expiresAt: string | null;
+}
+
 export async function updateFamilyNameAction(
   _previousState: FamilyNameActionState,
   formData: FormData,
@@ -111,6 +117,41 @@ export async function createInvitationAction(
   };
 }
 
+export async function createSearchPartyShareAction(
+  _previousState: SearchPartyActionState,
+  formData: FormData,
+): Promise<SearchPartyActionState> {
+  const householdId = String(formData.get("householdId") ?? "");
+  if (!householdId) {
+    return { error: "Choose a Family before creating a search-party link.", searchUrl: null, expiresAt: null };
+  }
+
+  const supabase = await createClient();
+  const { data: identity } = await supabase.auth.getClaims();
+  if (!identity?.claims?.sub) redirect("/login?next=/account");
+
+  const { data, error } = await supabase.rpc("bluepaws_create_search_party_share", {
+    requested_household_id: householdId,
+  });
+
+  if (error) {
+    console.error("Unable to create search party link", { code: error.code, message: error.message });
+    return { error: "The search-party link could not be created. Check your Owner access and try again.", searchUrl: null, expiresAt: null };
+  }
+
+  const share = Array.isArray(data) ? data[0] : null;
+  if (!share || typeof share.share_token !== "string") {
+    return { error: "The search-party link was created without a shareable token.", searchUrl: null, expiresAt: null };
+  }
+
+  revalidatePath("/account");
+  return {
+    error: null,
+    searchUrl: `${CANONICAL_SITE_URL}/search/${share.share_token}`,
+    expiresAt: typeof share.share_expires_at === "string" ? share.share_expires_at : null,
+  };
+}
+
 export async function revokeInvitationAction(formData: FormData) {
   const invitationId = String(formData.get("invitationId") ?? "");
   if (!invitationId) return;
@@ -123,6 +164,21 @@ export async function revokeInvitationAction(formData: FormData) {
     requested_invitation_id: invitationId,
   });
   if (error) console.error("Unable to revoke Family invitation", { code: error.code, message: error.message });
+  revalidatePath("/account");
+}
+
+export async function revokeSearchPartyShareAction(formData: FormData) {
+  const shareId = String(formData.get("shareId") ?? "");
+  if (!shareId) return;
+
+  const supabase = await createClient();
+  const { data: identity } = await supabase.auth.getClaims();
+  if (!identity?.claims?.sub) redirect("/login?next=/account");
+
+  const { error } = await supabase.rpc("bluepaws_revoke_search_party_share", {
+    requested_share_id: shareId,
+  });
+  if (error) console.error("Unable to revoke search party link", { code: error.code, message: error.message });
   revalidatePath("/account");
 }
 

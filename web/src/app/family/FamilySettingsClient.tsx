@@ -3,9 +3,9 @@
 import { useActionState, useMemo, useState } from "react";
 import { canRemoveFamilyMember } from "@/lib/familyAccess";
 import { invitationDeliveryMessage } from "@/lib/invitationDelivery";
-import type { FamilyInvitation, FamilyMember } from "@/lib/familySettings";
+import type { FamilyInvitation, FamilyMember, SearchPartyShare } from "@/lib/familySettings";
 import type { FamilyMembership } from "@/lib/familySelection";
-import { createInvitationAction, removeFamilyMemberAction, revokeInvitationAction, setActiveFamilyAction, updateFamilyNameAction, type FamilyNameActionState, type InvitationActionState } from "./actions";
+import { createInvitationAction, createSearchPartyShareAction, removeFamilyMemberAction, revokeInvitationAction, revokeSearchPartyShareAction, setActiveFamilyAction, updateFamilyNameAction, type FamilyNameActionState, type InvitationActionState, type SearchPartyActionState } from "./actions";
 
 const INITIAL_INVITATION_STATE: InvitationActionState = {
   error: null,
@@ -20,28 +20,40 @@ const INITIAL_FAMILY_NAME_STATE: FamilyNameActionState = {
   success: null,
 };
 
+const INITIAL_SEARCH_PARTY_STATE: SearchPartyActionState = {
+  error: null,
+  searchUrl: null,
+  expiresAt: null,
+};
+
 interface FamilySettingsClientProps {
   currentUserId: string;
   activeFamily: FamilyMembership;
   families: FamilyMembership[];
   members: FamilyMember[];
   invitations: FamilyInvitation[];
+  searchShares: SearchPartyShare[];
 }
 
-export function FamilySettingsClient({ currentUserId, activeFamily, families, members, invitations }: FamilySettingsClientProps) {
+export function FamilySettingsClient({ currentUserId, activeFamily, families, members, invitations, searchShares }: FamilySettingsClientProps) {
   const [state, formAction, pending] = useActionState(createInvitationAction, INITIAL_INVITATION_STATE);
   const [familyNameState, familyNameFormAction, familyNamePending] = useActionState(updateFamilyNameAction, INITIAL_FAMILY_NAME_STATE);
-  const [shareMessage, setShareMessage] = useState<string | null>(null);
+  const [searchPartyState, searchPartyFormAction, searchPartyPending] = useActionState(createSearchPartyShareAction, INITIAL_SEARCH_PARTY_STATE);
+  const [inviteShareMessage, setInviteShareMessage] = useState<string | null>(null);
+  const [searchShareMessage, setSearchShareMessage] = useState<string | null>(null);
   const isOwner = activeFamily.role === "owner";
   const deliveryWarning = invitationDeliveryMessage(state.emailDelivery);
   const shareText = useMemo(() => state.invitationUrl
     ? `Join ${activeFamily.name} on Bluepaws: ${state.invitationUrl}`
     : "", [activeFamily.name, state.invitationUrl]);
+  const searchPartyText = useMemo(() => searchPartyState.searchUrl
+    ? `Help search for pets from ${activeFamily.name} on Bluepaws: ${searchPartyState.searchUrl}`
+    : "", [activeFamily.name, searchPartyState.searchUrl]);
 
   async function copyInvitation() {
     if (!state.invitationUrl) return;
     await navigator.clipboard.writeText(state.invitationUrl);
-    setShareMessage("Invitation link copied.");
+    setInviteShareMessage("Invitation link copied.");
   }
 
   async function shareInvitation() {
@@ -51,6 +63,21 @@ export function FamilySettingsClient({ currentUserId, activeFamily, families, me
       return;
     }
     await copyInvitation();
+  }
+
+  async function copySearchPartyLink() {
+    if (!searchPartyState.searchUrl) return;
+    await navigator.clipboard.writeText(searchPartyState.searchUrl);
+    setSearchShareMessage("Search-party link copied.");
+  }
+
+  async function shareSearchPartyLink() {
+    if (!searchPartyState.searchUrl) return;
+    if (navigator.share) {
+      await navigator.share({ title: `Help ${activeFamily.name} search`, text: searchPartyText, url: searchPartyState.searchUrl });
+      return;
+    }
+    await copySearchPartyLink();
   }
 
   return (
@@ -133,7 +160,56 @@ export function FamilySettingsClient({ currentUserId, activeFamily, families, me
                 <a className="btn-secondary" href={`sms:?body=${encodeURIComponent(shareText)}`}>SMS</a>
                 <a className="btn-secondary" href={`mailto:${encodeURIComponent(state.invitedEmail ?? "")}?subject=${encodeURIComponent(`Join ${activeFamily.name} on Bluepaws`)}&body=${encodeURIComponent(shareText)}`}>Email</a>
               </div>
-              {shareMessage && <small>{shareMessage}</small>}
+              {inviteShareMessage && <small>{inviteShareMessage}</small>}
+            </div>
+          )}
+        </section>
+      )}
+
+      {isOwner && (
+        <section className="settings-card" id="search-party">
+          <div className="settings-card-heading">
+            <div><span className="settings-eyebrow">Search party</span><h2>Share a temporary read-only map</h2></div>
+            <span className="role-pill secondary">4 hours</span>
+          </div>
+          <p className="settings-copy">Create a guest link for friends or neighbours helping search. It shows current Family pet positions only, refreshes slowly and cannot send commands or change settings.</p>
+          <form action={searchPartyFormAction} className="search-party-form">
+            <input type="hidden" name="householdId" value={activeFamily.householdId} />
+            <button className="btn-primary" type="submit" disabled={searchPartyPending}>{searchPartyPending ? "Creating…" : "Create search-party link"}</button>
+          </form>
+          {searchPartyState.error && <p className="settings-message error" role="alert">{searchPartyState.error}</p>}
+          {searchPartyState.searchUrl && (
+            <div className="invite-share-card search-party-share-card" role="status">
+              <strong>Search-party link ready{searchPartyState.expiresAt ? ` until ${new Date(searchPartyState.expiresAt).toLocaleTimeString()}` : ""}</strong>
+              <code>{searchPartyState.searchUrl}</code>
+              <div className="share-actions">
+                <button className="btn-secondary" type="button" onClick={copySearchPartyLink}>Copy</button>
+                <button className="btn-secondary" type="button" onClick={shareSearchPartyLink}>Share</button>
+                <a className="btn-secondary" href={`https://wa.me/?text=${encodeURIComponent(searchPartyText)}`} target="_blank" rel="noreferrer">WhatsApp</a>
+                <a className="btn-secondary" href={`sms:?body=${encodeURIComponent(searchPartyText)}`}>SMS</a>
+                <a className="btn-secondary" href={`mailto:?subject=${encodeURIComponent(`Help search with ${activeFamily.name}`)}&body=${encodeURIComponent(searchPartyText)}`}>Email</a>
+              </div>
+              {searchShareMessage && <small>{searchShareMessage}</small>}
+            </div>
+          )}
+
+          {searchShares.length > 0 && (
+            <div className="invitation-list">
+              {searchShares.map((share) => (
+                <article className="invitation-row" key={share.id}>
+                  <div>
+                    <strong>Search link created {new Date(share.createdAt).toLocaleString()}</strong>
+                    <small>Expires {new Date(share.expiresAt).toLocaleString()} · Used {share.useCount} time{share.useCount === 1 ? "" : "s"}{share.lastUsedAt ? ` · Last opened ${new Date(share.lastUsedAt).toLocaleString()}` : ""}</small>
+                  </div>
+                  <span className={`invite-status ${share.status.toLowerCase()}`}>{share.status}</span>
+                  {share.status === "Active" && (
+                    <form action={revokeSearchPartyShareAction}>
+                      <input type="hidden" name="shareId" value={share.id} />
+                      <button className="btn-secondary" type="submit">Revoke</button>
+                    </form>
+                  )}
+                </article>
+              ))}
             </div>
           )}
         </section>

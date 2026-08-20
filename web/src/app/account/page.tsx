@@ -41,6 +41,7 @@ export default async function AccountPage({ searchParams }: AccountPageProps) {
       <nav className="account-section-nav" aria-label="Account sections">
         <a href="#profile">Profile &amp; security</a>
         <a href="#family">Family &amp; members</a>
+        <a href="#search-party">Search party</a>
         <a href="#billing">Billing</a>
       </nav>
 
@@ -68,6 +69,7 @@ export default async function AccountPage({ searchParams }: AccountPageProps) {
           families={context.families}
           members={familySettings.members}
           invitations={familySettings.invitations}
+          searchShares={familySettings.searchShares}
         />
 
         <section className="settings-card" id="billing">
