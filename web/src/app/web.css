@@ -219,6 +219,73 @@ body.panel-open .map-loading {
   color: var(--accent);
 }
 
+.empty-state-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+#panel {
+  min-height: 0;
+}
+
+#deviceCards {
+  min-height: 0;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
+}
+
+.device-card {
+  flex: 0 0 auto;
+}
+
+.device-card.dragging {
+  opacity: 0.55;
+}
+
+.device-card.drag-over {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgb(29 155 240 / 16%);
+}
+
+.card-summary {
+  align-items: flex-start;
+}
+
+.card-reorder-handle {
+  display: grid;
+  width: 18px;
+  min-width: 18px;
+  height: 36px;
+  place-items: center;
+  margin: 0 -2px 0 -5px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: grab;
+  font-size: 0.9rem;
+  line-height: 0.7;
+}
+
+.card-reorder-handle:active {
+  cursor: grabbing;
+}
+
+.card-reorder-handle:hover,
+.card-reorder-handle:focus-visible {
+  color: var(--accent);
+  outline: 0;
+}
+
+.card-detail-reveal {
+  transition:
+    grid-template-rows 0.8s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.48s ease;
+}
+
 .tutorial-mode-setting {
   margin: 14px 0 0;
   padding: 10px;

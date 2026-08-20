@@ -1,0 +1,22 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { deviceCardOrderStorageKey, moveDeviceBefore, orderDeviceIds, pinDeviceFirst } from "./deviceCardOrder.ts";
+
+test("orders visible devices using saved preference and appends new devices", () => {
+  assert.deepEqual(orderDeviceIds([1001, 1002, 1003, 1004], [1003, 1001, 9999]), [1003, 1001, 1002, 1004]);
+});
+
+test("moves one device before another while preserving the rest", () => {
+  assert.deepEqual(moveDeviceBefore([1001, 1002, 1003, 1004], 1004, 1002), [1001, 1004, 1002, 1003]);
+});
+
+test("pinning a device moves it to the top", () => {
+  assert.deepEqual(pinDeviceFirst([1001, 1002, 1003], 1003), [1003, 1001, 1002]);
+});
+
+test("storage key is scoped to user and Family", () => {
+  assert.equal(
+    deviceCardOrderStorageKey("owner@example.com", "family-1"),
+    "bp_device_card_order:owner@example.com:family-1",
+  );
+});
