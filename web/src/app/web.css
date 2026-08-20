@@ -1358,6 +1358,7 @@ body.panel-open .map-loading {
 .family-switcher,
 .family-name-form > div,
 .invite-form > div,
+.search-party-form > div,
 .profile-form > div {
   display: flex;
   gap: 9px;
@@ -1366,6 +1367,7 @@ body.panel-open .map-loading {
 .family-switcher select,
 .family-name-form input,
 .invite-form input,
+.search-party-form input,
 .profile-form input {
   min-width: 0;
   flex: 1;
@@ -1378,12 +1380,14 @@ body.panel-open .map-loading {
 }
 
 .invite-form,
+.search-party-form,
 .family-name-form,
 .profile-form {
   margin-top: 17px;
 }
 
 .invite-form label,
+.search-party-form label,
 .family-name-form label,
 .profile-form label {
   display: block;
@@ -1437,6 +1441,7 @@ body.panel-open .map-loading {
 .family-switcher .btn-primary,
 .family-name-form .btn-primary,
 .invite-form .btn-primary,
+.search-party-form .btn-primary,
 .profile-form .btn-primary {
   display: inline-flex;
   align-items: center;
@@ -1468,10 +1473,6 @@ body.panel-open .map-loading {
 .invite-status.accepted { color: var(--success); border-color: rgb(0 200 83 / 35%); background: rgb(0 200 83 / 8%); }
 .invite-status.revoked,
 .invite-status.expired { color: var(--text-secondary); border-color: var(--border); background: transparent; }
-
-.search-party-form {
-  margin-top: 16px;
-}
 
 .search-party-form .btn-primary {
   padding: 9px 13px;
@@ -1672,6 +1673,7 @@ body.panel-open .map-loading {
   .family-switcher,
   .family-name-form > div,
   .invite-form > div,
+  .search-party-form > div,
   .profile-form > div {
     align-items: stretch;
     flex-direction: column;

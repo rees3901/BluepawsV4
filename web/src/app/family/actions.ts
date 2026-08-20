@@ -23,6 +23,7 @@ export interface FamilyNameActionState {
 export interface SearchPartyActionState {
   error: string | null;
   searchUrl: string | null;
+  helperEmail: string | null;
   expiresAt: string | null;
 }
 
@@ -122,8 +123,12 @@ export async function createSearchPartyShareAction(
   formData: FormData,
 ): Promise<SearchPartyActionState> {
   const householdId = String(formData.get("householdId") ?? "");
+  const helperEmail = String(formData.get("helperEmail") ?? "").trim().toLowerCase();
   if (!householdId) {
-    return { error: "Choose a Family before creating a search-party link.", searchUrl: null, expiresAt: null };
+    return { error: "Choose a Family before creating a search-party link.", searchUrl: null, helperEmail: null, expiresAt: null };
+  }
+  if (helperEmail.length < 3 || helperEmail.length > 320 || !helperEmail.includes("@")) {
+    return { error: "Enter a valid helper email address.", searchUrl: null, helperEmail: null, expiresAt: null };
   }
 
   const supabase = await createClient();
@@ -132,22 +137,24 @@ export async function createSearchPartyShareAction(
 
   const { data, error } = await supabase.rpc("bluepaws_create_search_party_share", {
     requested_household_id: householdId,
+    helper_email: helperEmail,
   });
 
   if (error) {
     console.error("Unable to create search party link", { code: error.code, message: error.message });
-    return { error: "The search-party link could not be created. Check your Owner access and try again.", searchUrl: null, expiresAt: null };
+    return { error: "The search-party link could not be created. Check your Owner access and try again.", searchUrl: null, helperEmail: null, expiresAt: null };
   }
 
   const share = Array.isArray(data) ? data[0] : null;
   if (!share || typeof share.share_token !== "string") {
-    return { error: "The search-party link was created without a shareable token.", searchUrl: null, expiresAt: null };
+    return { error: "The search-party link was created without a shareable token.", searchUrl: null, helperEmail: null, expiresAt: null };
   }
 
   revalidatePath("/account");
   return {
     error: null,
     searchUrl: `${CANONICAL_SITE_URL}/search/${share.share_token}`,
+    helperEmail,
     expiresAt: typeof share.share_expires_at === "string" ? share.share_expires_at : null,
   };
 }
