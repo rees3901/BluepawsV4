@@ -117,19 +117,35 @@ function renderDevices() {
       <td><input data-field="sequence" type="number" min="0" max="65535" value="${settings.sequence}"></td>
       <td><button data-action="select">Edit</button> <button data-action="delete" class="danger">Delete</button></td>
     `;
+    tr.addEventListener("click", (event) => {
+      if (event.target.closest('[data-action="delete"]')) return;
+      selectDevice(device.device_id);
+    });
     tr.addEventListener("input", (event) => updateDeviceFromEvent(device.device_id, event));
     tr.addEventListener("change", (event) => updateDeviceFromEvent(device.device_id, event));
-    tr.querySelector('[data-action="select"]').addEventListener("click", () => {
-      state.selectedDeviceId = device.device_id;
-      state.configuredDeviceId = device.device_id;
-      renderDevices();
-      schedulePreview();
+    tr.querySelector('[data-action="select"]').addEventListener("click", (event) => {
+      event.stopPropagation();
+      selectDevice(device.device_id);
     });
-    tr.querySelector('[data-action="delete"]').addEventListener("click", () => deleteDevice(device.device_id));
+    tr.querySelector('[data-action="delete"]').addEventListener("click", (event) => {
+      event.stopPropagation();
+      deleteDevice(device.device_id);
+    });
     rows.appendChild(tr);
   }
   renderDeviceDetail();
   syncFleetSendToggle();
+}
+
+function selectDevice(deviceId) {
+  if (state.selectedDeviceId === deviceId) {
+    buildPreview();
+    return;
+  }
+  state.selectedDeviceId = deviceId;
+  state.configuredDeviceId = deviceId;
+  renderDevices();
+  buildPreview();
 }
 
 function syncFleetSendToggle() {
@@ -351,26 +367,96 @@ function validLatitudeLongitude(latitude, longitude) {
   return Number.isFinite(latitude) && Number.isFinite(longitude) && latitude >= -90 && latitude <= 90 && longitude >= -180 && longitude <= 180;
 }
 
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
 let previewTimer;
+let previewRun = 0;
 function schedulePreview() {
   clearTimeout(previewTimer);
   previewTimer = setTimeout(buildPreview, 180);
 }
 
 async function buildPreview() {
+  const run = ++previewRun;
   const settings = selectedSettings();
-  if (!settings) return;
+  if (!settings) {
+    $("payload-summary").textContent = "Select a device to preview its packet.";
+    $("packet-hex").value = "";
+    $("packet-b64").value = "";
+    $("decoded-preview").textContent = "{}";
+    $("fleet-preview-summary").textContent = "No devices loaded.";
+    $("fleet-previews").innerHTML = "";
+    return;
+  }
   try {
     const preview = await api("/api/build", { method: "POST", body: { device: settings, wrapper: state.wrapper } });
+    if (run !== previewRun) return;
+    $("payload-preview-title").textContent = `Device ${settings.deviceId} TLV packet preview`;
+    $("decoded-preview-title").textContent = `Device ${settings.deviceId} human-readable TLV JSON`;
     $("payload-summary").textContent = `${preview.packet_size_bytes} bytes • TLVs ${preview.tlv_length_bytes}/24 bytes • HMAC ${preview.hmac_valid ? "valid" : "invalid"}`;
     $("packet-hex").value = preview.packet_hex;
     $("packet-b64").value = preview.payload_b64;
     $("decoded-preview").textContent = JSON.stringify(preview.decoded, null, 2);
     $("wrapper-summary").textContent = `JSON body ${preview.wrapper_size_bytes} bytes • endpoint ${state.wrapper.endpoint}`;
     $("wrapper-preview").textContent = JSON.stringify(preview.wrapper, null, 2);
+    await renderFleetPreviews(run);
   } catch (error) {
+    if (run !== previewRun) return;
     $("payload-summary").textContent = error.message;
+    $("decoded-preview").textContent = JSON.stringify({ error: error.message }, null, 2);
   }
+}
+
+async function renderFleetPreviews(run) {
+  const enabledSettings = [...state.deviceSettings.values()].filter((settings) => settings.enabled);
+  $("fleet-preview-summary").textContent = enabledSettings.length
+    ? `Rendering ${enabledSettings.length} enabled device packet preview${enabledSettings.length === 1 ? "" : "s"}.`
+    : "No enabled devices selected.";
+  if (!enabledSettings.length) {
+    $("fleet-previews").innerHTML = "";
+    return;
+  }
+
+  const previews = await Promise.all(enabledSettings.map(async (settings) => {
+    try {
+      const preview = await api("/api/build", { method: "POST", body: { device: settings, wrapper: state.wrapper } });
+      return { settings, preview };
+    } catch (error) {
+      return { settings, error };
+    }
+  }));
+  if (run !== previewRun) return;
+
+  $("fleet-previews").innerHTML = previews.map(({ settings, preview, error }) => {
+    if (error) {
+      return `
+        <article class="fleet-preview-card error">
+          <h3>Device ${settings.deviceId}</h3>
+          <p class="muted">${error.message}</p>
+        </article>
+      `;
+    }
+    return `
+      <article class="fleet-preview-card ${settings.deviceId === state.selectedDeviceId ? "selected" : ""}" data-device-id="${settings.deviceId}">
+        <div class="preview-card-header">
+          <h3>Device ${settings.deviceId}</h3>
+          <span>${preview.packet_size_bytes} bytes • TLVs ${preview.tlv_length_bytes}/24 • ${preview.hmac_valid ? "HMAC valid" : "HMAC invalid"}</span>
+        </div>
+        <textarea readonly spellcheck="false">${preview.payload_b64}</textarea>
+        <pre>${escapeHtml(JSON.stringify(preview.decoded, null, 2))}</pre>
+      </article>
+    `;
+  }).join("");
+  $("fleet-previews").querySelectorAll("[data-device-id]").forEach((card) => {
+    card.addEventListener("click", () => selectDevice(Number(card.dataset.deviceId)));
+  });
 }
 
 async function runScenario() {

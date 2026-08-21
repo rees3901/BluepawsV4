@@ -94,17 +94,28 @@
         <div class="grid two previews">
           <section class="panel">
             <p class="eyebrow">Payload</p>
-            <h2>TLV packet preview</h2>
+            <h2 id="payload-preview-title">Selected TLV packet preview</h2>
             <p id="payload-summary" class="muted">Build a packet to see byte counts.</p>
             <textarea id="packet-hex" readonly spellcheck="false"></textarea>
             <textarea id="packet-b64" readonly spellcheck="false"></textarea>
           </section>
           <section class="panel">
             <p class="eyebrow">Decoded</p>
-            <h2>Human-readable TLV JSON</h2>
+            <h2 id="decoded-preview-title">Selected human-readable TLV JSON</h2>
             <pre id="decoded-preview">{}</pre>
           </section>
         </div>
+
+        <section class="panel fleet-preview-panel">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">Fleet preview</p>
+              <h2>Enabled device packet previews</h2>
+            </div>
+            <p id="fleet-preview-summary" class="muted">Select devices to preview generated packets.</p>
+          </div>
+          <div id="fleet-previews" class="fleet-preview-grid"></div>
+        </section>
       </section>
 
       <section id="tab-wrapper" class="tab-panel">
