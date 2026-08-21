@@ -402,6 +402,7 @@ async function runScenario() {
         const wrapper = (await api("/api/apply-recipe", { method: "POST", body: { device: packetSettings, wrapper: state.wrapper, recipe: recipeKey, cycle_index: cycle } })).wrapper;
         requestNumber += 1;
         $("run-status").textContent = `Sending request ${requestNumber}: device ${deviceId}, cycle ${cycle + 1}/${count}`;
+        const requestPreview = buildRequestPreview(wrapper, state.wrapper.endpoint);
         const result = await api("/api/send-one", {
           method: "POST",
           body: {
@@ -412,7 +413,7 @@ async function runScenario() {
           },
         });
         state.deviceSettings.set(deviceId, packetSettings);
-        appendLog(requestNumber, deviceId, packetSettings, result);
+        appendLog(requestNumber, deviceId, packetSettings, result, requestPreview);
         renderDevices();
         if (state.stopRequested) break;
       }
@@ -431,7 +432,7 @@ async function applyRecipe(settings, recipeKey, cycle) {
   return (await api("/api/apply-recipe", { method: "POST", body: { device: settings, wrapper: state.wrapper, recipe: recipeKey, cycle_index: cycle } })).device;
 }
 
-function appendLog(requestNumber, deviceId, settings, result) {
+function appendLog(requestNumber, deviceId, settings, result, requestPreview = {}) {
   const response = result.response || {};
   const row = {
     time: new Date().toLocaleTimeString(),
@@ -442,12 +443,28 @@ function appendLog(requestNumber, deviceId, settings, result) {
     sequence: settings.sequence,
     elapsed: result.elapsed_ms,
     message: response.error || response.message || response.format || (result.ok ? "accepted" : "failed"),
-    requestDetail: result.request || {},
+    requestDetail: result.request || requestPreview,
     responseDetail: result.response || {},
     detail: result,
   };
   state.responseRows.unshift(row);
   renderResponseLog();
+}
+
+function buildRequestPreview(wrapper, endpoint) {
+  const body = wrapper || {};
+  return {
+    method: "POST",
+    url: endpoint || state.wrapper.endpoint || state.meta.endpoint,
+    headers: {
+      Authorization: "Bearer <applied by local console server>",
+      "Content-Type": "application/json",
+      "User-Agent": "bluepaws-tlv-web-console/1",
+    },
+    body,
+    body_size_bytes: new Blob([JSON.stringify(body)]).size,
+    note: "Fallback preview generated in the browser. Restart the local console server to show the server-side redacted bearer-token preview.",
+  };
 }
 
 function renderResponseLog() {
