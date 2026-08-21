@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Bluepaws TLV Web Console</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Bluepaws V4</p>
+          <h1>TLV Telemetry Web Console</h1>
+        </div>
+        <div class="status-pill" id="server-status">Connecting…</div>
+      </header>
+
+      <section class="panel credentials">
+        <div>
+          <p class="eyebrow">Credentials</p>
+          <h2>Loaded device bundle</h2>
+          <p id="credential-path" class="muted">No file loaded yet.</p>
+        </div>
+        <div class="toolbar">
+          <label class="file-button">
+            Import JSON
+            <input id="credential-file" type="file" accept="application/json,.json" />
+          </label>
+          <button id="save-bundle">Save bundle JSON</button>
+          <button id="add-device">Add device</button>
+          <button id="add-gateway">Add gateway</button>
+          <button id="provision-sql">Provisioning SQL</button>
+        </div>
+      </section>
+
+      <nav class="tabs">
+        <button class="tab active" data-tab="packet">1. Packet generation</button>
+        <button class="tab" data-tab="wrapper">2. HTTPS wrapper</button>
+        <button class="tab" data-tab="send">3. Send & response log</button>
+      </nav>
+
+      <section id="tab-packet" class="tab-panel active">
+        <div class="grid two">
+          <section class="panel">
+            <div class="section-title">
+              <div>
+                <p class="eyebrow">Fleet</p>
+                <h2>Per-device scenario table</h2>
+              </div>
+              <button id="select-all-devices">Select all</button>
+            </div>
+            <div class="table-wrap">
+              <table class="device-table">
+                <thead>
+                  <tr>
+                    <th>Send</th>
+                    <th>Device</th>
+                    <th>Status</th>
+                    <th>Power profile</th>
+                    <th>TX reason</th>
+                    <th>Latitude</th>
+                    <th>Longitude</th>
+                    <th>Seq</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="device-rows"></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="section-title">
+              <div>
+                <p class="eyebrow">Selected device</p>
+                <h2 id="selected-device-title">No device selected</h2>
+              </div>
+              <button id="build-preview">Rebuild preview</button>
+            </div>
+            <div id="device-detail" class="form-grid"></div>
+          </section>
+        </div>
+
+        <div class="grid two previews">
+          <section class="panel">
+            <p class="eyebrow">Payload</p>
+            <h2>TLV packet preview</h2>
+            <p id="payload-summary" class="muted">Build a packet to see byte counts.</p>
+            <textarea id="packet-hex" readonly spellcheck="false"></textarea>
+            <textarea id="packet-b64" readonly spellcheck="false"></textarea>
+          </section>
+          <section class="panel">
+            <p class="eyebrow">Decoded</p>
+            <h2>Human-readable TLV JSON</h2>
+            <pre id="decoded-preview">{}</pre>
+          </section>
+        </div>
+      </section>
+
+      <section id="tab-wrapper" class="tab-panel">
+        <div class="grid two">
+          <section class="panel">
+            <p class="eyebrow">Transport</p>
+            <h2>Wrapper settings</h2>
+            <div id="wrapper-form" class="form-grid"></div>
+          </section>
+          <section class="panel">
+            <p class="eyebrow">JSON body</p>
+            <h2>Wrapper preview</h2>
+            <p id="wrapper-summary" class="muted">Build a packet to see wrapper size.</p>
+            <pre id="wrapper-preview">{}</pre>
+          </section>
+        </div>
+      </section>
+
+      <section id="tab-send" class="tab-panel">
+        <div class="grid two">
+          <section class="panel">
+            <p class="eyebrow">Run control</p>
+            <h2>Simulation send parameters</h2>
+            <div class="form-grid">
+              <label>Recipe <select id="recipe"></select></label>
+              <label>Count <input id="send-count" type="number" min="1" max="1000" value="5" /></label>
+              <label>Interval seconds <input id="send-interval" type="number" min="0" max="3600" step="0.1" value="5" /></label>
+              <label>Timeout seconds <input id="send-timeout" type="number" min="1" max="300" value="15" /></label>
+              <label>Movement metres <input id="movement-metres" type="number" min="0" max="300" value="200" /></label>
+              <label class="check"><input id="advance-live" type="checkbox" checked /> Advance sequence, time and telemetry</label>
+            </div>
+            <p id="recipe-description" class="muted"></p>
+            <div class="toolbar">
+              <button id="run-send" class="primary">Run selected scenario</button>
+              <button id="stop-send">Stop</button>
+              <button id="clear-log">Clear log</button>
+            </div>
+          </section>
+          <section class="panel">
+            <p class="eyebrow">Status</p>
+            <h2>Active run feedback</h2>
+            <p id="run-status" class="muted">Idle.</p>
+            <div class="log-table-wrap">
+              <table class="log-table">
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>#</th>
+                    <th>Device</th>
+                    <th>HTTP</th>
+                    <th>Result</th>
+                    <th>Seq</th>
+                    <th>ms</th>
+                    <th>Message</th>
+                  </tr>
+                </thead>
+                <tbody id="response-log"></tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+        <section class="panel">
+          <p class="eyebrow">Selected response</p>
+          <h2>Response JSON</h2>
+          <pre id="response-detail">{}</pre>
+        </section>
+      </section>
+    </main>
+
+    <dialog id="sql-dialog">
+      <form method="dialog" class="dialog-card">
+        <h2>Generate provisioning SQL</h2>
+        <label>Family / household UUID <input id="sql-household-id" placeholder="6e799f91-3027-4c8f-b239-09531939e79e" /></label>
+        <label>HMAC key version <input id="sql-key-version" type="number" min="1" max="32767" value="1" /></label>
+        <div class="toolbar">
+          <button id="generate-sql" type="button">Generate</button>
+          <button id="copy-sql" type="button">Copy</button>
+          <button>Close</button>
+        </div>
+        <textarea id="sql-output" spellcheck="false"></textarea>
+      </form>
+    </dialog>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

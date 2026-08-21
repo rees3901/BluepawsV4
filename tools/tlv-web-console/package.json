@@ -1,0 +1,14 @@
+{
+  "name": "bluepaws-tlv-web-console",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local-only Bluepaws TLV telemetry diagnostic console.",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
