@@ -407,15 +407,27 @@ export async function sendPacket({ deviceSettings, credential, gatewayCredential
   validateBearerToken(token, "bearer token");
   const cleanEndpoint = String(endpoint || DEFAULT_ENDPOINT).trim();
   if (!cleanEndpoint.startsWith("https://")) throw new Error("endpoint must use HTTPS");
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json",
+    "User-Agent": "bluepaws-tlv-web-console/1",
+  };
+  const requestBody = JSON.stringify(preview.wrapper);
+  const requestPreview = {
+    method: "POST",
+    url: cleanEndpoint,
+    headers: {
+      ...headers,
+      Authorization: `Bearer ${maskSecret(token)}`,
+    },
+    body: preview.wrapper,
+    body_size_bytes: Buffer.byteLength(requestBody, "utf8"),
+  };
   const started = Date.now();
   const response = await fetch(cleanEndpoint, {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      "User-Agent": "bluepaws-tlv-web-console/1",
-    },
-    body: JSON.stringify(preview.wrapper),
+    headers,
+    body: requestBody,
     signal: AbortSignal.timeout(Math.max(1, Number(timeoutSeconds)) * 1000),
   });
   const text = await response.text();
@@ -429,6 +441,7 @@ export async function sendPacket({ deviceSettings, credential, gatewayCredential
     status: response.status,
     ok: response.ok,
     elapsed_ms: Date.now() - started,
+    request: requestPreview,
     response: body,
     preview,
   };

@@ -52,6 +52,8 @@ function bindEvents() {
   });
   $("clear-log").addEventListener("click", () => {
     state.responseRows = [];
+    $("request-detail").textContent = "{}";
+    $("response-detail").textContent = "{}";
     renderResponseLog();
   });
   $("provision-sql").addEventListener("click", () => $("sql-dialog").showModal());
@@ -440,6 +442,8 @@ function appendLog(requestNumber, deviceId, settings, result) {
     sequence: settings.sequence,
     elapsed: result.elapsed_ms,
     message: response.error || response.message || response.format || (result.ok ? "accepted" : "failed"),
+    requestDetail: result.request || {},
+    responseDetail: result.response || {},
     detail: result,
   };
   state.responseRows.unshift(row);
@@ -461,7 +465,9 @@ function renderResponseLog() {
   `).join("");
   $("response-log").querySelectorAll("tr").forEach((row) => {
     row.addEventListener("click", () => {
-      $("response-detail").textContent = JSON.stringify(state.responseRows[Number(row.dataset.index)].detail, null, 2);
+      const selected = state.responseRows[Number(row.dataset.index)];
+      $("request-detail").textContent = JSON.stringify(selected.requestDetail, null, 2);
+      $("response-detail").textContent = JSON.stringify(selected.responseDetail, null, 2);
     });
   });
 }
