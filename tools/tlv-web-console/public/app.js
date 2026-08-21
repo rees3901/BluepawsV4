@@ -23,7 +23,6 @@ async function boot() {
   await refreshCredentials();
   bindEvents();
   $("server-status").textContent = "Local server connected";
-  await buildPreview();
 }
 
 function bindEvents() {
@@ -36,12 +35,16 @@ function bindEvents() {
   $("add-configured-device").addEventListener("click", addConfiguredDeviceToFleet);
   $("add-gateway").addEventListener("click", addGateway);
   $("select-all-devices").addEventListener("click", () => {
-    for (const settings of state.deviceSettings.values()) settings.enabled = true;
+    const devices = [...state.deviceSettings.values()];
+    const shouldEnable = !devices.every((settings) => settings.enabled);
+    for (const settings of devices) settings.enabled = shouldEnable;
     renderDevices();
+    buildPreview();
   });
   $("toggle-all-devices").addEventListener("change", (event) => {
     for (const settings of state.deviceSettings.values()) settings.enabled = event.target.checked;
     renderDevices();
+    buildPreview();
   });
   $("build-preview").addEventListener("click", buildPreview);
   $("recipe").addEventListener("change", applyRecipeDefaults);
@@ -95,7 +98,7 @@ async function refreshCredentials() {
     state.configuredDeviceId = state.selectedDeviceId;
   }
   renderDevices();
-  schedulePreview();
+  await buildPreview();
 }
 
 function renderDevices() {
@@ -156,6 +159,7 @@ function syncFleetSendToggle() {
   toggle.disabled = devices.length === 0;
   toggle.checked = devices.length > 0 && enabledCount === devices.length;
   toggle.indeterminate = enabledCount > 0 && enabledCount < devices.length;
+  $("select-all-devices").textContent = toggle.checked ? "Select none" : "Select all";
 }
 
 function renderDeviceDetail() {
@@ -378,14 +382,12 @@ function escapeHtml(value) {
 }
 
 let previewTimer;
-let previewRun = 0;
 function schedulePreview() {
   clearTimeout(previewTimer);
   previewTimer = setTimeout(buildPreview, 180);
 }
 
 async function buildPreview() {
-  const run = ++previewRun;
   const settings = selectedSettings();
   if (!settings) {
     setText("payload-summary", "Select a device to preview its packet.");
@@ -398,7 +400,6 @@ async function buildPreview() {
   }
   try {
     const preview = await api("/api/build", { method: "POST", body: { device: settings, wrapper: state.wrapper } });
-    if (run !== previewRun) return;
     setText("payload-preview-title", `Device ${settings.deviceId} TLV packet preview`);
     setText("decoded-preview-title", `Device ${settings.deviceId} human-readable TLV JSON`);
     setText("payload-summary", `${preview.packet_size_bytes} bytes • TLVs ${preview.tlv_length_bytes}/24 bytes • HMAC ${preview.hmac_valid ? "valid" : "invalid"}`);
@@ -407,15 +408,14 @@ async function buildPreview() {
     setText("decoded-preview", JSON.stringify(preview.decoded, null, 2));
     setText("wrapper-summary", `JSON body ${preview.wrapper_size_bytes} bytes • endpoint ${state.wrapper.endpoint}`);
     setText("wrapper-preview", JSON.stringify(preview.wrapper, null, 2));
-    await renderFleetPreviews(run);
+    await renderFleetPreviews();
   } catch (error) {
-    if (run !== previewRun) return;
     setText("payload-summary", error.message);
     setText("decoded-preview", JSON.stringify({ error: error.message }, null, 2));
   }
 }
 
-async function renderFleetPreviews(run) {
+async function renderFleetPreviews() {
   if (!$("fleet-preview-summary") || !$("fleet-previews")) return;
   const enabledSettings = [...state.deviceSettings.values()].filter((settings) => settings.enabled);
   setText("fleet-preview-summary", enabledSettings.length
@@ -434,8 +434,6 @@ async function renderFleetPreviews(run) {
       return { settings, error };
     }
   }));
-  if (run !== previewRun) return;
-
   setHtml("fleet-previews", previews.map(({ settings, preview, error }) => {
     if (error) {
       return `
