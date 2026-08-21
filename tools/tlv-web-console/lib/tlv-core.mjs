@@ -130,6 +130,7 @@ export function defaultDeviceSettings(deviceId, index = 0) {
     flags: FLAG_MASKS.GNSS_VALID | FLAG_MASKS.FIX_3D,
     latitude: round7(51.907055 + index * 0.00035),
     longitude: round7(-2.25666 - index * 0.00035),
+    driftMetres: 300,
     batteryMv: 3900,
     accuracyM: 8,
     fixAgeS: 0,

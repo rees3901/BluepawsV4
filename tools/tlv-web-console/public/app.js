@@ -4,6 +4,7 @@ const state = {
   credentialPath: "",
   deviceSettings: new Map(),
   selectedDeviceId: null,
+  configuredDeviceId: null,
   wrapper: {},
   running: false,
   stopRequested: false,
@@ -32,6 +33,7 @@ function bindEvents() {
   $("credential-file").addEventListener("change", importCredentialFile);
   $("save-bundle").addEventListener("click", saveBundle);
   $("add-device").addEventListener("click", addDevice);
+  $("add-configured-device").addEventListener("click", addConfiguredDeviceToFleet);
   $("add-gateway").addEventListener("click", addGateway);
   $("select-all-devices").addEventListener("click", () => {
     for (const settings of state.deviceSettings.values()) settings.enabled = true;
@@ -61,20 +63,20 @@ async function refreshCredentials() {
   state.credentials = result.bundle;
   state.credentialPath = result.path;
   $("credential-path").textContent = result.path;
+  const missingDefaults = [];
   state.credentials.devices.forEach((device, index) => {
     if (!state.deviceSettings.has(device.device_id)) {
-      state.deviceSettings.set(device.device_id, null);
-      api("/api/default-device-settings", {
-        method: "POST",
-        body: { device_id: device.device_id, index },
-      }).then((settings) => {
-        state.deviceSettings.set(device.device_id, settings);
-        if (state.selectedDeviceId === null) state.selectedDeviceId = device.device_id;
-        renderDevices();
-        schedulePreview();
-      });
+      missingDefaults.push(
+        api("/api/default-device-settings", {
+          method: "POST",
+          body: { device_id: device.device_id, index },
+        }).then((settings) => {
+          state.deviceSettings.set(device.device_id, settings);
+        })
+      );
     }
   });
+  await Promise.all(missingDefaults);
   for (const deviceId of [...state.deviceSettings.keys()]) {
     if (!state.credentials.devices.some((device) => device.device_id === deviceId)) {
       state.deviceSettings.delete(deviceId);
@@ -82,6 +84,9 @@ async function refreshCredentials() {
   }
   if (state.selectedDeviceId === null && state.credentials.devices[0]) {
     state.selectedDeviceId = state.credentials.devices[0].device_id;
+  }
+  if (state.configuredDeviceId === null && state.selectedDeviceId !== null) {
+    state.configuredDeviceId = state.selectedDeviceId;
   }
   renderDevices();
 }
@@ -102,6 +107,7 @@ function renderDevices() {
       <td>${selectHtml("txReason", state.meta.constants.txReasons, settings.txReason)}</td>
       <td><input data-field="latitude" type="number" step="0.0000001" value="${settings.latitude}"></td>
       <td><input data-field="longitude" type="number" step="0.0000001" value="${settings.longitude}"></td>
+      <td><input data-field="driftMetres" type="number" min="0" max="300" value="${settings.driftMetres ?? 300}"></td>
       <td><input data-field="sequence" type="number" min="0" max="65535" value="${settings.sequence}"></td>
       <td><button data-action="select">Edit</button> <button data-action="delete" class="danger">Delete</button></td>
     `;
@@ -109,6 +115,7 @@ function renderDevices() {
     tr.addEventListener("change", (event) => updateDeviceFromEvent(device.device_id, event));
     tr.querySelector('[data-action="select"]').addEventListener("click", () => {
       state.selectedDeviceId = device.device_id;
+      state.configuredDeviceId = device.device_id;
       renderDevices();
       schedulePreview();
     });
@@ -127,6 +134,26 @@ function renderDeviceDetail() {
     return;
   }
   detail.innerHTML = `
+    <label>Fleet target device ID <input id="configured-device-id" type="number" min="1" max="65535" value="${state.configuredDeviceId ?? settings.deviceId}"></label>
+    <label>Status
+      <select data-detail="status">
+        ${detailOptions(state.meta.constants.statuses, settings.status)}
+      </select>
+    </label>
+    <label>Power profile
+      <select data-detail="powerProfile">
+        ${detailOptions(state.meta.constants.powerProfiles, settings.powerProfile)}
+      </select>
+    </label>
+    <label>TX reason
+      <select data-detail="txReason">
+        ${detailOptions(state.meta.constants.txReasons, settings.txReason)}
+      </select>
+    </label>
+    <label>Latitude <input data-detail="latitude" type="number" step="0.0000001" value="${settings.latitude}"></label>
+    <label>Longitude <input data-detail="longitude" type="number" step="0.0000001" value="${settings.longitude}"></label>
+    <label>Drift metres <input data-detail="driftMetres" type="number" min="0" max="300" value="${settings.driftMetres ?? 300}"></label>
+    <label>Message sequence <input data-detail="sequence" type="number" min="0" max="65535" value="${settings.sequence}"></label>
     <label>Timestamp Unix <input data-detail="timestamp" type="number" value="${settings.timestamp}"></label>
     <label>Battery mV <input data-detail="batteryMv" type="number" min="0" max="65535" value="${settings.batteryMv}"></label>
     <label>Accuracy m <input data-detail="accuracyM" type="number" min="0" max="65535" value="${settings.accuracyM}"></label>
@@ -147,9 +174,12 @@ function renderDeviceDetail() {
     <label>Activity score <input data-tlv="activity_score" type="number" value="${settings.knownTlvs.activity_score}"></label>
     <label>Acked seq <input data-tlv="acked_msg_seq_id" type="number" value="${settings.knownTlvs.acked_msg_seq_id}"></label>
   `;
-  detail.querySelectorAll("input,select").forEach((input) => {
+  detail.querySelectorAll("[data-detail],[data-tlv]").forEach((input) => {
     input.addEventListener("input", updateDetailFromEvent);
     input.addEventListener("change", updateDetailFromEvent);
+  });
+  $("configured-device-id").addEventListener("input", (event) => {
+    state.configuredDeviceId = coerce(event.target.value);
   });
 }
 
@@ -188,6 +218,12 @@ function selectHtml(field, options, value) {
   return `<select data-field="${field}">${Object.entries(options)
     .map(([name, code]) => `<option value="${code}" ${Number(value) === code ? "selected" : ""}>${name} (${code})</option>`)
     .join("")}</select>`;
+}
+
+function detailOptions(options, value) {
+  return Object.entries(options)
+    .map(([name, code]) => `<option value="${code}" ${Number(value) === code ? "selected" : ""}>${name} (${code})</option>`)
+    .join("");
 }
 
 function option(value, label, selected) {
@@ -251,7 +287,7 @@ async function runScenario() {
   const count = Number($("send-count").value);
   const interval = Number($("send-interval").value);
   const timeout = Number($("send-timeout").value);
-  const movementMetres = Number($("movement-metres").value);
+  const fallbackMovementMetres = Number($("movement-metres").value);
   const enabledIds = [...state.deviceSettings.values()].filter((settings) => settings.enabled).map((settings) => settings.deviceId);
   let requestNumber = 0;
   try {
@@ -263,9 +299,10 @@ async function runScenario() {
         if ($("advance-live").checked && recipeKey !== "duplicate_retry_storm") {
           packetSettings.sequence = (Number(packetSettings.sequence) + 1) & 0xffff;
           packetSettings.timestamp = Math.floor(Date.now() / 1000) + Math.round(cycle * interval);
-          if (movementMetres > 0) {
-            packetSettings.latitude = Number(packetSettings.latitude) + (Math.random() - 0.5) * (movementMetres / 111_320);
-            packetSettings.longitude = Number(packetSettings.longitude) + (Math.random() - 0.5) * (movementMetres / 111_320);
+          const driftMetres = Number(packetSettings.driftMetres ?? fallbackMovementMetres);
+          if (driftMetres > 0) {
+            packetSettings.latitude = Number(packetSettings.latitude) + (Math.random() - 0.5) * (driftMetres / 111_320);
+            packetSettings.longitude = Number(packetSettings.longitude) + (Math.random() - 0.5) * (driftMetres / 111_320);
           }
         }
         const wrapper = (await api("/api/apply-recipe", { method: "POST", body: { device: packetSettings, wrapper: state.wrapper, recipe: recipeKey, cycle_index: cycle } })).wrapper;
@@ -366,11 +403,41 @@ async function addDevice() {
   await refreshCredentials();
 }
 
+async function addConfiguredDeviceToFleet() {
+  const source = selectedSettings();
+  const suggestedDeviceId = nextSuggestedDeviceId();
+  const explicitValue = state.configuredDeviceId ?? $("configured-device-id")?.value;
+  const value = explicitValue || prompt("Device ID to add or update in the fleet", String(suggestedDeviceId));
+  if (!value) return;
+  const deviceId = Number(value);
+  if (!Number.isInteger(deviceId) || deviceId < 1 || deviceId > 65535) {
+    alert("Device ID must be an integer from 1 to 65535.");
+    return;
+  }
+
+  const exists = state.credentials.devices.some((device) => device.device_id === deviceId);
+  if (!exists) {
+    await api("/api/credentials/add-device", { method: "POST", body: { device_id: deviceId } });
+    await refreshCredentials();
+  }
+
+  const sourceSettings = source || await api("/api/default-device-settings", {
+    method: "POST",
+    body: { device_id: deviceId, index: state.credentials.devices.length },
+  });
+  state.deviceSettings.set(deviceId, cloneDeviceSettings(sourceSettings, deviceId));
+  state.selectedDeviceId = deviceId;
+  state.configuredDeviceId = deviceId;
+  renderDevices();
+  schedulePreview();
+}
+
 async function deleteDevice(deviceId) {
   if (!confirm(`Delete device ${deviceId} from the active local bundle?`)) return;
   await api("/api/credentials/delete-device", { method: "POST", body: { device_id: deviceId } });
   state.deviceSettings.delete(deviceId);
   state.selectedDeviceId = null;
+  state.configuredDeviceId = null;
   await refreshCredentials();
 }
 
@@ -417,6 +484,31 @@ function showTab(name) {
 
 function selectedSettings() {
   return state.selectedDeviceId === null ? null : state.deviceSettings.get(state.selectedDeviceId);
+}
+
+function cloneDeviceSettings(settings, deviceId) {
+  return {
+    ...settings,
+    deviceId,
+    enabled: true,
+    driftMetres: settings.driftMetres ?? 300,
+    knownTlvs: { ...(settings.knownTlvs || {}) },
+    customTlvs: [...(settings.customTlvs || [])],
+  };
+}
+
+function nextSuggestedDeviceId() {
+  const used = new Set(state.credentials.devices.map((device) => device.device_id));
+  const selected = Number(state.selectedDeviceId);
+  if (Number.isInteger(selected)) {
+    for (let deviceId = selected + 1; deviceId <= 65535; deviceId += 1) {
+      if (!used.has(deviceId)) return deviceId;
+    }
+  }
+  for (let deviceId = 1001; deviceId <= 65535; deviceId += 1) {
+    if (!used.has(deviceId)) return deviceId;
+  }
+  return 65535;
 }
 
 async function api(path, options = {}) {

@@ -45,6 +45,20 @@
           <section class="panel">
             <div class="section-title">
               <div>
+                <p class="eyebrow">Selected device</p>
+                <h2 id="selected-device-title">No device selected</h2>
+              </div>
+              <div class="toolbar">
+                <button id="add-configured-device">Add configured device to fleet</button>
+                <button id="build-preview">Rebuild preview</button>
+              </div>
+            </div>
+            <div id="device-detail" class="form-grid"></div>
+          </section>
+
+          <section class="panel">
+            <div class="section-title">
+              <div>
                 <p class="eyebrow">Fleet</p>
                 <h2>Per-device scenario table</h2>
               </div>
@@ -61,6 +75,7 @@
                     <th>TX reason</th>
                     <th>Latitude</th>
                     <th>Longitude</th>
+                    <th>Drift m</th>
                     <th>Seq</th>
                     <th></th>
                   </tr>
@@ -68,17 +83,6 @@
                 <tbody id="device-rows"></tbody>
               </table>
             </div>
-          </section>
-
-          <section class="panel">
-            <div class="section-title">
-              <div>
-                <p class="eyebrow">Selected device</p>
-                <h2 id="selected-device-title">No device selected</h2>
-              </div>
-              <button id="build-preview">Rebuild preview</button>
-            </div>
-            <div id="device-detail" class="form-grid"></div>
           </section>
         </div>
 
@@ -124,7 +128,7 @@
               <label>Count <input id="send-count" type="number" min="1" max="1000" value="5" /></label>
               <label>Interval seconds <input id="send-interval" type="number" min="0" max="3600" step="0.1" value="5" /></label>
               <label>Timeout seconds <input id="send-timeout" type="number" min="1" max="300" value="15" /></label>
-              <label>Movement metres <input id="movement-metres" type="number" min="0" max="300" value="200" /></label>
+              <label>Fallback movement metres <input id="movement-metres" type="number" min="0" max="300" value="200" /></label>
               <label class="check"><input id="advance-live" type="checkbox" checked /> Advance sequence, time and telemetry</label>
             </div>
             <p id="recipe-description" class="muted"></p>

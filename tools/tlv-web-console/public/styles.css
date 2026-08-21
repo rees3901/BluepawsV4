@@ -98,6 +98,7 @@ button.danger { border-color: #7c2636; color: #ffd4dc; }
   margin-top: 14px;
 }
 table { width: 100%; border-collapse: collapse; min-width: 980px; }
+.device-table { min-width: 1180px; }
 th, td { border-bottom: 1px solid rgba(112, 169, 208, 0.18); padding: 9px; text-align: left; }
 th { color: #cceeff; background: #143b59; font-size: 12px; }
 td { color: var(--text); }

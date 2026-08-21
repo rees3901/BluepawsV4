@@ -20,6 +20,7 @@ test("builds a valid TLV packet and LTE wrapper", () => {
   const settings = defaultDeviceSettings(1001);
   const preview = previewPacket(settings, credential, defaultWrapperSettings());
 
+  assert.equal(settings.driftMetres, 300);
   assert.equal(preview.packet_size_bytes, 40);
   assert.equal(preview.hmac_valid, true);
   assert.equal(preview.decoded.header.device_id, 1001);
