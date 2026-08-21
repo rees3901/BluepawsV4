@@ -39,6 +39,10 @@ function bindEvents() {
     for (const settings of state.deviceSettings.values()) settings.enabled = true;
     renderDevices();
   });
+  $("toggle-all-devices").addEventListener("change", (event) => {
+    for (const settings of state.deviceSettings.values()) settings.enabled = event.target.checked;
+    renderDevices();
+  });
   $("build-preview").addEventListener("click", buildPreview);
   $("recipe").addEventListener("change", applyRecipeDefaults);
   $("run-send").addEventListener("click", runScenario);
@@ -123,6 +127,16 @@ function renderDevices() {
     rows.appendChild(tr);
   }
   renderDeviceDetail();
+  syncFleetSendToggle();
+}
+
+function syncFleetSendToggle() {
+  const toggle = $("toggle-all-devices");
+  const devices = [...state.deviceSettings.values()];
+  const enabledCount = devices.filter((settings) => settings.enabled).length;
+  toggle.disabled = devices.length === 0;
+  toggle.checked = devices.length > 0 && enabledCount === devices.length;
+  toggle.indeterminate = enabledCount > 0 && enabledCount < devices.length;
 }
 
 function renderDeviceDetail() {
@@ -172,12 +186,19 @@ function renderDeviceDetail() {
       <button id="paste-coordinates" type="button">Paste coordinates…</button>
     </div>
     <label>Custom HMAC tag <input data-detail="customTagHex" value="${settings.customTagHex || ""}" placeholder="16 hex characters"></label>
-    <label class="check"><input data-detail="includeTlvs" type="checkbox" ${settings.includeTlvs ? "checked" : ""}> Include optional TLVs</label>
-    <label>Firmware version <input data-tlv="fw_ver" value="${settings.knownTlvs.fw_ver}"></label>
-    <label>Reset reason <input data-tlv="reset_reason" type="number" value="${settings.knownTlvs.reset_reason}"></label>
-    <label>Uptime seconds <input data-tlv="uptime_s" type="number" value="${settings.knownTlvs.uptime_s}"></label>
-    <label>Activity score <input data-tlv="activity_score" type="number" value="${settings.knownTlvs.activity_score}"></label>
-    <label>Acked seq <input data-tlv="acked_msg_seq_id" type="number" value="${settings.knownTlvs.acked_msg_seq_id}"></label>
+    <details class="optional-tlv-panel" ${settings.includeTlvs ? "open" : ""}>
+      <summary>
+        <label class="check"><input data-detail="includeTlvs" type="checkbox" ${settings.includeTlvs ? "checked" : ""}> Include optional TLVs</label>
+        <span class="summary-hint">${settings.includeTlvs ? "Optional fields included in this packet" : "Collapsed — header-only packet"}</span>
+      </summary>
+      <div class="tlv-field-grid">
+        <label>Firmware version <input data-tlv="fw_ver" value="${settings.knownTlvs.fw_ver}"></label>
+        <label>Reset reason <input data-tlv="reset_reason" type="number" value="${settings.knownTlvs.reset_reason}"></label>
+        <label>Uptime seconds <input data-tlv="uptime_s" type="number" value="${settings.knownTlvs.uptime_s}"></label>
+        <label>Activity score <input data-tlv="activity_score" type="number" value="${settings.knownTlvs.activity_score}"></label>
+        <label>Acked seq <input data-tlv="acked_msg_seq_id" type="number" value="${settings.knownTlvs.acked_msg_seq_id}"></label>
+      </div>
+    </details>
   `;
   detail.querySelectorAll("[data-detail],[data-tlv]").forEach((input) => {
     input.addEventListener("input", updateDetailFromEvent);

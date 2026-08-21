@@ -119,6 +119,15 @@ input, select, textarea {
 textarea { min-height: 120px; resize: vertical; }
 .device-table input, .device-table select { min-width: 110px; }
 .device-table input[type="checkbox"], input[type="checkbox"] { width: auto; }
+.table-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #cceeff;
+  font-size: 12px;
+  font-weight: 800;
+}
+.table-check input { min-width: 0; }
 
 .form-grid {
   display: grid;
@@ -128,6 +137,41 @@ textarea { min-height: 120px; resize: vertical; }
 }
 label { display: grid; gap: 6px; color: var(--muted); font-size: 13px; font-weight: 700; }
 label.check { display: flex; align-items: center; gap: 8px; grid-column: 1 / -1; }
+.optional-tlv-panel {
+  grid-column: 1 / -1;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  background: rgba(6, 21, 34, 0.45);
+}
+.optional-tlv-panel summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  list-style: none;
+}
+.optional-tlv-panel summary::-webkit-details-marker { display: none; }
+.optional-tlv-panel summary::after {
+  content: "▾";
+  color: var(--blue-2);
+  font-size: 14px;
+  transition: transform 150ms ease;
+}
+.optional-tlv-panel[open] summary::after { transform: rotate(180deg); }
+.summary-hint {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  margin-left: auto;
+}
+.tlv-field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
 .inline-tools {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
