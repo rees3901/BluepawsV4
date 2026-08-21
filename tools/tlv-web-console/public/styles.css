@@ -128,6 +128,18 @@ textarea { min-height: 120px; resize: vertical; }
 }
 label { display: grid; gap: 6px; color: var(--muted); font-size: 13px; font-weight: 700; }
 label.check { display: flex; align-items: center; gap: 8px; grid-column: 1 / -1; }
+.inline-tools {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  align-content: end;
+}
+.inline-tools-label {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
 
 pre {
   background: #061522;

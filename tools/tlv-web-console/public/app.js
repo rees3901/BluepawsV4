@@ -166,6 +166,11 @@ function renderDeviceDetail() {
         ${option("custom", "Custom tag", settings.tagMode)}
       </select>
     </label>
+    <div class="inline-tools">
+      <span class="inline-tools-label">Map tools</span>
+      <button id="open-google-maps" type="button">Open Google Maps…</button>
+      <button id="paste-coordinates" type="button">Paste coordinates…</button>
+    </div>
     <label>Custom HMAC tag <input data-detail="customTagHex" value="${settings.customTagHex || ""}" placeholder="16 hex characters"></label>
     <label class="check"><input data-detail="includeTlvs" type="checkbox" ${settings.includeTlvs ? "checked" : ""}> Include optional TLVs</label>
     <label>Firmware version <input data-tlv="fw_ver" value="${settings.knownTlvs.fw_ver}"></label>
@@ -181,6 +186,8 @@ function renderDeviceDetail() {
   $("configured-device-id").addEventListener("input", (event) => {
     state.configuredDeviceId = coerce(event.target.value);
   });
+  $("open-google-maps").addEventListener("click", openGoogleMapsForSelected);
+  $("paste-coordinates").addEventListener("click", pasteCoordinatesForSelected);
 }
 
 function renderWrapperForm() {
@@ -255,6 +262,70 @@ function updateWrapperFromEvent(event) {
   const field = event.target.dataset.wrapper;
   state.wrapper[field] = coerce(event.target.value);
   schedulePreview();
+}
+
+function openGoogleMapsForSelected() {
+  const settings = selectedSettings();
+  if (!settings) return;
+  const latitude = Number(settings.latitude);
+  const longitude = Number(settings.longitude);
+  if (!validLatitudeLongitude(latitude, longitude)) {
+    alert("Enter valid latitude and longitude before opening Google Maps.");
+    return;
+  }
+  const query = `${latitude.toFixed(7)},${longitude.toFixed(7)}`;
+  window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`, "_blank", "noopener");
+}
+
+function pasteCoordinatesForSelected() {
+  const settings = selectedSettings();
+  if (!settings) return;
+  const value = prompt(
+    "Paste coordinates or a Google Maps URL",
+    `${Number(settings.latitude).toFixed(7)}, ${Number(settings.longitude).toFixed(7)}`,
+  );
+  if (!value) return;
+  try {
+    const [latitude, longitude] = parseCoordinates(value);
+    settings.latitude = latitude;
+    settings.longitude = longitude;
+    renderDevices();
+    schedulePreview();
+  } catch (error) {
+    alert(error.message);
+  }
+}
+
+function parseCoordinates(value) {
+  const decoded = safeDecode(value.trim());
+  const patterns = [
+    /!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/i,
+    /@(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)(?:,|$)/i,
+    /(?<![\d.])(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)(?![\d.])/i,
+  ];
+  for (const pattern of patterns) {
+    const match = decoded.match(pattern);
+    if (!match) continue;
+    const latitude = Number(match[1]);
+    const longitude = Number(match[2]);
+    if (!validLatitudeLongitude(latitude, longitude)) {
+      throw new Error("Latitude must be -90 to 90 and longitude must be -180 to 180.");
+    }
+    return [latitude, longitude];
+  }
+  throw new Error("Paste coordinates as latitude, longitude or a Google Maps URL.");
+}
+
+function safeDecode(value) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function validLatitudeLongitude(latitude, longitude) {
+  return Number.isFinite(latitude) && Number.isFinite(longitude) && latitude >= -90 && latitude <= 90 && longitude >= -180 && longitude <= 180;
 }
 
 let previewTimer;
