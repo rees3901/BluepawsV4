@@ -23,7 +23,7 @@ async function boot() {
   await refreshCredentials();
   bindEvents();
   $("server-status").textContent = "Local server connected";
-  schedulePreview();
+  await buildPreview();
 }
 
 function bindEvents() {
@@ -95,6 +95,7 @@ async function refreshCredentials() {
     state.configuredDeviceId = state.selectedDeviceId;
   }
   renderDevices();
+  schedulePreview();
 }
 
 function renderDevices() {
@@ -387,40 +388,41 @@ async function buildPreview() {
   const run = ++previewRun;
   const settings = selectedSettings();
   if (!settings) {
-    $("payload-summary").textContent = "Select a device to preview its packet.";
-    $("packet-hex").value = "";
-    $("packet-b64").value = "";
-    $("decoded-preview").textContent = "{}";
-    $("fleet-preview-summary").textContent = "No devices loaded.";
-    $("fleet-previews").innerHTML = "";
+    setText("payload-summary", "Select a device to preview its packet.");
+    setValue("packet-hex", "");
+    setValue("packet-b64", "");
+    setText("decoded-preview", "{}");
+    setText("fleet-preview-summary", "No devices loaded.");
+    setHtml("fleet-previews", "");
     return;
   }
   try {
     const preview = await api("/api/build", { method: "POST", body: { device: settings, wrapper: state.wrapper } });
     if (run !== previewRun) return;
-    $("payload-preview-title").textContent = `Device ${settings.deviceId} TLV packet preview`;
-    $("decoded-preview-title").textContent = `Device ${settings.deviceId} human-readable TLV JSON`;
-    $("payload-summary").textContent = `${preview.packet_size_bytes} bytes • TLVs ${preview.tlv_length_bytes}/24 bytes • HMAC ${preview.hmac_valid ? "valid" : "invalid"}`;
-    $("packet-hex").value = preview.packet_hex;
-    $("packet-b64").value = preview.payload_b64;
-    $("decoded-preview").textContent = JSON.stringify(preview.decoded, null, 2);
-    $("wrapper-summary").textContent = `JSON body ${preview.wrapper_size_bytes} bytes • endpoint ${state.wrapper.endpoint}`;
-    $("wrapper-preview").textContent = JSON.stringify(preview.wrapper, null, 2);
+    setText("payload-preview-title", `Device ${settings.deviceId} TLV packet preview`);
+    setText("decoded-preview-title", `Device ${settings.deviceId} human-readable TLV JSON`);
+    setText("payload-summary", `${preview.packet_size_bytes} bytes • TLVs ${preview.tlv_length_bytes}/24 bytes • HMAC ${preview.hmac_valid ? "valid" : "invalid"}`);
+    setValue("packet-hex", preview.packet_hex);
+    setValue("packet-b64", preview.payload_b64);
+    setText("decoded-preview", JSON.stringify(preview.decoded, null, 2));
+    setText("wrapper-summary", `JSON body ${preview.wrapper_size_bytes} bytes • endpoint ${state.wrapper.endpoint}`);
+    setText("wrapper-preview", JSON.stringify(preview.wrapper, null, 2));
     await renderFleetPreviews(run);
   } catch (error) {
     if (run !== previewRun) return;
-    $("payload-summary").textContent = error.message;
-    $("decoded-preview").textContent = JSON.stringify({ error: error.message }, null, 2);
+    setText("payload-summary", error.message);
+    setText("decoded-preview", JSON.stringify({ error: error.message }, null, 2));
   }
 }
 
 async function renderFleetPreviews(run) {
+  if (!$("fleet-preview-summary") || !$("fleet-previews")) return;
   const enabledSettings = [...state.deviceSettings.values()].filter((settings) => settings.enabled);
-  $("fleet-preview-summary").textContent = enabledSettings.length
+  setText("fleet-preview-summary", enabledSettings.length
     ? `Rendering ${enabledSettings.length} enabled device packet preview${enabledSettings.length === 1 ? "" : "s"}.`
-    : "No enabled devices selected.";
+    : "No enabled devices selected.");
   if (!enabledSettings.length) {
-    $("fleet-previews").innerHTML = "";
+    setHtml("fleet-previews", "");
     return;
   }
 
@@ -434,7 +436,7 @@ async function renderFleetPreviews(run) {
   }));
   if (run !== previewRun) return;
 
-  $("fleet-previews").innerHTML = previews.map(({ settings, preview, error }) => {
+  setHtml("fleet-previews", previews.map(({ settings, preview, error }) => {
     if (error) {
       return `
         <article class="fleet-preview-card error">
@@ -453,10 +455,25 @@ async function renderFleetPreviews(run) {
         <pre>${escapeHtml(JSON.stringify(preview.decoded, null, 2))}</pre>
       </article>
     `;
-  }).join("");
+  }).join(""));
   $("fleet-previews").querySelectorAll("[data-device-id]").forEach((card) => {
     card.addEventListener("click", () => selectDevice(Number(card.dataset.deviceId)));
   });
+}
+
+function setText(id, value) {
+  const element = $(id);
+  if (element) element.textContent = value;
+}
+
+function setValue(id, value) {
+  const element = $(id);
+  if (element) element.value = value;
+}
+
+function setHtml(id, value) {
+  const element = $(id);
+  if (element) element.innerHTML = value;
 }
 
 async function runScenario() {
