@@ -424,7 +424,11 @@ class QuectelSslSocket:
         tolerate_error: bool = False,
         expect: tuple[str, ...] = ("OK\r\n", "ERROR\r\n"),
     ) -> str:
-        self.slow_write(command + "\r\n")
+        # Match the previously working EG800K proof-of-concept: terminate AT
+        # commands with CR only. This is especially important around prompt
+        # commands; an extra LF can be consumed as data after the modem enters
+        # send mode.
+        self.slow_write(command + "\r")
         response = self.read_until(expect, timeout)
         if self.trace and command != "AT+QSSLSEND":
             print_trace(command, response)
@@ -492,7 +496,7 @@ class QuectelSslSocket:
         raise ModemError(f"TLS socket failed to open:\n{opened}\n{error_detail}")
 
     def send_http(self, socket_id: int, request: bytes) -> str:
-        self.slow_write(f"AT+QSSLSEND={socket_id},{len(request)}\r\n")
+        self.slow_write(f"AT+QSSLSEND={socket_id},{len(request)}\r")
         prompt = self.read_until((">", "ERROR\r\n"), timeout=max(5, self.timeout))
         if self.trace:
             print_trace("AT+QSSLSEND prompt", prompt)
