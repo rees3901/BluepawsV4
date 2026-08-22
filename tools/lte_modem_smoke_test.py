@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import random
 import sys
 import time
@@ -78,6 +79,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--baud", type=int, default=DEFAULT_BAUD)
     parser.add_argument("--apn", default=DEFAULT_APN)
+    parser.add_argument(
+        "--supabase-apikey",
+        default=os.getenv("BLUEPAWS_SUPABASE_APIKEY") or os.getenv("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"),
+        help="Optional Supabase publishable/anon key to include as the apikey header.",
+    )
     parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_SECONDS)
     parser.add_argument("--command-byte-delay", type=float, default=DEFAULT_COMMAND_BYTE_DELAY)
     parser.add_argument("--payload-byte-delay", type=float, default=DEFAULT_PAYLOAD_BYTE_DELAY)
@@ -101,6 +107,11 @@ def parse_args() -> argparse.Namespace:
         "--probe-only",
         action="store_true",
         help="Bring up modem/SIM/PDP/TLS config, but do not POST telemetry.",
+    )
+    parser.add_argument(
+        "--http-get-probe",
+        action="store_true",
+        help="Send a simple GET request to the target host/path instead of telemetry.",
     )
     parser.add_argument(
         "--dry-run",
@@ -173,6 +184,7 @@ def build_demo_request(args: argparse.Namespace) -> tuple[int, HttpRequest]:
         args.url,
         credential.token,
         wrapper,
+        apikey=args.supabase_apikey,
         user_agent="bluepaws-eg800k-smoke-test/1",
     )
 
@@ -182,6 +194,7 @@ def build_http_request(
     bearer_token: str,
     wrapper: dict[str, Any],
     *,
+    apikey: str | None = None,
     user_agent: str,
 ) -> HttpRequest:
     validate_bearer_token(bearer_token)
@@ -208,6 +221,9 @@ def build_http_request(
         "",
         "",
     ]
+    if apikey:
+        validate_bearer_token(apikey, "Supabase apikey")
+        header_lines.insert(3, f"apikey: {apikey}")
     raw = "\r\n".join(header_lines).encode("utf-8") + body
     masked_headers = {
         "Host": host_header,
@@ -218,6 +234,8 @@ def build_http_request(
         "Content-Length": len(body),
         "Connection": "close",
     }
+    if apikey:
+        masked_headers["apikey"] = mask_secret(apikey)
     return HttpRequest(
         host=parsed.hostname,
         port=port,
@@ -230,6 +248,54 @@ def build_http_request(
             "headers": masked_headers,
             "body": wrapper,
             "body_size_bytes": len(body),
+            "raw_http_size_bytes": len(raw),
+        },
+    )
+
+
+def build_get_probe_request(url: str, *, user_agent: str, apikey: str | None = None) -> HttpRequest:
+    parsed = urlparse(url)
+    if parsed.scheme.lower() != "https":
+        raise ValueError("EG800K smoke test endpoint must use HTTPS")
+    if not parsed.hostname:
+        raise ValueError("endpoint URL must include a hostname")
+    path = parsed.path or "/"
+    if parsed.query:
+        path = f"{path}?{parsed.query}"
+    port = parsed.port or 443
+    host_header = parsed.hostname if port == 443 else f"{parsed.hostname}:{port}"
+    header_lines = [
+        f"GET {path} HTTP/1.1",
+        f"Host: {host_header}",
+        "Accept: application/json",
+        f"User-Agent: {user_agent}",
+        "Connection: close",
+        "",
+        "",
+    ]
+    masked_headers = {
+        "Host": host_header,
+        "Accept": "application/json",
+        "User-Agent": user_agent,
+        "Connection": "close",
+    }
+    if apikey:
+        validate_bearer_token(apikey, "Supabase apikey")
+        header_lines.insert(2, f"apikey: {apikey}")
+        masked_headers["apikey"] = mask_secret(apikey)
+    raw = "\r\n".join(header_lines).encode("utf-8")
+    return HttpRequest(
+        host=parsed.hostname,
+        port=port,
+        path=path,
+        body=b"",
+        raw=raw,
+        masked_preview={
+            "method": "GET",
+            "url": url,
+            "headers": masked_headers,
+            "body": None,
+            "body_size_bytes": 0,
             "raw_http_size_bytes": len(raw),
         },
     )
@@ -477,7 +543,15 @@ def strip_modem_footer(body_text: str) -> str:
 def main() -> int:
     args = parse_args()
     try:
-        device_id, request = build_demo_request(args)
+        if args.http_get_probe:
+            device_id = None
+            request = build_get_probe_request(
+                args.url,
+                user_agent="bluepaws-eg800k-smoke-test/1",
+                apikey=args.supabase_apikey,
+            )
+        else:
+            device_id, request = build_demo_request(args)
     except Exception as error:
         print(f"Unable to build TLV request: {error}", file=sys.stderr)
         return 2

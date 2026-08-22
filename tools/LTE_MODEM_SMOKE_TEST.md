@@ -82,6 +82,26 @@ For noisy debugging:
 py -3.11 .\tools\lte_modem_smoke_test.py --port COM20 --device-id 1001 --trace-at --print-http-response
 ```
 
+## If the modem shows `SEND OK` but no HTTP response
+
+First verify whether the modem can read any response from the same Supabase TLS
+host:
+
+```powershell
+py -3.11 .\tools\lte_modem_smoke_test.py --port COM20 --http-get-probe --trace-at --print-http-response
+```
+
+If your shell has the Supabase publishable key available, include it as the
+`apikey` header:
+
+```powershell
+$env:BLUEPAWS_SUPABASE_APIKEY = "<your Supabase publishable key>"
+py -3.11 .\tools\lte_modem_smoke_test.py --port COM20 --http-get-probe --trace-at --print-http-response
+py -3.11 .\tools\lte_modem_smoke_test.py --port COM20 --device-id 1001 --trace-at --print-http-response
+```
+
+The key is transmitted to Supabase but masked in local previews.
+
 ## Defaults
 
 - Endpoint: `https://ykcdaonkvwemedotdpdr.supabase.co/functions/v1/ingest-position`
