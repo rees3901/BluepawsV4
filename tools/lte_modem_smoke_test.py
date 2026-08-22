@@ -37,6 +37,7 @@ DEFAULT_APN = "iot.1nce.net"
 DEFAULT_COMMAND_BYTE_DELAY = 0.002
 DEFAULT_PAYLOAD_BYTE_DELAY = 0.002
 DEFAULT_TIMEOUT_SECONDS = 15.0
+DEFAULT_SSL_RECV_BYTES = 1500
 DEFAULT_LATITUDE = 51.907055
 DEFAULT_LONGITUDE = -2.256660
 CONNECTION_HEADERS = ("close", "keep-alive")
@@ -88,6 +89,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_SECONDS)
     parser.add_argument("--command-byte-delay", type=float, default=DEFAULT_COMMAND_BYTE_DELAY)
     parser.add_argument("--payload-byte-delay", type=float, default=DEFAULT_PAYLOAD_BYTE_DELAY)
+    parser.add_argument(
+        "--ssl-recv-bytes",
+        type=int,
+        default=DEFAULT_SSL_RECV_BYTES,
+        help="Maximum bytes to request per QSSLRECV. 1500 matches the earlier working EG800K proof-of-concept.",
+    )
     parser.add_argument("--ssl-context", type=int, default=0)
     parser.add_argument("--socket-id", type=int, default=0)
     parser.add_argument("--pdp-context", type=int, default=1)
@@ -155,6 +162,8 @@ def parse_args() -> argparse.Namespace:
         parser.error("byte delays cannot be negative")
     if args.baud <= 0:
         parser.error("--baud must be positive")
+    if args.ssl_recv_bytes <= 0:
+        parser.error("--ssl-recv-bytes must be positive")
     return args
 
 
@@ -374,12 +383,14 @@ class QuectelSslSocket:
         *,
         command_byte_delay: float,
         payload_byte_delay: float,
+        ssl_recv_bytes: int,
         timeout: float,
         trace: bool = False,
     ) -> None:
         self.serial = serial_port
         self.command_byte_delay = command_byte_delay
         self.payload_byte_delay = payload_byte_delay
+        self.ssl_recv_bytes = ssl_recv_bytes
         self.timeout = timeout
         self.trace = trace
 
@@ -515,7 +526,7 @@ class QuectelSslSocket:
         for attempt in range(3):
             time.sleep(0.25)
             early_read = self.at(
-                f"AT+QSSLRECV={socket_id},4096",
+                f"AT+QSSLRECV={socket_id},{self.ssl_recv_bytes}",
                 tolerate_error=True,
                 timeout=max(3, self.timeout),
             )
@@ -544,7 +555,7 @@ class QuectelSslSocket:
             return recv_notice
         if f'+QSSLURC: "recv",{socket_id}' in recv_notice:
             return self.at(
-                f"AT+QSSLRECV={socket_id},4096",
+                f"AT+QSSLRECV={socket_id},{self.ssl_recv_bytes}",
                 tolerate_error=True,
                 timeout=max(10, self.timeout),
             )
@@ -553,7 +564,7 @@ class QuectelSslSocket:
         # buffered HTTP response only when explicitly polled, even without a recv
         # URC. Keep the pending URC text so the diagnostic output shows context.
         polled_response = self.at(
-            f"AT+QSSLRECV={socket_id},4096",
+            f"AT+QSSLRECV={socket_id},{self.ssl_recv_bytes}",
             tolerate_error=True,
             timeout=max(10, self.timeout),
         )
@@ -659,6 +670,7 @@ def main() -> int:
             serial_port,
             command_byte_delay=args.command_byte_delay,
             payload_byte_delay=args.payload_byte_delay,
+            ssl_recv_bytes=args.ssl_recv_bytes,
             timeout=args.timeout,
             trace=args.trace_at,
         )
