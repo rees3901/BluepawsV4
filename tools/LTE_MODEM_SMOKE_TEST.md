@@ -102,6 +102,26 @@ py -3.11 .\tools\lte_modem_smoke_test.py --port COM20 --device-id 1001 --trace-a
 
 The key is transmitted to Supabase but masked in local previews.
 
+If the modem still reports `SEND OK` followed by `closed` with no readable HTTP
+response, test whether the server is closing too quickly for buffered receive
+mode:
+
+```powershell
+py -3.11 .\tools\lte_modem_smoke_test.py --port COM20 --device-id 1001 --connection keep-alive --trace-at --print-http-response
+```
+
+Then test Quectel direct-push receive mode:
+
+```powershell
+py -3.11 .\tools\lte_modem_smoke_test.py --port COM20 --device-id 1001 --access-mode 1 --trace-at --print-http-response
+```
+
+For a final compatibility check, try HTTP/1.0:
+
+```powershell
+py -3.11 .\tools\lte_modem_smoke_test.py --port COM20 --device-id 1001 --http-version 1.0 --trace-at --print-http-response
+```
+
 ## Defaults
 
 - Endpoint: `https://ykcdaonkvwemedotdpdr.supabase.co/functions/v1/ingest-position`

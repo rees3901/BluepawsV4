@@ -35,10 +35,14 @@ class LteModemSmokeTestTests(unittest.TestCase):
             "a" * 48,
             {"format": "tlv", "payload_b64": "AAAA"},
             apikey="b" * 48,
+            http_version="1.0",
+            connection="keep-alive",
             user_agent="test-agent/1",
         )
 
         header, _, _body = request.raw.partition(b"\r\n\r\n")
+        self.assertIn(b"POST /functions/v1/ingest-position HTTP/1.0", header)
+        self.assertIn(b"Connection: keep-alive", header)
         self.assertIn(b"apikey: " + b"b" * 48, header)
         self.assertEqual(request.masked_preview["headers"]["apikey"], "bbbb…bbbb")
         self.assertNotIn("b" * 48, json.dumps(request.masked_preview))
@@ -84,6 +88,8 @@ class LteModemSmokeTestTests(unittest.TestCase):
                 satellites=9,
                 url="https://example.com/functions/v1/ingest-position",
                 supabase_apikey=None,
+                http_version="1.1",
+                connection="close",
             )
 
             device_id, request = build_demo_request(args)

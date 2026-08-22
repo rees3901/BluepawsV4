@@ -39,6 +39,7 @@ DEFAULT_PAYLOAD_BYTE_DELAY = 0.002
 DEFAULT_TIMEOUT_SECONDS = 15.0
 DEFAULT_LATITUDE = 51.907055
 DEFAULT_LONGITUDE = -2.256660
+CONNECTION_HEADERS = ("close", "keep-alive")
 
 
 class ModemError(RuntimeError):
@@ -90,6 +91,25 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ssl-context", type=int, default=0)
     parser.add_argument("--socket-id", type=int, default=0)
     parser.add_argument("--pdp-context", type=int, default=1)
+    parser.add_argument(
+        "--access-mode",
+        type=int,
+        default=0,
+        choices=(0, 1),
+        help="Quectel SSL socket access mode. 0=buffer mode, 1=direct push mode.",
+    )
+    parser.add_argument(
+        "--http-version",
+        default="1.1",
+        choices=("1.0", "1.1"),
+        help="Raw HTTP version to use in the request line.",
+    )
+    parser.add_argument(
+        "--connection",
+        default="close",
+        choices=CONNECTION_HEADERS,
+        help="Connection header. keep-alive can help diagnose servers that close too quickly for QSSLRECV.",
+    )
     parser.add_argument(
         "--ssl-seclevel",
         type=int,
@@ -185,6 +205,8 @@ def build_demo_request(args: argparse.Namespace) -> tuple[int, HttpRequest]:
         credential.token,
         wrapper,
         apikey=args.supabase_apikey,
+        http_version=args.http_version,
+        connection=args.connection,
         user_agent="bluepaws-eg800k-smoke-test/1",
     )
 
@@ -195,6 +217,8 @@ def build_http_request(
     wrapper: dict[str, Any],
     *,
     apikey: str | None = None,
+    http_version: str = "1.1",
+    connection: str = "close",
     user_agent: str,
 ) -> HttpRequest:
     validate_bearer_token(bearer_token)
@@ -203,6 +227,10 @@ def build_http_request(
         raise ValueError("EG800K smoke test endpoint must use HTTPS")
     if not parsed.hostname:
         raise ValueError("endpoint URL must include a hostname")
+    if http_version not in ("1.0", "1.1"):
+        raise ValueError("HTTP version must be 1.0 or 1.1")
+    if connection not in CONNECTION_HEADERS:
+        raise ValueError("Connection header must be close or keep-alive")
     path = parsed.path or "/"
     if parsed.query:
         path = f"{path}?{parsed.query}"
@@ -210,14 +238,14 @@ def build_http_request(
     port = parsed.port or 443
     host_header = parsed.hostname if port == 443 else f"{parsed.hostname}:{port}"
     header_lines = [
-        f"POST {path} HTTP/1.1",
+        f"POST {path} HTTP/{http_version}",
         f"Host: {host_header}",
         f"Authorization: Bearer {bearer_token}",
         "Content-Type: application/json",
         "Accept: application/json",
         f"User-Agent: {user_agent}",
         f"Content-Length: {len(body)}",
-        "Connection: close",
+        f"Connection: {connection}",
         "",
         "",
     ]
@@ -232,7 +260,7 @@ def build_http_request(
         "Accept": "application/json",
         "User-Agent": user_agent,
         "Content-Length": len(body),
-        "Connection": "close",
+        "Connection": connection,
     }
     if apikey:
         masked_headers["apikey"] = mask_secret(apikey)
@@ -430,10 +458,11 @@ class QuectelSslSocket:
         socket_id: int,
         host: str,
         port: int,
+        access_mode: int,
     ) -> None:
         self.close_socket(socket_id, tolerate_error=True)
         time.sleep(1)
-        command = f'AT+QSSLOPEN={pdp_context},{ssl_context},{socket_id},"{host}",{port},0'
+        command = f'AT+QSSLOPEN={pdp_context},{ssl_context},{socket_id},"{host}",{port},{access_mode}'
         self.at(command, timeout=max(5, self.timeout))
         opened = self.read_until(
             (f"+QSSLOPEN: {socket_id},0", f"+QSSLOPEN: {socket_id},563", f"+QSSLOPEN: {socket_id},552"),
@@ -467,18 +496,22 @@ class QuectelSslSocket:
         if "SEND OK" not in sent:
             raise ModemError(f"SSL payload send failed:\n{sent}")
         recv_notice = self.read_until(
-            (f'+QSSLURC: "recv",{socket_id}', f'+QSSLURC: "closed",{socket_id}'),
+            ("HTTP/", f'+QSSLURC: "recv",{socket_id}', f'+QSSLURC: "closed",{socket_id}'),
             timeout=max(30, self.timeout),
         )
         if self.trace:
             print_trace("QSSLURC", recv_notice)
+        if "HTTP/" in recv_notice:
+            return recv_notice
         if f'+QSSLURC: "recv",{socket_id}' not in recv_notice:
             # Some endpoints close quickly. Give the modem a final short window in case
             # the recv URC arrives immediately after the closed URC in a separate read.
-            trailing_notice = self.read_until((f'+QSSLURC: "recv",{socket_id}',), timeout=2)
+            trailing_notice = self.read_until(("HTTP/", f'+QSSLURC: "recv",{socket_id}'), timeout=2)
             if self.trace and trailing_notice:
                 print_trace("Trailing QSSLURC", trailing_notice)
             recv_notice += trailing_notice
+        if "HTTP/" in recv_notice:
+            return recv_notice
         if f'+QSSLURC: "recv",{socket_id}' in recv_notice:
             return self.at(
                 f"AT+QSSLRECV={socket_id},4096",
@@ -598,6 +631,7 @@ def main() -> int:
             socket_id=args.socket_id,
             host=request.host,
             port=request.port,
+            access_mode=args.access_mode,
         )
         response = modem.send_http(args.socket_id, request.raw)
         summary = summarize_http_response(response)
