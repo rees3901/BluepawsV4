@@ -183,17 +183,36 @@ struct pending_cmd_t {
 static pending_cmd_t pendingCmds[MAX_PENDING_CMDS];
 static SemaphoreHandle_t pendingMutex = NULL;       // Protects pendingCmds array
 
-// ── WiFi State ──
+// ── WiFi / Cloud State ──
 static bool staConnected = false;             // true if connected to home router
 static String staSSID = WIFI_STA_SSID;        // Current STA SSID (may be loaded from config file)
 static String staPass = WIFI_STA_PASS;        // Current STA password
 static String cloudEndpoint = CLOUD_ENDPOINT; // Cloud POST URL
 static String cloudToken = CLOUD_BEARER_TOKEN; // Gateway bearer token for Supabase Edge Function
 
-// ── Hub Mode (Home vs Portable) ──
-// Home mode: BLE beacon advertising (tells collars they're home)
-// Portable mode: BLE scanning for collar find beacons (RSSI proximity)
-static bool portableMode = false;
+// ── Hub Communications Profile ──
+// This is the user-selected operating profile. It must not flap merely because
+// WiFi, phone hotspot, or cloud reachability changes temporarily.
+enum hub_comm_profile_t : uint8_t {
+    HUB_COMM_HOME = 0,       // Fixed at home, normal household WiFi/cloud path.
+    HUB_COMM_PORTABLE = 1,   // User deliberately took the hub roaming; cloud is best-effort.
+    HUB_COMM_OFF_GRID = 2,   // Local-only roaming/search mode; cloud relay intentionally disabled.
+};
+
+static hub_comm_profile_t hubCommProfile = HUB_COMM_HOME;
+
+struct hub_connectivity_t {
+    bool wifi_connected;
+    bool internet_reachable;       // Placeholder for future active internet probe.
+    bool cloud_reachable;
+    bool lora_rx_active;
+    uint32_t last_cloud_success_ms;
+    uint8_t cloud_failures;
+};
+
+static hub_connectivity_t hubConnectivity = {
+    false, false, false, false, 0, 0
+};
 
 // ── BLE Scan Results (Portable Mode) ──
 #define MAX_BLE_DEVICES 8
@@ -261,6 +280,16 @@ static void initBLE();
 static void initStorage();
 static void initWebServer();
 
+// Hub communications profile / connectivity health
+static const char *hubCommProfileName(hub_comm_profile_t profile);
+static hub_comm_profile_t hubCommProfileFromString(const String &value);
+static bool hubProfileUsesBleScanning();
+static bool hubProfileAllowsCloudRelay();
+static void setHubCommunicationsProfile(hub_comm_profile_t profile);
+static void applyBleRoleForCurrentProfile();
+static void updateConnectivityState();
+static void noteCloudPostResult(int httpCode);
+
 // Packet handling pipeline
 static void handlePacket(const uint8_t *buf, uint8_t len, int16_t rssi, float snr);
 static void updateDeviceState(const uint8_t *buf, int16_t rssi, float snr);
@@ -281,6 +310,7 @@ static void handleAck(const uint8_t *buf);
 // Portable mode (BLE scanning for collar find beacons)
 static void enterPortableMode();
 static void enterHomeMode();
+static void enterOffGridMode();
 static void handleApiBle();
 static void handleApiHubMode();
 
@@ -342,6 +372,83 @@ void loop() {
 }
 
 // ═══════════════════════════════════════════════
+// Hub Communications Profile / Connectivity Health
+//
+// The selected profile is intentional user state. Connectivity is passive
+// health state. Do not switch HOME/PORTABLE/OFF_GRID just because WiFi or cloud
+// goes up/down.
+// ═══════════════════════════════════════════════
+
+static const char *hubCommProfileName(hub_comm_profile_t profile) {
+    switch (profile) {
+    case HUB_COMM_HOME: return "home";
+    case HUB_COMM_PORTABLE: return "portable";
+    case HUB_COMM_OFF_GRID: return "off_grid";
+    default: return "home";
+    }
+}
+
+static hub_comm_profile_t hubCommProfileFromString(const String &value) {
+    if (value == "portable") return HUB_COMM_PORTABLE;
+    if (value == "off_grid" || value == "off-grid" || value == "offline") {
+        return HUB_COMM_OFF_GRID;
+    }
+    return HUB_COMM_HOME;
+}
+
+static bool hubProfileUsesBleScanning() {
+    // Portable and Off-Grid are both search/roaming profiles. BLE scanning is
+    // useful there for local Active Find proximity. Home mode advertises the
+    // trusted home beacon instead.
+    return hubCommProfile == HUB_COMM_PORTABLE || hubCommProfile == HUB_COMM_OFF_GRID;
+}
+
+static bool hubProfileAllowsCloudRelay() {
+    // Off-Grid is an explicit local-only choice. Home and Portable may relay
+    // when their STA/internet/cloud path is healthy.
+    return hubCommProfile != HUB_COMM_OFF_GRID;
+}
+
+static void setHubCommunicationsProfile(hub_comm_profile_t profile) {
+    if (hubCommProfile == profile) return;
+
+    hubCommProfile = profile;
+    Serial.printf("[HUB] Communications profile → %s\n", hubCommProfileName(hubCommProfile));
+    applyBleRoleForCurrentProfile();
+}
+
+static void updateConnectivityState() {
+    bool connected = WiFi.status() == WL_CONNECTED;
+    staConnected = connected;
+    hubConnectivity.wifi_connected = connected;
+    // These are intentionally conservative until an active internet probe and
+    // cloud health endpoint are added. A successful cloud POST promotes both.
+    if (!connected) {
+        hubConnectivity.internet_reachable = false;
+        hubConnectivity.cloud_reachable = false;
+    }
+}
+
+static void noteCloudPostResult(int httpCode) {
+    if (httpCode >= 200 && httpCode < 300) {
+        hubConnectivity.internet_reachable = true;
+        hubConnectivity.cloud_reachable = true;
+        hubConnectivity.last_cloud_success_ms = millis();
+        hubConnectivity.cloud_failures = 0;
+        return;
+    }
+
+    if (hubConnectivity.cloud_failures < 255) {
+        hubConnectivity.cloud_failures++;
+    }
+    // Simple hysteresis placeholder: require repeated failed POSTs before the
+    // UI should show cloud as down. Replace with an explicit probe later.
+    if (hubConnectivity.cloud_failures >= 3) {
+        hubConnectivity.cloud_reachable = false;
+    }
+}
+
+// ═══════════════════════════════════════════════
 // Initialisation
 // ═══════════════════════════════════════════════
 
@@ -370,6 +477,7 @@ static void initLoRa() {
     lora.setCRC(LORA_CRC_ENABLED);   // Enable hardware CRC on the radio
     lora.setDio1Action(onLoRaDio1);   // Register our ISR for packet-received interrupt
     lora.startReceive();              // Put radio into continuous RX mode
+    hubConnectivity.lora_rx_active = true;
 
     Serial.println("OK");
     Serial.println("[LORA] TLV v1.1 raw binary uplink enabled");
@@ -398,8 +506,10 @@ static void initWiFi() {
         }
         if (WiFi.status() == WL_CONNECTED) {
             staConnected = true;
+            hubConnectivity.wifi_connected = true;
             Serial.printf("[WIFI] STA connected: %s\n", WiFi.localIP().toString().c_str());
         } else {
+            updateConnectivityState();
             Serial.println("[WIFI] STA connection failed — AP only");
         }
     }
@@ -424,10 +534,11 @@ static void initBLE() {
     advData.setName(BLE_HOME_BEACON_NAME);  // This is what the collar scans for
     pAdv->setAdvertisementData(advData);
 
-    if (portableMode) {
-        // Portable mode was persisted — start scanning instead of advertising
-        Serial.println("[BLE] Portable mode restored from config");
-        enterPortableMode();
+    if (hubProfileUsesBleScanning()) {
+        // Portable/Off-Grid was persisted — start scanning instead of advertising.
+        Serial.printf("[BLE] %s profile restored from config\n",
+                      hubCommProfileName(hubCommProfile));
+        applyBleRoleForCurrentProfile();
     } else {
         pAdv->start();  // Begin broadcasting — runs autonomously in background
         Serial.printf("[BLE] Beacon advertising: %s\n", BLE_HOME_BEACON_NAME);
@@ -473,7 +584,7 @@ static void initStorage() {
                 if (key == "sta_pass")  staPass = val;        // Home WiFi password
                 if (key == "cloud_url")   cloudEndpoint = val;  // Cloud POST endpoint
                 if (key == "cloud_token") cloudToken = val;     // Gateway bearer token
-                if (key == "hub_mode")    portableMode = (val == "portable");
+                if (key == "hub_mode")    hubCommProfile = hubCommProfileFromString(val);
             }
             f.close();
             Serial.println("[FS] Config loaded");
@@ -995,19 +1106,30 @@ static void handleApiDevices() {
 // Returns hub diagnostic info: uptime, packet counts, memory, WiFi state.
 // Displayed in the Settings modal in the web GUI.
 static void handleApiStatus() {
-    char buf[320];
+    updateConnectivityState();
+
+    char buf[512];
     snprintf(buf, sizeof(buf),
         "{\"uptime\":%u,\"rxCount\":%u,\"txCount\":%u,"
         "\"crcFails\":%u,\"devices\":%u,\"logEntries\":%u,"
         "\"staConnected\":%s,\"staIP\":\"%s\",\"apIP\":\"%s\","
-        "\"freeHeap\":%u,\"hubMode\":\"%s\"}",
+        "\"freeHeap\":%u,\"hubMode\":\"%s\","
+        "\"mode\":\"%s\",\"wifi_connected\":%s,"
+        "\"internet_reachable\":%s,\"cloud_reachable\":%s,"
+        "\"last_cloud_success_ms\":%u,\"lora_rx_active\":%s}",
         millis() / 1000, rxCount, txCount,
         crcFailCount, deviceCount, logEntryCount,
         staConnected ? "true" : "false",
         staConnected ? WiFi.localIP().toString().c_str() : "",
         WiFi.softAPIP().toString().c_str(),
         ESP.getFreeHeap(),
-        portableMode ? "portable" : "home"
+        hubCommProfileName(hubCommProfile),
+        hubCommProfileName(hubCommProfile),
+        hubConnectivity.wifi_connected ? "true" : "false",
+        hubConnectivity.internet_reachable ? "true" : "false",
+        hubConnectivity.cloud_reachable ? "true" : "false",
+        hubConnectivity.last_cloud_success_ms,
+        hubConnectivity.lora_rx_active ? "true" : "false"
     );
     httpServer.send(200, "application/json", buf);
 }
@@ -1143,7 +1265,7 @@ static void handleApiConfig() {
         if (newPass.length() > 0)  f.printf("sta_pass=%s\n", newPass.c_str());
         if (newCloud.length() > 0) f.printf("cloud_url=%s\n", newCloud.c_str());
         if (newToken.length() > 0) f.printf("cloud_token=%s\n", newToken.c_str());
-        f.printf("hub_mode=%s\n", portableMode ? "portable" : "home");
+        f.printf("hub_mode=%s\n", hubCommProfileName(hubCommProfile));
         f.close();
     }
 
@@ -1209,6 +1331,7 @@ static void webTask(void *param) {
     initWebServer();
 
     TickType_t lastHeartbeat = 0;
+    TickType_t lastConnectivityCheck = 0;
 
     for (;;) {
         // Process any pending HTTP requests (non-blocking)
@@ -1220,6 +1343,21 @@ static void webTask(void *param) {
         if (now - lastHeartbeat >= pdMS_TO_TICKS(5000)) {
             lastHeartbeat = now;
             sseBroadcast("heartbeat", "{}");
+        }
+
+        // Keep connectivity health fresh without ever disturbing LoRa RX or
+        // the local AP. Home and Portable may try to reconnect STA; Off-Grid
+        // remains local-only by design.
+        if (now - lastConnectivityCheck >= pdMS_TO_TICKS(10000)) {
+            lastConnectivityCheck = now;
+            updateConnectivityState();
+            if (hubProfileAllowsCloudRelay()
+                && !hubConnectivity.wifi_connected
+                && staSSID.length() > 0) {
+                Serial.printf("[WIFI] STA reconnect attempt in %s profile\n",
+                              hubCommProfileName(hubCommProfile));
+                WiFi.begin(staSSID.c_str(), staPass.c_str());
+            }
         }
 
         // 5ms sleep — fast enough for responsive web UI
@@ -1271,29 +1409,26 @@ class FindBeaconCallbacks : public BLEAdvertisedDeviceCallbacks {
 static FindBeaconCallbacks findBeaconCb;
 
 // ═══════════════════════════════════════════════
-// Portable Mode — Enter / Exit
+// Hub Communications Profile BLE Roles
 // ═══════════════════════════════════════════════
 
-static void enterPortableMode() {
-    if (portableMode) return;
+static void applyBleRoleForCurrentProfile() {
+    if (hubProfileUsesBleScanning()) {
+        // Stop home beacon
+        BLEDevice::getAdvertising()->stop();
+        Serial.println("[BLE] Home beacon stopped");
 
-    // Stop home beacon
-    BLEDevice::getAdvertising()->stop();
-    Serial.println("[BLE] Home beacon stopped");
+        // Start BLE scanning for collar find beacons
+        pBLEScan = BLEDevice::getScan();
+        pBLEScan->setAdvertisedDeviceCallbacks(&findBeaconCb, true);
+        pBLEScan->setActiveScan(true);
+        pBLEScan->setInterval(160);   // 100ms in 0.625ms units
+        pBLEScan->setWindow(128);     // 80ms in 0.625ms units
 
-    // Start BLE scanning for collar find beacons
-    pBLEScan = BLEDevice::getScan();
-    pBLEScan->setAdvertisedDeviceCallbacks(&findBeaconCb, true);
-    pBLEScan->setActiveScan(true);
-    pBLEScan->setInterval(160);   // 100ms in 0.625ms units
-    pBLEScan->setWindow(128);     // 80ms in 0.625ms units
-
-    portableMode = true;
-    Serial.println("[HUB] Entered PORTABLE mode — scanning for collars");
-}
-
-static void enterHomeMode() {
-    if (!portableMode) return;
+        Serial.printf("[HUB] %s profile — BLE scanning for collars\n",
+                      hubCommProfileName(hubCommProfile));
+        return;
+    }
 
     // Stop BLE scanning
     if (pBLEScan) {
@@ -1308,9 +1443,19 @@ static void enterHomeMode() {
 
     // Restart home beacon
     BLEDevice::getAdvertising()->start();
+    Serial.println("[HUB] HOME profile — beacon advertising");
+}
 
-    portableMode = false;
-    Serial.println("[HUB] Entered HOME mode — beacon advertising");
+static void enterPortableMode() {
+    setHubCommunicationsProfile(HUB_COMM_PORTABLE);
+}
+
+static void enterHomeMode() {
+    setHubCommunicationsProfile(HUB_COMM_HOME);
+}
+
+static void enterOffGridMode() {
+    setHubCommunicationsProfile(HUB_COMM_OFF_GRID);
 }
 
 // ═══════════════════════════════════════════════
@@ -1339,8 +1484,8 @@ static void handleApiBle() {
 }
 
 // ═══════════════════════════════════════════════
-// API: POST /api/hub-mode — Toggle home/portable mode
-// Body: mode=portable or mode=home
+// API: POST /api/hub-mode — Select the explicit communications profile
+// Body: mode=home, mode=portable, or mode=off_grid
 // ═══════════════════════════════════════════════
 
 static void handleApiHubMode() {
@@ -1352,15 +1497,17 @@ static void handleApiHubMode() {
     String body = httpServer.arg("plain");
     if (body.indexOf("mode=portable") >= 0) {
         enterPortableMode();
+    } else if (body.indexOf("mode=off_grid") >= 0 || body.indexOf("mode=off-grid") >= 0) {
+        enterOffGridMode();
     } else if (body.indexOf("mode=home") >= 0) {
         enterHomeMode();
     } else {
-        httpServer.send(400, "text/plain", "Bad request: mode=portable|home");
+        httpServer.send(400, "text/plain", "Bad request: mode=home|portable|off_grid");
         return;
     }
 
-    char resp[32];
-    snprintf(resp, sizeof(resp), "{\"mode\":\"%s\"}", portableMode ? "portable" : "home");
+    char resp[40];
+    snprintf(resp, sizeof(resp), "{\"mode\":\"%s\"}", hubCommProfileName(hubCommProfile));
     httpServer.send(200, "application/json", resp);
 }
 
@@ -1368,13 +1515,13 @@ static void handleApiHubMode() {
 // BLE Task — Home Beacon / Portable Scanner
 //
 // In Home mode: periodically restarts BLE advertising as a keepalive.
-// In Portable mode: runs BLE scans and expires stale results.
+// In Portable/Off-Grid mode: runs BLE scans and expires stale results.
 // ═══════════════════════════════════════════════
 
 static void bleTask(void *param) {
     (void)param;
     for (;;) {
-        if (portableMode) {
+        if (hubProfileUsesBleScanning()) {
             // Run a 5-second scan cycle
             if (pBLEScan) {
                 pBLEScan->start(5, false);
@@ -1467,8 +1614,16 @@ static void cloudTask(void *param) {
     for (;;) {
         // Block until a packet is queued (or timeout after 5s for housekeeping)
         if (xQueueReceive(cloudQueue, &entry, pdMS_TO_TICKS(5000)) == pdTRUE) {
+            updateConnectivityState();
+
+            // Off-Grid is deliberately local-only. Drop cloud-forward work
+            // without blocking the LoRa receive path or local web GUI.
+            if (!hubProfileAllowsCloudRelay()) {
+                continue;
+            }
+
             // Skip if no internet connection or no endpoint configured
-            if (!staConnected || cloudEndpoint.length() == 0) {
+            if (!hubConnectivity.wifi_connected || cloudEndpoint.length() == 0) {
                 continue;
             }
 
@@ -1492,6 +1647,7 @@ static void cloudTask(void *param) {
             } else {
                 Serial.printf("[CLOUD] POST failed: %s\n", http.errorToString(code).c_str());
             }
+            noteCloudPostResult(code);
             http.end();
         }
     }
