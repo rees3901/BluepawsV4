@@ -39,6 +39,8 @@ DEFAULT_COMMAND_BYTE_DELAY = 0.002
 DEFAULT_PAYLOAD_BYTE_DELAY = 0.002
 DEFAULT_TIMEOUT_SECONDS = 15.0
 DEFAULT_SSL_RECV_BYTES = 1500
+DEFAULT_ATTEMPTS = 2
+DEFAULT_RETRY_DELAY_SECONDS = 2.0
 DEFAULT_LATITUDE = 51.907055
 DEFAULT_LONGITUDE = -2.256660
 CONNECTION_HEADERS = ("close", "keep-alive")
@@ -132,6 +134,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--satellites", type=int, default=9)
     parser.add_argument("--sequence", type=int, default=random.randint(0, 65_535))
     parser.add_argument(
+        "--attempts",
+        type=int,
+        default=DEFAULT_ATTEMPTS,
+        help="Maximum send attempts for transient/no-response/5xx failures. Retries resend the exact same TLV payload.",
+    )
+    parser.add_argument(
+        "--retry-delay",
+        type=float,
+        default=DEFAULT_RETRY_DELAY_SECONDS,
+        help="Seconds to wait between transient retry attempts.",
+    )
+    parser.add_argument(
         "--probe-only",
         action="store_true",
         help="Bring up modem/SIM/PDP/TLS config, but do not POST telemetry.",
@@ -165,6 +179,10 @@ def parse_args() -> argparse.Namespace:
         parser.error("--baud must be positive")
     if args.ssl_recv_bytes <= 0:
         parser.error("--ssl-recv-bytes must be positive")
+    if args.attempts <= 0:
+        parser.error("--attempts must be positive")
+    if args.retry_delay < 0:
+        parser.error("--retry-delay cannot be negative")
     return args
 
 
@@ -681,6 +699,24 @@ def decode_chunked_body(body_text: str) -> str:
     return body_text
 
 
+def is_success_status(status: Any) -> bool:
+    return status in (200, 201)
+
+
+def is_transient_summary(summary: dict[str, Any]) -> bool:
+    status = summary.get("http_status")
+    if status is None:
+        return True
+    if isinstance(status, int) and status in {500, 502, 503, 504, 520, 522, 524}:
+        return True
+    body = summary.get("body")
+    if isinstance(body, dict):
+        codes = body.get("codes")
+        if isinstance(codes, list) and "PGRST303" in codes:
+            return True
+    return False
+
+
 def main() -> int:
     args = parse_args()
     try:
@@ -734,21 +770,30 @@ def main() -> int:
         if args.probe_only:
             print("Probe complete: modem, SIM, PDP context, and TLS settings responded.")
             return 0
-        modem.open_socket(
-            pdp_context=args.pdp_context,
-            ssl_context=args.ssl_context,
-            socket_id=args.socket_id,
-            host=request.host,
-            port=request.port,
-            access_mode=args.access_mode,
-        )
-        response = modem.send_http(args.socket_id, request.raw)
-        summary = summarize_http_response(response)
-        print(json.dumps({"modem_post_result": summary}, indent=2))
-        if args.print_http_response:
-            print("\nRaw modem response:")
-            print(response)
-        return 0 if summary["http_status"] in (200, 201) else 1
+        final_summary: dict[str, Any] | None = None
+        for attempt in range(1, args.attempts + 1):
+            modem.open_socket(
+                pdp_context=args.pdp_context,
+                ssl_context=args.ssl_context,
+                socket_id=args.socket_id,
+                host=request.host,
+                port=request.port,
+                access_mode=args.access_mode,
+            )
+            response = modem.send_http(args.socket_id, request.raw)
+            summary = summarize_http_response(response)
+            final_summary = summary
+            print(json.dumps({"attempt": attempt, "modem_post_result": summary}, indent=2))
+            if args.print_http_response:
+                print("\nRaw modem response:")
+                print(response)
+            if is_success_status(summary.get("http_status")):
+                return 0
+            if attempt >= args.attempts or not is_transient_summary(summary):
+                break
+            print(f"Transient result; retrying same TLV payload in {args.retry_delay:g}s...")
+            time.sleep(args.retry_delay)
+        return 0 if final_summary and is_success_status(final_summary.get("http_status")) else 1
     except (OSError, RuntimeError, ModemError) as error:
         print(f"LTE modem smoke test failed: {error}", file=sys.stderr)
         return 1

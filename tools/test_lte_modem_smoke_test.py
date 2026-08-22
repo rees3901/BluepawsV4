@@ -9,6 +9,7 @@ from lte_modem_smoke_test import (
     build_demo_request,
     build_get_probe_request,
     build_http_request,
+    is_transient_summary,
     summarize_http_response,
     supabase_apikey_for_url,
 )
@@ -134,6 +135,12 @@ class LteModemSmokeTestTests(unittest.TestCase):
 
         self.assertEqual(summary["http_status"], 201)
         self.assertEqual(summary["body"], {"accepted": True})
+
+    def test_transient_summary_detection_covers_cold_start_lookup_failure(self):
+        self.assertTrue(is_transient_summary({"http_status": None, "body": None}))
+        self.assertTrue(is_transient_summary({"http_status": 503, "body": {"codes": ["PGRST303"]}}))
+        self.assertFalse(is_transient_summary({"http_status": 401, "body": {"error": "unauthorized"}}))
+        self.assertFalse(is_transient_summary({"http_status": 409, "body": {"error": "message_id_conflict"}}))
 
 
 if __name__ == "__main__":
