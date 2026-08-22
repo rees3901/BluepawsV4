@@ -13,6 +13,8 @@ import {
 const MAX_BODY_BYTES = 4_096;
 const MAX_FUTURE_SKEW_MS = 5 * 60 * 1_000;
 const LEGACY_SOURCE = "edge-api";
+const TX_REASON_WAKE_CHECKIN = 7;
+const FLAG_HOME_BEACON_SEEN = 0x08;
 
 interface PositionPayload {
   schema_version: 1;
@@ -178,6 +180,15 @@ async function handleTlv(
 
   const packet = parsed.packet;
   const metadata = parsed.metadata;
+  const warnings = tlvWarnings(packet);
+  if (warnings.length > 0) {
+    console.warn("TLV accepted with protocol warnings", {
+      requestId,
+      deviceId: packet.deviceGuid16,
+      messageSequenceId: packet.messageSequenceId,
+      warnings,
+    });
+  }
   const payloadHash = await sha256Hex(packet.rawBytes);
   const rpcResult = await supabase.rpc("ingest_tlv_observation", {
     p_protocol_version: packet.protocolVersion,
@@ -241,9 +252,18 @@ async function handleTlv(
     payload_hash: payloadHash,
     ingest_path: metadata.ingestPath,
     link_type: metadata.linkType,
+    warnings,
     received_at: row.received_at,
     request_id: requestId,
   }, row.duplicate ? 200 : 201);
+}
+
+function tlvWarnings(packet: ParsedTlvRequest["packet"]) {
+  const warnings: string[] = [];
+  if (packet.txReason === TX_REASON_WAKE_CHECKIN && (packet.flags & FLAG_HOME_BEACON_SEEN) === 0) {
+    warnings.push("wake_checkin_without_home_beacon_seen");
+  }
+  return warnings;
 }
 
 async function handleLegacyJson(

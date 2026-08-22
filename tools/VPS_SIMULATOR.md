@@ -70,7 +70,7 @@ python3 tools/tlv_telemetry_simulator.py --device-count 5 --iterations 10 --inte
 For LoRa, a bundle containing exactly one gateway is selected automatically:
 
 ```bash
-python3 tools/tlv_telemetry_simulator.py --transport lora_hub --device-count 1 --iterations 5 --interval 2
+python3 tools/tlv_telemetry_simulator.py --transport lora_gateway --device-count 1 --iterations 5 --interval 2
 ```
 
 If the bundle contains several gateways, add `--gateway-guid16 0016`. The

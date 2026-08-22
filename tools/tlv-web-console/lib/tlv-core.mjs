@@ -30,6 +30,7 @@ export const TX_REASON_CODES = {
   BOOT: 4,
   ALERT: 5,
   CONFIG: 6,
+  WAKE_CHECKIN: 7,
 };
 
 export const FLAG_MASKS = {
@@ -360,18 +361,20 @@ export function buildTransportWrapper(payloadB64, wrapperSettings = {}) {
   const transport = wrapperSettings.transport || "cellular_direct";
   const wrapper = {};
   if (transport === "cellular_direct") {
+    wrapper.format = "tlv";
     wrapper.ingest_path = "cellular_direct";
     wrapper.link_type = "lte";
     optionalNumber(wrapper, "cell_rsrp_dbm", wrapperSettings.cellRsrpDbm, -200, 0);
     optionalNumber(wrapper, "cell_rsrq_db", wrapperSettings.cellRsrqDb, -100, 0);
     optionalNumber(wrapper, "cell_sinr_db", wrapperSettings.cellSinrDb, -100, 100);
-  } else if (transport === "lora_hub") {
-    wrapper.ingest_path = "lora_hub";
+  } else if (transport === "lora_hub" || transport === "lora_gateway") {
+    wrapper.format = "tlv";
+    wrapper.ingest_path = "lora_gateway";
     wrapper.link_type = "lora";
     wrapper.gateway_guid16 = normalizeGatewayGuid16(wrapperSettings.gatewayGuid16);
     wrapper.gateway_rx_time_unix = toInteger(wrapperSettings.gatewayRxTimeUnix ?? nowUnix(), "gateway receive timestamp");
   } else {
-    throw new Error("transport must be cellular_direct or lora_hub");
+    throw new Error("transport must be cellular_direct, lora_hub, or lora_gateway");
   }
   optionalNumber(wrapper, "link_rssi_dbm", wrapperSettings.linkRssiDbm, -200, 0);
   optionalNumber(wrapper, "link_snr_db", wrapperSettings.linkSnrDb, -100, 100);
@@ -401,7 +404,7 @@ export function previewPacket(deviceSettings, credential, wrapperSettings = {}) 
 export async function sendPacket({ deviceSettings, credential, gatewayCredential, wrapperSettings, endpoint, timeoutSeconds = 15 }) {
   const preview = previewPacket(deviceSettings, credential, wrapperSettings);
   const transport = wrapperSettings.transport || "cellular_direct";
-  const token = transport === "lora_hub"
+  const token = ["lora_hub", "lora_gateway"].includes(transport)
     ? normalizeGatewayCredential(gatewayCredential).bearer_token
     : normalizeDeviceCredential(credential).bearer_token;
   validateBearerToken(token, "bearer token");
@@ -629,7 +632,7 @@ function normalizeDeviceSettings(input, fallbackDeviceId) {
     timestamp: boundedInteger(settings.timestamp ?? nowUnix(), 0, 0xffff_ffff, "timestamp"),
     status: boundedInteger(settings.status, 0, 3, "status"),
     powerProfile: boundedInteger(settings.powerProfile, 0, 3, "power profile"),
-    txReason: boundedInteger(settings.txReason, 0, 6, "TX reason"),
+    txReason: boundedInteger(settings.txReason, 0, 7, "TX reason"),
     flags: boundedInteger(settings.flags, 0, 255, "flags"),
     latitude: boundedNumber(settings.latitude, -90, 90, "latitude"),
     longitude: boundedNumber(settings.longitude, -180, 180, "longitude"),

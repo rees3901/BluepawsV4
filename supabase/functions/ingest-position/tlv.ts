@@ -13,6 +13,7 @@ const KNOWN_TLVS = new Map<number, { name: string; length: number; read: (view: 
 ]);
 
 const WRAPPER_FIELDS = new Set([
+  "format",
   "ingest_path",
   "link_type",
   "gateway_guid16",
@@ -26,6 +27,7 @@ const WRAPPER_FIELDS = new Set([
 ]);
 
 export type IngestPath = "lora_hub" | "cellular_direct";
+type WrapperIngestPath = IngestPath | "lora_gateway";
 export type LinkType = "lora" | "lte";
 
 export interface TransportMetadata {
@@ -85,21 +87,26 @@ export function parseTlvRequest(value: unknown): ParsedTlvRequest {
   const body = objectBody(value, "body must be a JSON object");
   rejectUnknownFields(body, WRAPPER_FIELDS);
 
-  const ingestPath = body.ingest_path;
-  const linkType = body.link_type;
-  if (ingestPath !== "lora_hub" && ingestPath !== "cellular_direct") {
-    fail("invalid_ingest_path", "ingest_path must be lora_hub or cellular_direct");
+  if (body.format !== undefined && body.format !== "tlv") {
+    fail("invalid_format", "format must be tlv when supplied");
   }
+
+  const ingestPath = body.ingest_path as WrapperIngestPath;
+  const linkType = body.link_type;
+  if (ingestPath !== "lora_hub" && ingestPath !== "lora_gateway" && ingestPath !== "cellular_direct") {
+    fail("invalid_ingest_path", "ingest_path must be lora_gateway, lora_hub, or cellular_direct");
+  }
+  const normalizedIngestPath: IngestPath = ingestPath === "lora_gateway" ? "lora_hub" : ingestPath;
   if (linkType !== "lora" && linkType !== "lte") {
     fail("invalid_link_type", "link_type must be lora or lte");
   }
-  if ((ingestPath === "lora_hub" && linkType !== "lora") || (ingestPath === "cellular_direct" && linkType !== "lte")) {
+  if ((normalizedIngestPath === "lora_hub" && linkType !== "lora") || (normalizedIngestPath === "cellular_direct" && linkType !== "lte")) {
     fail("transport_mismatch", "ingest_path and link_type do not describe the same transport");
   }
 
   let gatewayGuid16: number | null = null;
   let gatewayRxTimeUnix: number | null = null;
-  if (ingestPath === "lora_hub") {
+  if (normalizedIngestPath === "lora_hub") {
     if (typeof body.gateway_guid16 !== "string" || !/^[0-9a-fA-F]{4}$/.test(body.gateway_guid16)) {
       fail("invalid_gateway", "gateway_guid16 must be exactly four hexadecimal characters");
     }
@@ -120,7 +127,7 @@ export function parseTlvRequest(value: unknown): ParsedTlvRequest {
 
   return {
     metadata: {
-      ingestPath,
+      ingestPath: normalizedIngestPath,
       linkType,
       gatewayGuid16,
       gatewayRxTimeUnix,
@@ -153,7 +160,7 @@ export function parseTlvPacket(rawBytes: Uint8Array): ParsedTlvPacket {
   if (powerProfile > 3) fail("reserved_power_profile", "power profile uses a reserved v1 value");
 
   const txReason = view.getUint8(11);
-  if (txReason > 6) fail("reserved_tx_reason", "tx_reason uses a reserved v1 value");
+  if (txReason > 7) fail("reserved_tx_reason", "tx_reason uses a reserved v1 value");
 
   for (let offset = 27; offset <= 30; offset += 1) {
     if (view.getUint8(offset) !== 0) fail("reserved_header_nonzero", "reserved header bytes must be zero");

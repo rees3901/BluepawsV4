@@ -26,6 +26,7 @@ test("builds a valid TLV packet and LTE wrapper", () => {
   assert.equal(preview.decoded.header.device_id, 1001);
   assert.equal(preview.decoded.header.status.name, "OUT");
   assert.equal(preview.wrapper.ingest_path, "cellular_direct");
+  assert.equal(preview.wrapper.format, "tlv");
   assert.equal(preview.wrapper.link_type, "lte");
 });
 
@@ -72,7 +73,8 @@ test("builds a valid LoRa wrapper", () => {
     gatewayRxTimeUnix: 1_786_537_811,
   });
 
-  assert.equal(wrapper.ingest_path, "lora_hub");
+  assert.equal(wrapper.ingest_path, "lora_gateway");
+  assert.equal(wrapper.format, "tlv");
   assert.equal(wrapper.link_type, "lora");
   assert.equal(wrapper.gateway_guid16, "0016");
   assert.equal(wrapper.gateway_rx_time_unix, 1_786_537_811);

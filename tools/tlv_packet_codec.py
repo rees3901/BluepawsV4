@@ -44,8 +44,6 @@ POWER_PROFILE_CODES = {
     "ACTIVE": 2,
     "LOST_ALERT": 3,
 }
-# The deployed v1.1 decoder currently accepts 0..6.  WAKE_CHECKIN remains a
-# documentation candidate until the Edge Function contract is updated.
 TX_REASON_CODES = {
     "TELEMETRY": 0,
     "ACK": 1,
@@ -54,6 +52,7 @@ TX_REASON_CODES = {
     "BOOT": 4,
     "ALERT": 5,
     "CONFIG": 6,
+    "WAKE_CHECKIN": 7,
 }
 FLAG_MASKS = {
     "GNSS_VALID": 0x01,
@@ -390,7 +389,7 @@ def build_transport_wrapper(
 ) -> dict[str, Any]:
     validate_payload_b64(payload_b64)
     wrapper: dict[str, Any]
-    if transport == "lora_hub":
+    if transport in ("lora_hub", "lora_gateway"):
         gateway = (gateway_guid16 or "").strip().upper()
         if len(gateway) != 4:
             raise ValueError("gateway GUID must be exactly four hexadecimal characters")
@@ -405,7 +404,8 @@ def build_transport_wrapper(
         if any(value is not None for value in (cell_rsrp_dbm, cell_rsrq_db, cell_sinr_db)):
             raise ValueError("cellular RF fields are not valid for a LoRa wrapper")
         wrapper = {
-            "ingest_path": "lora_hub",
+            "format": "tlv",
+            "ingest_path": "lora_gateway",
             "link_type": "lora",
             "gateway_guid16": gateway,
             "gateway_rx_time_unix": gateway_rx_time_unix,
@@ -413,9 +413,9 @@ def build_transport_wrapper(
     elif transport == "cellular_direct":
         if gateway_guid16 is not None or gateway_rx_time_unix is not None:
             raise ValueError("gateway fields are not valid for a cellular wrapper")
-        wrapper = {"ingest_path": "cellular_direct", "link_type": "lte"}
+        wrapper = {"format": "tlv", "ingest_path": "cellular_direct", "link_type": "lte"}
     else:
-        raise ValueError("transport must be cellular_direct or lora_hub")
+        raise ValueError("transport must be cellular_direct, lora_hub, or lora_gateway")
 
     optional_values = {
         "link_rssi_dbm": _optional_number(link_rssi_dbm, -200, 0, "link RSSI"),
@@ -608,7 +608,7 @@ def _validate_packet_fields(fields: PacketFields) -> None:
     _range(fields.status, 0, 3, "status")
     _range(fields.power_profile, 0, 3, "power profile")
     _range(fields.flags, 0, 255, "flags")
-    _range(fields.tx_reason, 0, 6, "TX reason")
+    _range(fields.tx_reason, 0, 7, "TX reason")
     if not -90 <= fields.latitude <= 90:
         raise ValueError("latitude must be from -90 to 90")
     if not -180 <= fields.longitude <= 180:

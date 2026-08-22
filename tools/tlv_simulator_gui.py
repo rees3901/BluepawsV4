@@ -847,7 +847,7 @@ class BluepawsTlvSimulator(ctk.CTk):
             "link_rssi_dbm": self._optional_float(self.link_rssi.get(), "link RSSI"),
             "link_snr_db": self._optional_float(self.link_snr.get(), "link SNR"),
         }
-        if transport == "lora_hub":
+        if transport in ("lora_hub", "lora_gateway"):
             return build_transport_wrapper(
                 payload,
                 transport,

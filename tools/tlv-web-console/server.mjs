@@ -149,7 +149,7 @@ async function handleApi(request, response, url) {
     const body = await readJson(request);
     const wrapper = body.wrapper || defaultWrapperSettings();
     const credential = findDevice(body.device?.deviceId);
-    const gatewayCredential = wrapper.transport === "lora_hub" ? findGateway(wrapper.gatewayGuid16) : null;
+    const gatewayCredential = ["lora_hub", "lora_gateway"].includes(wrapper.transport) ? findGateway(wrapper.gatewayGuid16) : null;
     const result = await sendPacket({
       deviceSettings: body.device,
       credential,

@@ -14,20 +14,19 @@ That document supersedes older notes that referred to:
 
 - 29-byte headers
 - 33-byte TLV sections
-- 16-bit device IDs
 - 32-bit message sequence IDs
 - JSON as a production telemetry payload
 
 ## Current v1.1 packet shape
 
 ```text
-[32-byte fixed header][0-30 bytes TLV][2-byte CRC16]
+[32-byte fixed header][0-24 bytes TLV][8-byte auth tag]
 ```
 
 Packet size:
 
 ```text
-minimum = 34 bytes
+minimum = 40 bytes
 maximum = 64 bytes
 ```
 
@@ -36,19 +35,20 @@ maximum = 64 bytes
 | Offset | Size | Field | Type |
 |---:|---:|---|---|
 | 0 | 1 | `ver` | u8 |
-| 1 | 4 | `device_guid32` | u32 |
-| 5 | 2 | `msg_seq_id` | u16 |
-| 7 | 4 | `time_unix` | u32 |
-| 11 | 1 | `state` | u8 |
-| 12 | 1 | `flags` | u8 |
-| 13 | 4 | `lat_e7` | i32 |
-| 17 | 4 | `lon_e7` | i32 |
-| 21 | 2 | `batt_mV` | u16 |
-| 23 | 2 | `acc_m` | u16 |
-| 25 | 2 | `dist_home_m` | u16 |
-| 27 | 1 | `tx_reason` | u8 |
-| 28 | 1 | `tlv_len` | u8 |
-| 29 | 3 | `hdr_rsvd` | u8[3] |
+| 1 | 2 | `device_guid16` | u16 |
+| 3 | 2 | `msg_seq_id` | u16 |
+| 5 | 4 | `time_unix` | u32 |
+| 9 | 1 | `state` | u8 |
+| 10 | 1 | `flags` | u8 |
+| 11 | 1 | `tx_reason` | u8 |
+| 12 | 4 | `lat_e7` | i32 |
+| 16 | 4 | `lon_e7` | i32 |
+| 20 | 2 | `batt_mV` | u16 |
+| 22 | 2 | `acc_m` | u16 |
+| 24 | 2 | `fix_age_s` | u16 |
+| 26 | 1 | `sat_count` | u8 |
+| 27 | 4 | `hdr_rsvd` | u8[4] |
+| 31 | 1 | `tlv_len` | u8 |
 
 ## Implementation warning
 
