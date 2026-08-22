@@ -51,24 +51,24 @@ The distinction between Portable and Off-Grid is intentional. A weak or intermit
 - [x] ~~Implement baseline cloud relay queue/HTTP POST path.~~
 - [x] ~~Implement local hub web server and local telemetry state table.~~
 - [x] ~~Advertise the BLE home beacon from the hub.~~
-- [x] ~~Refactor the current hub implementation into an explicit `HOME` communications state.~~ Implemented as part of the lightweight hub communications-profile skeleton.
-- [x] ~~In Home Mode automatically reconnect to the configured household Wi-Fi after temporary loss.~~ Baseline STA reconnect tick added; final internet/cloud probing still remains separate.
-- [x] ~~Continue LoRa receive, local state updates and command handling regardless of temporary cloud/Wi-Fi loss.~~ The reconnect/cloud-health path does not restart or reconfigure LoRa.
+- [ ] Refactor the current hub implementation into an explicit `HOME` communications state. Initial lightweight communications-profile skeleton exists; final firmware behaviour still needs hardware validation.
+- [ ] In Home Mode automatically reconnect to the configured household Wi-Fi after temporary loss. Baseline STA reconnect tick exists; final internet/cloud probing and validation remain open.
+- [ ] Continue LoRa receive, local state updates and command handling regardless of temporary cloud/Wi-Fi loss. Current scaffold keeps connectivity handling separate from LoRa RX; needs firmware compile/hardware verification.
 - [ ] Use the cloud web application as the normal customer interface while the hub is online.
-- [x] ~~Define clear hub status fields: `mode`, `wifi_connected`, `internet_reachable`, `cloud_reachable`, `last_cloud_success`, and `lora_rx_active`.~~ Exposed in the local hub `/api/status` JSON as architecture-level fields.
+- [ ] Define clear hub status fields: `mode`, `wifi_connected`, `internet_reachable`, `cloud_reachable`, `last_cloud_success`, and `lora_rx_active`. Initial `/api/status` fields exist; final naming, UI display, and health semantics remain open.
 
 ### Portable Mode
 
 - [x] ~~A basic Home/Portable mode concept already exists in the hub firmware.~~
 - [x] ~~Portable-mode BLE scanning support exists in the current hub firmware for Active Find proximity use.~~
-- [x] ~~Make Portable Mode an **explicit user-selected mode**, not a mode inferred simply because home Wi-Fi disappeared.~~ Implemented as `HUB_COMM_PORTABLE`.
+- [ ] Make Portable Mode an **explicit user-selected mode**, not a mode inferred simply because home Wi-Fi disappeared. Initial `HUB_COMM_PORTABLE` scaffold exists; final UX and hardware behaviour remain open.
 - [ ] Provide a simple UI action such as `Take Hub Portable` / `Portable Mode`.
 - [ ] When Portable Mode is selected, stop treating loss of the configured home SSID as a fault condition.
 - [ ] Allow the user to connect the hub STA interface to a phone hotspot or other temporary Wi-Fi network.
-- [x] ~~Continue receiving collar packets over LoRa at all times.~~ Communications-profile changes do not alter the LoRa receive task.
-- [x] ~~Continue forwarding collar packets to Supabase whenever the portable internet uplink is actually usable.~~ Portable mode keeps cloud relay enabled when STA/cloud health permits.
-- [x] ~~Keep local hub data and controls available even when the portable internet uplink becomes intermittent.~~ Local AP/server/state remain independent from cloud health.
-- [x] ~~Do not automatically drop into Off-Grid Mode because a phone hotspot temporarily loses mobile data.~~ Mode and connectivity are now separate state.
+- [ ] Continue receiving collar packets over LoRa at all times. Current skeleton is intended not to alter LoRa RX; needs firmware compile/hardware verification.
+- [ ] Continue forwarding collar packets to Supabase whenever the portable internet uplink is actually usable. Current skeleton keeps cloud relay enabled in Portable when STA/cloud health permits; final probing and retry semantics remain open.
+- [ ] Keep local hub data and controls available even when the portable internet uplink becomes intermittent. Local AP/server/state separation is scaffolded; final UI validation remains open.
+- [ ] Do not automatically drop into Off-Grid Mode because a phone hotspot temporarily loses mobile data. Mode/connectivity separation is scaffolded; final test coverage remains open.
 - [ ] Show separate indicators for `Portable Mode`, `Wi-Fi associated`, and `Internet/cloud reachable`.
 - [ ] Preserve BLE Active Find scanning behaviour while portable where useful.
 
@@ -76,11 +76,11 @@ The distinction between Portable and Off-Grid is intentional. A weak or intermit
 
 - [x] ~~The current hub already creates a local Wi-Fi AP and hosts a local web GUI baseline.~~
 - [x] ~~The current hub already stores recent received telemetry locally in LittleFS/logging structures.~~
-- [x] ~~Make Off-Grid Mode an **explicit user-selected communications profile**.~~ Implemented as `HUB_COMM_OFF_GRID`.
-- [x] ~~In Off-Grid Mode present the hub's local AP as the primary user connection.~~ Off-Grid disables cloud relay and leaves the local AP/server path active.
+- [ ] Make Off-Grid Mode an **explicit user-selected communications profile**. Initial `HUB_COMM_OFF_GRID` scaffold exists; final UX and hardware behaviour remain open.
+- [ ] In Off-Grid Mode present the hub's local AP as the primary user connection. Current scaffold disables cloud relay and leaves local AP/server code active; final local GUI work remains open.
 - [ ] Serve a local version of the BluePaws tracking GUI directly from the hub.
 - [ ] Display live LoRa-derived collar positions, battery, status, RSSI/SNR and last-seen information with no cloud dependency.
-- [x] ~~Maintain command transmission from hub to collar while off-grid.~~ Off-Grid mode does not disable the existing local command path.
+- [ ] Maintain command transmission from hub to collar while off-grid. Current scaffold does not disable the existing local command path; needs firmware compile/hardware verification.
 - [ ] Ensure Lost/Active Find can be initiated locally without Supabase/Vercel availability.
 - [ ] Clearly label the interface `OFF-GRID / LOCAL` so the user understands cloud services are not in use.
 - [ ] Define how much recent position history should be retained by the hub for local viewing.
@@ -89,14 +89,14 @@ The distinction between Portable and Off-Grid is intentional. A weak or intermit
 
 ### Mode Switching and Anti-Flapping
 
-- [x] ~~Implement formal `HOME`, `PORTABLE`, and `OFF_GRID` hub states.~~ Lightweight firmware enum/skeleton added.
-- [x] ~~Home Mode may automatically reconnect to its configured home Wi-Fi, but the user's selected communications profile should not change merely because internet connectivity fluctuates.~~
-- [x] ~~Portable and Off-Grid should be conscious user choices during a search event.~~
-- [x] ~~Separate **mode state** from **connectivity state**. Example: `mode=PORTABLE`, `internet=DOWN` is valid and should not force `mode=OFF_GRID`.~~
-- [x] ~~Add connectivity hysteresis before changing UI/cloud-health indicators, for example several consecutive failed probes before declaring cloud unreachable and several consecutive successes before declaring it restored.~~ Baseline cloud POST failure hysteresis added; dedicated probe remains future work.
-- [x] ~~Never restart/reconfigure the LoRa receive path solely because Wi-Fi or cloud connectivity changed.~~
-- [x] ~~Queue or gracefully drop cloud-forward work without blocking LoRa reception.~~
-- [x] ~~Ensure a temporary phone signal outage cannot cause repeated GUI switching, AP resets, dropped local sessions or confusing status changes.~~
+- [ ] Implement formal `HOME`, `PORTABLE`, and `OFF_GRID` hub states. Lightweight firmware enum/skeleton exists; final state-machine behaviour remains open.
+- [ ] Home Mode may automatically reconnect to its configured home Wi-Fi, but the user's selected communications profile should not change merely because internet connectivity fluctuates. Initial separation exists; needs validation.
+- [ ] Portable and Off-Grid should be conscious user choices during a search event. Initial API-level profile selection exists; final user-facing selector remains open.
+- [ ] Separate **mode state** from **connectivity state**. Example: `mode=PORTABLE`, `internet=DOWN` is valid and should not force `mode=OFF_GRID`. Initial data model exists; final UI/test coverage remains open.
+- [ ] Add connectivity hysteresis before changing UI/cloud-health indicators, for example several consecutive failed probes before declaring cloud unreachable and several consecutive successes before declaring it restored. Baseline cloud POST failure counter exists; dedicated active probe remains future work.
+- [ ] Never restart/reconfigure the LoRa receive path solely because Wi-Fi or cloud connectivity changed. Scaffold intent exists; firmware compile/hardware verification required.
+- [ ] Queue or gracefully drop cloud-forward work without blocking LoRa reception. Current queue/drop pattern exists; final retry/drop policy remains open.
+- [ ] Ensure a temporary phone signal outage cannot cause repeated GUI switching, AP resets, dropped local sessions or confusing status changes. Scaffold intent exists; needs integration testing.
 - [ ] Provide one clear mode selector and separate passive indicators for Wi-Fi, internet/cloud and LoRa status.
 
 ### HTTP Ingestion Wrapper and Ingress Paths
@@ -332,7 +332,7 @@ The current shared configuration contains a consecutive-detection threshold. The
 - [x] ~~BLE home beacon and portable BLE scanning baseline exist.~~
 - [x] ~~Local LittleFS storage/logging baseline exists.~~
 - [x] ~~Cloud relay queue/task baseline exists.~~
-- [x] ~~Refactor hub firmware around the final three communications profiles.~~ High-level profile skeleton implemented; hardware-specific provisioning and final UI remain open.
+- [ ] Refactor hub firmware around the final three communications profiles. High-level profile skeleton exists; hardware-specific provisioning, final UI, and firmware validation remain open.
 - [ ] Implement final Wi-Fi onboarding/provisioning experience.
 - [ ] Implement secure persistent hub identity/credentials.
 - [ ] Implement hub OTA.
