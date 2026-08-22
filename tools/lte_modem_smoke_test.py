@@ -406,8 +406,26 @@ class QuectelSslSocket:
         )
         if self.trace:
             print_trace("QSSLURC", recv_notice)
-        response = self.at(f"AT+QSSLRECV={socket_id},4096", tolerate_error=True, timeout=max(10, self.timeout))
-        return response
+        if f'+QSSLURC: "recv",{socket_id}' not in recv_notice:
+            # Some endpoints close quickly. Give the modem a final short window in case
+            # the recv URC arrives immediately after the closed URC in a separate read.
+            trailing_notice = self.read_until((f'+QSSLURC: "recv",{socket_id}',), timeout=2)
+            if self.trace and trailing_notice:
+                print_trace("Trailing QSSLURC", trailing_notice)
+            recv_notice += trailing_notice
+        if f'+QSSLURC: "recv",{socket_id}' in recv_notice:
+            return self.at(
+                f"AT+QSSLRECV={socket_id},4096",
+                tolerate_error=True,
+                timeout=max(10, self.timeout),
+            )
+        error_detail = self.at("AT+QIGETERROR", tolerate_error=True)
+        return (
+            "NO_HTTP_RESPONSE_AVAILABLE\r\n"
+            + recv_notice
+            + "\r\n"
+            + error_detail
+        )
 
     def close_socket(self, socket_id: int, *, tolerate_error: bool = False) -> None:
         try:
