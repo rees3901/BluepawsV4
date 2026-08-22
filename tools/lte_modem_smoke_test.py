@@ -12,6 +12,7 @@ import argparse
 import json
 import os
 import random
+import re
 import sys
 import time
 from dataclasses import dataclass
@@ -449,6 +450,36 @@ class QuectelSslSocket:
             raise ModemError(f"{command} returned ERROR:\n{response}")
         return response
 
+    def qsslrecv(self, socket_id: int, *, timeout: float | None = None) -> str:
+        command = f"AT+QSSLRECV={socket_id},{self.ssl_recv_bytes}"
+        self.slow_write(command + "\r")
+        response = self.read_qsslrecv_response(timeout=timeout)
+        if self.trace:
+            print_trace(command, response)
+        return response
+
+    def read_qsslrecv_response(self, *, timeout: float | None = None) -> str:
+        end = time.monotonic() + (self.timeout if timeout is None else timeout)
+        chunks: list[str] = []
+        while time.monotonic() < end:
+            waiting = getattr(self.serial, "in_waiting", 0)
+            raw = self.serial.read(waiting or 1)
+            if raw:
+                chunks.append(raw.decode("utf-8", errors="replace"))
+                current = "".join(chunks)
+                if "ERROR" in current and "+QSSLRECV:" not in current:
+                    return current
+                match = re.search(r"\+QSSLRECV:\s*(\d+)\r?\n", current)
+                if match:
+                    expected_bytes = int(match.group(1))
+                    payload_text = current[match.end() :]
+                    payload_bytes = payload_text.encode("utf-8", errors="replace")
+                    if len(payload_bytes) >= expected_bytes:
+                        return current
+            else:
+                time.sleep(0.02)
+        return "".join(chunks)
+
     def configure(
         self,
         *,
@@ -525,11 +556,7 @@ class QuectelSslSocket:
         early_reads: list[str] = []
         for attempt in range(3):
             time.sleep(0.25)
-            early_read = self.at(
-                f"AT+QSSLRECV={socket_id},{self.ssl_recv_bytes}",
-                tolerate_error=True,
-                timeout=max(3, self.timeout),
-            )
+            early_read = self.qsslrecv(socket_id, timeout=max(3, self.timeout))
             early_reads.append(early_read)
             if self.trace:
                 print_trace(f"Early QSSLRECV #{attempt + 1}", early_read)
@@ -554,20 +581,12 @@ class QuectelSslSocket:
         if "HTTP/" in recv_notice:
             return recv_notice
         if f'+QSSLURC: "recv",{socket_id}' in recv_notice:
-            return self.at(
-                f"AT+QSSLRECV={socket_id},{self.ssl_recv_bytes}",
-                tolerate_error=True,
-                timeout=max(10, self.timeout),
-            )
+            return self.qsslrecv(socket_id, timeout=max(10, self.timeout))
         # The original working EG800K proof-of-concept still attempted QSSLRECV
         # after a quick "closed" URC. Some firmware builds appear to expose the
         # buffered HTTP response only when explicitly polled, even without a recv
         # URC. Keep the pending URC text so the diagnostic output shows context.
-        polled_response = self.at(
-            f"AT+QSSLRECV={socket_id},{self.ssl_recv_bytes}",
-            tolerate_error=True,
-            timeout=max(10, self.timeout),
-        )
+        polled_response = self.qsslrecv(socket_id, timeout=max(10, self.timeout))
         if "HTTP/" in polled_response:
             return recv_notice + "\r\n" + polled_response
         error_detail = self.at("AT+QIGETERROR", tolerate_error=True)
