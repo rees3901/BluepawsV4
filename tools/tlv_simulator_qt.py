@@ -2265,7 +2265,7 @@ class BluepawsTlvConsole(QMainWindow):
                     if key in metadata_overrides
                 }
             )
-        if transport == "lora_hub":
+        if transport in ("lora_hub", "lora_gateway"):
             return build_transport_wrapper(
                 payload,
                 transport,

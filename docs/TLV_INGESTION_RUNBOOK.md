@@ -199,7 +199,7 @@ To test the same immutable collar packet through the single gateway in the
 bundle:
 
 ```bash
-python3 tools/tlv_telemetry_simulator.py --transport lora_hub --device-count 1 --iterations 5 --interval 2
+python3 tools/tlv_telemetry_simulator.py --transport lora_gateway --device-count 1 --iterations 5 --interval 2
 ```
 
 With multiple bundled gateways, add `--gateway-guid16 0016`. Explicit gateway

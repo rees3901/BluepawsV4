@@ -8,14 +8,13 @@
   NORMAL / POWERSAVE / ACTIVE cycle:
     1. Wake from deep sleep (only RTC running)
     2. BLE scan for home beacon (10s)
-    3. If home → go back to sleep (no GPS, no TX)
-       Exception: every Nth home cycle, send a heartbeat
-       (battery + status, no GPS, no LED — quiet at night)
+    3. If home → skip GNSS/LTE, send a short WAKE_CHECKIN raw TLV over LoRa,
+       open the command RX window, then go back to sleep.
     4. If NOT home → GPS two-phase acquisition:
        a) Phase 1: TTFF — wait up to 20s for initial fix
        b) Phase 2: Stabilisation — wait 10s for accuracy
     5. Build TLV packet, transmit via LoRa
-    6. Listen for commands from hub (2s RX window)
+    6. Listen for commands from hub (10s RX window)
     7. Every Nth cycle → also send via NB-IoT cellular
     8. Power down all peripherals, deep sleep until next cycle
 
@@ -44,7 +43,7 @@
 // ── BluePaws shared protocol library ──
 #include <bp_protocol.h>     // Binary TLV packet format, builder & parser
 #include <bp_config.h>       // LoRa params, profiles, AES key, timing constants
-#include <bp_crypto.h>       // AES-128-CTR encrypt/decrypt
+#include <bp_crypto.h>       // Legacy AES helper retained for downlink experiments
 #include "collar_pins.h"     // GPIO pin assignments for this board
 
 // FreeRTOS (built into Adafruit nRF52 BSP — no separate install needed)
@@ -84,7 +83,7 @@ static uint32_t gnssFixAgeMs  = 0;     // millis() at last valid parse
 // Controls sleep interval, TX power, GPS mode, cellular ratio.
 // Changed via PKT_CMD_MODE commands from the hub.
 static volatile bp_profile_t currentProfile = PROFILE_NORMAL;          // Current profile enum
-static const bp_profile_config_t *currentConfig = &BP_PROFILES[0];    // Pointer to profile params
+static const bp_profile_config_t *currentConfig = bp_profile_config(PROFILE_NORMAL); // Pointer to profile params
 
 // ── Counters ──
 static uint32_t messageSeq     = 0;    // Incrementing sequence number for outgoing packets
@@ -114,7 +113,9 @@ static uint32_t lastProcessedCmdSeq = 0;
 static volatile bool     inLostMode      = false;  // true = currently in emergency lost mode
 static volatile uint32_t lostModeStartMs = 0;      // millis() when lost mode started
 
-// ── AES-128 Encryption Key (must match the hub's key) ──
+// ── Legacy AES-128 key ──
+// TLV v1.1 uplink packets are sent as raw authenticated TLV over private LoRa.
+// Keep this only until the downlink command protocol is revised.
 static const uint8_t aesKey[16] = LORA_AES_KEY;
 
 // ── Cellular (Sequans Monarch 2 GM02SP — LTE-M/NB-IoT + GNSS) ──
@@ -146,7 +147,7 @@ static void cellularTask(void *param);     // Notification-driven: wakes GM02SP 
 // Cycle phases (called in sequence by cycleTask)
 static bool     bleScanForHome();          // BLE scan for hub's home beacon
 static bool     gnssAcquireFix();          // Request GNSS fix via AT+SQNGNSS
-static void     listenForCommands();       // Open 2s LoRa RX window for hub commands
+static void     listenForCommands();       // Open 10s LoRa RX window for hub commands
 static void     enterDeepSleep();          // Power down, sleep until next cycle
 static void     runLostMode();             // Emergency continuous operation loop
 
@@ -159,8 +160,8 @@ static void     sendTelemetry();           // Build + send PKT_TELEMETRY
 static void     sendModeAck(uint32_t cmdMsgSeq);        // ACK a mode change command
 static void     sendStatusResponse(uint32_t cmdMsgSeq); // Respond to status query
 static void     sendLostModeAlert();       // Alert: lost mode 2hr timeout expired
-static void     sendHeartbeat();              // Home heartbeat (no GPS, no LED)
-static void     transmitPacket(uint8_t *buf, uint8_t len, bool suppressLed = false);  // Encrypt + LoRa TX
+static void     sendWakeCheckin();         // Home wake check-in (no GNSS, no routine LTE)
+static void     transmitPacket(uint8_t *buf, uint8_t len, bool suppressLed = false);  // Raw TLV LoRa TX
 
 // Command handling
 static void     handleReceivedCommand(const uint8_t *buf, uint8_t len);
@@ -345,16 +346,15 @@ static void cycleTask(void *param) {
         if (atHome) {
             homeCycleCount++;
 
-            // Periodic heartbeat: send a lightweight packet so the hub
-            // knows the collar is alive and the cat is still home.
-            // No GPS, no LED flash (quiet at night).
-            uint8_t hbRatio = currentConfig->heartbeat_ratio;
-            if (hbRatio > 0 && (homeCycleCount % hbRatio == 0)) {
-                Serial.printf("[CYCLE] Home (x%d). Heartbeat (ratio 1:%d).\n",
-                              homeCycleCount, hbRatio);
-                sendHeartbeat();
-            } else {
-                Serial.printf("[CYCLE] Home (x%d). Skipping GPS/TX.\n", homeCycleCount);
+            // Home wake check-in: BLE detection is the cause, but the packet
+            // builder explicitly sets WAKE_CHECKIN and HOME_BEACON_SEEN.
+            // This path skips GNSS and routine LTE, then listens for commands.
+            uint8_t checkinRatio = currentConfig->wake_checkin_ratio;
+            if (checkinRatio > 0 && (homeCycleCount % checkinRatio == 0)) {
+                Serial.printf("[CYCLE] Home (x%d). WAKE_CHECKIN (ratio 1:%d).\n",
+                              homeCycleCount, checkinRatio);
+                sendWakeCheckin();
+                listenForCommands();
             }
 
             peripheralsSleep();
@@ -585,7 +585,7 @@ static void sendTelemetry() {
     messageSeq++;
 
     bp_status_t status;
-    uint16_t flags = PKT_TELEMETRY;
+    uint8_t flags = 0;
 
     // Check if GNSS fix is valid and recent
     uint32_t fixAgeS = (millis() - gnssFixAgeMs) / 1000;
@@ -593,18 +593,20 @@ static void sendTelemetry() {
 
     if (locValid) {
         status = STATUS_OUT_AND_ABOUT;  // Pet is outside with valid position
-        flags |= FLAG_HAS_GPS;          // Tell hub we have GPS coordinates
+        flags |= FLAG_GNSS_VALID | FLAG_FIX_3D;
     } else {
         status = STATUS_INVALID_GPS;    // No usable GPS fix this cycle
     }
 
-    if (gpsWarmStart) flags |= FLAG_GPS_WARM;  // Inform hub we have cached ephemeris
+    if (gpsWarmStart && !locValid) flags |= FLAG_STALE_FIX;
+    if (lastError != ERROR_NONE) flags |= FLAG_ERROR_PRESENT;
 
     uint32_t unixTime = gnssGetUnixTime();  // Get timestamp from GNSS
 
     // ── Build the packet ──
     uint8_t buf[BP_MAX_PACKET_SIZE];
-    pkt_init(buf, MY_DEVICE_ID, messageSeq, unixTime, status, flags);
+    pkt_init(buf, MY_DEVICE_ID, (uint16_t)(messageSeq & 0xFFFF), unixTime,
+             status, currentProfile, flags, TX_TELEMETRY);
 
     if (flags & FLAG_HAS_GPS) {
         int32_t lat_e7 = (int32_t)(gnssLat * 1e7);
@@ -616,36 +618,28 @@ static void sendTelemetry() {
         uint16_t acc_m = gnssHdop > 0 ? (uint16_t)((gnssHdop / 100.0) * 5) : 0;
         uint16_t batt_mV = 3700;  // TODO: Read actual battery voltage via ADC
         pkt_set_quality(buf, batt_mV, acc_m, (uint16_t)fixAgeS);
+        pkt_set_sat_count(buf, gnssSats);
     } else {
         uint16_t batt_mV = 3700;  // TODO: Read actual battery voltage via ADC
-        pkt_set_quality(buf, batt_mV, 0, 0);
+        pkt_set_quality(buf, batt_mV, 0, 65535);
+        pkt_set_sat_count(buf, 255);
     }
 
-    // ── Append TLV payload (variable-length key-value pairs after the header) ──
-    pkt_add_tlv_u8(buf,  TLV_PROFILE,        currentProfile);           // Current operating mode
-    pkt_add_tlv_i8(buf,  TLV_TX_POWER,       currentConfig->tx_power_dBm); // TX power in use
-    pkt_add_tlv_u16(buf, TLV_SLEEP_INTERVAL,  currentConfig->sleep_interval_s); // Sleep interval
-    pkt_add_tlv_u8(buf,  TLV_GPS_WARM,        gpsWarmStart ? 1 : 0);    // Warm/cold start indicator
-    pkt_add_tlv_u8(buf,  TLV_HOME_CYCLES,     homeCycleCount);          // How many consecutive home detections
-
-    if (inLostMode) {
-        uint32_t lostElapsed = (millis() - lostModeStartMs) / 1000;
-        pkt_add_tlv_u32(buf, TLV_LOST_MODE_S, lostElapsed);
-    }
-
-    // Append error code if a subsystem fault is active
+    // Keep embedded optional TLVs sparse until the production telemetry set is
+    // finalized. Header fields carry status/profile/location/battery.
+    pkt_add_tlv_u32(buf, TLV_UPTIME_S, millis() / 1000);
     if (lastError != ERROR_NONE) {
-        pkt_add_tlv_u8(buf, TLV_ERROR_TYPE, lastError);
+        pkt_add_tlv_u8(buf, TLV_RESET_REASON, lastError);
     }
 
-    // Finalize: compute and append CRC-16, return total packet length
+    // Finalize: append v1.1 8-byte auth tag placeholder, return total length.
     uint8_t pktLen = pkt_finalize(buf);
 
     Serial.printf("[TX] TELEMETRY seq=%lu status=%s size=%dB\n",
                   messageSeq, bp_status_display(status), pktLen);
     pkt_print_hex(buf, pktLen);
 
-    transmitPacket(buf, pktLen);  // Encrypt + LoRa transmit
+    transmitPacket(buf, pktLen);
 
     // Save a copy for the cellular task to re-send via NB-IoT
     memcpy(lastTxPacket, buf, pktLen);
@@ -653,45 +647,40 @@ static void sendTelemetry() {
 }
 
 // ═══════════════════════════════════════════════
-// Send Home Heartbeat (no GPS, no LED)
+// Send Home Wake Check-In (no GNSS, no routine LTE)
 //
-// Lightweight telemetry sent periodically while the collar
-// detects the home beacon. Lets the hub know the collar is
-// alive and the cat is still home. No GPS acquisition (cat
-// is home, position isn't useful), no LED flash (quiet at
-// night), just battery level + profile + home cycle count.
+// Lightweight presence packet sent when the collar detects the BLE home beacon.
+// The packet explicitly sets tx_reason=WAKE_CHECKIN and HOME_BEACON_SEEN; the
+// packet builder does not infer those fields from each other.
 // ═══════════════════════════════════════════════
-static void sendHeartbeat() {
+static void sendWakeCheckin() {
     messageSeq++;
 
     uint8_t buf[BP_MAX_PACKET_SIZE];
-    pkt_init(buf, MY_DEVICE_ID, messageSeq, 0,
-             STATUS_BLE_HOME, PKT_TELEMETRY);  // No FLAG_HAS_GPS
+    uint8_t flags = FLAG_HOME_BEACON_SEEN;
+    if (lastError != ERROR_NONE) flags |= FLAG_ERROR_PRESENT;
 
-    // Battery only — no GPS accuracy or fix age
+    pkt_init(buf, MY_DEVICE_ID, (uint16_t)(messageSeq & 0xFFFF), 0,
+             STATUS_HOME, currentProfile, flags, TX_WAKE_CHECKIN);
+
     uint16_t batt_mV = 3700;  // TODO: Read actual battery voltage via ADC
-    pkt_set_quality(buf, batt_mV, 0, 0);
+    pkt_set_quality(buf, batt_mV, 0, 65535);
+    pkt_set_sat_count(buf, 255);
 
-    // TLV payload
-    pkt_add_tlv_u8(buf,  TLV_PROFILE,        currentProfile);
-    pkt_add_tlv_i8(buf,  TLV_TX_POWER,       currentConfig->tx_power_dBm);
-    pkt_add_tlv_u16(buf, TLV_SLEEP_INTERVAL,  currentConfig->sleep_interval_s);
-    pkt_add_tlv_u8(buf,  TLV_HOME_CYCLES,     homeCycleCount);
-
-    // Append error code if a subsystem fault is active
+    pkt_add_tlv_u32(buf, TLV_UPTIME_S, millis() / 1000);
     if (lastError != ERROR_NONE) {
-        pkt_add_tlv_u8(buf, TLV_ERROR_TYPE, lastError);
+        pkt_add_tlv_u8(buf, TLV_RESET_REASON, lastError);
     }
 
     uint8_t pktLen = pkt_finalize(buf);
 
-    Serial.printf("[TX] HEARTBEAT seq=%lu homeCycles=%d size=%dB\n",
+    Serial.printf("[TX] WAKE_CHECKIN seq=%lu homeCycles=%d size=%dB\n",
                   messageSeq, homeCycleCount, pktLen);
     pkt_print_hex(buf, pktLen);
 
     transmitPacket(buf, pktLen, /*suppressLed=*/true);
 
-    // Save copy for cellular (though heartbeat won't trigger cellular)
+    // Save copy for diagnostics; routine cellular is intentionally skipped.
     memcpy(lastTxPacket, buf, pktLen);
     lastTxPacketLen = pktLen;
 }
@@ -770,17 +759,12 @@ static void sendLostModeAlert() {
 // ═══════════════════════════════════════════════
 // LoRa Transmit
 //
-// Encrypts the packet (AES-128-CTR), wakes the radio from sleep,
-// transmits, then provides visual feedback via LED flashes.
+// Wakes the radio, transmits the raw TLV v1.1 packet, then provides visual
+// feedback via LED flashes.
 // LED pattern tells you the result: normal flashes = OK,
 // 2 slow flashes = timeout, 6 rapid flashes = error.
 // ═══════════════════════════════════════════════
 static void transmitPacket(uint8_t *buf, uint8_t len, bool suppressLed) {
-    // Encrypt the packet in-place (byte 0 = version stays cleartext)
-    if (!bp_aes_key_is_zero(aesKey)) {
-        bp_aes_ctr_apply(buf, len, aesKey);
-    }
-
     lora.standby();                      // Wake radio from sleep → standby mode
     int state = lora.transmit(buf, len); // Blocking TX — returns when done or timeout
 
@@ -802,7 +786,7 @@ static void transmitPacket(uint8_t *buf, uint8_t len, bool suppressLed) {
 }
 
 // ═══════════════════════════════════════════════
-// Listen for Commands (2s RX window)
+// Listen for Commands (10s RX window)
 //
 // After transmitting telemetry, the collar opens a short receive
 // window so the hub can send commands (mode change, find, etc.).
@@ -832,11 +816,6 @@ static void listenForCommands() {
                 uint8_t rxLen = lora.getPacketLength();
                 Serial.printf("[RX] Received %d bytes\n", rxLen);
 
-                // Decrypt the received command
-                if (!bp_aes_key_is_zero(aesKey)) {
-                    bp_aes_ctr_apply(rxBuf, rxLen, aesKey);
-                }
-
                 pkt_print_hex(rxBuf, rxLen);  // Debug: hex dump to serial
 
                 // Basic validation before processing
@@ -861,9 +840,11 @@ static void listenForCommands() {
 //   PKT_CMD_FIND   — Flash LED + play buzzer pattern ("Find My Pet")
 // ═══════════════════════════════════════════════
 static void handleReceivedCommand(const uint8_t *buf, uint8_t len) {
-    // Validate software CRC
+    // Validate TLV v1.1 structure. Authentication of cloud-bound uplinks is
+    // performed by Supabase; local command authentication will be revised with
+    // the downlink command protocol.
     if (!pkt_validate_crc(buf, len)) {
-        Serial.println("[RX] CRC failed — dropping");
+        Serial.println("[RX] TLV structure failed — dropping");
         return;
     }
 
@@ -1031,7 +1012,8 @@ static void cellularTask(void *param) {
 // ═══════════════════════════════════════════════
 // Cellular: Send TLV via NB-IoT
 // Wakes GM02SP, configures PSM/eDRX on first use,
-// POSTs the TLV binary, then returns (modem enters PSM).
+// POSTs the same TLV payload inside the HTTPS JSON wrapper, then returns
+// (modem enters PSM).
 // ═══════════════════════════════════════════════
 static void cellularSendTlv(const uint8_t *pkt, uint8_t len) {
     // ── Power on GM02SP ──
@@ -1056,7 +1038,8 @@ static void cellularSendTlv(const uint8_t *pkt, uint8_t len) {
     }
 
     // ── POST the TLV payload ──
-    // The TLV binary is sent as-is with FLAG_CELLULAR set.
+    // The collar-generated TLV must stay byte-for-byte identical to any copy
+    // relayed by the hub. LTE adds transport metadata only in the HTTPS wrapper.
     // For now, this is a placeholder AT sequence.
     // The server endpoint and auth will be configured at provisioning.
 
@@ -1064,8 +1047,8 @@ static void cellularSendTlv(const uint8_t *pkt, uint8_t len) {
     //   AT+CEREG?                           → check registration
     //   AT+SQNHTTPCFG=0,"<server_host>",443,1  → configure HTTP client with TLS
     //   AT+SQNHTTPQRY=0,1,"/<endpoint>"     → POST request
-    //   AT+SQNHTTPSND=0,1,<len>             → send body
-    //   <raw TLV binary with FLAG_CELLULAR>
+    //   AT+SQNHTTPSND=0,1,<len>             → send JSON wrapper
+    //   {"format":"tlv","ingest_path":"cellular_direct",...,"payload_b64":"..."}
     //   → +SQNHTTPRING: 0,200,...
 
     Serial.printf("[CELL] TODO: POST %d bytes TLV\n", len);

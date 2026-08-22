@@ -527,7 +527,7 @@ class QtConsoleTests(unittest.TestCase):
         wrapper = self.window.preview_wrapper()
         self.assertIsNotNone(wrapper)
         assert wrapper is not None
-        self.assertEqual(wrapper["ingest_path"], "lora_hub")
+        self.assertEqual(wrapper["ingest_path"], "lora_gateway")
         self.assertEqual(wrapper["gateway_guid16"], "0016")
         self.assertNotIn("cell_rsrp_dbm", wrapper)
 

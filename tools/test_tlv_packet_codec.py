@@ -193,6 +193,7 @@ class TlvPacketCodecTests(unittest.TestCase):
             cell_rsrq_db=-9.5,
             cell_sinr_db=7,
         )
+        self.assertEqual(lte["format"], "tlv")
         self.assertEqual(lte["ingest_path"], "cellular_direct")
         self.assertNotIn("gateway_guid16", lte)
         self.assertEqual(base64.b64decode(lte["payload_b64"]), base64.b64decode(payload))
@@ -205,14 +206,18 @@ class TlvPacketCodecTests(unittest.TestCase):
             link_rssi_dbm=-92,
             link_snr_db=6.25,
         )
+        self.assertEqual(lora["format"], "tlv")
+        self.assertEqual(lora["ingest_path"], "lora_gateway")
         self.assertEqual(lora["link_type"], "lora")
         self.assertEqual(lora["gateway_guid16"], "0016")
         self.assertNotIn("cell_rsrp_dbm", lora)
 
     def test_rejects_backend_reserved_values_and_invalid_cross_transport_fields(self):
         key = bytes(32)
+        wake_checkin = build_tlv_packet(packet_fields(tx_reason=7, flags=0x08), [], key)
+        self.assertEqual(wake_checkin.packet[11], 7)
         with self.assertRaisesRegex(ValueError, "TX reason"):
-            build_tlv_packet(packet_fields(tx_reason=7), [], key)
+            build_tlv_packet(packet_fields(tx_reason=8), [], key)
         payload = build_tlv_packet(packet_fields(), [], key).payload_b64
         with self.assertRaisesRegex(ValueError, "cellular RF"):
             build_transport_wrapper(

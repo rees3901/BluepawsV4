@@ -31,8 +31,9 @@
 #define LORA_LBT_BACKOFF_MIN 50       // ms
 #define LORA_LBT_BACKOFF_MAX 500      // ms
 
-// AES-128 encryption key (16 bytes)
-// Override per-deployment via build flags or provisioning
+// Legacy AES-128 encryption key (16 bytes)
+// TLV v1.1 uplink packets are authenticated, not encrypted. Keep this only for
+// older command-path experiments until the downlink command protocol is revised.
 #ifndef LORA_AES_KEY
 #define LORA_AES_KEY { \
     0xB7, 0x3A, 0x1F, 0x5D, 0x82, 0xC6, 0x49, 0xE0, \
@@ -52,16 +53,16 @@ struct bp_profile_config_t {
     bool         beacon_enabled;     // LED beacon during active period
     bool         gps_continuous;     // keep GPS on between cycles
     uint8_t      cellular_ratio;     // 1 cellular per N cycles (0 = disabled)
-    uint8_t      heartbeat_ratio;   // 1 heartbeat per N home cycles (0 = disabled)
+    uint8_t      wake_checkin_ratio; // 1 wake check-in per N home cycles; use 1 for every scheduled home wake
 };
 
 // Profile lookup table
 static const bp_profile_config_t BP_PROFILES[] = {
-    //                        power  sleep   led  beacon  gps_cont  cell_ratio  heartbeat
-    { PROFILE_NORMAL,          14,    600,    5,  false,  false,    10,          6 },  // 10 min, hb ~1/hr
-    { PROFILE_POWERSAVE,       10,   1800,    3,  false,  false,    30,          2 },  // 30 min, hb ~1/hr
-    { PROFILE_ACTIVE,          20,     60,    5,  false,  false,     5,          0 },  // Active Find: higher TX power
-    { PROFILE_LOST,            20,      0,   10,  true,   true,      3,          0 },  // Emergency Lost: higher TX power
+    //                        power  sleep   led  beacon  gps_cont  cell_ratio  checkin
+    { PROFILE_NORMAL,          14,    600,    5,  false,  false,    10,          1 },  // home: every scheduled wake
+    { PROFILE_POWERSAVE,       10,   1800,    3,  false,  false,    30,          1 },  // home: every scheduled wake
+    { PROFILE_ACTIVE,          20,     60,    5,  false,  false,     5,          1 },  // Active Find: higher TX power
+    { PROFILE_LOST,            20,      0,   10,  true,   true,      3,          1 },  // Emergency Lost: higher TX power
 };
 
 #define BP_PROFILE_COUNT  (sizeof(BP_PROFILES) / sizeof(BP_PROFILES[0]))
@@ -130,7 +131,7 @@ static inline const bp_profile_config_t *bp_profile_config(bp_profile_t p) {
 // ═══════════════════════════════════════════════
 // Command Listen Window
 // ═══════════════════════════════════════════════
-#define CMD_LISTEN_WINDOW_MS      2000
+#define CMD_LISTEN_WINDOW_MS      10000
 #define CMD_QUEUE_INTERVAL_MS     3000  // rate limit between outbound commands
 
 // ═══════════════════════════════════════════════

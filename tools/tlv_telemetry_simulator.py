@@ -98,9 +98,9 @@ def build_wrapper(
     rng: random.Random,
     gateway_guid16: str | None,
 ) -> dict[str, Any]:
-    if transport == "lora_hub":
+    if transport in ("lora_hub", "lora_gateway"):
         if gateway_guid16 is None:
-            raise ValueError("gateway_guid16 is required for lora_hub")
+            raise ValueError("gateway_guid16 is required for lora_gateway")
         return build_transport_wrapper(
             base64.b64encode(packet).decode("ascii"),
             transport,
@@ -154,7 +154,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--iterations", type=int, default=0, help="0 runs until stopped")
     parser.add_argument("--duplicate-rate", type=float, default=0.05)
     parser.add_argument(
-        "--transport", choices=("cellular_direct", "lora_hub"), default="cellular_direct"
+        "--transport", choices=("cellular_direct", "lora_hub", "lora_gateway"), default="cellular_direct"
     )
     parser.add_argument(
         "--gateway-guid16", default=os.getenv("BLUEPAWS_GATEWAY_GUID16")
@@ -219,7 +219,7 @@ def main() -> int:
     try:
         bundle = load_credential_bundle(args.devices_file)
         credentials = list(bundle.devices)
-        if args.transport == "lora_hub":
+        if args.transport in ("lora_hub", "lora_gateway"):
             args.gateway_guid16, args.gateway_token = resolve_gateway_auth(
                 bundle, args.gateway_guid16, args.gateway_token
             )
@@ -255,7 +255,7 @@ def main() -> int:
                 wrapper = build_wrapper(packet, args.transport, rng, args.gateway_guid16)
                 bearer = (
                     args.gateway_token
-                    if args.transport == "lora_hub"
+                    if args.transport in ("lora_hub", "lora_gateway")
                     else state.credential.token
                 )
                 try:

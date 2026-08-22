@@ -61,9 +61,10 @@ response log.
 The credentials file is Git-ignored. Do not commit it, send screenshots with
 the secret fields revealed, or use a Supabase service-role key in this tool.
 
-For `cellular_direct`, use the selected device's bearer token. For `lora_hub`,
-replace it with the separately provisioned gateway bearer token and provide the
-gateway's four-digit hexadecimal GUID.
+For `cellular_direct`, use the selected device's bearer token. For LoRa gateway
+relay, the generated wrapper uses `ingest_path: "lora_gateway"` and the sender
+uses the separately provisioned gateway bearer token plus the gateway's
+four-digit hexadecimal GUID.
 
 ## Tab 1: TLV Packet Builder
 

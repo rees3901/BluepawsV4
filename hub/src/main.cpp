@@ -31,6 +31,7 @@
 #include <BLEServer.h>
 #include <BLEAdvertising.h>
 #include <HTTPClient.h>      // HTTP client for cloud POST relay
+#include <time.h>
 
 // ── FreeRTOS primitives ──
 #include <freertos/FreeRTOS.h>
@@ -41,7 +42,7 @@
 // ── BluePaws shared protocol library ──
 #include <bp_protocol.h>     // Binary TLV packet format, builder & parser
 #include <bp_config.h>       // LoRa params, profiles, AES key, timing constants
-#include <bp_crypto.h>       // AES-128-CTR encrypt/decrypt
+#include <bp_crypto.h>       // Legacy AES helper retained for downlink experiments
 #include "hub_pins.h"        // GPIO pin assignments for this board
 
 // ═══════════════════════════════════════════════
@@ -68,6 +69,12 @@
 // Empty string = cloud relay disabled.
 #ifndef CLOUD_ENDPOINT
 #define CLOUD_ENDPOINT   ""
+#endif
+#ifndef CLOUD_BEARER_TOKEN
+#define CLOUD_BEARER_TOKEN ""
+#endif
+#ifndef GATEWAY_GUID16
+#define GATEWAY_GUID16 0x0016
 #endif
 
 // mDNS hostname — after connecting, browse to http://bluepaws.local
@@ -146,14 +153,14 @@ struct cloud_entry_t {
     float    snr;                      // Signal-to-noise ratio when received
 };
 
-// ── AES-128 Encryption Key ──
-// Loaded from bp_config.h. If all zeros, encryption is disabled.
-// Both hub and collar must use the same key.
+// ── Legacy AES-128 key ──
+// TLV v1.1 uplink packets are raw authenticated TLV over private LoRa. Keep
+// this only until the downlink command protocol is revised.
 static const uint8_t aesKey[16] = LORA_AES_KEY;
 
 // ── Packet Statistics (displayed in web GUI status) ──
 static uint32_t rxCount = 0;         // Total valid packets received
-static uint32_t crcFailCount = 0;    // Packets that failed CRC check
+static uint32_t crcFailCount = 0;    // Packets that failed TLV structure/auth checks
 static uint32_t txCount = 0;         // Total commands transmitted
 static uint32_t cmdSeqCounter = 0;   // Incrementing sequence for outgoing commands
 
@@ -181,6 +188,7 @@ static bool staConnected = false;             // true if connected to home route
 static String staSSID = WIFI_STA_SSID;        // Current STA SSID (may be loaded from config file)
 static String staPass = WIFI_STA_PASS;        // Current STA password
 static String cloudEndpoint = CLOUD_ENDPOINT; // Cloud POST URL
+static String cloudToken = CLOUD_BEARER_TOKEN; // Gateway bearer token for Supabase Edge Function
 
 // ── Hub Mode (Home vs Portable) ──
 // Home mode: BLE beacon advertising (tells collars they're home)
@@ -258,6 +266,8 @@ static void handlePacket(const uint8_t *buf, uint8_t len, int16_t rssi, float sn
 static void updateDeviceState(const uint8_t *buf, int16_t rssi, float snr);
 static void logToStorage(const uint8_t *buf, uint8_t len, int16_t rssi, float snr);
 static void sseBroadcast(const char *event, const char *data);
+static String base64Encode(const uint8_t *data, uint8_t len);
+static String buildCloudWrapperJson(const cloud_entry_t &entry);
 static device_state_t *findDevice(uint16_t id);
 
 // Command building & ACK tracking
@@ -362,8 +372,7 @@ static void initLoRa() {
     lora.startReceive();              // Put radio into continuous RX mode
 
     Serial.println("OK");
-    Serial.printf("[LORA] AES-128: %s\n",
-                  bp_aes_key_is_zero(aesKey) ? "OFF (key all zeros)" : "ENABLED");
+    Serial.println("[LORA] TLV v1.1 raw binary uplink enabled");
 }
 
 static void initWiFi() {
@@ -462,8 +471,9 @@ static void initStorage() {
                 String val = line.substring(eq + 1);
                 if (key == "sta_ssid")  staSSID = val;        // Home WiFi name
                 if (key == "sta_pass")  staPass = val;        // Home WiFi password
-                if (key == "cloud_url") cloudEndpoint = val;  // Cloud POST endpoint
-                if (key == "hub_mode")  portableMode = (val == "portable");
+                if (key == "cloud_url")   cloudEndpoint = val;  // Cloud POST endpoint
+                if (key == "cloud_token") cloudToken = val;     // Gateway bearer token
+                if (key == "hub_mode")    portableMode = (val == "portable");
             }
             f.close();
             Serial.println("[FS] Config loaded");
@@ -476,7 +486,7 @@ static void initStorage() {
 //
 // This is the most important task. It runs in a tight loop:
 //   1. Check if a packet was received (ISR sets flag)
-//   2. Read the packet, decrypt, and dispatch to handlePacket()
+//   2. Read the raw TLV packet and dispatch to handlePacket()
 //   3. Check the command queue for outgoing commands from the web GUI
 //   4. Check for timed-out pending commands that need retrying
 // ═══════════════════════════════════════════════
@@ -506,11 +516,7 @@ static void loraTask(void *param) {
                     xSemaphoreGive(loraMutex);
 
                     if (state == RADIOLIB_ERR_NONE) {
-                        // Decrypt the packet (AES-128-CTR, byte 0 stays cleartext)
-                        if (!bp_aes_key_is_zero(aesKey)) {
-                            bp_aes_ctr_apply(rxBuf, (uint8_t)len, aesKey);
-                        }
-                        // Process the decrypted packet (CRC check, update state, broadcast SSE)
+                        // Process the raw TLV v1.1 packet.
                         handlePacket(rxBuf, (uint8_t)len, rssi, snr);
                     }
                 } else {
@@ -528,11 +534,6 @@ static void loraTask(void *param) {
         TickType_t now = xTaskGetTickCount();
         if ((now - lastCmdTx) >= pdMS_TO_TICKS(CMD_QUEUE_INTERVAL_MS)) {
             if (xQueueReceive(cmdQueue, &cmd, 0) == pdTRUE) {
-                // Encrypt the outgoing command packet
-                if (!bp_aes_key_is_zero(aesKey)) {
-                    bp_aes_ctr_apply(cmd.buf, cmd.len, aesKey);
-                }
-
                 // Take SPI mutex, transmit, then go back to RX mode
                 if (xSemaphoreTake(loraMutex, pdMS_TO_TICKS(200))) {
                     int state = lora.transmit(cmd.buf, cmd.len);
@@ -645,16 +646,15 @@ static void checkPendingAcks() {
 // ═══════════════════════════════════════════════
 // Packet Handler — the central dispatch for every received packet
 //
-// Pipeline: CRC check → version check → ACK matching → update state
+// Pipeline: structure check → version check → ACK matching → update state
 //           → log to flash → queue for cloud → broadcast to web GUI
 // ═══════════════════════════════════════════════
 
 static void handlePacket(const uint8_t *buf, uint8_t len, int16_t rssi, float snr) {
-    // Step 1: Validate the software CRC-16 in the last 2 bytes of the packet.
-    // This catches any corruption that slipped past the radio's hardware CRC.
+    // Step 1: Validate TLV v1.1 structure. Supabase validates HMAC.
     if (!pkt_validate_crc(buf, len)) {
         crcFailCount++;
-        Serial.printf("[LORA] CRC fail #%u (len=%u)\n", crcFailCount, len);
+        Serial.printf("[LORA] TLV structure fail #%u (len=%u)\n", crcFailCount, len);
         return;
     }
 
@@ -666,7 +666,7 @@ static void handlePacket(const uint8_t *buf, uint8_t len, int16_t rssi, float sn
 
     rxCount++;
     uint16_t devId = pkt_device_id(buf);
-    uint16_t pktType = pkt_pkt_type(buf);
+    uint8_t pktType = pkt_pkt_type(buf);
 
     Serial.printf("[LORA] RX #%u from %s | type=0x%02X rssi=%d snr=%.1f\n",
                   rxCount, bp_device_name(devId), pktType, rssi, snr);
@@ -708,10 +708,9 @@ static void buildDeviceJson(const uint8_t *buf, int16_t rssi, float snr,
     bool hasGps       = (flags & FLAG_HAS_GPS) != 0;
     double lat        = hasGps ? pkt_lat_e7(buf) / 1e7 : 0.0;  // Convert from integer×10^7 to degrees
     double lon        = hasGps ? pkt_lon_e7(buf) / 1e7 : 0.0;
-    uint8_t profile   = 0;
-    pkt_tlv_get_u8(buf, TLV_PROFILE, &profile);  // Extract profile from TLV payload
+    uint8_t profile   = pkt_power_profile(buf);
     uint8_t error     = 0;
-    pkt_tlv_get_u8(buf, TLV_ERROR_TYPE, &error);  // Extract error from TLV payload
+    pkt_tlv_get_u8(buf, TLV_RESET_REASON, &error);
 
     snprintf(out, outLen,
         "{\"id\":%u,\"name\":\"%s\",\"seq\":%u,\"time\":%u,"
@@ -719,7 +718,7 @@ static void buildDeviceJson(const uint8_t *buf, int16_t rssi, float snr,
         "\"lat\":%.7f,\"lon\":%.7f,\"hasGps\":%s,"
         "\"batt\":%u,\"acc\":%u,\"fixAge\":%u,"
         "\"rssi\":%d,\"snr\":%.1f,"
-        "\"bleHome\":%s,\"cellular\":%s}",
+        "\"bleHome\":%s,\"cellular\":false,\"txReason\":\"%s\"}",
         devId, bp_device_name(devId), pkt_msg_seq(buf), pkt_time_unix(buf),
         bp_status_display((bp_status_t)pkt_status(buf)),
         bp_profile_name((bp_profile_t)profile),
@@ -727,8 +726,8 @@ static void buildDeviceJson(const uint8_t *buf, int16_t rssi, float snr,
         lat, lon, hasGps ? "true" : "false",
         pkt_batt_mV(buf), pkt_acc_m(buf), pkt_fix_age_s(buf),
         rssi, snr,
-        (flags & FLAG_BLE_HOME) ? "true" : "false",   // Collar detected home beacon
-        (flags & FLAG_CELLULAR) ? "true" : "false"     // Collar has cellular connectivity
+        (flags & FLAG_HOME_BEACON_SEEN) ? "true" : "false",
+        bp_tx_reason_display(pkt_tx_reason(buf))
     );
 }
 
@@ -761,9 +760,9 @@ static void updateDeviceState(const uint8_t *buf, int16_t rssi, float snr) {
                 dev->lat_e7 = pkt_lat_e7(buf);
                 dev->lon_e7 = pkt_lon_e7(buf);
             }
-            pkt_tlv_get_u8(buf, TLV_PROFILE, &dev->profile);
+            dev->profile = pkt_power_profile(buf);
             dev->error = 0;
-            pkt_tlv_get_u8(buf, TLV_ERROR_TYPE, &dev->error);
+            pkt_tlv_get_u8(buf, TLV_RESET_REASON, &dev->error);
         }
         xSemaphoreGive(deviceMutex);
     }
@@ -794,8 +793,7 @@ static void logToStorage(const uint8_t *buf, uint8_t len, int16_t rssi, float sn
     uint16_t flags = pkt_flags(buf);
     bool hasGps    = (flags & FLAG_HAS_GPS) != 0;
 
-    uint8_t profile = 0;
-    pkt_tlv_get_u8(buf, TLV_PROFILE, &profile);
+    uint8_t profile = pkt_power_profile(buf);
 
     // CSV columns: timestamp, device_id, msg_seq, status, lat, lon, batt_mV, rssi, snr, profile
     f.printf("%u,%u,%u,%u,%.7f,%.7f,%u,%d,%.1f,%u\n",
@@ -1136,6 +1134,7 @@ static void handleApiConfig() {
     String newSSID  = parseParam("ssid");
     String newPass  = parseParam("pass");
     String newCloud = parseParam("cloud_url");
+    String newToken = parseParam("cloud_token");
 
     // Write config to flash as simple key=value text file
     File f = LittleFS.open(CONFIG_FILE_PATH, "w");
@@ -1143,6 +1142,7 @@ static void handleApiConfig() {
         if (newSSID.length() > 0)  f.printf("sta_ssid=%s\n", newSSID.c_str());
         if (newPass.length() > 0)  f.printf("sta_pass=%s\n", newPass.c_str());
         if (newCloud.length() > 0) f.printf("cloud_url=%s\n", newCloud.c_str());
+        if (newToken.length() > 0) f.printf("cloud_token=%s\n", newToken.c_str());
         f.printf("hub_mode=%s\n", portableMode ? "portable" : "home");
         f.close();
     }
@@ -1151,6 +1151,7 @@ static void handleApiConfig() {
     staSSID = newSSID;
     staPass = newPass;
     if (newCloud.length() > 0) cloudEndpoint = newCloud;
+    if (newToken.length() > 0) cloudToken = newToken;
 
     httpServer.send(200, "application/json", "{\"ok\":true,\"restart\":true}");
 
@@ -1406,10 +1407,57 @@ static void bleTask(void *param) {
 // ═══════════════════════════════════════════════
 // Cloud Task — REST POST Relay
 //
+static String base64Encode(const uint8_t *data, uint8_t len) {
+    static const char alphabet[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    String out;
+    out.reserve(((len + 2) / 3) * 4);
+    for (uint8_t i = 0; i < len; i += 3) {
+        uint32_t n = ((uint32_t)data[i]) << 16;
+        bool has2 = (i + 1) < len;
+        bool has3 = (i + 2) < len;
+        if (has2) n |= ((uint32_t)data[i + 1]) << 8;
+        if (has3) n |= data[i + 2];
+        out += alphabet[(n >> 18) & 0x3F];
+        out += alphabet[(n >> 12) & 0x3F];
+        out += has2 ? alphabet[(n >> 6) & 0x3F] : '=';
+        out += has3 ? alphabet[n & 0x3F] : '=';
+    }
+    return out;
+}
+
+static String buildCloudWrapperJson(const cloud_entry_t &entry) {
+    char gateway[5];
+    snprintf(gateway, sizeof(gateway), "%04X", (uint16_t)GATEWAY_GUID16);
+
+    uint32_t rxTime = (uint32_t)time(nullptr);
+    String body = "{";
+    body += "\"format\":\"tlv\",";
+    body += "\"payload_b64\":\"";
+    body += base64Encode(entry.buf, entry.len);
+    body += "\",";
+    body += "\"ingest_path\":\"lora_gateway\",";
+    body += "\"gateway_guid16\":\"";
+    body += gateway;
+    body += "\",";
+    body += "\"gateway_rx_time_unix\":";
+    body += String(rxTime);
+    body += ",";
+    body += "\"link_type\":\"lora\",";
+    body += "\"link_rssi_dbm\":";
+    body += String(entry.rssi);
+    body += ",";
+    body += "\"link_snr_db\":";
+    body += String(entry.snr, 1);
+    body += "}";
+    return body;
+}
+
 // Relays raw TLV packets to a cloud server (e.g. Supabase Edge Function).
 // Blocks on the cloudQueue — wakes up when handlePacket() enqueues a packet.
 // Only sends if WiFi STA is connected AND a cloud endpoint is configured.
-// The raw binary packet is POSTed as-is with metadata in HTTP headers.
+// The raw collar TLV remains unchanged; it is base64 encoded into the HTTPS
+// JSON transport wrapper expected by Supabase.
 // ═══════════════════════════════════════════════
 
 static void cloudTask(void *param) {
@@ -1424,17 +1472,23 @@ static void cloudTask(void *param) {
                 continue;
             }
 
-            // POST the raw TLV binary to the cloud endpoint
+            if (cloudToken.length() == 0) {
+                Serial.println("[CLOUD] No gateway bearer token configured — skipping POST");
+                continue;
+            }
+
+            String body = buildCloudWrapperJson(entry);
+
             HTTPClient http;
             http.begin(cloudEndpoint);
-            http.addHeader("Content-Type", "application/octet-stream");
-            http.addHeader("X-BP-Version", String(BP_PROTOCOL_VERSION));  // Protocol version for server-side parsing
-            http.addHeader("X-BP-Device", String(pkt_device_id(entry.buf)));  // Which collar sent this
-            http.addHeader("X-BP-RSSI", String(entry.rssi));  // Signal strength at hub
+            http.addHeader("Content-Type", "application/json");
+            String authHeader = "Bearer ";
+            authHeader += cloudToken;
+            http.addHeader("Authorization", authHeader);
 
-            int code = http.POST(entry.buf, entry.len);
+            int code = http.POST(body);
             if (code > 0) {
-                Serial.printf("[CLOUD] POST %d → %d\n", entry.len, code);
+                Serial.printf("[CLOUD] POST wrapper %dB TLV → %d\n", entry.len, code);
             } else {
                 Serial.printf("[CLOUD] POST failed: %s\n", http.errorToString(code).c_str());
             }
@@ -1462,11 +1516,12 @@ static void sendCommandFind(uint16_t target_id, bp_pkt_type_t type,
                               bp_profile_t mode, uint8_t ledFlash,
                               bp_buzzer_pattern_t buzzerPattern) {
     cmd_entry_t cmd;
-    uint16_t flags = (uint16_t)type;       // Packet type goes in the flags field
+    uint8_t txReason = (uint8_t)type;      // Temporary downlink compatibility mapping
     uint32_t seq = ++cmdSeqCounter;        // Unique sequence number for ACK matching
 
-    // Build the fixed header (version, device_id, seq, time, status, flags)
-    pkt_init(cmd.buf, DEVICE_ID_HUB, seq, 0, STATUS_OK, flags);
+    // Build the fixed header. Downlink commands still use the compatibility
+    // pkt_type names until the command protocol is formalized separately.
+    pkt_init(cmd.buf, DEVICE_ID_HUB, seq, 0, STATUS_OK, txReason);
 
     // Add TLV payload based on command type
     if (type == PKT_CMD_MODE && mode != PROFILE_UNKNOWN) {
@@ -1482,7 +1537,7 @@ static void sendCommandFind(uint16_t target_id, bp_pkt_type_t type,
     // (pkt_init set it to DEVICE_ID_HUB, but commands are addressed to the collar)
     memcpy(&cmd.buf[1], &target_id, 2);
 
-    // Finalize: compute CRC-16 and append it, returns total packet length
+    // Finalize: append the v1.1 auth-tag bytes and return total packet length.
     cmd.len = pkt_finalize(cmd.buf);
 
     // Queue the packet for the loraTask to transmit

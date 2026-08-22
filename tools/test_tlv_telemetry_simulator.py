@@ -96,8 +96,8 @@ class TlvSimulatorTests(unittest.TestCase):
         packet_data = bytearray(40)
         packet_data[31] = 0
         packet = bytes(packet_data)
-        wrapper = build_wrapper(packet, "lora_hub", random.Random(1), "0016")
-        self.assertEqual(wrapper["ingest_path"], "lora_hub")
+        wrapper = build_wrapper(packet, "lora_gateway", random.Random(1), "0016")
+        self.assertEqual(wrapper["ingest_path"], "lora_gateway")
         self.assertEqual(wrapper["gateway_guid16"], "0016")
         self.assertEqual(base64.b64decode(wrapper["payload_b64"]), packet)
 

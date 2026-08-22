@@ -8,7 +8,8 @@ const KEY = Uint8Array.from({ length: 32 }, (_value, index) => index);
 test("decodes the locked v1.1 header, selected TLVs, and transport wrapper", () => {
   const raw = buildPacket();
   const parsed = parseTlvRequest({
-    ingest_path: "lora_hub",
+    format: "tlv",
+    ingest_path: "lora_gateway",
     link_type: "lora",
     gateway_guid16: "0016",
     gateway_rx_time_unix: 1_786_537_811,
@@ -18,6 +19,7 @@ test("decodes the locked v1.1 header, selected TLVs, and transport wrapper", () 
   });
 
   assert.equal(parsed.metadata.gatewayGuid16, 0x0016);
+  assert.equal(parsed.metadata.ingestPath, "lora_hub");
   assert.equal(parsed.packet.deviceGuid16, 0x04a7);
   assert.equal(parsed.packet.messageSequenceId, 10_542);
   assert.equal(parsed.packet.status, 1);
@@ -57,6 +59,7 @@ test("rejects malformed packets and ambiguous known TLVs", () => {
 
 test("rejects wrappers whose path metadata disagrees", () => {
   assertDecodeError(() => parseTlvRequest({
+    format: "tlv",
     ingest_path: "cellular_direct",
     link_type: "lora",
     payload_b64: bytesToBase64(buildPacket()),
@@ -65,6 +68,7 @@ test("rejects wrappers whose path metadata disagrees", () => {
 
 test("recognizes a valid direct cellular wrapper", () => {
   const parsed = parseTlvRequest({
+    format: "tlv",
     ingest_path: "cellular_direct",
     link_type: "lte",
     link_rssi_dbm: -103,
@@ -83,7 +87,7 @@ test("recognizes a valid direct cellular wrapper", () => {
 test("decodes every v1.1 status, power profile, and TX reason code from the header", () => {
   for (let status = 0; status <= 3; status += 1) {
     for (let powerProfile = 0; powerProfile <= 3; powerProfile += 1) {
-      for (let txReason = 0; txReason <= 6; txReason += 1) {
+      for (let txReason = 0; txReason <= 7; txReason += 1) {
         const packet = buildPacket();
         packet[9] = (powerProfile << 4) | status;
         packet[11] = txReason;
@@ -111,8 +115,30 @@ test("rejects reserved v1.1 status, power profile, and TX reason codes", () => {
   );
 
   const reservedTxReason = buildPacket();
-  reservedTxReason[11] = 7;
+  reservedTxReason[11] = 8;
   assertDecodeError(() => parseTlvPacket(reservedTxReason), "reserved_tx_reason");
+});
+
+test("accepts wake check-in packets without GNSS coordinates", () => {
+  const packet = buildPacket();
+  packet[9] = 0x00;
+  packet[10] = 0x08;
+  packet[11] = 7;
+  packet.fill(0, 12, 20);
+  new DataView(packet.buffer).setUint16(24, 65_535, true);
+  packet[26] = 255;
+
+  const parsed = parseTlvPacket(packet);
+
+  assert.equal(parsed.status, 0);
+  assert.equal(parsed.powerProfile, 0);
+  assert.equal(parsed.txReason, 7);
+  assert.equal(parsed.flags, 0x08);
+  assert.equal(parsed.gnssValid, false);
+  assert.equal(parsed.latitude, null);
+  assert.equal(parsed.longitude, null);
+  assert.equal(parsed.fixAgeSeconds, 65_535);
+  assert.equal(parsed.satelliteCount, 255);
 });
 
 function buildPacket(tlvs = selectedTlvs()) {

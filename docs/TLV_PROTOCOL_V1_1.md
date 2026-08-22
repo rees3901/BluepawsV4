@@ -231,8 +231,8 @@ GNSS_VALID + FIX_3D + GEOFENCE_BREACHED = 0x01 + 0x02 + 0x10 = 0x13
 
 ## 10. TX reason enum
 
-`tx_reason` is one byte, but only values `0..6` are assigned in v1.1. Value
-`7` is reserved and receivers must reject it until a later contract assigns it.
+`tx_reason` is one byte. Values `0..7` are assigned in v1.1. Values above
+`7` are reserved and receivers must reject them until a later contract assigns them.
 
 | Value | Name | Meaning |
 |---:|---|---|
@@ -246,6 +246,13 @@ GNSS_VALID + FIX_3D + GEOFENCE_BREACHED = 0x01 + 0x02 + 0x10 = 0x13
 | 7 | `WAKE_CHECKIN` | Lightweight wake-up presence check-in. Used when the collar wakes, may see the BLE home beacon, reports last-seen/presence, then opens a short command receive window. |
 
 `WAKE_CHECKIN` is intended for low-cost presence and command-poll behaviour, not full diagnostic telemetry. It tells Supabase that the collar is alive and reachable, updates last-seen status, and allows the backend/user app to queue configuration commands for the receive window.
+
+`WAKE_CHECKIN` does not implicitly set other header fields. The usual causal flow is:
+the collar detects the BLE home beacon, chooses the home wake-check-in path, then
+explicitly builds a packet with `tx_reason = WAKE_CHECKIN` and
+`HOME_BEACON_SEEN` set. A receiver should treat `WAKE_CHECKIN` without
+`HOME_BEACON_SEEN` as anomalous during development, not as a different packet
+type.
 
 Do not keep expanding `tx_reason` without a protocol version bump. Use TLVs for detail where possible.
 
@@ -389,7 +396,8 @@ Example LoRa relay wrapper:
 
 ```json
 {
-  "ingest_path": "lora_hub",
+  "format": "tlv",
+  "ingest_path": "lora_gateway",
   "link_type": "lora",
   "gateway_guid16": "0016",
   "gateway_rx_time_unix": 1786537811,
@@ -407,6 +415,7 @@ Example LTE direct wrapper:
 
 ```json
 {
+  "format": "tlv",
   "ingest_path": "cellular_direct",
   "link_type": "lte",
   "link_rssi_dbm": -104,
@@ -655,7 +664,7 @@ while the backend continues to validate the corresponding `link_type` pair.
 Suggested display logic:
 
 ```text
-ingest_path = lora_hub       -> show RF beside the signal quality
+ingest_path = lora_gateway   -> show RF beside the signal quality
 ingest_path = cellular_direct -> show 4G beside the signal quality
 ingest_path absent            -> show a neutral unknown marker
 ```
