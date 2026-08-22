@@ -10,6 +10,7 @@ from lte_modem_smoke_test import (
     build_get_probe_request,
     build_http_request,
     summarize_http_response,
+    supabase_apikey_for_url,
 )
 
 
@@ -58,6 +59,13 @@ class LteModemSmokeTestTests(unittest.TestCase):
         self.assertIn(b"GET /functions/v1/ingest-position HTTP/1.1", request.raw)
         self.assertNotIn(b"Content-Length", request.raw)
         self.assertEqual(request.masked_preview["method"], "GET")
+
+    def test_supabase_apikey_is_only_applied_to_supabase_hosts(self):
+        self.assertEqual(
+            supabase_apikey_for_url("https://ykcdaonkvwemedotdpdr.supabase.co/functions/v1/x", "b" * 48),
+            "b" * 48,
+        )
+        self.assertIsNone(supabase_apikey_for_url("https://example.com/", "b" * 48))
 
     def test_build_demo_request_reuses_tlv_wrapper_contract(self):
         key = base64.b64encode(bytes(32)).decode()

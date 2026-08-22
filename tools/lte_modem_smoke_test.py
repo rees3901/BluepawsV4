@@ -204,11 +204,20 @@ def build_demo_request(args: argparse.Namespace) -> tuple[int, HttpRequest]:
         args.url,
         credential.token,
         wrapper,
-        apikey=args.supabase_apikey,
+        apikey=supabase_apikey_for_url(args.url, args.supabase_apikey),
         http_version=args.http_version,
         connection=args.connection,
         user_agent="bluepaws-eg800k-smoke-test/1",
     )
+
+
+def supabase_apikey_for_url(url: str, apikey: str | None) -> str | None:
+    if not apikey:
+        return None
+    hostname = (urlparse(url).hostname or "").lower()
+    if hostname.endswith(".supabase.co") or hostname.endswith(".supabase.com"):
+        return apikey
+    return None
 
 
 def build_http_request(
@@ -495,9 +504,26 @@ class QuectelSslSocket:
             print_trace("QSSLSEND result", sent)
         if "SEND OK" not in sent:
             raise ModemError(f"SSL payload send failed:\n{sent}")
+        # Some EG800K firmware/network combinations close the TLS socket before
+        # a separate recv URC is emitted. Poll immediately after SEND OK while
+        # the socket is still likely valid, then fall back to URC-driven reads.
+        early_reads: list[str] = []
+        for attempt in range(3):
+            time.sleep(0.25)
+            early_read = self.at(
+                f"AT+QSSLRECV={socket_id},4096",
+                tolerate_error=True,
+                timeout=max(3, self.timeout),
+            )
+            early_reads.append(early_read)
+            if self.trace:
+                print_trace(f"Early QSSLRECV #{attempt + 1}", early_read)
+            if "HTTP/" in early_read:
+                return "\r\n".join(early_reads)
+
         recv_notice = self.read_until(
             ("HTTP/", f'+QSSLURC: "recv",{socket_id}', f'+QSSLURC: "closed",{socket_id}'),
-            timeout=max(30, self.timeout),
+            timeout=max(10, self.timeout),
         )
         if self.trace:
             print_trace("QSSLURC", recv_notice)
@@ -532,6 +558,8 @@ class QuectelSslSocket:
         error_detail = self.at("AT+QIGETERROR", tolerate_error=True)
         return (
             "NO_HTTP_RESPONSE_AVAILABLE\r\n"
+            + "\r\n".join(early_reads)
+            + "\r\n"
             + recv_notice
             + "\r\n"
             + polled_response
@@ -595,7 +623,7 @@ def main() -> int:
             request = build_get_probe_request(
                 args.url,
                 user_agent="bluepaws-eg800k-smoke-test/1",
-                apikey=args.supabase_apikey,
+                apikey=supabase_apikey_for_url(args.url, args.supabase_apikey),
             )
         else:
             device_id, request = build_demo_request(args)
