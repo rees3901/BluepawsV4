@@ -518,10 +518,23 @@ class QuectelSslSocket:
                 tolerate_error=True,
                 timeout=max(10, self.timeout),
             )
+        # The original working EG800K proof-of-concept still attempted QSSLRECV
+        # after a quick "closed" URC. Some firmware builds appear to expose the
+        # buffered HTTP response only when explicitly polled, even without a recv
+        # URC. Keep the pending URC text so the diagnostic output shows context.
+        polled_response = self.at(
+            f"AT+QSSLRECV={socket_id},4096",
+            tolerate_error=True,
+            timeout=max(10, self.timeout),
+        )
+        if "HTTP/" in polled_response:
+            return recv_notice + "\r\n" + polled_response
         error_detail = self.at("AT+QIGETERROR", tolerate_error=True)
         return (
             "NO_HTTP_RESPONSE_AVAILABLE\r\n"
             + recv_notice
+            + "\r\n"
+            + polled_response
             + "\r\n"
             + error_detail
         )
@@ -529,6 +542,7 @@ class QuectelSslSocket:
     def close_socket(self, socket_id: int, *, tolerate_error: bool = False) -> None:
         try:
             self.at(f"AT+QSSLCLOSE={socket_id}", timeout=10, tolerate_error=tolerate_error)
+            time.sleep(2)
         except ModemError:
             if not tolerate_error:
                 raise
