@@ -627,6 +627,8 @@ def summarize_http_response(modem_response: str) -> dict[str, Any]:
     if len(parts) >= 2 and parts[1].isdigit():
         status_code = int(parts[1])
     body = strip_modem_footer(body_text)
+    if "transfer-encoding: chunked" in header_text.lower():
+        body = decode_chunked_body(body)
     parsed_body: Any = body
     if body:
         try:
@@ -647,6 +649,36 @@ def strip_modem_footer(body_text: str) -> str:
         if index >= 0:
             body = body[:index].strip()
     return body
+
+
+def decode_chunked_body(body_text: str) -> str:
+    cursor = 0
+    decoded: list[str] = []
+    while cursor < len(body_text):
+        line_end = body_text.find("\r\n", cursor)
+        line_break_len = 2
+        if line_end < 0:
+            line_end = body_text.find("\n", cursor)
+            line_break_len = 1
+        if line_end < 0:
+            size_line = body_text[cursor:].strip()
+            line_break_len = 0
+        else:
+            size_line = body_text[cursor:line_end].strip()
+        try:
+            chunk_size = int(size_line.split(";", 1)[0], 16)
+        except ValueError:
+            return body_text
+        cursor = len(body_text) if line_end < 0 else line_end + line_break_len
+        if chunk_size == 0:
+            return "".join(decoded).strip()
+        decoded.append(body_text[cursor : cursor + chunk_size])
+        cursor += chunk_size
+        if body_text.startswith("\r\n", cursor):
+            cursor += 2
+        elif body_text.startswith("\n", cursor):
+            cursor += 1
+    return body_text
 
 
 def main() -> int:

@@ -117,6 +117,24 @@ class LteModemSmokeTestTests(unittest.TestCase):
         self.assertEqual(summary["http_status"], 201)
         self.assertEqual(summary["body"], {"accepted": True})
 
+    def test_summarizes_chunked_modem_http_response_json_body(self):
+        raw = (
+            "+QSSLRECV: 168\r\n"
+            "HTTP/1.1 201 Created\r\n"
+            "Content-Type: application/json; charset=utf-8\r\n"
+            "Transfer-Encoding: chunked\r\n"
+            "\r\n"
+            "11\r\n"
+            '{"accepted":true}'
+            "\r\n0\r\n\r\n"
+            "OK\r\n"
+        )
+
+        summary = summarize_http_response(raw)
+
+        self.assertEqual(summary["http_status"], 201)
+        self.assertEqual(summary["body"], {"accepted": True})
+
 
 if __name__ == "__main__":
     unittest.main()
