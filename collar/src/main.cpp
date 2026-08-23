@@ -101,7 +101,7 @@ static bool bleAdvertising = false;          // true = BLE find beacon is advert
 
 // ── Error State ──
 // Tracks the most recent subsystem fault. Auto-clears on success.
-static volatile bp_error_t lastError = ERROR_NONE;
+static volatile bp_error_t lastError = BP_ERROR_NONE;
 
 // ── Command Deduplication ──
 // The hub retries commands up to 3 times if no ACK received.
@@ -563,7 +563,7 @@ static bool gnssAcquireFix() {
             gnssFixAgeMs = millis();
             gpsFix = true;
             gpsWarmStart = true;
-            if (lastError == ERROR_GPS) lastError = ERROR_NONE;  // Clear GPS error on success
+            if (lastError == ERROR_GPS) lastError = BP_ERROR_NONE;  // Clear GPS error on success
             Serial.printf("[GNSS] Fix acquired after %lums\n", millis() - startMs);
             Serial.printf("[GNSS] Position: %.6f, %.6f (sats: %d)\n",
                           gnssLat, gnssLon, gnssSats);
@@ -599,7 +599,7 @@ static void sendTelemetry() {
     }
 
     if (gpsWarmStart && !locValid) flags |= FLAG_STALE_FIX;
-    if (lastError != ERROR_NONE) flags |= FLAG_ERROR_PRESENT;
+    if (lastError != BP_ERROR_NONE) flags |= FLAG_ERROR_PRESENT;
 
     uint32_t unixTime = gnssGetUnixTime();  // Get timestamp from GNSS
 
@@ -628,7 +628,7 @@ static void sendTelemetry() {
     // Keep embedded optional TLVs sparse until the production telemetry set is
     // finalized. Header fields carry status/profile/location/battery.
     pkt_add_tlv_u32(buf, TLV_UPTIME_S, millis() / 1000);
-    if (lastError != ERROR_NONE) {
+    if (lastError != BP_ERROR_NONE) {
         pkt_add_tlv_u8(buf, TLV_RESET_REASON, lastError);
     }
 
@@ -658,7 +658,7 @@ static void sendWakeCheckin() {
 
     uint8_t buf[BP_MAX_PACKET_SIZE];
     uint8_t flags = FLAG_HOME_BEACON_SEEN;
-    if (lastError != ERROR_NONE) flags |= FLAG_ERROR_PRESENT;
+    if (lastError != BP_ERROR_NONE) flags |= FLAG_ERROR_PRESENT;
 
     pkt_init(buf, MY_DEVICE_ID, (uint16_t)(messageSeq & 0xFFFF), 0,
              STATUS_HOME, currentProfile, flags, TX_WAKE_CHECKIN);
@@ -668,7 +668,7 @@ static void sendWakeCheckin() {
     pkt_set_sat_count(buf, 255);
 
     pkt_add_tlv_u32(buf, TLV_UPTIME_S, millis() / 1000);
-    if (lastError != ERROR_NONE) {
+    if (lastError != BP_ERROR_NONE) {
         pkt_add_tlv_u8(buf, TLV_RESET_REASON, lastError);
     }
 
@@ -770,7 +770,7 @@ static void transmitPacket(uint8_t *buf, uint8_t len, bool suppressLed) {
 
     if (state == RADIOLIB_ERR_NONE) {
         Serial.printf("[LORA] TX OK (%d bytes)\n", len);
-        if (lastError == ERROR_RF) lastError = ERROR_NONE;  // Clear RF error on success
+        if (lastError == ERROR_RF) lastError = BP_ERROR_NONE;  // Clear RF error on success
         if (!suppressLed) {
             ledFlicker(currentConfig->led_flashes, 50, 50);  // Success: profile-defined flash count
         }
@@ -1029,7 +1029,7 @@ static void cellularSendTlv(const uint8_t *pkt, uint8_t len) {
         lastError = ERROR_CELLULAR;
         return;
     }
-    if (lastError == ERROR_CELLULAR) lastError = ERROR_NONE;  // Modem responded OK
+    if (lastError == ERROR_CELLULAR) lastError = BP_ERROR_NONE;  // Modem responded OK
 
     // ── First-time PSM/eDRX configuration ──
     if (!cellularInitialised) {

@@ -97,7 +97,7 @@ enum bp_pkt_type_t : uint8_t {
 };
 
 enum bp_error_t : uint8_t {
-    ERROR_NONE      = 0x00,
+    BP_ERROR_NONE   = 0x00,
     ERROR_GPS       = 0x01,
     ERROR_RF        = 0x02,
     ERROR_CELLULAR  = 0x03,
