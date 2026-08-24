@@ -1,12 +1,20 @@
 import { createClient } from "@/lib/supabase/client";
 import { familyRealtimeTopic, nextFamilyAccessVersion } from "@/lib/familyRealtime";
-import { isPositionRow, positionToTelemetryDevice, type PositionRow } from "@/lib/telemetryRows";
+import {
+  applyPresenceToTelemetryDevice,
+  isDevicePresenceRow,
+  isPositionRow,
+  positionToTelemetryDevice,
+  type DevicePresenceRow,
+  type PositionRow,
+} from "@/lib/telemetryRows";
 import { VISIBLE_TRAIL_POINT_LIMIT } from "@/lib/trailPoints";
 import type { TelemetryDevice, TelemetrySource, TrailPoint } from "@/types/telemetry";
 
 const INITIAL_FALLBACK_DELAY_MS = 30_000;
 const MAX_FALLBACK_DELAY_MS = 120_000;
 const POSITION_COLUMNS = "position_id,device_uid,household_id,message_id,latitude,longitude,battery,battery_mv,status_code,power_profile_code,flags,tx_reason,ingest_path,link_type,link_rssi_dbm,link_snr_db,source,recorded_at,received_at,schema_version";
+const PRESENCE_COLUMNS = "device_id,household_id,last_seen_at,last_seen_status_code,last_seen_power_profile_code,last_seen_tx_reason,last_seen_battery_mv";
 
 export function createRealtimeTelemetrySource(
   householdId: string,
@@ -37,26 +45,52 @@ export function createRealtimeTelemetrySource(
         publish();
       };
 
+      const updateFromPresenceRow = (value: unknown) => {
+        if (!isDevicePresenceRow(value) || value.household_id !== householdId) return;
+        const current = devices.get(value.device_id);
+        if (!current) return;
+        const next = applyPresenceToTelemetryDevice(current, value);
+        if (next === current) return;
+        devices.set(next.id, next);
+        publish();
+      };
+
       const refresh = async () => {
-        const result = await supabase
-          .from("device_latest_positions")
-          .select(POSITION_COLUMNS)
-          .eq("household_id", householdId);
+        const [positionResult, presenceResult] = await Promise.all([
+          supabase
+            .from("device_latest_positions")
+            .select(POSITION_COLUMNS)
+            .eq("household_id", householdId),
+          supabase
+            .from("devices")
+            .select(PRESENCE_COLUMNS)
+            .eq("household_id", householdId),
+        ]);
 
         if (!active) return;
-        if (result.error) {
-          statusListener?.("degraded", result.error.message);
+        if (positionResult.error) {
+          statusListener?.("degraded", positionResult.error.message);
           return;
         }
+        if (presenceResult.error) {
+          statusListener?.("degraded", presenceResult.error.message);
+        }
 
-        const incoming: PositionRow[] = Array.isArray(result.data)
-          ? (result.data as unknown[]).filter((row): row is PositionRow => isPositionRow(row))
+        const incoming: PositionRow[] = Array.isArray(positionResult.data)
+          ? (positionResult.data as unknown[]).filter((row): row is PositionRow => isPositionRow(row))
+          : [];
+        const presenceRows: DevicePresenceRow[] = Array.isArray(presenceResult.data)
+          ? (presenceResult.data as unknown[]).filter((row): row is DevicePresenceRow => isDevicePresenceRow(row))
           : [];
         const incomingIds = new Set(incoming.map((row: PositionRow) => row.device_uid));
         devices.forEach((_device, deviceId) => {
           if (!incomingIds.has(deviceId)) devices.delete(deviceId);
         });
         incoming.forEach((row: PositionRow) => devices.set(row.device_uid, positionToTelemetryDevice(row)));
+        presenceRows.forEach((row) => {
+          const current = devices.get(row.device_id);
+          if (current) devices.set(row.device_id, applyPresenceToTelemetryDevice(current, row));
+        });
         publish();
       };
 
@@ -90,6 +124,11 @@ export function createRealtimeTelemetrySource(
         updateFromRow(row);
       };
 
+      const handlePresenceBroadcast = (payload: unknown) => {
+        const row = extractBroadcastRecord(payload);
+        updateFromPresenceRow(row);
+      };
+
       const handleAccessChange = (payload: unknown) => {
         const row = extractBroadcastRecord(payload);
         const nextAccessVersion = nextFamilyAccessVersion(row, householdId, accessVersion);
@@ -116,6 +155,7 @@ export function createRealtimeTelemetrySource(
           .channel(familyRealtimeTopic(householdId, accessVersion), { config: { private: true } })
           .on("broadcast", { event: "INSERT" }, handlePositionBroadcast)
           .on("broadcast", { event: "UPDATE" }, handlePositionBroadcast)
+          .on("broadcast", { event: "DEVICE_PRESENCE" }, handlePresenceBroadcast)
           .on("broadcast", { event: "ACCESS_CHANGED" }, handleAccessChange)
           .subscribe((status: "SUBSCRIBED" | "TIMED_OUT" | "CLOSED" | "CHANNEL_ERROR", error?: Error) => {
             if (!active || channel !== nextChannel) return;
