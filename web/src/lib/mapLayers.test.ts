@@ -32,8 +32,8 @@ test("uses satellite as the alternate preview except when satellite is active", 
   assert.equal(alternatePreviewMapLayer("Satellite HD"), "Street");
 });
 
-test("keeps the alternate preview two zoom levels out and inside tile limits", () => {
-  assert.equal(previewMapZoom(17, "Satellite"), 15);
+test("keeps the alternate preview one zoom level out and inside tile limits", () => {
+  assert.equal(previewMapZoom(17, "Satellite"), 16);
   assert.equal(previewMapZoom(1, "Satellite"), 0);
   assert.equal(previewMapZoom(24, "Satellite HD"), MAP_LAYER_DEFINITIONS["Satellite HD"].maxZoom);
 });
