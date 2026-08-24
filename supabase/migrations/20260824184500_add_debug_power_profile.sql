@@ -15,7 +15,7 @@ alter table public.positions
   add constraint positions_power_profile_range
     check (power_profile_code is null or power_profile_code between 0 and 4);
 
-alter table public.latest_positions
+alter table public.device_latest_positions
   drop constraint if exists latest_positions_power_profile_range,
   add constraint latest_positions_power_profile_range
     check (power_profile_code is null or power_profile_code between 0 and 4);
