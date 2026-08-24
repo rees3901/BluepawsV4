@@ -4,7 +4,7 @@ import L from "leaflet";
 import { useEffect, useRef } from "react";
 import { emojiImageUrl } from "@/lib/emoji";
 import { formatMapCoordinates, googleMapsUrl } from "@/lib/mapLocation";
-import { MAP_LAYER_DEFINITIONS, type MapLayerName } from "@/lib/mapLayers";
+import { alternatePreviewMapLayer, MAP_LAYER_DEFINITIONS, previewMapZoom, type MapLayerName } from "@/lib/mapLayers";
 import { EMPTY_MAP_CENTER, EMPTY_MAP_ZOOM } from "@/lib/mapViewport";
 import { normalizeMarkerColor } from "@/lib/markerColor";
 import { transportPresentation } from "@/lib/transportPath";
@@ -75,6 +75,11 @@ export default function TrackingMap(props: TrackingMapProps) {
       ]),
     ) as Record<MapLayerName, L.TileLayer>;
     baseLayers.Street.addTo(map);
+    let currentLayerName: MapLayerName = "Street";
+    let layerPreviewMap: L.Map | null = null;
+    let layerPreviewLayer: L.TileLayer | null = null;
+    let layerPreviewLabel: HTMLElement | null = null;
+    let layerPreviewUpdateTimer: number | null = null;
     const layerControl = L.control.layers(baseLayers, undefined, { position: "topright", collapsed: true }).addTo(map);
     const layerControlElement = layerControl.getContainer();
     let layerControlOpen = false;
@@ -84,14 +89,66 @@ export default function TrackingMap(props: TrackingMapProps) {
       if (open) layerControl.expand();
       else layerControl.collapse();
     };
+    const updateLayerPreview = () => {
+      if (!layerPreviewMap) return;
+      const previewLayerName = alternatePreviewMapLayer(currentLayerName);
+      const previewDefinition = MAP_LAYER_DEFINITIONS[previewLayerName];
+      const center = map.getCenter();
+      const zoom = previewMapZoom(map.getZoom(), previewLayerName);
+      if (layerPreviewLayer) layerPreviewLayer.removeFrom(layerPreviewMap);
+      layerPreviewLayer = createTileLayer(previewLayerName).addTo(layerPreviewMap);
+      layerPreviewMap.setMaxZoom(previewDefinition.maxZoom);
+      layerPreviewMap.setView(center, zoom, { animate: false });
+      if (layerPreviewLabel) layerPreviewLabel.textContent = previewLayerName;
+      window.setTimeout(() => layerPreviewMap?.invalidateSize(), 0);
+    };
+    const scheduleLayerPreviewUpdate = () => {
+      if (layerPreviewUpdateTimer !== null) window.clearTimeout(layerPreviewUpdateTimer);
+      layerPreviewUpdateTimer = window.setTimeout(() => {
+        layerPreviewUpdateTimer = null;
+        updateLayerPreview();
+      }, 350);
+    };
     if (layerControlElement) {
       layerControlElement.classList.add("bp-click-layer-control");
       const toggle = layerControlElement.querySelector<HTMLElement>(".leaflet-control-layers-toggle");
+      const previewButton = L.DomUtil.create("button", "bp-layer-preview-toggle", layerControlElement) as HTMLButtonElement;
+      previewButton.type = "button";
+      previewButton.title = "Preview alternate map style and choose map layer";
+      previewButton.setAttribute("aria-label", "Preview alternate map style and choose map layer");
+      const previewMapElement = L.DomUtil.create("span", "bp-layer-preview-map", previewButton);
+      const previewCaption = L.DomUtil.create("span", "bp-layer-preview-caption", previewButton);
+      previewCaption.textContent = "Preview ";
+      layerPreviewLabel = L.DomUtil.create("strong", "bp-layer-preview-label", previewCaption);
+      L.DomEvent.disableClickPropagation(layerControlElement);
+      L.DomEvent.disableScrollPropagation(layerControlElement);
+      L.DomEvent.on(previewButton, "click", (event: Event) => {
+        L.DomEvent.stop(event);
+        setLayerControlOpen(!layerControlOpen);
+      });
       L.DomEvent.on(toggle ?? layerControlElement, "click", (event: Event) => {
         L.DomEvent.stop(event);
         setLayerControlOpen(!layerControlOpen);
       });
+      layerPreviewMap = L.map(previewMapElement, {
+        attributionControl: false,
+        boxZoom: false,
+        center: map.getCenter(),
+        doubleClickZoom: false,
+        dragging: false,
+        keyboard: false,
+        scrollWheelZoom: false,
+        zoom: previewMapZoom(map.getZoom(), alternatePreviewMapLayer(currentLayerName)),
+        zoomControl: false,
+      });
+      updateLayerPreview();
     }
+    map.on("baselayerchange", (event: L.LeafletEvent & { name?: string }) => {
+      if (isMapLayerName(event.name)) currentLayerName = event.name;
+      setLayerControlOpen(false);
+      scheduleLayerPreviewUpdate();
+    });
+    map.on("moveend zoomend", scheduleLayerPreviewUpdate);
     L.control.zoom({ position: "bottomleft" }).addTo(map);
 
     const FitControl = L.Control.extend({
@@ -254,6 +311,8 @@ export default function TrackingMap(props: TrackingMapProps) {
 
     return () => {
       mapContainer.removeEventListener("click", handleMapAction);
+      if (layerPreviewUpdateTimer !== null) window.clearTimeout(layerPreviewUpdateTimer);
+      layerPreviewMap?.remove();
       markerAnimations.forEach((frameId) => window.cancelAnimationFrame(frameId));
       markerAnimations.clear();
       map.remove();
@@ -525,6 +584,10 @@ function toDms(value: number, positive: string, negative: string) {
 
 function formatDistance(metres: number) {
   return metres >= 1000 ? `${(metres / 1000).toFixed(2)} km` : `${Math.round(metres)} m`;
+}
+
+function isMapLayerName(value: unknown): value is MapLayerName {
+  return typeof value === "string" && value in MAP_LAYER_DEFINITIONS;
 }
 
 function escapeHtml(value: string) {
