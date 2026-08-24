@@ -27,6 +27,27 @@ The default `collar` PlatformIO environment currently enables both flags because
 
 Important rule: spoof/testbed state is not added as a TLV field. The TLV protocol stays production-shaped so the hub, Edge Function and frontend are tested against the same packet contract. Testbed status is visible through firmware build flags, serial logs and documentation, not by polluting the authenticated collar payload.
 
+### RAK4631 testbed serial console
+
+When `BLUEPAWS_TESTBED_BUILD` is enabled, the collar exposes a non-persistent USB Serial debug console at `115200` baud. This is for bench bring-up only and must not become a production user command channel.
+
+Supported commands:
+
+| Command | Effect |
+|---|---|
+| `help` | Print available commands. |
+| `status` | Print device ID, current profile, debug cadence, sequence and cycle counters. |
+| `profile normal` | Switch to `NORMAL`. |
+| `profile powersave` | Switch to `POWER_SAVE`. |
+| `profile active` | Switch to `ACTIVE`. |
+| `profile lost` | Switch to `LOST_ALERT`. |
+| `debug on` | Override non-lost sleep cadence to 60 seconds and request the next cycle. |
+| `debug off` | Restore the selected profile's normal sleep cadence. |
+| `interval <seconds>` | Override non-lost sleep cadence to a custom 5–3600 second interval. |
+| `tx` | Request the next collar cycle immediately. |
+
+Debug cadence is deliberately an override on top of the selected profile. For example, `profile normal` plus `interval 30` keeps Normal profile semantics but wakes every 30 seconds for bench testing.
+
 Current spoof origin:
 
 - Latitude: `51.905978580906705`
