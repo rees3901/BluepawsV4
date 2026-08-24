@@ -25,7 +25,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Iterable
+from typing import Callable, Iterable
 
 try:
     import serial  # type: ignore
@@ -168,11 +168,19 @@ def hex_device_id(device_id: int) -> str:
     return f"{device_id:04X}"
 
 
-def run_step(name: str, action, checks: list[tuple[str | None, list[str], float]], events: EventLog) -> bool:
+def run_step(
+    name: str,
+    action: Callable[[], bool | None],
+    checks: list[tuple[str | None, list[str], float]],
+    events: EventLog,
+) -> bool:
     print()
     print(f"=== {name} ===")
     start = time.time()
-    action()
+    action_ok = action()
+    if action_ok is False:
+        print("❌ Step action failed; skipping waits that cannot succeed.")
+        return False
     passed = True
     for source, patterns, timeout in checks:
         ok = events.wait_for(source, patterns, timeout, start)
@@ -192,6 +200,7 @@ def main() -> int:
     parser.add_argument("--baud", type=int, default=DEFAULT_BAUD, help="Serial baud rate.")
     parser.add_argument("--timeout", type=float, default=45.0, help="Seconds to wait for each command result.")
     parser.add_argument("--http-timeout", type=float, default=5.0, help="Seconds to wait for hub HTTP calls.")
+    parser.add_argument("--continue-without-hub-http", action="store_true", help="Keep monitoring serial logs even when the hub HTTP API is unreachable.")
     parser.add_argument("--profile", default="active", choices=["normal", "powersave", "active", "lost"], help="Profile command to test.")
     parser.add_argument("--skip-sniffer", action="store_true", help="Do not open or assert against the sniffer port.")
     parser.add_argument("--skip-collar-control", action="store_true", help="Do not send debug/tx commands to collar serial.")
@@ -233,6 +242,12 @@ def main() -> int:
         print()
         print(f"[HTTP] GET /api/status -> {status_code}")
         print(status_body)
+        if status_code is None and not args.continue_without_hub_http:
+            print()
+            print("Hub HTTP API is unreachable, so downlink commands cannot be queued.")
+            print("Use the hub IP shown on the hub serial monitor, for example:")
+            print("  py -3.11 .\\tools\\hardware_command_pipeline_test.py --hub-url http://192.168.0.67 --target-id 1001")
+            return 2
 
         collar = next(monitor for monitor in monitors if monitor.label == "COLLAR")
 
@@ -250,18 +265,21 @@ def main() -> int:
                 print("[INFO] Waiting for the next natural collar TX/RX window.")
 
         presence_checks = [
-            ("HUB", [r"\[LORA\].*RX valid", rf"device={args.target_id}"], args.timeout),
+            ("HUB", [r"\[LORA\].*RX", rf"Collar_{target_hex}|device={args.target_id}"], args.timeout),
         ]
         if not args.skip_sniffer:
             presence_checks.append(("SNIFFER", [r"\[RX\]", rf"device={args.target_id}"], args.timeout))
         results.append(("presence/wake check-in observed", run_step("Presence / wake check-in", force_report, presence_checks, events)))
 
-        def queue_profile_command() -> None:
+        def queue_profile_command() -> bool:
             code, body = post_form(args.hub_url, "/api/command", {"device": target_hex, "mode": args.profile}, args.http_timeout)
             print(f"[HTTP] POST /api/command mode={args.profile} -> {code} {body}")
+            if code is None:
+                return False
             if not args.skip_collar_control:
                 time.sleep(0.5)
                 collar.write_line("tx")
+            return True
 
         results.append(("profile command ACKed", run_step(
             f"Profile command → {args.profile}",
@@ -276,12 +294,15 @@ def main() -> int:
             events,
         )))
 
-        def queue_status_command() -> None:
+        def queue_status_command() -> bool:
             code, body = post_form(args.hub_url, "/api/device-status", {"device": target_hex}, args.http_timeout)
             print(f"[HTTP] POST /api/device-status -> {code} {body}")
+            if code is None:
+                return False
             if not args.skip_collar_control:
                 time.sleep(0.5)
                 collar.write_line("tx")
+            return True
 
         results.append(("status command response observed", run_step(
             "Status command / battery/profile response",
@@ -295,15 +316,18 @@ def main() -> int:
             events,
         )))
 
-        def restore_normal() -> None:
+        def restore_normal() -> bool:
             if args.profile == "normal":
                 print("[INFO] Already testing normal; no restore needed.")
-                return
+                return True
             code, body = post_form(args.hub_url, "/api/command", {"device": target_hex, "mode": "normal"}, args.http_timeout)
             print(f"[HTTP] POST /api/command mode=normal -> {code} {body}")
+            if code is None:
+                return False
             if not args.skip_collar_control:
                 time.sleep(0.5)
                 collar.write_line("tx")
+            return True
 
         if args.profile != "normal":
             results.append(("profile restored to normal", run_step(
