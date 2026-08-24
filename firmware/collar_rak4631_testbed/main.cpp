@@ -48,6 +48,7 @@ static constexpr double LON_E7_PER_METRE = 10000000.0 / 68660.0;
 
 // Bench runtime is time-compressed. Each pass represents one real collar wake.
 static constexpr uint32_t TEST_WAKE_STEP_MS = 8000;
+static constexpr uint32_t TEST_WAKE_STEP_SECONDS = TEST_WAKE_STEP_MS / 1000UL;
 static constexpr uint32_t TEST_RX_WINDOW_MS = 1500;
 static constexpr uint32_t FAKE_UNIX_START = 1787486400UL;
 static constexpr uint16_t FAKE_BATTERY_MV = 3900;
@@ -95,7 +96,8 @@ struct CollarRuntimeState {
   bool lastGnssValid = true;
   uint16_t seq = 1;
   uint32_t simulatedUnix = FAKE_UNIX_START;
-  uint32_t lastLteHeartbeatUnix = FAKE_UNIX_START;
+  uint32_t simulatedProfileSeconds = 0;
+  uint32_t lastLteHeartbeatProfileSeconds = 0;
   uint32_t lastSuccessfulCloudSeenUnix = FAKE_UNIX_START;
   uint32_t homeSeenWakeCount = 0;
   uint32_t homeMissedWakeCount = 0;
@@ -271,7 +273,7 @@ static void noteRxWindow(const char *path) {
 }
 
 static void noteLteEvent(const char *label, bp_status_t status, bp_tx_reason_t reason) {
-  runtimeState.lastLteHeartbeatUnix = runtimeState.simulatedUnix;
+  runtimeState.lastLteHeartbeatProfileSeconds = runtimeState.simulatedProfileSeconds;
   runtimeState.lastSuccessfulCloudSeenUnix = runtimeState.simulatedUnix;
   Serial.printf("[LTE] %s due now: would HTTPS-wrap same TLV shape | status=%s reason=%s unix=%lu\n",
                 label,
@@ -293,7 +295,7 @@ static void runHomePath(const RuntimeProfile *profile) {
   const bool loraWakeDue = (profile->homeLoraEveryNWakes > 0) &&
                            ((runtimeState.homeSeenWakeCount % profile->homeLoraEveryNWakes) == 0);
   const bool lteDue = (profile->lteHeartbeatEveryS > 0) &&
-                      ((runtimeState.simulatedUnix - runtimeState.lastLteHeartbeatUnix) >= profile->lteHeartbeatEveryS);
+                      ((runtimeState.simulatedProfileSeconds - runtimeState.lastLteHeartbeatProfileSeconds) >= profile->lteHeartbeatEveryS);
 
   Serial.printf("[HOME] BLE seen count=%lu | LoRa due=%s | GNSS sanity due=%s | LTE due=%s\n",
                 static_cast<unsigned long>(runtimeState.homeSeenWakeCount),
@@ -396,15 +398,17 @@ static void runtimeTask(void *param) {
   for (;;) {
     const RuntimeProfile *profile = runtimeProfile(runtimeState.profile);
     runtimeState.totalWakeCount++;
-    runtimeState.simulatedUnix += profile->wakeIntervalS;
+    runtimeState.simulatedUnix += TEST_WAKE_STEP_SECONDS;
+    runtimeState.simulatedProfileSeconds += profile->wakeIntervalS;
 
     Serial.println();
     Serial.println("────────────────────────────────────────────");
-    Serial.printf("[WAKE] #%lu profile=%s real_interval=%us simulated_unix=%lu BLE_HOME=%s\n",
+    Serial.printf("[WAKE] #%lu profile=%s real_interval=%us simulated_unix=%lu logical_profile_time=%lus BLE_HOME=%s\n",
                   static_cast<unsigned long>(runtimeState.totalWakeCount),
                   profile->label,
                   profile->wakeIntervalS,
                   static_cast<unsigned long>(runtimeState.simulatedUnix),
+                  static_cast<unsigned long>(runtimeState.simulatedProfileSeconds),
                   runtimeState.simulatedHomeBeaconSeen ? "seen" : "missed");
 
     if (profile->profile == PROFILE_LOST) {
