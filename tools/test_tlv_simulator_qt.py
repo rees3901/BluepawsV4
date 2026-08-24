@@ -211,9 +211,9 @@ class QtConsoleTests(unittest.TestCase):
         self.window.recipe_combo.setCurrentText("Status/profile sweep")
         self.window.cookbook_group.setChecked(True)
         with patch("tlv_simulator_qt.time.time", return_value=6_000):
-            requests = self.window._prepare_requests(16, 2.0)
+            requests = self.window._prepare_requests(20, 2.0)
 
-        self.assertEqual(self.window.send_count.text(), "16")
+        self.assertEqual(self.window.send_count.text(), "20")
         self.assertEqual(TAG_MODES[self.window.tag_mode.currentText()], "valid")
         self.assertTrue(all(packet_hmac_valid(wrapper, bytes(range(32))) for _, wrapper in requests))
 
@@ -222,7 +222,7 @@ class QtConsoleTests(unittest.TestCase):
             STATUS_CODES["OUT"],
             STATUS_CODES["LOST"],
             STATUS_CODES["ERROR"],
-        ] * 4
+        ] * 5
         expected_profiles = [
             POWER_PROFILE_CODES["NORMAL"],
             POWER_PROFILE_CODES["NORMAL"],
@@ -240,6 +240,10 @@ class QtConsoleTests(unittest.TestCase):
             POWER_PROFILE_CODES["LOST_ALERT"],
             POWER_PROFILE_CODES["LOST_ALERT"],
             POWER_PROFILE_CODES["LOST_ALERT"],
+            POWER_PROFILE_CODES["DEBUG"],
+            POWER_PROFILE_CODES["DEBUG"],
+            POWER_PROFILE_CODES["DEBUG"],
+            POWER_PROFILE_CODES["DEBUG"],
         ]
         expected_reasons = list(TX_REASON_CODES.values()) * 3
 

@@ -911,6 +911,7 @@
         var profileClass = 'profile-' + profileLower.replace('save', '');
         var profileLabel = data.profile;
         if (profileLower === 'powersave') profileLabel = '\u{1F4A4} PowerSave';
+        if (profileLower === 'debug') profileLabel = '\u{1F9EA} Debug';
 
         // ── Compact summary (always visible) ──
         // Row 1: avatar, name, status badge, profile badge, chevron

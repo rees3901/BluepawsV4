@@ -98,7 +98,7 @@ begin
 
   if command_type = 'set_profile' then
     profile := command_payload ->> 'profile';
-    if profile not in ('normal', 'power_save', 'active', 'lost_alert') then
+    if profile not in ('normal', 'power_save', 'active', 'lost_alert', 'debug') then
       raise exception using errcode = '22023', message = 'set_profile requires a valid profile';
     end if;
   elsif command_type = 'request_status' then
@@ -227,6 +227,13 @@ begin
   end if;
 
   perform private.bluepaws_validate_command_payload(normalized_type, normalized_payload);
+
+  if normalized_type = 'set_profile'
+    and normalized_payload ->> 'profile' = 'debug'
+    and caller_role <> 'owner'
+  then
+    raise exception using errcode = '42501', message = 'Owner role required for Debug profile';
+  end if;
 
   if requested_expires_in < interval '1 minute' or requested_expires_in > interval '24 hours' then
     raise exception using errcode = '22023', message = 'Command expiry must be between 1 minute and 24 hours';

@@ -124,7 +124,7 @@ function statusName(value: number | null): TelemetryDevice["status"] {
 }
 
 function profileName(value: number | null): TelemetryDevice["profile"] {
-  return (["PowerSave", "Normal", "Active", "Emergency Lost"] as const)[value ?? 1] ?? "Normal";
+  return (["PowerSave", "Normal", "Active", "Emergency Lost", "Debug"] as const)[value ?? 1] ?? "Normal";
 }
 
 function nullableNumber(value: unknown) {

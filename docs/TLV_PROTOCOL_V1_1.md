@@ -198,13 +198,15 @@ Stored in the upper nibble of `state`.
 | 1 | `NORMAL` | Standard tracking behaviour. |
 | 2 | `ACTIVE` | Higher frequency tracking. |
 | 3 | `LOST_ALERT` | Urgent lost-alert behaviour. |
-| 4-15 | `RESERVED` | Reserved. |
+| 4 | `DEBUG` | Development-only noisy bench-test reporting. Not customer-facing production behaviour. |
+| 5-15 | `RESERVED` | Reserved. |
 
 Examples:
 
 ```text
 0x11 = OUT + NORMAL
 0x32 = LOST + LOST_ALERT
+0x41 = OUT + DEBUG
 0x00 = HOME + POWER_SAVE
 ```
 
@@ -388,6 +390,7 @@ Transmit-power policy:
 | POWER_SAVE | 10 dBm |
 | NORMAL | 14 dBm |
 | ACTIVE | 20 dBm |
+| DEBUG | 14 dBm |
 | LOST_ALERT | 20 dBm |
 
 The higher-power profiles remain subject to the final product's UK regulatory compliance, including complete-system ERP after antenna gain and feeder losses.

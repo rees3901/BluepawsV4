@@ -407,6 +407,7 @@ body.panel-open .hamburger-btn {
 .card-profile.profile-power     { background: var(--accent);   color: #fff; }
 .card-profile.profile-active    { background: var(--warning);  color: #000; }
 .card-profile.profile-lost      { background: var(--danger);   color: #fff; }
+.card-profile.profile-debug     { background: #7c3aed;         color: #fff; }
 
 .card-coords {
     font-size: 0.7rem;

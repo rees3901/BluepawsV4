@@ -64,6 +64,7 @@ static const bp_profile_config_t BP_PROFILES[] = {
     { PROFILE_NORMAL,          14,    600,    5,  false,  false,    10,          1,       10,        3600  }, // default everyday collar
     { PROFILE_POWERSAVE,       10,   1800,    3,  false,  false,    30,          2,       10,        10800 }, // lazy/low-battery conservation
     { PROFILE_ACTIVE,          20,     60,    5,  false,  false,     5,          1,       10,        600   }, // interested/high-frequency monitoring
+    { PROFILE_DEBUG,           14,     30,    2,  false,  false,     1,          1,        1,        30    }, // development-only noisy telemetry
     { PROFILE_LOST,            20,      0,   10,  true,   true,      3,          1,        1,        60    }, // emergency; handled outside home gate
 };
 

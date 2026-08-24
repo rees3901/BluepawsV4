@@ -86,7 +86,7 @@ test("recognizes a valid direct cellular wrapper", () => {
 
 test("decodes every v1.1 status, power profile, and TX reason code from the header", () => {
   for (let status = 0; status <= 3; status += 1) {
-    for (let powerProfile = 0; powerProfile <= 3; powerProfile += 1) {
+    for (let powerProfile = 0; powerProfile <= 4; powerProfile += 1) {
       for (let txReason = 0; txReason <= 7; txReason += 1) {
         const packet = buildPacket();
         packet[9] = (powerProfile << 4) | status;
@@ -108,7 +108,7 @@ test("rejects reserved v1.1 status, power profile, and TX reason codes", () => {
   assertDecodeError(() => parseTlvPacket(reservedStatus), "reserved_status");
 
   const reservedPowerProfile = buildPacket();
-  reservedPowerProfile[9] = 0x40;
+  reservedPowerProfile[9] = 0x50;
   assertDecodeError(
     () => parseTlvPacket(reservedPowerProfile),
     "reserved_power_profile",

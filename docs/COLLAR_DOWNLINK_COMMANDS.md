@@ -83,7 +83,7 @@ These are the first supported backend command types. They are intentionally cons
 
 | Command type | Payload | Meaning | First delivery path |
 |---|---|---|---|
-| `set_profile` | `{ "profile": "normal" \| "power_save" \| "active" \| "lost_alert" }` | Change collar power/safety profile. | LTE response and Home Hub |
+| `set_profile` | `{ "profile": "normal" \| "power_save" \| "active" \| "lost_alert" \| "debug" }` | Change collar power/safety profile. `debug` is development-only and must not be customer-facing. | LTE response and Home Hub |
 | `request_status` | `{}` | Ask collar to reply with battery/profile/status diagnostics. | Home Hub first |
 | `force_report` | `{ "gnss": true \| false }` | Ask collar to send a fresh report at the next safe opportunity. | Later |
 | `enter_lost_alert` | `{}` | Enter Lost Alert emergency search mode. | LTE response and Home Hub |
@@ -129,7 +129,6 @@ failed
 
 - The command queue is keyed by `device_id` and `household_id`.
 - A command can only be queued for a device in the caller's Family.
-- Test/debug commands must remain restricted.
+- Test/debug commands must remain restricted; `debug_cadence`, `reboot`, and `set_profile` to `debug` are owner-only in the first queue implementation.
 - LTE response delivery is protected by the collar's existing bearer token and packet HMAC.
 - LoRa downlink command authentication is still a separate protocol decision and must not be treated as production-secure until formally solved.
-

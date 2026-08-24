@@ -43,6 +43,7 @@ POWER_PROFILE_CODES = {
     "NORMAL": 1,
     "ACTIVE": 2,
     "LOST_ALERT": 3,
+    "DEBUG": 4,
 }
 TX_REASON_CODES = {
     "TELEMETRY": 0,
@@ -607,7 +608,7 @@ def _validate_packet_fields(fields: PacketFields) -> None:
     _range(fields.message_sequence, 0, 65_535, "message sequence")
     _range(fields.timestamp, 0, 0xFFFF_FFFF, "timestamp")
     _range(fields.status, 0, 3, "status")
-    _range(fields.power_profile, 0, 3, "power profile")
+    _range(fields.power_profile, 0, 4, "power profile")
     _range(fields.flags, 0, 255, "flags")
     _range(fields.tx_reason, 0, 7, "TX reason")
     if not -90 <= fields.latitude <= 90:
