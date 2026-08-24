@@ -94,6 +94,14 @@ static uint32_t cycleCount     = 0;    // Total wake/transmit cycles since boot
 static uint8_t  homeCycleCount = 0;    // Consecutive cycles where BLE home beacon was detected
 static uint32_t lastLteHeartbeatMs = 0; // Last time a home LTE heartbeat was queued
 
+#if defined(BLUEPAWS_TESTBED_BUILD) && BLUEPAWS_TESTBED_BUILD
+// USB Serial debug console for RAK4631/WisMesh testbed work only.
+// Non-persistent: reset/power-cycle returns to firmware defaults.
+static volatile bool     debugCadenceEnabled = false;
+static volatile uint16_t debugSleepIntervalS = 60;
+static volatile bool     forceImmediateCycle = false;
+#endif
+
 // ── GPS State ──
 static volatile bool gpsAwake     = false;   // true = GPS module is powered on
 static volatile bool gpsWarmStart = false;   // true = we had a fix before (ephemeris cached)
@@ -198,6 +206,14 @@ static void     buzzerOff();
 static void     cellularSendTlv(const uint8_t *pkt, uint8_t len);  // Full send sequence
 static void     cellularConfigurePSM();    // Configure PSM + eDRX (first use only)
 static bool     cellularSendAT(const char *cmd, const char *expect, uint16_t timeoutMs);
+static uint16_t effectiveSleepIntervalS();
+
+#if defined(BLUEPAWS_TESTBED_BUILD) && BLUEPAWS_TESTBED_BUILD
+static void     debugConsolePoll();
+static void     debugConsoleHandleLine(String line);
+static void     debugConsolePrintHelp();
+static void     debugConsolePrintStatus();
+#endif
 
 // ═══════════════════════════════════════════════
 // BLE Scan Callback
@@ -330,9 +346,14 @@ void setup() {
     Serial.println("──────────────────────────────────");
 }
 
-// Arduino loop() — not used. All work happens in FreeRTOS tasks.
+// Arduino loop() — production work happens in FreeRTOS tasks.
 void loop() {
+#if defined(BLUEPAWS_TESTBED_BUILD) && BLUEPAWS_TESTBED_BUILD
+    debugConsolePoll();
+    vTaskDelay(pdMS_TO_TICKS(25));
+#else
     vTaskDelay(pdMS_TO_TICKS(10000));
+#endif
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -351,9 +372,15 @@ static void cycleTask(void *param) {
         }
 
         cycleCount++;
-        Serial.printf("\n[CYCLE %lu] %s | interval %ds\n",
+        Serial.printf("\n[CYCLE %lu] %s | interval %ds%s\n",
                       cycleCount, bp_profile_name(currentProfile),
-                      currentConfig->sleep_interval_s);
+                      effectiveSleepIntervalS(),
+#if defined(BLUEPAWS_TESTBED_BUILD) && BLUEPAWS_TESTBED_BUILD
+                      debugCadenceEnabled ? " | debug cadence" : ""
+#else
+                      ""
+#endif
+        );
 
         // ── Wake peripherals for this cycle ──
         peripheralsWake();
@@ -1105,6 +1132,158 @@ static void applyProfile(bp_profile_t profile) {
                   currentConfig->gps_continuous ? "continuous" : "on-demand");
 }
 
+static uint16_t effectiveSleepIntervalS() {
+#if defined(BLUEPAWS_TESTBED_BUILD) && BLUEPAWS_TESTBED_BUILD
+    if (debugCadenceEnabled && currentProfile != PROFILE_LOST) {
+        return debugSleepIntervalS;
+    }
+#endif
+    return currentConfig->sleep_interval_s;
+}
+
+#if defined(BLUEPAWS_TESTBED_BUILD) && BLUEPAWS_TESTBED_BUILD
+static void debugConsolePoll() {
+    static String line;
+
+    while (Serial.available() > 0) {
+        char c = (char)Serial.read();
+        if (c == '\r') continue;
+        if (c == '\n') {
+            debugConsoleHandleLine(line);
+            line = "";
+            continue;
+        }
+
+        if (line.length() < 96) {
+            line += c;
+        } else {
+            line = "";
+            Serial.println("[DBG] Command too long; discarded. Type 'help'.");
+        }
+    }
+}
+
+static void debugConsoleHandleLine(String line) {
+    line.trim();
+    if (line.length() == 0) return;
+
+    String lower = line;
+    lower.toLowerCase();
+
+    if (lower == "help" || lower == "?") {
+        debugConsolePrintHelp();
+        return;
+    }
+
+    if (lower == "status") {
+        debugConsolePrintStatus();
+        return;
+    }
+
+    if (lower == "tx" || lower == "send" || lower == "wake") {
+        forceImmediateCycle = true;
+        if (cycleTaskHandle != NULL) {
+            xTaskNotifyGive(cycleTaskHandle);
+        }
+        Serial.println("[DBG] Forced next cycle requested.");
+        return;
+    }
+
+    if (lower == "debug on") {
+        debugCadenceEnabled = true;
+        forceImmediateCycle = true;
+        if (cycleTaskHandle != NULL) {
+            xTaskNotifyGive(cycleTaskHandle);
+        }
+        Serial.printf("[DBG] Debug cadence ON: %us sleep interval.\n", debugSleepIntervalS);
+        return;
+    }
+
+    if (lower == "debug off") {
+        debugCadenceEnabled = false;
+        Serial.println("[DBG] Debug cadence OFF: profile cadence restored.");
+        debugConsolePrintStatus();
+        return;
+    }
+
+    if (lower.startsWith("interval ")) {
+        String value = lower.substring(9);
+        value.trim();
+        long seconds = value.toInt();
+        if (seconds < 5 || seconds > 3600) {
+            Serial.println("[DBG] interval must be 5..3600 seconds.");
+            return;
+        }
+        debugSleepIntervalS = (uint16_t)seconds;
+        debugCadenceEnabled = true;
+        forceImmediateCycle = true;
+        if (cycleTaskHandle != NULL) {
+            xTaskNotifyGive(cycleTaskHandle);
+        }
+        Serial.printf("[DBG] Debug cadence ON: %us sleep interval.\n", debugSleepIntervalS);
+        return;
+    }
+
+    if (lower.startsWith("profile ")) {
+        String value = lower.substring(8);
+        value.trim();
+
+        bp_profile_t next = PROFILE_NORMAL;
+        if (value == "normal") {
+            next = PROFILE_NORMAL;
+        } else if (value == "powersave" || value == "power_save" || value == "power-save") {
+            next = PROFILE_POWERSAVE;
+        } else if (value == "active") {
+            next = PROFILE_ACTIVE;
+        } else if (value == "lost" || value == "lost_alert" || value == "lost-alert") {
+            next = PROFILE_LOST;
+        } else {
+            Serial.println("[DBG] Unknown profile. Use: normal, powersave, active, lost.");
+            return;
+        }
+
+        applyProfile(next);
+        forceImmediateCycle = true;
+        if (cycleTaskHandle != NULL) {
+            xTaskNotifyGive(cycleTaskHandle);
+        }
+        debugConsolePrintStatus();
+        return;
+    }
+
+    Serial.printf("[DBG] Unknown command: %s\n", line.c_str());
+    Serial.println("[DBG] Type 'help' for commands.");
+}
+
+static void debugConsolePrintHelp() {
+    Serial.println();
+    Serial.println("[DBG] Bluepaws collar testbed commands");
+    Serial.println("      help                 Show this help");
+    Serial.println("      status               Print profile/cadence/counters");
+    Serial.println("      profile normal       Set Normal profile");
+    Serial.println("      profile powersave    Set Power Save profile");
+    Serial.println("      profile active       Set Active profile");
+    Serial.println("      profile lost         Set Lost Alert profile");
+    Serial.println("      debug on             Override sleep interval to 60s");
+    Serial.println("      debug off            Restore profile sleep interval");
+    Serial.println("      interval <seconds>   Override sleep interval, 5..3600s");
+    Serial.println("      tx                   Request an immediate next cycle");
+    Serial.println();
+}
+
+static void debugConsolePrintStatus() {
+    Serial.printf("[DBG] device=%u profile=%s debug=%s interval=%us seq=%lu cycles=%lu home_wakes=%u lost=%s\n",
+                  (unsigned)MY_DEVICE_ID,
+                  bp_profile_name(currentProfile),
+                  debugCadenceEnabled ? "on" : "off",
+                  effectiveSleepIntervalS(),
+                  messageSeq,
+                  cycleCount,
+                  homeCycleCount,
+                  inLostMode ? "yes" : "no");
+}
+#endif
+
 // ═══════════════════════════════════════════════
 // Cellular Task
 // Blocks on notification. Wakes GM02SP, configures
@@ -1280,16 +1459,43 @@ static uint32_t gnssGetUnixTime() {
 // sleep with only RTC running.
 // ═══════════════════════════════════════════════
 static void enterDeepSleep() {
-    uint32_t sleepMs = currentConfig->sleep_interval_s * 1000UL;
+    uint16_t sleepIntervalS = effectiveSleepIntervalS();
+    uint32_t sleepMs = sleepIntervalS * 1000UL;
 
-    Serial.printf("[SLEEP] %lus (all peripherals off, RTC only)\n",
-                  currentConfig->sleep_interval_s);
+    Serial.printf("[SLEEP] %us (all peripherals off, RTC only%s)\n",
+                  sleepIntervalS,
+#if defined(BLUEPAWS_TESTBED_BUILD) && BLUEPAWS_TESTBED_BUILD
+                  debugCadenceEnabled ? ", debug cadence" : ""
+#else
+                  ""
+#endif
+    );
     Serial.flush();
 
     // FreeRTOS tickless idle will put the nRF52840 into
     // system-on sleep mode. Only the RTC and ULP remain active.
     // All GPIOs retain state (GPS sleep pin stays LOW, etc).
+#if defined(BLUEPAWS_TESTBED_BUILD) && BLUEPAWS_TESTBED_BUILD
+    if (forceImmediateCycle) {
+        forceImmediateCycle = false;
+        Serial.println("[DBG] Sleep skipped for forced cycle.");
+    } else {
+        uint32_t sleptMs = 0;
+        while (sleptMs < sleepMs) {
+            uint32_t remainingMs = sleepMs - sleptMs;
+            uint32_t chunkMs = remainingMs > 1000UL ? 1000UL : remainingMs;
+            uint32_t notified = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(chunkMs));
+            if (notified > 0 || forceImmediateCycle) {
+                forceImmediateCycle = false;
+                Serial.println("[DBG] Sleep interrupted for debug command.");
+                break;
+            }
+            sleptMs += chunkMs;
+        }
+    }
+#else
     vTaskDelay(pdMS_TO_TICKS(sleepMs));
+#endif
 
     Serial.println("[WAKE] ──────────────────────");
 }
