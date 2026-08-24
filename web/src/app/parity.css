@@ -932,6 +932,117 @@ body.light .console-log {
     margin-top: 4px;
 }
 
+.device-report-modal {
+    max-width: 760px;
+}
+
+.report-eyebrow {
+    display: block;
+    margin-bottom: 4px;
+    color: var(--accent);
+    font-size: 0.68rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.modal-close-btn {
+    display: grid;
+    width: 34px;
+    height: 34px;
+    flex: 0 0 34px;
+    place-items: center;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-primary);
+    color: var(--text-secondary);
+    font-size: 1.2rem;
+    cursor: pointer;
+}
+
+.modal-close-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.report-summary {
+    margin: 0 0 14px;
+    padding: 12px 13px;
+    border: 1px solid rgb(29 155 240 / 24%);
+    border-radius: 9px;
+    background: rgb(29 155 240 / 9%);
+    color: var(--text-primary);
+    font-size: 0.86rem;
+    line-height: 1.45;
+}
+
+.report-table-wrap {
+    overflow: auto;
+    max-height: min(52vh, 520px);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+}
+
+.report-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.78rem;
+}
+
+.report-table th,
+.report-table td {
+    padding: 10px 11px;
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+    vertical-align: top;
+}
+
+.report-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font-weight: 800;
+}
+
+.report-table tbody th {
+    width: 18%;
+    color: var(--text-primary);
+    font-weight: 800;
+    white-space: nowrap;
+}
+
+.report-table td:nth-child(2) {
+    width: 26%;
+    color: var(--accent);
+    font-weight: 700;
+}
+
+.report-table td:nth-child(3) {
+    color: var(--text-secondary);
+    line-height: 1.45;
+}
+
+.previous-reports {
+    margin-top: 12px;
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+}
+
+.previous-reports summary {
+    cursor: pointer;
+    color: var(--text-primary);
+    font-weight: 700;
+}
+
+.previous-reports ol {
+    display: grid;
+    gap: 6px;
+    margin: 10px 0 0;
+    padding-left: 18px;
+}
+
 /* ── Popup Layout ── */
 .popup-header {
     display: flex;
