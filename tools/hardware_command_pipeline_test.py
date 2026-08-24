@@ -27,6 +27,9 @@ import urllib.parse
 import urllib.request
 from typing import Callable, Iterable
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(errors="replace")
+
 try:
     import serial  # type: ignore
 except ImportError:  # pragma: no cover - friendly runtime message
@@ -77,7 +80,7 @@ class SerialMonitor:
         payload = (line.rstrip("\r\n") + "\n").encode("utf-8")
         self._serial.write(payload)
         self._serial.flush()
-        print(f"[{self.label} →] {line}")
+        print(f"[{self.label} ->] {line}")
 
     def _run(self) -> None:
         assert self._serial is not None
