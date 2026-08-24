@@ -29,11 +29,13 @@ interface DeviceCardProps {
   onDrop: () => void;
   onDragEnd: () => void;
   onPinTop: () => void;
+  onReportLog: () => void;
+  onReportExport: () => void;
   onAvatarEdit?: () => void;
 }
 
 export function DeviceCard(props: DeviceCardProps) {
-  const { device, avatar, expanded, dragging, dragOver, followed, trailVisible, portableMode, distance, ageSeconds, onExpand, onAction, onDragStart, onDragOver, onDrop, onDragEnd, onPinTop, onAvatarEdit } = props;
+  const { device, avatar, expanded, dragging, dragOver, followed, trailVisible, portableMode, distance, ageSeconds, onExpand, onAction, onDragStart, onDragOver, onDrop, onDragEnd, onPinTop, onReportLog, onReportExport, onAvatarEdit } = props;
   const status = STATUS[device.status.toLowerCase() as keyof typeof STATUS] ?? STATUS.error;
   const profileLower = device.profile.toLowerCase();
   const profileClass = `profile-${profileLower.replace("save", "").replaceAll(" ", "-")}`;
@@ -143,8 +145,8 @@ export function DeviceCard(props: DeviceCardProps) {
             </div>
             <ActionButtons followed={followed} trailVisible={trailVisible} onAction={onAction} />
             <div className="log-btn-row">
-              <button className="btn-device-log btn-secondary">Message Log</button>
-              <button className="btn-log-export" title="Export log as CSV" aria-label="Export device log">
+              <button className="btn-device-log btn-secondary" type="button" onClick={onReportLog}>Message Log</button>
+              <button className="btn-log-export" type="button" title="Export report log as CSV" aria-label="Export report log" onClick={onReportExport}>
                 <DownloadIcon />
               </button>
             </div>

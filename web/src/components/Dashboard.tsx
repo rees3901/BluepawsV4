@@ -4,10 +4,12 @@ import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DeviceCard, DownloadIcon } from "@/components/DeviceCard";
+import { DeviceReportModal } from "@/components/DeviceReportModal";
 import { GuidedTour } from "@/components/GuidedTour";
 import { AccountMenu } from "@/components/AccountMenu";
 import { defaultDeviceAvatar } from "@/lib/defaultDeviceAvatar";
 import { deviceCardOrderStorageKey, moveDeviceBefore, orderDeviceIds, pinDeviceFirst } from "@/lib/deviceCardOrder";
+import { buildCurrentDeviceReport, deviceReportsToCsv, loadDeviceReports, type DeviceReport } from "@/lib/deviceReports";
 import { loadDeviceAppearances, revokeAvatarUrls } from "@/lib/deviceAppearances";
 import { nextExpandedDeviceCards } from "@/lib/expandedCards";
 import { followedDeviceAfterAction } from "@/lib/followState";
@@ -80,6 +82,10 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
   const [draggingDeviceId, setDraggingDeviceId] = useState<number | null>(null);
   const [dragOverDeviceId, setDragOverDeviceId] = useState<number | null>(null);
   const [familyRetryCount, setFamilyRetryCount] = useState(0);
+  const [reportDevice, setReportDevice] = useState<TelemetryDevice | null>(null);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
+  const [deviceReports, setDeviceReports] = useState<DeviceReport[]>([]);
   const sequences = useRef(new Map<number, number>());
   const customAvatarsRef = useRef<Record<number, DeviceAvatar>>({});
   const cardOrderKey = useMemo(() => deviceCardOrderStorageKey(userEmail, householdId), [householdId, userEmail]);
@@ -322,6 +328,42 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
     setToast("Pet pinned to the top of this browser");
   }, [devices]);
 
+  const fetchReportsForDevice = useCallback(async (device: TelemetryDevice) => {
+    if (tutorialMode) return [buildCurrentDeviceReport(device)];
+    return loadDeviceReports(device.id);
+  }, [tutorialMode]);
+
+  const handleReportLog = useCallback((device: TelemetryDevice) => {
+    setReportDevice(device);
+    setReportLoading(true);
+    setReportError(null);
+    setDeviceReports([]);
+
+    void fetchReportsForDevice(device)
+      .then((reports) => setDeviceReports(reports))
+      .catch((error: unknown) => {
+        console.error("Unable to load device report log", error);
+        setReportError("Unable to load the latest accepted reports for this pet.");
+      })
+      .finally(() => setReportLoading(false));
+  }, [fetchReportsForDevice]);
+
+  const handleReportExport = useCallback((device: TelemetryDevice, existingReports?: DeviceReport[]) => {
+    void (async () => {
+      try {
+        const reports = existingReports ?? await fetchReportsForDevice(device);
+        if (reports.length === 0) {
+          setToast("No accepted reports are available to export yet");
+          return;
+        }
+        downloadDeviceReports(device.name, reports);
+      } catch (error) {
+        console.error("Unable to export device report log", error);
+        setToast("Unable to export the report log");
+      }
+    })();
+  }, [fetchReportsForDevice]);
+
   const handleRefreshNow = useCallback(() => {
     setFamilyRetryCount(0);
     setConnectionDetail("Refreshing latest Family and pet data...");
@@ -487,6 +529,8 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
               onDrop={() => handleCardDrop(device.id)}
               onDragEnd={() => { setDraggingDeviceId(null); setDragOverDeviceId(null); }}
               onPinTop={() => handleCardPin(device.id)}
+              onReportLog={() => handleReportLog(device)}
+              onReportExport={() => handleReportExport(device)}
             />
           ))}
         </div>
@@ -520,6 +564,16 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
       )}
       {commandDevice && <CommandModal device={commandDevice} onClose={() => setCommandDevice(null)} onSend={(mode) => { setCommandDevice(null); setToast(tutorialMode ? `Tutorial command preview: ${mode}` : "Command sending is not connected yet"); }} />}
       {findDevice && <FindModal device={findDevice} onClose={() => setFindDevice(null)} onSend={() => { setFindDevice(null); setToast(tutorialMode ? "Tutorial Find Alert previewed" : "Find Alert sending is not connected yet"); }} />}
+      {reportDevice && (
+        <DeviceReportModal
+          deviceName={reportDevice.name}
+          reports={deviceReports}
+          loading={reportLoading}
+          error={reportError}
+          onClose={() => setReportDevice(null)}
+          onDownload={() => handleReportExport(reportDevice, deviceReports)}
+        />
+      )}
       {avatarDevice && householdId && (
         <AvatarEditorModal
           device={avatarDevice}
@@ -677,6 +731,16 @@ function downloadLog(logs: string[]) {
   const anchor = document.createElement("a");
   anchor.href = url;
   anchor.download = `bluepaws_console_${new Date().toISOString().slice(0, 10)}.csv`;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+function downloadDeviceReports(deviceName: string, reports: DeviceReport[]) {
+  const blob = new Blob([deviceReportsToCsv(reports)], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `bluepaws_${deviceName.toLowerCase().replace(/[^a-z0-9]+/g, "_")}_reports_${new Date().toISOString().slice(0, 10)}.csv`;
   anchor.click();
   URL.revokeObjectURL(url);
 }
