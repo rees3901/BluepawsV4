@@ -162,6 +162,30 @@ def get_json(base_url: str, path: str, timeout: float) -> tuple[int | None, str]
         return None, str(exc)
 
 
+def normalize_hub_url(raw_url: str) -> str:
+    """Accept plain URLs and Markdown links accidentally pasted from chat."""
+    value = raw_url.strip()
+
+    markdown_match = re.fullmatch(r"\[(https?://[^\]]+)\]\(https?://[^)]+\)", value)
+    if markdown_match:
+        value = markdown_match.group(1)
+
+    value = value.strip("<>")
+    return value.rstrip("/")
+
+
+def wait_for_hub_settle(events: EventLog, seconds: float) -> None:
+    """Give the ESP32 hub time to recover if opening serial toggled reset."""
+    if seconds <= 0:
+        return
+    print()
+    print(f"[INFO] Waiting {seconds:g}s for hub serial/Wi-Fi to settle...")
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        events.drain()
+        time.sleep(0.2)
+
+
 def hex_device_id(device_id: int) -> str:
     if not 1 <= device_id <= 65535:
         raise ValueError("--target-id must be 1..65535")
@@ -200,6 +224,7 @@ def main() -> int:
     parser.add_argument("--baud", type=int, default=DEFAULT_BAUD, help="Serial baud rate.")
     parser.add_argument("--timeout", type=float, default=45.0, help="Seconds to wait for each command result.")
     parser.add_argument("--http-timeout", type=float, default=5.0, help="Seconds to wait for hub HTTP calls.")
+    parser.add_argument("--hub-startup-wait", type=float, default=10.0, help="Seconds to wait after opening hub serial before HTTP checks.")
     parser.add_argument("--continue-without-hub-http", action="store_true", help="Keep monitoring serial logs even when the hub HTTP API is unreachable.")
     parser.add_argument("--profile", default="active", choices=["normal", "powersave", "active", "lost"], help="Profile command to test.")
     parser.add_argument("--skip-sniffer", action="store_true", help="Do not open or assert against the sniffer port.")
@@ -207,6 +232,7 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true", help="Print planned actions without opening serial ports.")
     args = parser.parse_args()
 
+    args.hub_url = normalize_hub_url(args.hub_url)
     target_hex = hex_device_id(args.target_id)
 
     print(json.dumps({
@@ -237,7 +263,7 @@ def main() -> int:
         for monitor in monitors:
             monitor.start()
 
-        time.sleep(1.0)
+        wait_for_hub_settle(events, args.hub_startup_wait)
         status_code, status_body = get_json(args.hub_url, "/api/status", args.http_timeout)
         print()
         print(f"[HTTP] GET /api/status -> {status_code}")
