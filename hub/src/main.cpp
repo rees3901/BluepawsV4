@@ -81,6 +81,8 @@
 #define PRIO_CLOUD   2      // Medium — cloud relay not urgent
 #define PRIO_BLE     1      // Lowest — BLE beacon just needs to stay alive
 
+#define LORA_RX_POLL_TIMEOUT_MS 250  // Short timed RX window; avoids relying solely on DIO1 ISR
+
 // ═══════════════════════════════════════════════
 // Globals
 // ═══════════════════════════════════════════════
@@ -649,8 +651,11 @@ static void initStorage() {
 // LoRa Task — RX & TX (runs on core 1)
 //
 // This is the most important task. It runs in a tight loop:
-//   1. Check if a packet was received (ISR sets flag)
-//   2. Read the raw TLV packet and dispatch to handlePacket()
+//   1. Listen for a raw TLV packet using a short timed receive window.
+//      This deliberately avoids depending solely on DIO1 interrupts during
+//      hardware bring-up, because a wrong DIO pin can otherwise look like
+//      "RX ready but no packets".
+//   2. Dispatch received raw TLV packets to handlePacket()
 //   3. Check the command queue for outgoing commands from the web GUI
 //   4. Check for timed-out pending commands that need retrying
 // ═══════════════════════════════════════════════
@@ -661,34 +666,23 @@ static void loraTask(void *param) {
     TickType_t lastCmdTx = 0;  // Timestamp of last command TX (for rate-limiting)
 
     for (;;) {
-        // ── Step 1: Check for received LoRa packet ──
-        // The DIO1 ISR sets loraPacketReceived=true when radio has a packet ready.
-        if (loraPacketReceived) {
-            loraPacketReceived = false;
+        // ── Step 1: Listen for received LoRa packet ──
+        // Use a short timed receive so the hub still works if DIO1 interrupts
+        // are miswired/misdeclared during board bring-up.
+        if (xSemaphoreTake(loraMutex, pdMS_TO_TICKS(100))) {
+            int state = lora.receive(rxBuf, sizeof(rxBuf), LORA_RX_POLL_TIMEOUT_MS);
+            int16_t rssi = lora.getRSSI();  // Signal strength
+            float snr = lora.getSNR();      // Signal-to-noise ratio
+            size_t len = lora.getPacketLength(false);
+            xSemaphoreGive(loraMutex);
 
-            // Take the SPI mutex to safely talk to the radio
-            if (xSemaphoreTake(loraMutex, pdMS_TO_TICKS(100))) {
-                int len = lora.getPacketLength();
-                if (len > 0 && len <= BP_MAX_PACKET_SIZE) {
-                    // Read the packet data from the radio's FIFO buffer
-                    int state = lora.readData(rxBuf, len);
-                    int16_t rssi = lora.getRSSI();  // Signal strength
-                    float snr = lora.getSNR();      // Signal-to-noise ratio
-
-                    // Immediately restart RX so we don't miss the next packet
-                    lora.startReceive();
-                    xSemaphoreGive(loraMutex);
-
-                    if (state == RADIOLIB_ERR_NONE) {
-                        // Process the raw TLV v1.1 packet.
-                        handlePacket(rxBuf, (uint8_t)len, rssi, snr);
-                    }
-                } else {
-                    // Invalid length — just restart RX
-                    lora.startReceive();
-                    xSemaphoreGive(loraMutex);
-                }
+            if (state == RADIOLIB_ERR_NONE && len > 0 && len <= BP_MAX_PACKET_SIZE) {
+                handlePacket(rxBuf, (uint8_t)len, rssi, snr);
+            } else if (state != RADIOLIB_ERR_RX_TIMEOUT && state != RADIOLIB_ERR_NONE) {
+                Serial.printf("[LORA] RX poll error: %d\n", state);
             }
+
+            loraPacketReceived = false;  // DIO path is advisory only in this polling loop
         }
 
         // ── Step 2: Process outgoing commands from the web GUI ──
