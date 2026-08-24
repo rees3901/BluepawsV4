@@ -1,0 +1,529 @@
+/*
+  Bluepaws V4 — Heltec Wireless Tracker V2 Home Hub substitute
+
+  Receives raw Bluepaws TLV v1.1 packets from the RAK4631 collar testbed,
+  validates/prints them locally, base64-encodes the unchanged TLV payload, and
+  relays it to the Supabase ingest-position Edge Function as HTTPS JSON.
+
+  Secrets are configured at runtime over the USB serial monitor and stored in
+  ESP32 NVS. Do not commit Wi-Fi credentials or gateway bearer tokens.
+*/
+
+#include <Arduino.h>
+#include <SPI.h>
+#include <RadioLib.h>
+#include <WiFi.h>
+#include <WebServer.h>
+#include <HTTPClient.h>
+#include <Preferences.h>
+#include <BLEDevice.h>
+#include <BLEUtils.h>
+#include <BLEServer.h>
+#include <BLEAdvertising.h>
+
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <freertos/queue.h>
+#include <freertos/semphr.h>
+
+#include <bp_config.h>
+#include <bp_protocol.h>
+
+// Heltec Wireless Tracker V2 / HTIT-Tracker V2.3 pinout from the legacy
+// BluePawzReceiver project. V3 protocol/radio settings remain read-only
+// reference; this firmware uses the V4 locked LoRa profile from bp_config.h.
+static constexpr uint8_t PIN_LORA_NSS = 8;
+static constexpr uint8_t PIN_LORA_SCK = 9;
+static constexpr uint8_t PIN_LORA_MOSI = 10;
+static constexpr uint8_t PIN_LORA_MISO = 11;
+static constexpr uint8_t PIN_LORA_RST = 12;
+static constexpr uint8_t PIN_LORA_BUSY = 13;
+static constexpr uint8_t PIN_LORA_DIO1 = 14;
+static constexpr uint8_t PIN_VEXT = 3;       // active LOW, powers TFT/GNSS rails on legacy board
+static constexpr uint8_t PIN_LED = 18;
+
+static constexpr char AP_SSID[] = "BluePaws-Hub-V4";
+static constexpr char AP_PASS[] = "bluepaws4";
+static constexpr char MDNS_NAME[] = "bluepaws-hub";
+static constexpr uint16_t GATEWAY_GUID16 = 0x0016;
+static constexpr uint8_t LORA_RX_BUFFER_LEN = BP_MAX_PACKET_SIZE + 16;
+
+struct HubConfig {
+  String wifiSsid;
+  String wifiPass;
+  String cloudUrl;
+  String gatewayToken;
+};
+
+struct CloudEntry {
+  uint8_t bytes[BP_MAX_PACKET_SIZE];
+  uint8_t len = 0;
+  int16_t rssi = 0;
+  float snr = 0.0f;
+  uint32_t rxMillis = 0;
+};
+
+struct HubStats {
+  uint32_t rxValid = 0;
+  uint32_t rxInvalid = 0;
+  uint32_t cloudOk = 0;
+  uint32_t cloudFail = 0;
+  uint16_t lastDevice = 0;
+  uint16_t lastSeq = 0;
+  int16_t lastRssi = 0;
+  float lastSnr = 0.0f;
+  int lastHttpCode = 0;
+};
+
+static SPIClass loraSPI(HSPI);
+static SX1262 radio = new Module(PIN_LORA_NSS, PIN_LORA_DIO1, PIN_LORA_RST, PIN_LORA_BUSY, loraSPI);
+static WebServer server(80);
+static Preferences prefs;
+static HubConfig config;
+static HubStats stats;
+static QueueHandle_t cloudQueue = nullptr;
+static SemaphoreHandle_t statsMutex = nullptr;
+static volatile bool radioIrq = false;
+static String serialLine;
+
+static void onRadioIrq() {
+  radioIrq = true;
+}
+
+static String htmlEscape(const String &value) {
+  String out;
+  out.reserve(value.length());
+  for (size_t i = 0; i < value.length(); i++) {
+    char c = value[i];
+    switch (c) {
+      case '&': out += F("&amp;"); break;
+      case '<': out += F("&lt;"); break;
+      case '>': out += F("&gt;"); break;
+      case '"': out += F("&quot;"); break;
+      default: out += c; break;
+    }
+  }
+  return out;
+}
+
+static String base64Encode(const uint8_t *data, uint8_t len) {
+  static const char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  String out;
+  out.reserve(((len + 2) / 3) * 4);
+  for (uint8_t i = 0; i < len; i += 3) {
+    uint32_t n = ((uint32_t)data[i]) << 16;
+    bool has2 = (i + 1) < len;
+    bool has3 = (i + 2) < len;
+    if (has2) n |= ((uint32_t)data[i + 1]) << 8;
+    if (has3) n |= data[i + 2];
+    out += alphabet[(n >> 18) & 0x3F];
+    out += alphabet[(n >> 12) & 0x3F];
+    out += has2 ? alphabet[(n >> 6) & 0x3F] : '=';
+    out += has3 ? alphabet[n & 0x3F] : '=';
+  }
+  return out;
+}
+
+static String gatewayHex() {
+  char out[5];
+  snprintf(out, sizeof(out), "%04X", GATEWAY_GUID16);
+  return String(out);
+}
+
+static void printHex(const uint8_t *bytes, uint8_t len) {
+  for (uint8_t i = 0; i < len; i++) {
+    if (bytes[i] < 0x10) Serial.print('0');
+    Serial.print(bytes[i], HEX);
+    if (i + 1 < len) Serial.print(' ');
+  }
+  Serial.println();
+}
+
+static void loadConfig() {
+  prefs.begin("bluepaws", false);
+  config.wifiSsid = prefs.getString("ssid", "");
+  config.wifiPass = prefs.getString("pass", "");
+  config.cloudUrl = prefs.getString("url", "");
+  config.gatewayToken = prefs.getString("token", "");
+}
+
+static void saveConfig() {
+  prefs.putString("ssid", config.wifiSsid);
+  prefs.putString("pass", config.wifiPass);
+  prefs.putString("url", config.cloudUrl);
+  prefs.putString("token", config.gatewayToken);
+}
+
+static void printConfig() {
+  Serial.println();
+  Serial.println("[CFG] Current hub relay configuration");
+  Serial.printf("      Wi-Fi SSID: %s\n", config.wifiSsid.length() ? config.wifiSsid.c_str() : "<not set>");
+  Serial.printf("      Wi-Fi pass: %s\n", config.wifiPass.length() ? "<stored>" : "<not set>");
+  Serial.printf("      Cloud URL : %s\n", config.cloudUrl.length() ? config.cloudUrl.c_str() : "<not set>");
+  Serial.printf("      Token     : %s\n", config.gatewayToken.length() ? "<stored>" : "<not set>");
+  Serial.printf("      Gateway   : %s\n", gatewayHex().c_str());
+}
+
+static void printHelp() {
+  Serial.println();
+  Serial.println("[CMD] Heltec V4 Home Hub serial commands:");
+  Serial.println("      ssid <your-wifi-name>");
+  Serial.println("      pass <your-wifi-password>");
+  Serial.println("      url https://<project-ref>.supabase.co/functions/v1/ingest-position");
+  Serial.println("      token <gateway-bearer-token>");
+  Serial.println("      connect");
+  Serial.println("      show");
+  Serial.println("      clear");
+  Serial.println("      help");
+}
+
+static void connectWifi() {
+  if (config.wifiSsid.length() == 0) {
+    Serial.println("[WIFI] STA SSID not set; AP-only mode remains available.");
+    return;
+  }
+  Serial.printf("[WIFI] Connecting STA to %s...\n", config.wifiSsid.c_str());
+  WiFi.begin(config.wifiSsid.c_str(), config.wifiPass.c_str());
+}
+
+static void startWifi() {
+  WiFi.mode(WIFI_AP_STA);
+  WiFi.softAP(AP_SSID, AP_PASS, 6);
+  Serial.printf("[WIFI] AP started: %s | %s\n", AP_SSID, WiFi.softAPIP().toString().c_str());
+  connectWifi();
+}
+
+static void startBleBeacon() {
+  BLEDevice::init(BLE_HOME_BEACON_NAME);
+  BLEServer *bleServer = BLEDevice::createServer();
+  (void)bleServer;
+  BLEAdvertising *advertising = BLEDevice::getAdvertising();
+  advertising->setScanResponse(true);
+  advertising->setMinPreferred(0x06);
+  advertising->setMinPreferred(0x12);
+  BLEDevice::startAdvertising();
+  Serial.printf("[BLE] Advertising Home beacon name '%s'\n", BLE_HOME_BEACON_NAME);
+}
+
+static void configureRadioOrHalt() {
+  pinMode(PIN_VEXT, OUTPUT);
+  digitalWrite(PIN_VEXT, LOW);
+  pinMode(PIN_LED, OUTPUT);
+  digitalWrite(PIN_LED, LOW);
+
+  loraSPI.begin(PIN_LORA_SCK, PIN_LORA_MISO, PIN_LORA_MOSI, PIN_LORA_NSS);
+
+  Serial.println("[LORA] Initialising Heltec Tracker V2 SX1262 with V4 locked profile...");
+  int state = radio.begin(LORA_FREQUENCY);
+  if (state != RADIOLIB_ERR_NONE) {
+    Serial.printf("[LORA] FATAL init failed: %d\n", state);
+    while (true) {
+      digitalWrite(PIN_LED, !digitalRead(PIN_LED));
+      delay(100);
+    }
+  }
+
+  radio.setSpreadingFactor(LORA_SPREADING);
+  radio.setBandwidth(LORA_BANDWIDTH);
+  radio.setCodingRate(LORA_CODING_RATE);
+  radio.setPreambleLength(LORA_PREAMBLE_LEN);
+  radio.setSyncWord(LORA_SYNC_WORD);
+  radio.setCRC(LORA_CRC_ENABLED);
+  radio.setDio1Action(onRadioIrq);
+
+  state = radio.startReceive();
+  if (state != RADIOLIB_ERR_NONE) {
+    Serial.printf("[LORA] FATAL startReceive failed: %d\n", state);
+    while (true) {
+      digitalWrite(PIN_LED, !digitalRead(PIN_LED));
+      delay(250);
+    }
+  }
+
+  Serial.printf("[LORA] RX ready %.1f MHz | SF%d | BW %.0f kHz | CR 4/%d | preamble %d | sync 0x%02X | CRC %s\n",
+                LORA_FREQUENCY,
+                LORA_SPREADING,
+                LORA_BANDWIDTH,
+                LORA_CODING_RATE,
+                LORA_PREAMBLE_LEN,
+                LORA_SYNC_WORD,
+                LORA_CRC_ENABLED ? "on" : "off");
+}
+
+static String buildCloudJson(const CloudEntry &entry) {
+  String body;
+  body.reserve(256);
+  body += F("{\"format\":\"tlv\",\"payload_b64\":\"");
+  body += base64Encode(entry.bytes, entry.len);
+  body += F("\",\"ingest_path\":\"lora_gateway\",\"gateway_guid16\":\"");
+  body += gatewayHex();
+  body += F("\",\"link_type\":\"lora\",\"link_rssi_dbm\":");
+  body += String(entry.rssi);
+  body += F(",\"link_snr_db\":");
+  body += String(entry.snr, 1);
+  body += "}";
+  return body;
+}
+
+static void updateStatsFromPacket(const uint8_t *buf, uint8_t len, int16_t rssi, float snr, bool valid) {
+  if (xSemaphoreTake(statsMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+    if (valid) {
+      stats.rxValid++;
+      stats.lastDevice = pkt_device_id(buf);
+      stats.lastSeq = pkt_msg_seq(buf);
+      stats.lastRssi = rssi;
+      stats.lastSnr = snr;
+    } else {
+      stats.rxInvalid++;
+    }
+    xSemaphoreGive(statsMutex);
+  }
+}
+
+static void loraTask(void *param) {
+  (void)param;
+  configureRadioOrHalt();
+
+  for (;;) {
+    if (!radioIrq) {
+      vTaskDelay(pdMS_TO_TICKS(10));
+      continue;
+    }
+    radioIrq = false;
+
+    uint8_t rx[LORA_RX_BUFFER_LEN] = {0};
+    size_t len = 0;
+    int state = radio.readData(rx, LORA_RX_BUFFER_LEN);
+    int16_t rssi = (int16_t)radio.getRSSI();
+    float snr = radio.getSNR();
+
+    if (state == RADIOLIB_ERR_NONE) {
+      len = radio.getPacketLength();
+      if (len > BP_MAX_PACKET_SIZE) len = BP_MAX_PACKET_SIZE;
+
+      const bool valid = pkt_validate_structure(rx, (uint8_t)len);
+      updateStatsFromPacket(rx, (uint8_t)len, rssi, snr, valid);
+
+      if (valid) {
+        Serial.printf("[LORA] RX valid %uB device=%u seq=%u status=%s profile=%s reason=%s RSSI=%d SNR=%.1f\n",
+                      (unsigned)len,
+                      pkt_device_id(rx),
+                      pkt_msg_seq(rx),
+                      bp_status_display((bp_status_t)pkt_status(rx)),
+                      bp_profile_name((bp_profile_t)pkt_power_profile(rx)),
+                      bp_tx_reason_display(pkt_tx_reason(rx)),
+                      rssi,
+                      snr);
+        Serial.print("[LORA] TLV hex: ");
+        printHex(rx, (uint8_t)len);
+
+        CloudEntry entry;
+        memcpy(entry.bytes, rx, len);
+        entry.len = (uint8_t)len;
+        entry.rssi = rssi;
+        entry.snr = snr;
+        entry.rxMillis = millis();
+        if (xQueueSend(cloudQueue, &entry, 0) != pdTRUE) {
+          Serial.println("[CLOUD] Queue full; dropping relay entry");
+        }
+      } else {
+        Serial.printf("[LORA] RX invalid structure len=%u RSSI=%d SNR=%.1f\n", (unsigned)len, rssi, snr);
+      }
+    } else {
+      Serial.printf("[LORA] readData failed: %d\n", state);
+    }
+
+    radio.startReceive();
+  }
+}
+
+static void cloudTask(void *param) {
+  (void)param;
+  CloudEntry entry;
+  for (;;) {
+    if (xQueueReceive(cloudQueue, &entry, portMAX_DELAY) != pdTRUE) {
+      continue;
+    }
+
+    if (WiFi.status() != WL_CONNECTED) {
+      Serial.println("[CLOUD] STA Wi-Fi not connected; cannot relay yet");
+      continue;
+    }
+    if (config.cloudUrl.length() == 0 || config.gatewayToken.length() == 0) {
+      Serial.println("[CLOUD] URL/token not configured; cannot relay yet");
+      continue;
+    }
+
+    String body = buildCloudJson(entry);
+    HTTPClient http;
+    http.begin(config.cloudUrl);
+    http.addHeader("Content-Type", "application/json");
+    String auth = "Bearer ";
+    auth += config.gatewayToken;
+    http.addHeader("Authorization", auth);
+
+    const int code = http.POST(body);
+    String response = http.getString();
+    if (xSemaphoreTake(statsMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+      stats.lastHttpCode = code;
+      if (code >= 200 && code < 300) stats.cloudOk++;
+      else stats.cloudFail++;
+      xSemaphoreGive(statsMutex);
+    }
+    Serial.printf("[CLOUD] POST %uB TLV wrapper -> HTTP %d\n", entry.len, code);
+    if (response.length() > 0) {
+      Serial.printf("[CLOUD] Response: %s\n", response.c_str());
+    }
+    http.end();
+  }
+}
+
+static String statusJson() {
+  HubStats snapshot;
+  if (xSemaphoreTake(statsMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+    snapshot = stats;
+    xSemaphoreGive(statsMutex);
+  }
+
+  String out;
+  out.reserve(420);
+  out += "{";
+  out += "\"ap_ip\":\"" + WiFi.softAPIP().toString() + "\",";
+  out += "\"sta_connected\":" + String(WiFi.status() == WL_CONNECTED ? "true" : "false") + ",";
+  out += "\"sta_ip\":\"" + (WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : String("")) + "\",";
+  out += "\"rssi\":" + String(WiFi.status() == WL_CONNECTED ? WiFi.RSSI() : 0) + ",";
+  out += "\"cloud_configured\":" + String((config.cloudUrl.length() && config.gatewayToken.length()) ? "true" : "false") + ",";
+  out += "\"rx_valid\":" + String(snapshot.rxValid) + ",";
+  out += "\"rx_invalid\":" + String(snapshot.rxInvalid) + ",";
+  out += "\"cloud_ok\":" + String(snapshot.cloudOk) + ",";
+  out += "\"cloud_fail\":" + String(snapshot.cloudFail) + ",";
+  out += "\"last_device\":" + String(snapshot.lastDevice) + ",";
+  out += "\"last_seq\":" + String(snapshot.lastSeq) + ",";
+  out += "\"last_rssi\":" + String(snapshot.lastRssi) + ",";
+  out += "\"last_snr\":" + String(snapshot.lastSnr, 1) + ",";
+  out += "\"last_http_code\":" + String(snapshot.lastHttpCode);
+  out += "}";
+  return out;
+}
+
+static void handleRoot() {
+  String page = F("<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
+                  "<title>Bluepaws V4 Home Hub</title>"
+                  "<style>body{font-family:system-ui;background:#071826;color:#eaf6ff;margin:24px}"
+                  ".card{border:1px solid #1e5a86;border-radius:14px;background:#0d2940;padding:18px;max-width:780px}"
+                  "code{color:#7bd0ff}button{padding:10px 14px;border-radius:8px}</style></head><body>"
+                  "<div class='card'><p><code>BLUEPAWS V4</code></p><h1>Home Hub Relay</h1>"
+                  "<p>This Heltec Tracker V2 is receiving raw TLV over LoRa and relaying base64-wrapped HTTPS JSON when Wi-Fi/cloud are configured.</p>"
+                  "<pre id='status'>Loading...</pre></div>"
+                  "<script>async function tick(){document.getElementById('status').textContent=JSON.stringify(await (await fetch('/api/status')).json(),null,2)} tick(); setInterval(tick,2000)</script>"
+                  "</body></html>");
+  server.send(200, "text/html", page);
+}
+
+static void webTask(void *param) {
+  (void)param;
+  server.on("/", HTTP_GET, handleRoot);
+  server.on("/api/status", HTTP_GET, []() {
+    server.send(200, "application/json", statusJson());
+  });
+  server.begin();
+  Serial.println("[WEB] Local status page ready on AP IP and STA IP.");
+
+  for (;;) {
+    server.handleClient();
+    vTaskDelay(pdMS_TO_TICKS(5));
+  }
+}
+
+static void handleSerialLine(String line) {
+  line.trim();
+  if (line.length() == 0) return;
+
+  int space = line.indexOf(' ');
+  String cmd = (space >= 0) ? line.substring(0, space) : line;
+  String value = (space >= 0) ? line.substring(space + 1) : "";
+  cmd.toLowerCase();
+  value.trim();
+
+  if (cmd == "ssid") {
+    config.wifiSsid = value;
+    saveConfig();
+    Serial.println("[CFG] Stored Wi-Fi SSID");
+  } else if (cmd == "pass") {
+    config.wifiPass = value;
+    saveConfig();
+    Serial.println("[CFG] Stored Wi-Fi password");
+  } else if (cmd == "url") {
+    config.cloudUrl = value;
+    saveConfig();
+    Serial.println("[CFG] Stored cloud URL");
+  } else if (cmd == "token") {
+    config.gatewayToken = value;
+    saveConfig();
+    Serial.println("[CFG] Stored gateway bearer token");
+  } else if (cmd == "connect") {
+    connectWifi();
+  } else if (cmd == "show") {
+    printConfig();
+    Serial.println(statusJson());
+  } else if (cmd == "clear") {
+    prefs.clear();
+    config = HubConfig();
+    Serial.println("[CFG] Cleared stored config; restart recommended");
+  } else if (cmd == "help" || cmd == "?") {
+    printHelp();
+  } else {
+    Serial.println("[CMD] Unknown command. Type 'help'.");
+  }
+}
+
+static void serialTask(void *param) {
+  (void)param;
+  printHelp();
+  printConfig();
+  for (;;) {
+    while (Serial.available()) {
+      char c = (char)Serial.read();
+      if (c == '\r' || c == '\n') {
+        handleSerialLine(serialLine);
+        serialLine = "";
+      } else {
+        serialLine += c;
+      }
+    }
+    vTaskDelay(pdMS_TO_TICKS(20));
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+  Serial.println();
+  Serial.println("════════════════════════════════════════════");
+  Serial.println("  Bluepaws V4 — Heltec Tracker V2 Home Hub");
+  Serial.printf("  Gateway GUID16: %s\n", gatewayHex().c_str());
+  Serial.println("  Role: raw LoRa TLV -> base64 HTTPS Supabase relay");
+  Serial.println("════════════════════════════════════════════");
+
+  loadConfig();
+  statsMutex = xSemaphoreCreateMutex();
+  cloudQueue = xQueueCreate(16, sizeof(CloudEntry));
+  if (!statsMutex || !cloudQueue) {
+    Serial.println("[INIT] FATAL: could not create RTOS primitives");
+    while (true) delay(1000);
+  }
+
+  startWifi();
+  startBleBeacon();
+
+  xTaskCreatePinnedToCore(loraTask, "lora", 8192, nullptr, 3, nullptr, 1);
+  xTaskCreatePinnedToCore(cloudTask, "cloud", 8192, nullptr, 2, nullptr, 0);
+  xTaskCreatePinnedToCore(webTask, "web", 8192, nullptr, 1, nullptr, 0);
+  xTaskCreatePinnedToCore(serialTask, "serial", 4096, nullptr, 1, nullptr, 0);
+
+  Serial.println("[INIT] FreeRTOS tasks started.");
+}
+
+void loop() {
+  vTaskDelay(pdMS_TO_TICKS(10000));
+}
