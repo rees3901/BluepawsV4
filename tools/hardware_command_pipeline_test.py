@@ -226,6 +226,7 @@ def main() -> int:
     parser.add_argument("--http-timeout", type=float, default=5.0, help="Seconds to wait for hub HTTP calls.")
     parser.add_argument("--hub-startup-wait", type=float, default=10.0, help="Seconds to wait after opening hub serial before HTTP checks.")
     parser.add_argument("--continue-without-hub-http", action="store_true", help="Keep monitoring serial logs even when the hub HTTP API is unreachable.")
+    parser.add_argument("--command-transport", default="auto", choices=["auto", "http", "serial"], help="How to queue hub→collar commands.")
     parser.add_argument("--profile", default="active", choices=["normal", "powersave", "active", "lost"], help="Profile command to test.")
     parser.add_argument("--skip-sniffer", action="store_true", help="Do not open or assert against the sniffer port.")
     parser.add_argument("--skip-collar-control", action="store_true", help="Do not send debug/tx commands to collar serial.")
@@ -263,19 +264,29 @@ def main() -> int:
         for monitor in monitors:
             monitor.start()
 
+        hub = next(monitor for monitor in monitors if monitor.label == "HUB")
+        collar = next(monitor for monitor in monitors if monitor.label == "COLLAR")
+        command_transport = args.command_transport
+
         wait_for_hub_settle(events, args.hub_startup_wait)
         status_code, status_body = get_json(args.hub_url, "/api/status", args.http_timeout)
         print()
         print(f"[HTTP] GET /api/status -> {status_code}")
         print(status_body)
-        if status_code is None and not args.continue_without_hub_http:
+        if status_code is None and command_transport == "auto":
+            command_transport = "serial"
+            print("[INFO] Hub HTTP unreachable; falling back to COM7 serial command transport.")
+        if status_code is not None and command_transport == "auto":
+            command_transport = "http"
+            print("[INFO] Hub HTTP reachable; using HTTP command transport.")
+        if status_code is None and args.command_transport == "http" and not args.continue_without_hub_http:
             print()
             print("Hub HTTP API is unreachable, so downlink commands cannot be queued.")
             print("Use the hub IP shown on the hub serial monitor, for example:")
             print("  py -3.11 .\\tools\\hardware_command_pipeline_test.py --hub-url http://192.168.0.67 --target-id 1001")
+            print("Or force serial fallback:")
+            print("  py -3.11 .\\tools\\hardware_command_pipeline_test.py --command-transport serial --target-id 1001")
             return 2
-
-        collar = next(monitor for monitor in monitors if monitor.label == "COLLAR")
 
         if not args.skip_collar_control:
             collar.write_line("debug on")
@@ -298,6 +309,13 @@ def main() -> int:
         results.append(("presence/wake check-in observed", run_step("Presence / wake check-in", force_report, presence_checks, events)))
 
         def queue_profile_command() -> bool:
+            if command_transport == "serial":
+                hub.write_line(f"cmd mode {args.target_id} {args.profile}")
+                if not args.skip_collar_control:
+                    time.sleep(0.5)
+                    collar.write_line("tx")
+                return True
+
             code, body = post_form(args.hub_url, "/api/command", {"device": target_hex, "mode": args.profile}, args.http_timeout)
             print(f"[HTTP] POST /api/command mode={args.profile} -> {code} {body}")
             if code is None:
@@ -321,6 +339,13 @@ def main() -> int:
         )))
 
         def queue_status_command() -> bool:
+            if command_transport == "serial":
+                hub.write_line(f"cmd status {args.target_id}")
+                if not args.skip_collar_control:
+                    time.sleep(0.5)
+                    collar.write_line("tx")
+                return True
+
             code, body = post_form(args.hub_url, "/api/device-status", {"device": target_hex}, args.http_timeout)
             print(f"[HTTP] POST /api/device-status -> {code} {body}")
             if code is None:
@@ -346,6 +371,14 @@ def main() -> int:
             if args.profile == "normal":
                 print("[INFO] Already testing normal; no restore needed.")
                 return True
+
+            if command_transport == "serial":
+                hub.write_line(f"cmd mode {args.target_id} normal")
+                if not args.skip_collar_control:
+                    time.sleep(0.5)
+                    collar.write_line("tx")
+                return True
+
             code, body = post_form(args.hub_url, "/api/command", {"device": target_hex, "mode": "normal"}, args.http_timeout)
             print(f"[HTTP] POST /api/command mode=normal -> {code} {body}")
             if code is None:

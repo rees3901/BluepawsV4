@@ -63,6 +63,35 @@ If mDNS is flaky, use the Home Hub IP shown in the hub serial log:
 py -3.11 .\tools\hardware_command_pipeline_test.py --hub-url http://192.168.0.67 --target-id 1001
 ```
 
+If the hub is on an isolated guest network, the PC may not be able to reach
+`/api/status` even though the hub can still post outbound to Supabase. In that
+case use the serial fallback:
+
+```powershell
+py -3.11 .\tools\hardware_command_pipeline_test.py --command-transport serial --target-id 1001
+```
+
+## Move the hub to a different Wi-Fi network over COM7
+
+If the hub web UI is unreachable, use the Home Hub serial console instead.
+Open the COM7 monitor at `115200` baud and send:
+
+```text
+wifi ssid="Your 2.4 GHz SSID" pass="Your Wi-Fi password"
+```
+
+The hub saves the setting to LittleFS and reboots. After reboot, send:
+
+```text
+status
+```
+
+The status output prints the current STA IP. Use that IP with the harness:
+
+```powershell
+py -3.11 .\tools\hardware_command_pipeline_test.py --hub-url http://<hub-ip> --target-id 1001
+```
+
 To test a different profile command:
 
 ```powershell
@@ -106,6 +135,12 @@ Skip the sniffer if COM11 is busy:
 
 ```powershell
 py -3.11 .\tools\hardware_command_pipeline_test.py --hub-url http://192.168.0.67 --skip-sniffer
+```
+
+Force command queueing over COM7 instead of HTTP:
+
+```powershell
+py -3.11 .\tools\hardware_command_pipeline_test.py --command-transport serial --target-id 1001
 ```
 
 Do not force the collar to transmit over serial; wait for the natural collar wake window:

@@ -75,11 +75,13 @@
 #define STACK_WEB    8192   // Web server — large stack (JSON building, string ops)
 #define STACK_BLE    4096   // BLE beacon + scanning in portable mode
 #define STACK_CLOUD  16384  // Cloud relay — HTTPS/TLS + HTTPClient need generous stack
+#define STACK_CONSOLE 4096  // USB serial bench console
 
 #define PRIO_LORA    3      // Highest — LoRa packets are time-sensitive
 #define PRIO_WEB     2      // Medium — serves the GUI
 #define PRIO_CLOUD   2      // Medium — cloud relay not urgent
 #define PRIO_BLE     1      // Lowest — BLE beacon just needs to stay alive
+#define PRIO_CONSOLE 1      // Low — bench/debug command parser
 
 #define LORA_RX_POLL_TIMEOUT_MS 250  // Short timed RX window; avoids relying solely on DIO1 ISR
 
@@ -221,6 +223,7 @@ static TaskHandle_t loraTaskHandle  = NULL;
 static TaskHandle_t webTaskHandle   = NULL;
 static TaskHandle_t bleTaskHandle   = NULL;
 static TaskHandle_t cloudTaskHandle = NULL;
+static TaskHandle_t consoleTaskHandle = NULL;
 
 // ── Device State Table ──
 // Stores the latest telemetry from each collar so the web GUI can
@@ -257,6 +260,7 @@ static void loraTask(void *param);
 static void webTask(void *param);
 static void bleTask(void *param);
 static void cloudTask(void *param);
+static void consoleTask(void *param);
 
 // Hardware initialisation
 static void initLoRa();
@@ -300,6 +304,12 @@ static void sendCommandFind(uint16_t target_id, bp_pkt_type_t type,
 static void sendStatusCommand(uint16_t target_id);
 static void checkPendingAcks();
 static void handleAck(const uint8_t *buf);
+static void handleSerialCommand(String line);
+static void printSerialHelp();
+static void printHubSerialStatus();
+static bool saveHubConfigToFlash();
+static bool extractSerialArg(const String &line, const char *key, String &out);
+static uint16_t parseSerialDeviceId(String value);
 
 // Portable mode (BLE scanning for collar find beacons)
 static void enterPortableMode();
@@ -355,8 +365,10 @@ void setup() {
     xTaskCreatePinnedToCore(webTask,   "web",   STACK_WEB,   NULL, PRIO_WEB,   &webTaskHandle,   0);  // Core 0
     xTaskCreatePinnedToCore(bleTask,   "ble",   STACK_BLE,   NULL, PRIO_BLE,   &bleTaskHandle,   0);  // Core 0
     xTaskCreatePinnedToCore(cloudTask, "cloud", STACK_CLOUD, NULL, PRIO_CLOUD, &cloudTaskHandle, 0);  // Core 0
+    xTaskCreatePinnedToCore(consoleTask, "console", STACK_CONSOLE, NULL, PRIO_CONSOLE, &consoleTaskHandle, 0); // Core 0
 
     Serial.println("[INIT] All tasks started");
+    printSerialHelp();
 }
 
 // Arduino loop() — does nothing. All work happens in FreeRTOS tasks.
@@ -1504,6 +1516,246 @@ static void webTask(void *param) {
         // 5ms sleep — fast enough for responsive web UI
         vTaskDelay(pdMS_TO_TICKS(5));
     }
+}
+
+// ═══════════════════════════════════════════════
+// USB Serial Bench Console
+//
+// This is intentionally a local bench/debug path. It lets us configure Wi-Fi
+// and queue collar commands even when the hub's HTTP server is unreachable
+// because the hub is on an isolated guest network.
+// ═══════════════════════════════════════════════
+
+static void consoleTask(void *param) {
+    (void)param;
+
+    String line;
+    line.reserve(160);
+
+    for (;;) {
+        while (Serial.available() > 0) {
+            char c = (char)Serial.read();
+            if (c == '\r') {
+                continue;
+            }
+            if (c == '\n') {
+                line.trim();
+                if (line.length() > 0) {
+                    handleSerialCommand(line);
+                }
+                line = "";
+            } else if (line.length() < 180) {
+                line += c;
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+}
+
+static bool extractSerialArg(const String &line, const char *key, String &out) {
+    String marker = String(key) + "=";
+    int idx = line.indexOf(marker);
+    if (idx < 0) {
+        return false;
+    }
+
+    int start = idx + marker.length();
+    if (start >= (int)line.length()) {
+        out = "";
+        return true;
+    }
+
+    char quote = 0;
+    if (line[start] == '"' || line[start] == '\'') {
+        quote = line[start];
+        start++;
+    }
+
+    int end = start;
+    if (quote != 0) {
+        end = line.indexOf(quote, start);
+        if (end < 0) {
+            end = line.length();
+        }
+    } else {
+        while (end < (int)line.length() && line[end] != ' ') {
+            end++;
+        }
+    }
+
+    out = line.substring(start, end);
+    out.trim();
+    return true;
+}
+
+static uint16_t parseSerialDeviceId(String value) {
+    value.trim();
+    if (value.startsWith("0x") || value.startsWith("0X")) {
+        return (uint16_t)strtoul(value.c_str() + 2, NULL, 16);
+    }
+
+    bool containsHexAlpha = false;
+    for (size_t i = 0; i < value.length(); i++) {
+        char c = value[i];
+        if ((c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f')) {
+            containsHexAlpha = true;
+            break;
+        }
+    }
+
+    return (uint16_t)strtoul(value.c_str(), NULL, containsHexAlpha ? 16 : 10);
+}
+
+static bool saveHubConfigToFlash() {
+    File f = LittleFS.open(CONFIG_FILE_PATH, "w");
+    if (!f) {
+        return false;
+    }
+
+    if (staSSID.length() > 0) f.printf("sta_ssid=%s\n", staSSID.c_str());
+    f.printf("sta_pass=%s\n", staPass.c_str());
+    if (cloudEndpoint.length() > 0) f.printf("cloud_url=%s\n", cloudEndpoint.c_str());
+    if (cloudToken.length() > 0) f.printf("cloud_token=%s\n", cloudToken.c_str());
+    f.printf("hub_mode=%s\n", hubCommProfileName(hubCommProfile));
+    f.printf("provisioning=%s\n", hubProvisioningMode ? "true" : "false");
+    f.close();
+    return true;
+}
+
+static void printSerialHelp() {
+    Serial.println();
+    Serial.println("[CMD] Home Hub bench console");
+    Serial.println("      help");
+    Serial.println("      status");
+    Serial.println("      reboot");
+    Serial.println("      wifi ssid=\"Your SSID\" pass=\"Your password\"");
+    Serial.println("      wifi ssid=\"Open network\"");
+    Serial.println("      cmd mode 1001 active");
+    Serial.println("      cmd mode 1001 normal");
+    Serial.println("      cmd status 1001");
+    Serial.println("      cmd find 1001");
+    Serial.println();
+}
+
+static void printHubSerialStatus() {
+    updateConnectivityState();
+    Serial.println("[CFG] Current hub relay configuration");
+    Serial.printf("      Profile   : %s\n", hubCommProfileName(hubCommProfile));
+    Serial.printf("      Wi-Fi SSID: %s\n", staSSID.length() ? staSSID.c_str() : "<not set>");
+    Serial.printf("      Wi-Fi pass: %s\n", staPass.length() ? "<stored>" : "<not set>");
+    Serial.printf("      STA       : %s\n", WiFi.status() == WL_CONNECTED ? "connected" : "not connected");
+    Serial.printf("      STA IP    : %s\n", WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString().c_str() : "<none>");
+    Serial.printf("      RSSI      : %d\n", WiFi.status() == WL_CONNECTED ? WiFi.RSSI() : 0);
+    Serial.printf("      AP        : %s\n", hubApEnabled ? "enabled" : "disabled");
+    Serial.printf("      AP IP     : %s\n", WiFi.softAPIP().toString().c_str());
+    Serial.printf("      Cloud URL : %s\n", cloudEndpoint.c_str());
+    Serial.printf("      Token     : %s\n", cloudToken.length() ? "<stored>" : "<not set>");
+    Serial.printf("      Gateway   : %04X\n", GATEWAY_GUID16);
+    Serial.printf("      Time/NTP  : %s\n", hubTimeSynced ? "synced" : "not synced");
+    Serial.printf("      RX/TX     : %lu/%lu\n", (unsigned long)rxCount, (unsigned long)txCount);
+}
+
+static void handleSerialCommand(String line) {
+    String lower = line;
+    lower.toLowerCase();
+
+    if (lower == "help" || lower == "?") {
+        printSerialHelp();
+        return;
+    }
+
+    if (lower == "status") {
+        printHubSerialStatus();
+        return;
+    }
+
+    if (lower == "reboot" || lower == "restart") {
+        Serial.println("[CMD] Rebooting hub...");
+        delay(250);
+        ESP.restart();
+        return;
+    }
+
+    if (lower.startsWith("wifi ")) {
+        String ssid;
+        String pass;
+        if (!extractSerialArg(line, "ssid", ssid) || ssid.length() == 0) {
+            Serial.println("[CMD] Usage: wifi ssid=\"Your SSID\" pass=\"Your password\"");
+            return;
+        }
+        extractSerialArg(line, "pass", pass);
+
+        staSSID = ssid;
+        staPass = pass;
+        hubCommProfile = HUB_COMM_HOME;
+        hubProvisioningMode = false;
+
+        if (!saveHubConfigToFlash()) {
+            Serial.println("[CMD] Failed to save Wi-Fi config to LittleFS.");
+            return;
+        }
+
+        Serial.printf("[CMD] Saved Wi-Fi SSID '%s'. Rebooting to reconnect...\n", staSSID.c_str());
+        delay(500);
+        ESP.restart();
+        return;
+    }
+
+    if (lower.startsWith("cmd mode ")) {
+        int firstSpace = line.indexOf(' ', 9);
+        if (firstSpace < 0) {
+            Serial.println("[CMD] Usage: cmd mode 1001 active|normal|powersave|lost");
+            return;
+        }
+
+        String idStr = line.substring(9, firstSpace);
+        String modeStr = line.substring(firstSpace + 1);
+        idStr.trim();
+        modeStr.trim();
+        modeStr.toLowerCase();
+
+        uint16_t targetId = parseSerialDeviceId(idStr);
+        bp_profile_t mode = bp_profile_from_name(modeStr.c_str());
+        if (targetId == 0 || mode == PROFILE_UNKNOWN) {
+            Serial.println("[CMD] Bad mode command. Use: cmd mode 1001 active");
+            return;
+        }
+
+        sendCommand(targetId, PKT_CMD_MODE, mode);
+        Serial.printf("[CMD] Serial queued MODE %s for device %u\n", bp_profile_name(mode), targetId);
+        return;
+    }
+
+    if (lower.startsWith("cmd status ")) {
+        String idStr = line.substring(11);
+        idStr.trim();
+        uint16_t targetId = parseSerialDeviceId(idStr);
+        if (targetId == 0) {
+            Serial.println("[CMD] Usage: cmd status 1001");
+            return;
+        }
+
+        sendStatusCommand(targetId);
+        Serial.printf("[CMD] Serial queued STATUS for device %u\n", targetId);
+        return;
+    }
+
+    if (lower.startsWith("cmd find ")) {
+        String idStr = line.substring(9);
+        idStr.trim();
+        uint16_t targetId = parseSerialDeviceId(idStr);
+        if (targetId == 0) {
+            Serial.println("[CMD] Usage: cmd find 1001");
+            return;
+        }
+
+        sendCommandFind(targetId, PKT_CMD_FIND, PROFILE_UNKNOWN, 5, BUZZER_CHIRP);
+        Serial.printf("[CMD] Serial queued FIND for device %u\n", targetId);
+        return;
+    }
+
+    Serial.printf("[CMD] Unknown command: %s\n", line.c_str());
+    Serial.println("[CMD] Type 'help' for available commands.");
 }
 
 // ═══════════════════════════════════════════════
