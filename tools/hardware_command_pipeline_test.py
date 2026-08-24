@@ -56,7 +56,10 @@ class SerialMonitor:
         self._serial = None
 
     def start(self) -> None:
-        self._serial = serial.Serial(self.port, self.baud, timeout=0.2)
+        try:
+            self._serial = serial.Serial(self.port, self.baud, timeout=0.2)
+        except Exception as exc:
+            raise RuntimeError(f"Failed to open {self.label} serial port {self.port}: {exc}") from exc
         self._thread = threading.Thread(target=self._run, name=f"serial-{self.label}", daemon=True)
         self._thread.start()
         print(f"[{self.label}] Opened {self.port} at {self.baud} baud.")
