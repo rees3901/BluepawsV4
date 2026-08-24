@@ -8,21 +8,22 @@
   NORMAL / POWERSAVE / ACTIVE cycle:
     1. Wake from deep sleep (only RTC running)
     2. BLE scan for home beacon (10s)
-    3. If home → skip GNSS/LTE, send a short WAKE_CHECKIN raw TLV over LoRa,
-       open the command RX window, then go back to sleep.
+    3. If home → send a profile-cadenced WAKE_CHECKIN raw TLV over LoRa,
+       open the command RX window, then usually go back to sleep.
+       GNSS sanity refreshes and LTE heartbeats run only on their profile cadence.
     4. If NOT home → GPS two-phase acquisition:
        a) Phase 1: TTFF — wait up to 20s for initial fix
        b) Phase 2: Stabilisation — wait 10s for accuracy
     5. Build TLV packet, transmit via LoRa
     6. Listen for commands from hub (10s RX window)
-    7. Every Nth cycle → also send via NB-IoT cellular
+    7. Cellular direct-to-cloud is secondary/fallback and profile-cadenced
     8. Power down all peripherals, deep sleep until next cycle
 
   LOST MODE (emergency):
     - No sleep — stays awake for up to 2 hours
     - GPS continuous (kept on between transmissions)
     - LoRa at full power (22 dBm), TX every 30s
-    - Cellular every 3rd cycle (increased over normal)
+    - Cellular fallback/heartbeat is frequent compared with normal
     - LED beacon flashing continuously
     - Auto-reverts to ACTIVE after 2-hour safety timer
 
@@ -37,6 +38,7 @@
 // ── Core libraries ──
 #include <Arduino.h>
 #include <SPI.h>
+#include <math.h>
 #include <RadioLib.h>        // SX1262 LoRa radio driver
 #include <bluefruit.h>       // Adafruit nRF52 BLE library (scanner for home beacon)
 
@@ -44,6 +46,7 @@
 #include <bp_protocol.h>     // Binary TLV packet format, builder & parser
 #include <bp_config.h>       // LoRa params, profiles, AES key, timing constants
 #include <bp_crypto.h>       // Legacy AES helper retained for downlink experiments
+#include "collar_hardware_profile.h"  // Testbed/production guardrails
 #include "collar_pins.h"     // GPIO pin assignments for this board
 
 // FreeRTOS (built into Adafruit nRF52 BSP — no separate install needed)
@@ -89,11 +92,13 @@ static const bp_profile_config_t *currentConfig = bp_profile_config(PROFILE_NORM
 static uint32_t messageSeq     = 0;    // Incrementing sequence number for outgoing packets
 static uint32_t cycleCount     = 0;    // Total wake/transmit cycles since boot
 static uint8_t  homeCycleCount = 0;    // Consecutive cycles where BLE home beacon was detected
+static uint32_t lastLteHeartbeatMs = 0; // Last time a home LTE heartbeat was queued
 
 // ── GPS State ──
 static volatile bool gpsAwake     = false;   // true = GPS module is powered on
 static volatile bool gpsWarmStart = false;   // true = we had a fix before (ephemeris cached)
 static volatile bool gpsFix       = false;   // true = valid fix obtained this cycle
+static SemaphoreHandle_t gpsMutex = NULL;    // Protects GNSS state shared across tasks
 
 // ── BLE State ──
 static volatile bool bleHomeFound = false;   // Set by BLE scan callback when home beacon found
@@ -101,7 +106,7 @@ static bool bleAdvertising = false;          // true = BLE find beacon is advert
 
 // ── Error State ──
 // Tracks the most recent subsystem fault. Auto-clears on success.
-static volatile bp_error_t lastError = ERROR_NONE;
+static volatile bp_error_t lastError = BP_ERROR_NONE;
 
 // ── Command Deduplication ──
 // The hub retries commands up to 3 times if no ACK received.
@@ -176,6 +181,8 @@ static void     bleFindBeaconStop();
 static void     gnssEnable();              // Start GNSS receiver via AT command
 static void     gnssDisable();             // Stop GNSS receiver via AT command
 static uint32_t gnssGetUnixTime();         // Return last parsed GNSS Unix timestamp
+static bool     gnssSpoofAcquireFix();     // Testbed-only spoof GNSS fix
+static uint32_t compileTimeUnix();         // Approximate boot-time UTC from compiler macros
 
 // LED helpers
 static void     ledFlicker(uint8_t count, uint16_t onMs, uint16_t offMs);  // Blink N times
@@ -231,6 +238,17 @@ void setup() {
     Serial.println("  Bluepaws V4 — Collar");
     Serial.printf("  Device: %s (0x%04X)\n", bp_device_name(MY_DEVICE_ID), MY_DEVICE_ID);
     Serial.printf("  Protocol v%d | Max %dB packet\n", BP_PROTOCOL_VERSION, BP_MAX_PACKET_SIZE);
+    Serial.printf("  Hardware profile: %s\n", BLUEPAWS_COLLAR_HARDWARE_PROFILE);
+#if BLUEPAWS_TESTBED_BUILD
+    Serial.println("  BUILD: TESTBED — diagnostic/spoof features may be enabled");
+#else
+    Serial.println("  BUILD: PRODUCTION — diagnostic/spoof features disabled");
+#endif
+#if BLUEPAWS_GNSS_SPOOF_ENABLED
+    Serial.println("  GNSS: SPOOF ENABLED — emits synthetic drift for bench testing");
+#else
+    Serial.println("  GNSS: real GM02SP only");
+#endif
     Serial.println("══════════════════════════════════");
 
     // ── Mutex ──
@@ -357,6 +375,30 @@ static void cycleTask(void *param) {
                 listenForCommands();
             }
 
+            uint8_t homeGnssRatio = currentConfig->home_gnss_refresh_ratio;
+            if (homeGnssRatio > 0 && (homeCycleCount % homeGnssRatio == 0)) {
+                Serial.printf("[CYCLE] Home (x%d). GNSS sanity refresh due (ratio 1:%d).\n",
+                              homeCycleCount, homeGnssRatio);
+                bool haveHomeFix = gnssAcquireFix();
+                if (haveHomeFix) {
+                    Serial.println("[CYCLE] Home GNSS sanity refresh has a fix; sending HOME telemetry.");
+                    sendTelemetry();
+                    listenForCommands();
+                } else {
+                    Serial.println("[CYCLE] Home GNSS failed; keeping HOME status and last known location downstream.");
+                }
+            }
+
+            uint32_t lteHeartbeatS = currentConfig->lte_heartbeat_interval_s;
+            if (lteHeartbeatS > 0 &&
+                (lastLteHeartbeatMs == 0 ||
+                 millis() - lastLteHeartbeatMs >= lteHeartbeatS * 1000UL)) {
+                Serial.printf("[CELL] Home LTE heartbeat due (interval %lus)\n", lteHeartbeatS);
+                cellularPending = true;
+                lastLteHeartbeatMs = millis();
+                xTaskNotifyGive(cellTaskHandle);
+            }
+
             peripheralsSleep();
             enterDeepSleep();
             continue;
@@ -366,6 +408,7 @@ static void cycleTask(void *param) {
 
         // ── Phase 2: GNSS acquisition via AT command ──
         bool haveFix = gnssAcquireFix();
+        Serial.printf("[GNSS] Away acquisition result: %s\n", haveFix ? "fix" : "no fix");
 
         // ── Phase 3: Build TLV and transmit via LoRa ──
         sendTelemetry();
@@ -527,6 +570,10 @@ static bool bleScanForHome() {
 // Returns true if usable fix obtained.
 // ═══════════════════════════════════════════════
 static bool gnssAcquireFix() {
+#if BLUEPAWS_GNSS_SPOOF_ENABLED
+    return gnssSpoofAcquireFix();
+#endif
+
     gnssEnable();
     gpsFix = false;
 
@@ -563,7 +610,7 @@ static bool gnssAcquireFix() {
             gnssFixAgeMs = millis();
             gpsFix = true;
             gpsWarmStart = true;
-            if (lastError == ERROR_GPS) lastError = ERROR_NONE;  // Clear GPS error on success
+            if (lastError == BP_ERROR_GPS) lastError = BP_ERROR_NONE;  // Clear GPS error on success
             Serial.printf("[GNSS] Fix acquired after %lums\n", millis() - startMs);
             Serial.printf("[GNSS] Position: %.6f, %.6f (sats: %d)\n",
                           gnssLat, gnssLon, gnssSats);
@@ -574,8 +621,78 @@ static bool gnssAcquireFix() {
     }
 
     Serial.println("[GNSS] Timeout — no fix");
-    lastError = ERROR_GPS;
+    lastError = BP_ERROR_GPS;
     return false;
+}
+
+// ═══════════════════════════════════════════════
+// Testbed GNSS Spoof
+//
+// Used only while the RAK4631/WisMesh board is standing in for the final collar
+// PCB and no real GNSS path is fitted. It produces realistic-looking movement
+// around the agreed bench coordinate, but does not alter the TLV contract.
+// Disable with -DBLUEPAWS_GNSS_SPOOF_ENABLED=0 for production hardware.
+// ═══════════════════════════════════════════════
+static bool gnssSpoofAcquireFix() {
+#if !BLUEPAWS_GNSS_SPOOF_ENABLED
+    return false;
+#else
+    if (gpsMutex) {
+        xSemaphoreTake(gpsMutex, portMAX_DELAY);
+    }
+
+    const float driftMaxM = BLUEPAWS_SPOOF_DRIFT_METRES_DEFAULT;
+    const float phaseA = (float)((cycleCount % 360) * 0.104719755f);   // 6 degrees/cycle
+    const float phaseB = (float)((messageSeq % 360) * 0.06981317f);    // 4 degrees/packet
+    const float driftNorthM = sinf(phaseA) * driftMaxM;
+    const float driftEastM = cosf(phaseB) * driftMaxM;
+    const float metresPerDegLat = 111320.0f;
+    const float metresPerDegLon = 111320.0f * cosf((float)BLUEPAWS_SPOOF_HOME_LAT * 0.01745329252f);
+
+    gnssLat = BLUEPAWS_SPOOF_HOME_LAT + (driftNorthM / metresPerDegLat);
+    gnssLon = BLUEPAWS_SPOOF_HOME_LON + (driftEastM / metresPerDegLon);
+    gnssHdop = 120;      // HDOP 1.20, intentionally plausible not perfect
+    gnssSats = 9;
+    gnssUnixTime = compileTimeUnix() + (millis() / 1000UL);
+    gnssFixAgeMs = millis();
+    gpsFix = true;
+    gpsWarmStart = true;
+    if (lastError == BP_ERROR_GPS) lastError = BP_ERROR_NONE;
+
+    if (gpsMutex) {
+        xSemaphoreGive(gpsMutex);
+    }
+
+    Serial.printf("[GNSS-SPOOF] TESTBED fix %.6f, %.6f drift<=%.0fm sats=%u time=%lu\n",
+                  gnssLat, gnssLon, driftMaxM, gnssSats, gnssUnixTime);
+    return true;
+#endif
+}
+
+static uint32_t compileTimeUnix() {
+    const char *date = __DATE__;  // "Mmm dd yyyy"
+    const char *time = __TIME__;  // "hh:mm:ss"
+    const char *months = "JanFebMarAprMayJunJulAugSepOctNovDec";
+    const char *monthPtr = strstr(months, date);
+    int month = monthPtr ? ((monthPtr - months) / 3) + 1 : 1;
+    int day = atoi(date + 4);
+    int year = atoi(date + 7);
+    int hour = atoi(time);
+    int minute = atoi(time + 3);
+    int second = atoi(time + 6);
+
+    if (month <= 2) {
+        year -= 1;
+        month += 12;
+    }
+
+    const int era = year / 400;
+    const unsigned yoe = (unsigned)(year - era * 400);
+    const unsigned doy = (unsigned)((153 * (month - 3) + 2) / 5 + day - 1);
+    const unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    const int days = era * 146097 + (int)doe - 719468;
+    return (uint32_t)((uint64_t)days * 86400ULL + (uint32_t)hour * 3600UL +
+                      (uint32_t)minute * 60UL + (uint32_t)second);
 }
 
 // ═══════════════════════════════════════════════
@@ -591,7 +708,14 @@ static void sendTelemetry() {
     uint32_t fixAgeS = (millis() - gnssFixAgeMs) / 1000;
     bool locValid = gpsFix && (fixAgeS < GPS_STALE_THRESHOLD_S);
 
-    if (locValid) {
+    if (bleHomeFound) {
+        // A home GNSS sanity refresh is still a HOME observation. GNSS may
+        // improve last-known accuracy, but seeing the trusted home beacon is
+        // the stronger state signal for the customer-facing status.
+        status = STATUS_HOME;
+        flags |= FLAG_HOME_BEACON_SEEN;
+        if (locValid) flags |= FLAG_GNSS_VALID | FLAG_FIX_3D;
+    } else if (locValid) {
         status = STATUS_OUT_AND_ABOUT;  // Pet is outside with valid position
         flags |= FLAG_GNSS_VALID | FLAG_FIX_3D;
     } else {
@@ -599,7 +723,7 @@ static void sendTelemetry() {
     }
 
     if (gpsWarmStart && !locValid) flags |= FLAG_STALE_FIX;
-    if (lastError != ERROR_NONE) flags |= FLAG_ERROR_PRESENT;
+    if (lastError != BP_ERROR_NONE) flags |= FLAG_ERROR_PRESENT;
 
     uint32_t unixTime = gnssGetUnixTime();  // Get timestamp from GNSS
 
@@ -628,7 +752,7 @@ static void sendTelemetry() {
     // Keep embedded optional TLVs sparse until the production telemetry set is
     // finalized. Header fields carry status/profile/location/battery.
     pkt_add_tlv_u32(buf, TLV_UPTIME_S, millis() / 1000);
-    if (lastError != ERROR_NONE) {
+    if (lastError != BP_ERROR_NONE) {
         pkt_add_tlv_u8(buf, TLV_RESET_REASON, lastError);
     }
 
@@ -658,7 +782,7 @@ static void sendWakeCheckin() {
 
     uint8_t buf[BP_MAX_PACKET_SIZE];
     uint8_t flags = FLAG_HOME_BEACON_SEEN;
-    if (lastError != ERROR_NONE) flags |= FLAG_ERROR_PRESENT;
+    if (lastError != BP_ERROR_NONE) flags |= FLAG_ERROR_PRESENT;
 
     pkt_init(buf, MY_DEVICE_ID, (uint16_t)(messageSeq & 0xFFFF), 0,
              STATUS_HOME, currentProfile, flags, TX_WAKE_CHECKIN);
@@ -668,7 +792,7 @@ static void sendWakeCheckin() {
     pkt_set_sat_count(buf, 255);
 
     pkt_add_tlv_u32(buf, TLV_UPTIME_S, millis() / 1000);
-    if (lastError != ERROR_NONE) {
+    if (lastError != BP_ERROR_NONE) {
         pkt_add_tlv_u8(buf, TLV_RESET_REASON, lastError);
     }
 
@@ -770,17 +894,17 @@ static void transmitPacket(uint8_t *buf, uint8_t len, bool suppressLed) {
 
     if (state == RADIOLIB_ERR_NONE) {
         Serial.printf("[LORA] TX OK (%d bytes)\n", len);
-        if (lastError == ERROR_RF) lastError = ERROR_NONE;  // Clear RF error on success
+        if (lastError == BP_ERROR_RF) lastError = BP_ERROR_NONE;  // Clear RF error on success
         if (!suppressLed) {
             ledFlicker(currentConfig->led_flashes, 50, 50);  // Success: profile-defined flash count
         }
     } else if (state == RADIOLIB_ERR_TX_TIMEOUT) {
         Serial.println("[LORA] TX timeout");
-        lastError = ERROR_RF;
+        lastError = BP_ERROR_RF;
         ledFlicker(2, 200, 200);  // Slow double-flash = timeout (always show errors)
     } else {
         Serial.printf("[LORA] TX failed: %d\n", state);
-        lastError = ERROR_RF;
+        lastError = BP_ERROR_RF;
         ledFlicker(6, 80, 80);    // Rapid 6-flash = error (always show errors)
     }
 }
@@ -797,35 +921,26 @@ static void transmitPacket(uint8_t *buf, uint8_t len, bool suppressLed) {
 static void listenForCommands() {
     Serial.printf("[RX] Listening %dms...\n", CMD_LISTEN_WINDOW_MS);
 
-    // Put radio into RX mode
-    int rxState = lora.startReceive();
-    if (rxState != RADIOLIB_ERR_NONE) {
-        Serial.printf("[RX] startReceive failed: %d\n", rxState);
-        return;
-    }
+    uint8_t rxBuf[BP_MAX_PACKET_SIZE];
+    int state = lora.receive(rxBuf, sizeof(rxBuf), CMD_LISTEN_WINDOW_MS);
 
-    // Poll for incoming packet within the RX window
-    uint32_t listenStart = millis();
-    while (millis() - listenStart < CMD_LISTEN_WINDOW_MS) {
-        // Check the radio's IRQ status register for RX_DONE flag
-        uint16_t irq = lora.getIrqStatus();
-        if (irq & RADIOLIB_SX126X_IRQ_RX_DONE) {
-            uint8_t rxBuf[BP_MAX_PACKET_SIZE];
-            int state = lora.readData(rxBuf, sizeof(rxBuf));
-            if (state == RADIOLIB_ERR_NONE) {
-                uint8_t rxLen = lora.getPacketLength();
-                Serial.printf("[RX] Received %d bytes\n", rxLen);
-
-                pkt_print_hex(rxBuf, rxLen);  // Debug: hex dump to serial
-
-                // Basic validation before processing
-                if (rxLen >= BP_MIN_PACKET_SIZE && rxBuf[0] == BP_PROTOCOL_VERSION) {
-                    handleReceivedCommand(rxBuf, rxLen);
-                }
-            }
-            break;  // Only process one command per RX window
+    if (state == RADIOLIB_ERR_NONE) {
+        size_t rxLen = lora.getPacketLength(false);
+        if (rxLen == 0 || rxLen > sizeof(rxBuf)) {
+            rxLen = sizeof(rxBuf);
         }
-        vTaskDelay(pdMS_TO_TICKS(10));  // Poll every 10ms
+
+        Serial.printf("[RX] Received %d bytes\n", (int)rxLen);
+        pkt_print_hex(rxBuf, (uint8_t)rxLen);  // Debug: hex dump to serial
+
+        // Basic validation before processing
+        if (rxLen >= BP_MIN_PACKET_SIZE && rxBuf[0] == BP_PROTOCOL_VERSION) {
+            handleReceivedCommand(rxBuf, (uint8_t)rxLen);
+        }
+    } else if (state == RADIOLIB_ERR_RX_TIMEOUT) {
+        Serial.println("[RX] No command received");
+    } else {
+        Serial.printf("[RX] receive failed: %d\n", state);
     }
 
     lora.standby();  // Return radio to standby (will go to sleep later)
@@ -1026,10 +1141,10 @@ static void cellularSendTlv(const uint8_t *pkt, uint8_t len) {
     // Wait for modem ready
     if (!cellularSendAT("AT", "OK", 5000)) {
         Serial.println("[CELL] Modem not responding — aborting");
-        lastError = ERROR_CELLULAR;
+        lastError = BP_ERROR_CELLULAR;
         return;
     }
-    if (lastError == ERROR_CELLULAR) lastError = ERROR_NONE;  // Modem responded OK
+    if (lastError == BP_ERROR_CELLULAR) lastError = BP_ERROR_NONE;  // Modem responded OK
 
     // ── First-time PSM/eDRX configuration ──
     if (!cellularInitialised) {

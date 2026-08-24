@@ -54,15 +54,17 @@ struct bp_profile_config_t {
     bool         gps_continuous;     // keep GPS on between cycles
     uint8_t      cellular_ratio;     // 1 cellular per N cycles (0 = disabled)
     uint8_t      wake_checkin_ratio; // 1 wake check-in per N home cycles; use 1 for every scheduled home wake
+    uint8_t      home_gnss_refresh_ratio; // 1 proper GNSS sanity refresh per N BLE-home wakes
+    uint32_t     lte_heartbeat_interval_s; // time-based LTE heartbeat while repeatedly home
 };
 
 // Profile lookup table
 static const bp_profile_config_t BP_PROFILES[] = {
-    //                        power  sleep   led  beacon  gps_cont  cell_ratio  checkin
-    { PROFILE_NORMAL,          14,    600,    5,  false,  false,    10,          1 },  // home: every scheduled wake
-    { PROFILE_POWERSAVE,       10,   1800,    3,  false,  false,    30,          1 },  // home: every scheduled wake
-    { PROFILE_ACTIVE,          20,     60,    5,  false,  false,     5,          1 },  // Active Find: higher TX power
-    { PROFILE_LOST,            20,      0,   10,  true,   true,      3,          1 },  // Emergency Lost: higher TX power
+    //                        power  sleep   led  beacon  gps_cont  cell_ratio  checkin  home_gnss  lte_heartbeat
+    { PROFILE_NORMAL,          14,    600,    5,  false,  false,    10,          1,       10,        3600  }, // default everyday collar
+    { PROFILE_POWERSAVE,       10,   1800,    3,  false,  false,    30,          2,       10,        10800 }, // lazy/low-battery conservation
+    { PROFILE_ACTIVE,          20,     60,    5,  false,  false,     5,          1,       10,        600   }, // interested/high-frequency monitoring
+    { PROFILE_LOST,            20,      0,   10,  true,   true,      3,          1,        1,        60    }, // emergency; handled outside home gate
 };
 
 #define BP_PROFILE_COUNT  (sizeof(BP_PROFILES) / sizeof(BP_PROFILES[0]))
