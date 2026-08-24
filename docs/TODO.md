@@ -132,11 +132,11 @@ Hub health is gateway telemetry, not collar telemetry. It should therefore use a
 
 - [x] ~~Implement baseline NORMAL, POWERSAVE, ACTIVE and LOST firmware profiles.~~
 - [x] ~~Implement profile-specific sleep intervals, LoRa TX power and cellular ratios in shared configuration.~~
-- [ ] Formalise the distinction between **status** (`home`, `out`, `lost`, etc.) and **power/communications profile** (`powersave`, `normal`, `active`, `lost`).
+- [x] ~~Formalise the distinction between **status** (`home`, `out`, `lost`, etc.) and **power/communications profile** (`powersave`, `normal`, `active`, `lost`) in `docs/COLLAR_RUNTIME_DECISIONS.md`.~~
 - [ ] Keep LoRa as the primary transport for routine communications.
 - [ ] Use LTE-M / NB-IoT as the secondary direct-to-cloud path.
 - [ ] Maintain identical logical collar payloads regardless of LoRa/Home Hub or direct cellular ingress.
-- [ ] Keep path-specific telemetry in the transport wrapper rather than the collar TLV.
+- [x] ~~Keep path-specific telemetry in the transport wrapper rather than the collar TLV; testbed/spoof flags remain compile-time/log-only and do not enter the collar TLV.~~
 - [ ] Finalise automatic transitions between Home, Out, Active and Lost states.
 
 ## 3. Collar Wake / Check-In Workflow
@@ -176,13 +176,13 @@ The original power-saving design was: wake, scan for the BLE home beacon, and if
 - [x] ~~Current firmware suppresses GNSS when home.~~
 - [x] ~~Current firmware contains a LoRa command-listening mechanism.~~
 - [x] ~~Command ACK/retry/deduplication foundations already exist between hub and collar.~~
-- [ ] Replace the current old behaviour of `home -> usually sleep, occasional heartbeat` with the new **presence/check-in on every scheduled home wake** behaviour.
-- [ ] Remove/retire the existing `heartbeat_ratio` logic if it becomes redundant under the every-wake presence design.
-- [ ] Increase the current firmware command listen window from 2 seconds to the agreed **10-second RX window**.
-- [ ] Keep the radio continuously in RX for that window. Do not implement one-second on/off listening pauses.
-- [ ] Add the final `WAKE_CHECK_IN` / equivalent TX reason enum value to the shared protocol if not already represented in the current protocol version.
-- [ ] Ensure Supabase interprets this packet as a presence/check-in event rather than requiring a GNSS position.
-- [ ] Ensure a home presence packet can omit latitude/longitude and other unnecessary telemetry while still containing device identity, sequence, status/profile, battery and authentication fields as appropriate.
+- [x] ~~Replace the current old behaviour of `home -> usually sleep, occasional heartbeat` with profile-controlled **presence/check-in on scheduled home wakes** behaviour.~~
+- [x] ~~Remove/retire the old cycle-only heartbeat idea in favour of explicit home check-in, home GNSS sanity refresh and time-based LTE heartbeat cadences.~~
+- [x] ~~Increase the current firmware command listen window from 2 seconds to the agreed **10-second RX window**.~~
+- [x] ~~Keep the radio continuously in RX for that window. Do not implement one-second on/off listening pauses.~~
+- [x] ~~Add the final `WAKE_CHECKIN` TX reason enum value to the shared protocol.~~
+- [x] ~~Ensure Supabase interprets this packet as a presence/check-in event rather than requiring a GNSS position.~~
+- [x] ~~Ensure a home presence packet can omit latitude/longitude and other unnecessary telemetry while still containing device identity, sequence, status/profile, battery and authentication fields as appropriate.~~
 - [ ] Run GNSS acquisition and the command window concurrently on the away-from-home path where firmware architecture permits.
 
 ## 4. LoRa Radio Configuration
@@ -206,7 +206,7 @@ The original power-saving design was: wake, scan for the BLE home beacon, and if
 - [x] ~~Ingestion runbook exists at `docs/TLV_INGESTION_RUNBOOK.md`.~~
 - [x] ~~`msg_seq_id` is used by the ingestion/deduplication model.~~
 - [x] ~~Ingress RF/network metadata is represented outside the collar payload by the backend ingest model.~~
-- [ ] Keep protocol documentation synchronised with the newest wake-check-in TX reason and any resulting presence-packet example.
+- [x] ~~Keep protocol documentation synchronised with the newest wake-check-in TX reason and resulting presence-packet behaviour.~~
 - [ ] Revisit device UID width before final commercial protocol freeze.
 - [ ] Resolve any remaining mismatch between older firmware encryption/authentication code and the current documented keyed-MAC/HMAC protocol design.
 
@@ -222,7 +222,7 @@ The original power-saving design was: wake, scan for the BLE home beacon, and if
 - [x] ~~Gateway RSSI/SNR and cellular network metrics are accepted by ingestion.~~
 - [ ] Add/confirm keyed-MAC verification against the final protocol specification before accepting a packet as authentic.
 - [ ] Add dedicated hub health/self-report ingestion and storage.
-- [ ] Add/confirm wake-check-in handling that updates presence/last-seen without requiring a fresh GNSS point.
+- [x] ~~Add/confirm wake-check-in handling that updates presence/last-seen without requiring a fresh GNSS point.~~
 - [ ] Review credential lifecycle, rotation, revocation and rate limiting before launch.
 
 ## 7. Local / Cloud Web Interface
@@ -252,6 +252,7 @@ The original power-saving design was: wake, scan for the BLE home beacon, and if
 
 - [x] ~~GM02SP GNSS integration scaffolding and fix parsing exist in collar firmware.~~
 - [x] ~~Warm/cold acquisition timing constants exist.~~
+- [x] ~~Add explicit RAK4631 testbed spoof-GNSS guardrails so bench drift cannot be mistaken for production GNSS implementation.~~
 - [ ] Hardware-test acquisition performance and power consumption on the production design.
 - [ ] Tune TTFF/stabilisation limits using real field data.
 - [ ] Confirm fallback behaviour when no valid fix is obtained.
@@ -268,13 +269,13 @@ BLE home detection is primarily a **power-saving mechanism**. Presence of the tr
 - [x] ~~Implement Home Hub BLE beacon advertising.~~
 - [x] ~~Use a defined BluePaws home beacon identity/name in shared configuration.~~
 - [x] ~~Stop/short-circuit GNSS work when home is confirmed.~~
-- [ ] On every scheduled wake, perform the BLE home check before deciding whether GNSS is required.
-- [ ] If home is confirmed, skip GNSS and routine LTE attachment.
-- [ ] Send a lightweight LoRa **wake-up check-in / presence packet on every scheduled home wake**.
-- [ ] Immediately follow that transmission with the **10-second continuous LoRa RX command window**.
+- [x] ~~On every scheduled wake, perform the BLE home check before deciding whether GNSS is required.~~
+- [x] ~~If home is confirmed, skip routine GNSS and LTE attachment except for profile-defined sanity refreshes/heartbeats.~~
+- [x] ~~Send a lightweight LoRa **wake-up check-in / presence packet according to the profile's home cadence**.~~
+- [x] ~~Immediately follow that transmission with the **10-second continuous LoRa RX command window**.~~
 - [ ] Permit OTA configuration/profile commands during that window so a collar that remains at home for days is still predictably reachable.
-- [ ] Return to deep sleep after the command window when no action requires the collar to remain awake.
-- [ ] Ensure `last_seen` is refreshed by the presence packet even though no new position is generated.
+- [x] ~~Return to deep sleep after the command window when no action requires the collar to remain awake.~~
+- [x] ~~Ensure `last_seen` is refreshed by the presence packet even though no new position is generated.~~
 
 ### Home/departure confidence
 
@@ -418,7 +419,7 @@ The current shared configuration contains a consecutive-detection threshold. The
 - [x] ~~TLV ingestion runbook exists.~~
 - [x] ~~Simulator documentation exists.~~
 - [ ] Create a dedicated **Hub Communications Modes** design document after the TODO design is finalised.
-- [ ] Create a dedicated **Collar Wake / BLE Home Behaviour** state-machine document.
+- [x] ~~Create a dedicated **Collar Wake / BLE Home Behaviour** state-machine document at `docs/COLLAR_RUNTIME_DECISIONS.md`.~~
 - [ ] Document the production HTTP ingress wrapper schema.
 - [ ] Add architecture diagrams for LoRa-via-hub and cellular-direct paths.
 - [ ] Add Security Architecture / Threat Model.

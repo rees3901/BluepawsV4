@@ -97,11 +97,11 @@ enum bp_pkt_type_t : uint8_t {
 };
 
 enum bp_error_t : uint8_t {
-    ERROR_NONE      = 0x00,
-    ERROR_GPS       = 0x01,
-    ERROR_RF        = 0x02,
-    ERROR_CELLULAR  = 0x03,
-    ERROR_MODULE    = 0x04,
+    BP_ERROR_NONE      = 0x00,
+    BP_ERROR_GPS       = 0x01,
+    BP_ERROR_RF        = 0x02,
+    BP_ERROR_CELLULAR  = 0x03,
+    BP_ERROR_MODULE    = 0x04,
 };
 
 enum bp_tlv_type_t : uint8_t {
@@ -201,10 +201,10 @@ static inline const char *bp_tx_reason_display(uint8_t r) {
 
 static inline const char *bp_error_display(bp_error_t e) {
     switch (e) {
-    case ERROR_GPS:      return "GPS";
-    case ERROR_RF:       return "RF";
-    case ERROR_CELLULAR: return "Cellular";
-    case ERROR_MODULE:   return "Module";
+    case BP_ERROR_GPS:      return "GPS";
+    case BP_ERROR_RF:       return "RF";
+    case BP_ERROR_CELLULAR: return "Cellular";
+    case BP_ERROR_MODULE:   return "Module";
     default:             return "None";
     }
 }

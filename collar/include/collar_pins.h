@@ -46,7 +46,7 @@
 
 // ── User Interface ──
 #define PIN_LED        LED_BUILTIN    // Green LED on RAK4630
-#define PIN_BUTTON     D10            // Provision / wake button
+#define PIN_BUTTON     WB_IO6         // Provision / wake button on WisBlock IO slot
 #define PIN_BUZZER     A4             // Passive piezo buzzer (PWM)
 
 // ── NFC (provisioning) ──
