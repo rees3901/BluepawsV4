@@ -74,7 +74,7 @@
 #define STACK_LORA   4096   // LoRa RX/TX — moderate stack (radio + crypto)
 #define STACK_WEB    8192   // Web server — large stack (JSON building, string ops)
 #define STACK_BLE    4096   // BLE beacon + scanning in portable mode
-#define STACK_CLOUD  4096   // Cloud relay — HTTP client needs decent stack
+#define STACK_CLOUD  16384  // Cloud relay — HTTPS/TLS + HTTPClient need generous stack
 
 #define PRIO_LORA    3      // Highest — LoRa packets are time-sensitive
 #define PRIO_WEB     2      // Medium — serves the GUI
@@ -260,6 +260,9 @@ static void cloudTask(void *param);
 
 // Hardware initialisation
 static void initLoRa();
+static void femInit();
+static void femSetRx();
+static void femSetTx();
 static void initWiFi();
 static void initBLE();
 static void initStorage();
@@ -513,24 +516,26 @@ static void initLoRa() {
     // Start SPI bus to the SX1262 module
     loraSPI.begin(PIN_LORA_SCK, PIN_LORA_MISO, PIN_LORA_MOSI, PIN_LORA_NSS);
 
+    // Heltec Tracker V2.x routes the SX1262 through an external RF
+    // front-end. Power/enable it before lora.begin(), then leave it in RX.
+    femInit();
+
     Serial.print("[LORA] Initialising SX1262... ");
-    // Configure radio with parameters from bp_config.h.
-    // Hub uses 10 dBm TX (lower than collar — hub has wall power, no need for max range on TX).
-    int state = lora.begin(
-        LORA_FREQUENCY,      // Locked at 869.5 MHz
-        LORA_BANDWIDTH,      // e.g. 125.0 kHz
-        LORA_SPREADING,      // e.g. SF10 (good range vs speed tradeoff)
-        LORA_CODING_RATE,    // Locked at 4/6 FEC
-        LORA_SYNC_WORD,      // Private network sync word
-        10,                  // TX power in dBm (hub transmits at low power)
-        LORA_PREAMBLE_LEN    // Locked at 8 symbols
-    );
+    int state = lora.begin(LORA_FREQUENCY);
 
     if (state != RADIOLIB_ERR_NONE) {
         Serial.printf("FAILED (err %d)\n", state);
         return;
     }
 
+    // Configure radio parameters explicitly, matching the collar and the
+    // proven T190 sniffer initialisation style.
+    lora.setSpreadingFactor(LORA_SPREADING);
+    lora.setBandwidth(LORA_BANDWIDTH);
+    lora.setCodingRate(LORA_CODING_RATE);
+    lora.setPreambleLength(LORA_PREAMBLE_LEN);
+    lora.setSyncWord(LORA_SYNC_WORD);
+    lora.setOutputPower(10);         // Hub command TX is low power for now
     lora.setCRC(LORA_CRC_ENABLED);   // Enable hardware CRC on the radio
     lora.setDio1Action(onLoRaDio1);   // Register our ISR for packet-received interrupt
     lora.startReceive();              // Put radio into continuous RX mode
@@ -538,6 +543,27 @@ static void initLoRa() {
 
     Serial.println("OK");
     Serial.println("[LORA] TLV v1.1 raw binary uplink enabled");
+}
+
+static void femInit() {
+    pinMode(PIN_FEM_VCTRL, OUTPUT);
+    pinMode(PIN_FEM_CSD, OUTPUT);
+    pinMode(PIN_FEM_CTX, OUTPUT);
+
+    digitalWrite(PIN_FEM_VCTRL, HIGH);  // Enable FEM LDO/power rail
+    digitalWrite(PIN_FEM_CSD, HIGH);    // Enable FEM chip
+    femSetRx();                         // Default to receive path
+    delay(20);
+
+    Serial.println("[FEM] KCT8103L powered + enabled; CTX=RX");
+}
+
+static void femSetRx() {
+    digitalWrite(PIN_FEM_CTX, LOW);
+}
+
+static void femSetTx() {
+    digitalWrite(PIN_FEM_CTX, HIGH);
 }
 
 static void initWiFi() {
@@ -667,22 +693,28 @@ static void loraTask(void *param) {
 
     for (;;) {
         // ── Step 1: Listen for received LoRa packet ──
-        // Use a short timed receive so the hub still works if DIO1 interrupts
-        // are miswired/misdeclared during board bring-up.
-        if (xSemaphoreTake(loraMutex, pdMS_TO_TICKS(100))) {
-            int state = lora.receive(rxBuf, sizeof(rxBuf), LORA_RX_POLL_TIMEOUT_MS);
+        // Use the same continuous-RX/DIO/readData pattern as the proven T190
+        // sniffer. Timed receive polling can leave SX126x state transitions in
+        // awkward places on this board.
+        if (loraPacketReceived && xSemaphoreTake(loraMutex, pdMS_TO_TICKS(100))) {
+            loraPacketReceived = false;
+            size_t len = lora.getPacketLength(false);
+            int state = RADIOLIB_ERR_PACKET_TOO_LONG;
+            if (len > 0 && len <= BP_MAX_PACKET_SIZE) {
+                state = lora.readData(rxBuf, len);
+            }
             int16_t rssi = lora.getRSSI();  // Signal strength
             float snr = lora.getSNR();      // Signal-to-noise ratio
-            size_t len = lora.getPacketLength(false);
+            lora.startReceive();            // Always re-arm continuous RX
             xSemaphoreGive(loraMutex);
 
             if (state == RADIOLIB_ERR_NONE && len > 0 && len <= BP_MAX_PACKET_SIZE) {
                 handlePacket(rxBuf, (uint8_t)len, rssi, snr);
-            } else if (state != RADIOLIB_ERR_RX_TIMEOUT && state != RADIOLIB_ERR_NONE) {
-                Serial.printf("[LORA] RX poll error: %d\n", state);
+            } else if (state == RADIOLIB_ERR_CRC_MISMATCH) {
+                Serial.println("[LORA] RX CRC mismatch");
+            } else {
+                Serial.printf("[LORA] RX read error: state=%d len=%u\n", state, (unsigned)len);
             }
-
-            loraPacketReceived = false;  // DIO path is advisory only in this polling loop
         }
 
         // ── Step 2: Process outgoing commands from the web GUI ──
@@ -694,7 +726,9 @@ static void loraTask(void *param) {
             if (xQueueReceive(cmdQueue, &cmd, 0) == pdTRUE) {
                 // Take SPI mutex, transmit, then go back to RX mode
                 if (xSemaphoreTake(loraMutex, pdMS_TO_TICKS(200))) {
+                    femSetTx();
                     int state = lora.transmit(cmd.buf, cmd.len);
+                    femSetRx();
                     lora.startReceive();  // Always return to RX after TX
                     xSemaphoreGive(loraMutex);
 
