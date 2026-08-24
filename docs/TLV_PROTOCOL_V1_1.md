@@ -300,6 +300,12 @@ Current remaining TLV headroom:
 
 `command_id` was deliberately omitted. The collar should normally ACK the sequence number of the command/message it received. Supabase already knows what command was associated with that sequence number.
 
+The backend command queue uses a UUID as the permanent database/audit identity,
+but the collar ACK remains compact: `tx_reason = ACK` plus
+`acked_msg_seq_id = command_sequence_id`. See
+[`COLLAR_DOWNLINK_COMMANDS.md`](COLLAR_DOWNLINK_COMMANDS.md) for the delivery
+contract and command dictionary.
+
 `speed_cms` and `ack_status` were also omitted to keep the selected set under budget. Speed can be estimated by backend position deltas. ACK status is unnecessary for the first version because the ACK mainly confirms receipt, and the next telemetry packet confirms whether the state actually changed.
 
 ## 13. TLVs omitted from the collar packet for now

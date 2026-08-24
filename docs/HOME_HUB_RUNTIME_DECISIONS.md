@@ -68,6 +68,19 @@ The current Edge Function accepts `lora_gateway` and normalizes it to the backen
 
 `gateway_rx_time_unix` should use the hub's NTP-synced clock when available. During early boot, before NTP is ready, the hub may temporarily fall back to the collar packet timestamp so the wrapper remains well-formed.
 
+## Cloud command delivery
+
+The Home Hub must not need a collar IP address. Cloud commands are queued by
+collar `device_id` in Supabase. When the hub receives or expects a collar RX
+window, it can poll for the next pending command for that device, transmit it
+over LoRa, and wait for the collar's TLV ACK.
+
+The canonical command contract is
+[`COLLAR_DOWNLINK_COMMANDS.md`](COLLAR_DOWNLINK_COMMANDS.md). The first Home Hub
+implementation can poll; a later version can replace polling with Supabase
+Realtime/WebSocket command delivery while keeping the same database command
+state machine.
+
 ## Current prototype target
 
 The current Home Hub prototype target is:
