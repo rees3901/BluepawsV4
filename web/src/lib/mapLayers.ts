@@ -54,3 +54,14 @@ export const MAP_LAYER_DEFINITIONS: Record<MapLayerName, MapLayerDefinition> = {
     maxZoom: 18,
   },
 };
+
+export function alternatePreviewMapLayer(activeLayer: MapLayerName): MapLayerName {
+  if (activeLayer === "Satellite" || activeLayer === "Satellite HD") return "Street";
+  return "Satellite";
+}
+
+export function previewMapZoom(activeZoom: number, previewLayer: MapLayerName) {
+  const layer = MAP_LAYER_DEFINITIONS[previewLayer];
+  const zoom = Math.floor(activeZoom) - 2;
+  return Math.max(0, Math.min(layer.maxZoom, zoom));
+}
