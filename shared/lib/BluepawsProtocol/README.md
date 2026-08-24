@@ -55,3 +55,9 @@ maximum = 64 bytes
 Keep protocol constants, encoder, decoder, README files, hub parser, collar transmitter, cloud parser and simulator payloads aligned with `docs/TLV_PROTOCOL_V1_1.md`.
 
 If this library still contains legacy constants or packet helpers, update the implementation before treating firmware output as v1.1 compliant.
+
+## Boot and wake-check-in semantics
+
+`tx_reason = BOOT` and `tx_reason = WAKE_CHECKIN` use the unchanged v1.1 header. Do not add new header flag meanings for boot diagnostics. Use TLVs such as `firmware_version`, `reset_reason`, and `uptime_s`.
+
+No-GNSS boot and wake-check-in packets are valid presence/diagnostic reports. Cloud ingestion should update last-seen/presence while preserving the last known valid coordinates.

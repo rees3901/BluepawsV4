@@ -297,12 +297,12 @@ function formatDateTime(value: string) {
 function txReasonLabel(value: number) {
   return ([
     "Telemetry",
-    "Timer",
-    "Movement",
+    "ACK",
+    "Ping",
     "User request",
-    "Low battery",
-    "Recovery",
-    "Debug",
+    "Boot report",
+    "Alert",
+    "Config",
     "Wake check-in",
   ] as const)[value] ?? `Unknown (${value})`;
 }
@@ -310,8 +310,12 @@ function txReasonLabel(value: number) {
 function txReasonDescription(value: number) {
   if (value === 7) return "The collar woke briefly to touch base and prove it is still alive. This is most likely a home heartbeat rather than a full position update.";
   if (value === 0) return "A normal collar report, usually carrying the latest telemetry and position when GPS is available.";
-  if (value === 4) return "The collar is reporting because battery level needs attention.";
-  if (value === 6) return "A diagnostic report used during testing or troubleshooting.";
+  if (value === 3) return "A user or field-test button action forced the collar to send an immediate report.";
+  if (value === 4) return "The collar restarted or recovered and sent a boot report with startup diagnostics.";
+  if (value === 5) return "An alert report, normally used for safety or timeout events such as Lost Alert handling.";
+  if (value === 6) return "A configuration-related report or acknowledgement used during collar setup and troubleshooting.";
+  if (value === 1) return "An acknowledgement packet confirming that a command or packet was received.";
+  if (value === 2) return "A lightweight ping or liveness packet.";
   return "Why the collar decided to send this report.";
 }
 
@@ -373,8 +377,10 @@ function sourceLabel(path: DeviceObservationPathRow | null) {
 
 function summaryVerb(txReason: number) {
   if (txReason === 7) return "checked in";
-  if (txReason === 4) return "reported low battery";
-  if (txReason === 6) return "sent a diagnostic report";
+  if (txReason === 4) return "booted and checked in";
+  if (txReason === 5) return "sent an alert";
+  if (txReason === 6) return "sent a configuration report";
+  if (txReason === 3) return "sent a user-requested report";
   return "sent a report";
 }
 

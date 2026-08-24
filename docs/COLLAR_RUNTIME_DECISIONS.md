@@ -48,6 +48,8 @@ Supported commands:
 
 Debug cadence is deliberately an override on top of the selected profile. For example, `profile normal` plus `interval 30` keeps Normal profile semantics but wakes every 30 seconds for bench testing.
 
+The `tx` command mirrors the prototype short-button press: it queues a user-requested report using `tx_reason = INTERRUPT`.
+
 Current spoof origin:
 
 - Latitude: `51.905978580906705`
@@ -69,7 +71,22 @@ Current spoof origin:
 
 ```mermaid
 stateDiagram-v2
-  [*] --> Sleep
+  [*] --> LoadPersistedConfig
+  LoadPersistedConfig --> BootReport
+  BootReport --> BootBleScan: scan Home beacon
+  BootBleScan --> BootGnss: try GNSS up to 60s, even if Home seen
+  BootGnss --> SendBoot: tx_reason = BOOT
+  SendBoot --> CommandWindow: 10s LoRa RX
+  SendBoot --> BootLtePost: same TLV via LTE HTTPS wrapper
+  BootLtePost --> Sleep
+
+  Sleep --> ButtonShort: user short press
+  ButtonShort --> ForcedReport: tx_reason = INTERRUPT
+  ForcedReport --> CommandWindow
+
+  Sleep --> ButtonLong: user long press
+  ButtonLong --> LostAlert: toggle LOST_ALERT
+
   Sleep --> Wake: RTC/profile interval
   Wake --> BLEHomeScan: scan for Home Hub beacon
 
@@ -106,6 +123,27 @@ stateDiagram-v2
   LostAlert --> Sleep: timeout or user clears alert
 ```
 
+## Boot report behaviour
+
+On every cold boot, reboot, watchdog recovery or firmware restart, the collar must:
+
+1. Load persisted collar configuration before choosing its operating behaviour.
+2. Attempt a BLE Home scan.
+3. Attempt GNSS acquisition for up to 60 seconds, even if the BLE Home beacon is seen.
+4. Send a LoRa TLV report with `tx_reason = BOOT`.
+5. Open the normal 10-second command receive window.
+6. Queue the same boot TLV for LTE direct-to-cloud POST.
+
+If GNSS succeeds, the boot report includes valid coordinates. If GNSS fails, the boot report remains valid and useful: set stale/error indicators, include diagnostics, and let the backend update presence/last-seen without moving or erasing the last known map position.
+
+Boot diagnostics use existing TLVs only:
+
+- `firmware_version`
+- `reset_reason`
+- `uptime_s`
+
+Do not repurpose header flags for extra boot diagnostics. Additional boot/config diagnostics should be future TLVs or a later protocol version.
+
 ## BLE Home behaviour
 
 BLE Home detection is primarily a power-saving and state-confidence mechanism.
@@ -132,9 +170,44 @@ If BLE Home is seen and a scheduled GNSS sanity refresh fails:
 
 The customer-facing map should continue showing the last useful position with updated last-seen/presence rather than jumping to null or implying the cat has moved.
 
+The same rule applies to no-GNSS `BOOT` and `WAKE_CHECKIN` packets: they are presence/diagnostic reports first, not position updates.
+
+## Conservative persistence
+
+The collar persists a small versioned state record in non-volatile flash. This is not a high-frequency event log.
+
+Persist immediately:
+
+- selected power profile;
+- device configuration revision;
+- LTE/APN/provisioning settings;
+- Lost Alert active/inactive state;
+- first/meaningful last valid GNSS fix.
+
+Checkpoint carefully:
+
+- message sequence;
+- boot counter;
+- runtime cycle counters;
+- BLE-home wake counters.
+
+The initial policy checkpoints sequence/cycle state periodically rather than after every packet to reduce flash wear. On reboot, the collar resumes from the most recent checkpoint where practical rather than starting from zero.
+
+## Physical button behaviour
+
+Prototype and field-test firmware keeps the collar button enabled:
+
+- short press: force a user-requested report/check-in using `tx_reason = INTERRUPT`;
+- long press: toggle `LOST_ALERT`;
+- very long press/factory reset: deliberately not part of this milestone to avoid accidental destructive actions.
+
+Both actions must emit clear serial logs and LED feedback. Production UX can refine timings and safety prompts later.
+
 ## Lost Alert BLE behaviour
 
-In `LOST_ALERT`, the collar switches from listening for the BLE Home beacon to actively advertising a BLE lost/find beacon. A portable/off-grid Home Hub can use the beacon RSSI for close-range finding when GNSS is only accurate to a few metres.
+In `LOST_ALERT`, the collar actively advertises a BLE lost/find beacon. A portable/off-grid Home Hub can use the beacon RSSI for close-range finding when GNSS is only accurate to a few metres.
+
+`ACTIVE` does not start the BLE find beacon. Active is higher-frequency monitoring, not emergency search.
 
 Early firmware may advertise a stable device identifier for development. Production should later move to privacy-preserving rotating identifiers before customer release.
 
@@ -142,7 +215,7 @@ Early firmware may advertise a stable device identifier for development. Product
 
 - Replace spoof GNSS with real GM02SP GNSS parsing.
 - Implement real battery measurement.
-- Replace placeholder TLV auth tag with the provisioned HMAC key.
 - Tune LoRa ACK retry counts and LTE fallback rules after range tests.
+- Design authenticated downlink commands before treating command packets as production-secure.
 - Decide final user-facing rules for automatic profile changes.
 - Validate deep sleep current on the final collar PCB.

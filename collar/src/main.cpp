@@ -41,6 +41,8 @@
 #include <math.h>
 #include <RadioLib.h>        // SX1262 LoRa radio driver
 #include <bluefruit.h>       // Adafruit nRF52 BLE library (scanner for home beacon)
+#include <Adafruit_LittleFS.h>
+#include <InternalFileSystem.h>
 
 // ── BluePaws shared protocol library ──
 #include <bp_protocol.h>     // Binary TLV packet format, builder & parser
@@ -58,6 +60,8 @@
 #include <task.h>            // xTaskCreate, vTaskDelay
 #include <semphr.h>          // xSemaphoreCreateMutex, Take/Give
 
+using namespace Adafruit_LittleFS_Namespace;
+
 // ═══════════════════════════════════════════════
 // Device Identity — set per collar at provisioning
 // Each collar gets a unique ID (e.g. 0x0001, 0x0002).
@@ -66,6 +70,22 @@
 #ifndef MY_DEVICE_ID
 #define MY_DEVICE_ID  0x0001
 #endif
+
+#ifndef BLUEPAWS_FW_MAJOR
+#define BLUEPAWS_FW_MAJOR 1
+#endif
+
+#ifndef BLUEPAWS_FW_MINOR
+#define BLUEPAWS_FW_MINOR 1
+#endif
+
+#define BLUEPAWS_BOOT_GNSS_TIMEOUT_S       60UL
+#define BLUEPAWS_STATE_SEQ_CHECKPOINT_EVERY 16UL
+#define BLUEPAWS_BUTTON_DEBOUNCE_MS        40UL
+#define BLUEPAWS_BUTTON_LONG_PRESS_MS      3000UL
+#define BLUEPAWS_COLLAR_STATE_PATH         "/bp_collar_state.bin"
+#define BLUEPAWS_COLLAR_STATE_MAGIC        0x42505634UL
+#define BLUEPAWS_COLLAR_STATE_VERSION      1U
 
 #if defined(COLLAR_HMAC_KEY_BYTES)
 static const uint8_t collarHmacKey[32] = COLLAR_HMAC_KEY_BYTES;
@@ -104,6 +124,9 @@ static uint32_t messageSeq     = 0;    // Incrementing sequence number for outgo
 static uint32_t cycleCount     = 0;    // Total wake/transmit cycles since boot
 static uint8_t  homeCycleCount = 0;    // Consecutive cycles where BLE home beacon was detected
 static uint32_t lastLteHeartbeatMs = 0; // Last time a home LTE heartbeat was queued
+static volatile bool bootReportPending = true;        // First runtime action is a BOOT report
+static volatile bool forceUserReportRequested = false; // Physical button / debug forced TX
+static uint8_t bootResetReason = 0;                   // Raw nRF reset-reason low byte
 
 #if defined(BLUEPAWS_TESTBED_BUILD) && BLUEPAWS_TESTBED_BUILD
 // USB Serial debug console for RAK4631/WisMesh testbed work only.
@@ -136,6 +159,34 @@ static uint32_t lastProcessedCmdSeq = 0;
 // ── Lost Mode Tracking ──
 static volatile bool     inLostMode      = false;  // true = currently in emergency lost mode
 static volatile uint32_t lostModeStartMs = 0;      // millis() when lost mode started
+
+// ── Conservative non-volatile collar state ──
+// This is intentionally small and versioned. Write immediately for human config
+// changes; checkpoint high-churn counters to reduce internal flash wear.
+struct collar_persisted_state_t {
+    uint32_t magic;
+    uint16_t version;
+    uint16_t size;
+    uint32_t checksum;
+    uint8_t  profile;
+    uint8_t  lost_active;
+    uint16_t config_revision;
+    uint32_t message_seq_checkpoint;
+    uint32_t boot_counter;
+    uint32_t runtime_counter_checkpoint;
+    uint8_t  home_cycle_checkpoint;
+    uint8_t  reserved0[3];
+    int32_t  last_lat_e7;
+    int32_t  last_lon_e7;
+    uint32_t last_fix_unix;
+    uint16_t last_fix_acc_m;
+    uint8_t  last_fix_sats;
+    uint8_t  has_last_fix;
+    char     apn[32];
+};
+
+static collar_persisted_state_t persistedState;
+static bool collarStateReady = false;
 
 // ── Legacy AES-128 key ──
 // TLV v1.1 uplink packets are sent as raw authenticated TLV over private LoRa.
@@ -171,6 +222,7 @@ static void cellularTask(void *param);     // Notification-driven: wakes GM02SP 
 // Cycle phases (called in sequence by cycleTask)
 static bool     bleScanForHome();          // BLE scan for hub's home beacon
 static bool     gnssAcquireFix();          // Request GNSS fix via AT+SQNGNSS
+static bool     gnssAcquireFixWithTimeout(uint32_t timeoutS); // Bounded GNSS request
 static void     listenForCommands();       // Open 10s LoRa RX window for hub commands
 static void     enterDeepSleep();          // Power down, sleep until next cycle
 static void     runLostMode();             // Emergency continuous operation loop
@@ -181,6 +233,8 @@ static void     peripheralsSleep();        // Sleep GNSS, LoRa, stop BLE
 
 // Packet builders (construct TLV packets and transmit)
 static void     sendTelemetry();           // Build + send PKT_TELEMETRY
+static void     sendTelemetryWithReason(uint8_t txReason);    // TELEMETRY/INTERRUPT helper
+static void     sendBootReport(bool atHome, bool haveFix);    // Cold/reboot boot report
 static void     sendModeAck(uint32_t cmdMsgSeq);        // ACK a mode change command
 static void     sendStatusResponse(uint32_t cmdMsgSeq); // Respond to status query
 static void     sendLostModeAlert();       // Alert: lost mode 2hr timeout expired
@@ -193,9 +247,10 @@ static void     handleReceivedCommand(const uint8_t *buf, uint8_t len);
 static void     applyProfile(bp_profile_t profile);  // Switch operating profile
 static void     sendFindAck(uint32_t cmdMsgSeq);     // ACK a find command
 
-// BLE Active Find beacon (collar advertises when in PROFILE_ACTIVE)
+// BLE Lost/Find beacon (collar advertises only when in PROFILE_LOST)
 static void     bleFindBeaconStart();
 static void     bleFindBeaconStop();
+static void     buttonPoll();              // Short press = forced TX; long press = Lost Alert
 
 // GPS helpers
 static void     gnssEnable();              // Start GNSS receiver via AT command
@@ -203,6 +258,15 @@ static void     gnssDisable();             // Stop GNSS receiver via AT command
 static uint32_t gnssGetUnixTime();         // Return last parsed GNSS Unix timestamp
 static bool     gnssSpoofAcquireFix();     // Testbed-only spoof GNSS fix
 static uint32_t compileTimeUnix();         // Approximate boot-time UTC from compiler macros
+
+// Persistence helpers
+static void     collarStateDefaults();
+static bool     collarStateLoad();
+static void     collarStateSave(const char *reason, bool noisy = true);
+static void     collarStateCheckpoint(const char *reason);
+static void     collarStateRememberFix();
+static uint32_t collarStateChecksum(collar_persisted_state_t state);
+static uint8_t  captureResetReason();
 
 // LED helpers
 static void     ledFlicker(uint8_t count, uint16_t onMs, uint16_t offMs);  // Blink N times
@@ -261,6 +325,7 @@ static void bleScanCallback(ble_gap_evt_adv_report_t *report) {
 void setup() {
     Serial.begin(115200);
     while (!Serial && millis() < 2000) {}
+    bootResetReason = captureResetReason();
 
     Serial.println("══════════════════════════════════");
     Serial.println("  Bluepaws V4 — Collar");
@@ -282,12 +347,45 @@ void setup() {
     // ── Mutex ──
     gpsMutex = xSemaphoreCreateMutex();
 
+    if (InternalFS.begin()) {
+        collarStateReady = true;
+        if (collarStateLoad()) {
+            currentProfile = (bp_profile_t)persistedState.profile;
+            currentConfig = bp_profile_config(currentProfile);
+            inLostMode = persistedState.lost_active != 0;
+            messageSeq = persistedState.message_seq_checkpoint;
+            cycleCount = persistedState.runtime_counter_checkpoint;
+            homeCycleCount = persistedState.home_cycle_checkpoint;
+            if (persistedState.has_last_fix) {
+                gnssLat = persistedState.last_lat_e7 / 1e7;
+                gnssLon = persistedState.last_lon_e7 / 1e7;
+                gnssUnixTime = persistedState.last_fix_unix;
+                gnssSats = persistedState.last_fix_sats;
+                gpsWarmStart = true;
+            }
+            persistedState.boot_counter++;
+            Serial.printf("[STATE] Loaded flash state: profile=%s seq=%lu boots=%lu lost=%s\n",
+                          bp_profile_name(currentProfile),
+                          messageSeq,
+                          persistedState.boot_counter,
+                          inLostMode ? "yes" : "no");
+        } else {
+            collarStateDefaults();
+            persistedState.boot_counter = 1;
+            Serial.println("[STATE] No valid flash state; using factory defaults.");
+        }
+        collarStateSave("boot", true);
+    } else {
+        Serial.println("[STATE] InternalFS unavailable; running with volatile state only.");
+    }
+
     // ── LED (visual feedback for TX, errors, and lost mode beacon) ──
     pinMode(PIN_LED, OUTPUT);
     digitalWrite(PIN_LED, LOW);
     ledFlicker(3, 30, 30);  // 3 quick flashes = "I'm alive" boot indicator
 
-    // ── Button (can be used for manual mode toggle — TODO) ──
+    // ── Button ──
+    // Short press: force a user-requested report. Long press: toggle Lost Alert.
     pinMode(PIN_BUTTON, INPUT_PULLUP);
 
     // ── Buzzer (passive piezo — needs PWM to generate tones) ──
@@ -340,6 +438,11 @@ void setup() {
     Bluefruit.Scanner.setInterval(160, 80);  // Scan interval 100ms, window 50ms (in 0.625ms units)
     Bluefruit.Scanner.useActiveScan(true);   // Active scan = request scan response for more data
     Serial.printf("[BLE] Ready, beacon: \"%s\"\n", BLE_HOME_BEACON_NAME);
+    if (inLostMode) {
+        bleFindBeaconStart();
+        lostModeStartMs = millis();
+        Serial.println("[MODE] Persisted Lost Alert restored after reboot.");
+    }
 
     // ── Cellular Init (Sequans Monarch 2 GM02SP — UART only, modem off until needed) ──
     Serial1.begin(CELLULAR_BAUD_RATE);  // UART to GM02SP modem
@@ -360,11 +463,12 @@ void setup() {
 
 // Arduino loop() — production work happens in FreeRTOS tasks.
 void loop() {
+    buttonPoll();
 #if defined(BLUEPAWS_TESTBED_BUILD) && BLUEPAWS_TESTBED_BUILD
     debugConsolePoll();
     vTaskDelay(pdMS_TO_TICKS(25));
 #else
-    vTaskDelay(pdMS_TO_TICKS(10000));
+    vTaskDelay(pdMS_TO_TICKS(25));
 #endif
 }
 
@@ -377,6 +481,58 @@ static void cycleTask(void *param) {
     vTaskDelay(pdMS_TO_TICKS(500));
 
     for (;;) {
+        if (bootReportPending) {
+            bootReportPending = false;
+            cycleCount++;
+
+            Serial.printf("\n[BOOT] Boot report cycle | reset=0x%02X | profile=%s\n",
+                          bootResetReason, bp_profile_name(currentProfile));
+            peripheralsWake();
+
+            bool atHome = bleScanForHome();
+            if (atHome) {
+                homeCycleCount++;
+            } else {
+                homeCycleCount = 0;
+            }
+
+            Serial.printf("[BOOT] GNSS acquisition ceiling: %lus\n", BLUEPAWS_BOOT_GNSS_TIMEOUT_S);
+            bool haveBootFix = gnssAcquireFixWithTimeout(BLUEPAWS_BOOT_GNSS_TIMEOUT_S);
+            sendBootReport(atHome, haveBootFix);
+            listenForCommands();
+
+            Serial.println("[CELL] Boot safety POST requested for same TLV.");
+            cellularPending = true;
+            xTaskNotifyGive(cellTaskHandle);
+
+            peripheralsSleep();
+            enterDeepSleep();
+            continue;
+        }
+
+        if (forceUserReportRequested) {
+            forceUserReportRequested = false;
+            cycleCount++;
+
+            Serial.printf("\n[USER] Forced report cycle | profile=%s\n", bp_profile_name(currentProfile));
+            peripheralsWake();
+
+            bool atHome = bleScanForHome();
+            if (atHome) {
+                homeCycleCount++;
+            } else {
+                homeCycleCount = 0;
+            }
+
+            (void)gnssAcquireFixWithTimeout(BLUEPAWS_BOOT_GNSS_TIMEOUT_S);
+            sendTelemetryWithReason(TX_INTERRUPT);
+            listenForCommands();
+
+            peripheralsSleep();
+            enterDeepSleep();
+            continue;
+        }
+
         // ── Lost mode runs its own continuous loop ──
         if (inLostMode) {
             runLostMode();
@@ -609,6 +765,11 @@ static bool bleScanForHome() {
 // Returns true if usable fix obtained.
 // ═══════════════════════════════════════════════
 static bool gnssAcquireFix() {
+    uint32_t ttffTimeoutS = gpsWarmStart ? GPS_TTFF_WARM_TIMEOUT_S : GPS_TTFF_COLD_TIMEOUT_S;
+    return gnssAcquireFixWithTimeout(ttffTimeoutS);
+}
+
+static bool gnssAcquireFixWithTimeout(uint32_t timeoutS) {
 #if BLUEPAWS_GNSS_SPOOF_ENABLED
     return gnssSpoofAcquireFix();
 #endif
@@ -616,12 +777,11 @@ static bool gnssAcquireFix() {
     gnssEnable();
     gpsFix = false;
 
-    uint32_t ttffTimeoutS = gpsWarmStart ? GPS_TTFF_WARM_TIMEOUT_S : GPS_TTFF_COLD_TIMEOUT_S;
     Serial.printf("[GNSS] Acquiring fix (%s, %lus timeout)\n",
-                  gpsWarmStart ? "warm" : "cold", ttffTimeoutS);
+                  gpsWarmStart ? "warm" : "cold", timeoutS);
 
     uint32_t startMs = millis();
-    uint32_t ttffTimeoutMs = ttffTimeoutS * 1000UL;
+    uint32_t ttffTimeoutMs = timeoutS * 1000UL;
 
     while (millis() - startMs < ttffTimeoutMs) {
         // TODO: Replace with actual Sequans GNSS AT command sequence.
@@ -650,6 +810,7 @@ static bool gnssAcquireFix() {
             gpsFix = true;
             gpsWarmStart = true;
             if (lastError == BP_ERROR_GPS) lastError = BP_ERROR_NONE;  // Clear GPS error on success
+            collarStateRememberFix();
             Serial.printf("[GNSS] Fix acquired after %lums\n", millis() - startMs);
             Serial.printf("[GNSS] Position: %.6f, %.6f (sats: %d)\n",
                           gnssLat, gnssLon, gnssSats);
@@ -697,6 +858,7 @@ static bool gnssSpoofAcquireFix() {
     gpsFix = true;
     gpsWarmStart = true;
     if (lastError == BP_ERROR_GPS) lastError = BP_ERROR_NONE;
+    collarStateRememberFix();
 
     if (gpsMutex) {
         xSemaphoreGive(gpsMutex);
@@ -735,6 +897,191 @@ static uint32_t compileTimeUnix() {
 }
 
 // ═══════════════════════════════════════════════
+// Conservative Flash Persistence
+// ═══════════════════════════════════════════════
+static uint8_t captureResetReason() {
+#if defined(NRF_POWER)
+    uint32_t reason = NRF_POWER->RESETREAS;
+    NRF_POWER->RESETREAS = reason;  // nRF52 reset reason bits are cleared by writing them back.
+    return (uint8_t)(reason & 0xFF);
+#else
+    return 0;
+#endif
+}
+
+static void collarStateDefaults() {
+    memset(&persistedState, 0, sizeof(persistedState));
+    persistedState.magic = BLUEPAWS_COLLAR_STATE_MAGIC;
+    persistedState.version = BLUEPAWS_COLLAR_STATE_VERSION;
+    persistedState.size = sizeof(persistedState);
+    persistedState.profile = PROFILE_NORMAL;
+    persistedState.config_revision = 1;
+    strncpy(persistedState.apn, "iot.1nce.net", sizeof(persistedState.apn) - 1);
+    currentProfile = PROFILE_NORMAL;
+    currentConfig = bp_profile_config(PROFILE_NORMAL);
+    inLostMode = false;
+}
+
+static uint32_t collarStateChecksum(collar_persisted_state_t state) {
+    state.checksum = 0;
+    const uint8_t *raw = (const uint8_t *)&state;
+    uint32_t hash = 2166136261UL;
+    for (size_t i = 0; i < sizeof(state); i++) {
+        hash ^= raw[i];
+        hash *= 16777619UL;
+    }
+    return hash;
+}
+
+static bool collarStateLoad() {
+    collarStateDefaults();
+    if (!collarStateReady || !InternalFS.exists(BLUEPAWS_COLLAR_STATE_PATH)) {
+        return false;
+    }
+
+    File file = InternalFS.open(BLUEPAWS_COLLAR_STATE_PATH, FILE_O_READ);
+    if (!file) {
+        return false;
+    }
+
+    collar_persisted_state_t loaded;
+    int readBytes = file.read(&loaded, sizeof(loaded));
+    file.close();
+
+    if (readBytes != (int)sizeof(loaded) ||
+        loaded.magic != BLUEPAWS_COLLAR_STATE_MAGIC ||
+        loaded.version != BLUEPAWS_COLLAR_STATE_VERSION ||
+        loaded.size != sizeof(loaded) ||
+        loaded.checksum != collarStateChecksum(loaded) ||
+        loaded.profile > PROFILE_LOST) {
+        Serial.println("[STATE] Stored state failed validation.");
+        return false;
+    }
+
+    persistedState = loaded;
+    return true;
+}
+
+static void collarStateSave(const char *reason, bool noisy) {
+    if (!collarStateReady) return;
+
+    persistedState.magic = BLUEPAWS_COLLAR_STATE_MAGIC;
+    persistedState.version = BLUEPAWS_COLLAR_STATE_VERSION;
+    persistedState.size = sizeof(persistedState);
+    persistedState.profile = currentProfile;
+    persistedState.lost_active = inLostMode ? 1 : 0;
+    persistedState.message_seq_checkpoint = messageSeq;
+    persistedState.runtime_counter_checkpoint = cycleCount;
+    persistedState.home_cycle_checkpoint = homeCycleCount;
+    persistedState.checksum = collarStateChecksum(persistedState);
+
+    InternalFS.remove(BLUEPAWS_COLLAR_STATE_PATH);
+    File file = InternalFS.open(BLUEPAWS_COLLAR_STATE_PATH, FILE_O_WRITE);
+    if (!file) {
+        Serial.println("[STATE] Save failed: could not open state file.");
+        return;
+    }
+
+    size_t written = file.write((const uint8_t *)&persistedState, sizeof(persistedState));
+    file.close();
+
+    if (written != sizeof(persistedState)) {
+        Serial.println("[STATE] Save failed: short write.");
+        return;
+    }
+
+    if (noisy) {
+        Serial.printf("[STATE] Saved (%s): profile=%s seq=%lu boots=%lu lost=%s\n",
+                      reason,
+                      bp_profile_name(currentProfile),
+                      messageSeq,
+                      persistedState.boot_counter,
+                      inLostMode ? "yes" : "no");
+    }
+}
+
+static void collarStateCheckpoint(const char *reason) {
+    if ((messageSeq % BLUEPAWS_STATE_SEQ_CHECKPOINT_EVERY) == 0) {
+        collarStateSave(reason, false);
+    }
+}
+
+static void collarStateRememberFix() {
+    if (!gpsFix) return;
+
+    uint32_t fixAgeS = (millis() - gnssFixAgeMs) / 1000;
+    if (fixAgeS >= GPS_STALE_THRESHOLD_S) return;
+
+    persistedState.last_lat_e7 = (int32_t)(gnssLat * 1e7);
+    persistedState.last_lon_e7 = (int32_t)(gnssLon * 1e7);
+    persistedState.last_fix_unix = gnssGetUnixTime();
+    persistedState.last_fix_acc_m = gnssHdop > 0 ? (uint16_t)((gnssHdop / 100.0) * 5) : 0;
+    persistedState.last_fix_sats = gnssSats;
+    persistedState.has_last_fix = 1;
+
+    if (messageSeq == 0 || (messageSeq % BLUEPAWS_STATE_SEQ_CHECKPOINT_EVERY) == 0) {
+        collarStateSave("gnss-fix", false);
+    }
+}
+
+// ═══════════════════════════════════════════════
+// User Button
+// ═══════════════════════════════════════════════
+static void buttonPoll() {
+    static bool stablePressed = false;
+    static bool lastRawPressed = false;
+    static bool longHandled = false;
+    static uint32_t lastChangeMs = 0;
+    static uint32_t pressStartMs = 0;
+
+    bool rawPressed = digitalRead(PIN_BUTTON) == LOW;
+    uint32_t now = millis();
+
+    if (rawPressed != lastRawPressed) {
+        lastRawPressed = rawPressed;
+        lastChangeMs = now;
+    }
+
+    if (now - lastChangeMs < BLUEPAWS_BUTTON_DEBOUNCE_MS) {
+        return;
+    }
+
+    if (rawPressed != stablePressed) {
+        stablePressed = rawPressed;
+        if (stablePressed) {
+            pressStartMs = now;
+            longHandled = false;
+        } else if (!longHandled) {
+            forceUserReportRequested = true;
+#if defined(BLUEPAWS_TESTBED_BUILD) && BLUEPAWS_TESTBED_BUILD
+            forceImmediateCycle = true;
+#endif
+            if (cycleTaskHandle != NULL) {
+                xTaskNotifyGive(cycleTaskHandle);
+            }
+            Serial.println("[BTN] Short press: user-requested report queued.");
+            ledFlicker(1, 80, 40);
+        }
+    }
+
+    if (stablePressed && !longHandled &&
+        now - pressStartMs >= BLUEPAWS_BUTTON_LONG_PRESS_MS) {
+        longHandled = true;
+        bp_profile_t next = inLostMode ? LOST_MODE_FALLBACK : PROFILE_LOST;
+        Serial.printf("[BTN] Long press: toggling %s.\n", bp_profile_name(next));
+        applyProfile(next);
+        forceUserReportRequested = true;
+#if defined(BLUEPAWS_TESTBED_BUILD) && BLUEPAWS_TESTBED_BUILD
+        forceImmediateCycle = true;
+#endif
+        if (cycleTaskHandle != NULL) {
+            xTaskNotifyGive(cycleTaskHandle);
+        }
+        ledFlicker(inLostMode ? 4 : 2, 120, 80);
+    }
+}
+
+// ═══════════════════════════════════════════════
 // Finalize + Authenticate TLV v1.1 Packet
 //
 // pkt_finalize() appends the correctly-sized auth-tag area. If this collar has
@@ -766,6 +1113,10 @@ static uint8_t finalizeAuthenticatedPacket(uint8_t *buf) {
 // Build and Send Telemetry (PKT_TELEMETRY)
 // ═══════════════════════════════════════════════
 static void sendTelemetry() {
+    sendTelemetryWithReason(TX_TELEMETRY);
+}
+
+static void sendTelemetryWithReason(uint8_t txReason) {
     messageSeq++;
 
     bp_status_t status;
@@ -797,7 +1148,7 @@ static void sendTelemetry() {
     // ── Build the packet ──
     uint8_t buf[BP_MAX_PACKET_SIZE];
     pkt_init(buf, MY_DEVICE_ID, (uint16_t)(messageSeq & 0xFFFF), unixTime,
-             status, currentProfile, flags, TX_TELEMETRY);
+             status, currentProfile, flags, txReason);
 
     if (flags & FLAG_HAS_GPS) {
         int32_t lat_e7 = (int32_t)(gnssLat * 1e7);
@@ -825,8 +1176,8 @@ static void sendTelemetry() {
 
     uint8_t pktLen = finalizeAuthenticatedPacket(buf);
 
-    Serial.printf("[TX] TELEMETRY seq=%lu status=%s size=%dB\n",
-                  messageSeq, bp_status_display(status), pktLen);
+    Serial.printf("[TX] %s seq=%lu status=%s size=%dB\n",
+                  bp_tx_reason_display(txReason), messageSeq, bp_status_display(status), pktLen);
     pkt_print_hex(buf, pktLen);
 
     transmitPacket(buf, pktLen);
@@ -834,6 +1185,80 @@ static void sendTelemetry() {
     // Save a copy for the cellular task to re-send via NB-IoT
     memcpy(lastTxPacket, buf, pktLen);
     lastTxPacketLen = pktLen;
+    if (locValid) {
+        collarStateRememberFix();
+    }
+    collarStateCheckpoint("tx");
+}
+
+// ═══════════════════════════════════════════════
+// Send Boot Report
+//
+// Cold/reboot path deliberately attempts BLE Home and GNSS before reporting.
+// If GNSS fails, the packet remains valid and presence-only; Supabase keeps the
+// previous map position and updates last-seen/diagnostic fields.
+// ═══════════════════════════════════════════════
+static void sendBootReport(bool atHome, bool haveFix) {
+    messageSeq++;
+
+    uint8_t flags = 0;
+    bp_status_t status = STATUS_INVALID_GPS;
+    uint32_t fixAgeS = (millis() - gnssFixAgeMs) / 1000;
+    bool locValid = haveFix && gpsFix && (fixAgeS < GPS_STALE_THRESHOLD_S);
+
+    if (atHome) {
+        status = STATUS_HOME;
+        flags |= FLAG_HOME_BEACON_SEEN;
+    } else if (locValid) {
+        status = STATUS_OUT_AND_ABOUT;
+    }
+
+    if (locValid) {
+        flags |= FLAG_GNSS_VALID | FLAG_FIX_3D;
+    } else {
+        flags |= FLAG_STALE_FIX | FLAG_ERROR_PRESENT;
+    }
+    if (lastError != BP_ERROR_NONE) flags |= FLAG_ERROR_PRESENT;
+
+    uint32_t unixTime = locValid ? gnssGetUnixTime() : (compileTimeUnix() + millis() / 1000UL);
+
+    uint8_t buf[BP_MAX_PACKET_SIZE];
+    pkt_init(buf, MY_DEVICE_ID, (uint16_t)(messageSeq & 0xFFFF), unixTime,
+             status, currentProfile, flags, TX_BOOT);
+
+    uint16_t batt_mV = 3700;  // TODO: Read actual battery voltage via ADC
+    if (locValid) {
+        int32_t lat_e7 = (int32_t)(gnssLat * 1e7);
+        int32_t lon_e7 = (int32_t)(gnssLon * 1e7);
+        pkt_set_gps(buf, lat_e7, lon_e7);
+        uint16_t acc_m = gnssHdop > 0 ? (uint16_t)((gnssHdop / 100.0) * 5) : 0;
+        pkt_set_quality(buf, batt_mV, acc_m, (uint16_t)fixAgeS);
+        pkt_set_sat_count(buf, gnssSats);
+    } else {
+        pkt_set_quality(buf, batt_mV, 0, 65535);
+        pkt_set_sat_count(buf, 255);
+    }
+
+    uint16_t fw = (uint16_t)(((BLUEPAWS_FW_MAJOR & 0xFF) << 8) | (BLUEPAWS_FW_MINOR & 0xFF));
+    pkt_add_tlv_u16(buf, TLV_FW_VER, fw);
+    pkt_add_tlv_u8(buf, TLV_RESET_REASON, bootResetReason);
+    pkt_add_tlv_u32(buf, TLV_UPTIME_S, millis() / 1000);
+
+    uint8_t pktLen = finalizeAuthenticatedPacket(buf);
+
+    Serial.printf("[TX] BOOT seq=%lu home=%s gnss=%s reset=0x%02X size=%dB\n",
+                  messageSeq, atHome ? "yes" : "no", locValid ? "fix" : "no-fix",
+                  bootResetReason, pktLen);
+    pkt_print_hex(buf, pktLen);
+
+    transmitPacket(buf, pktLen);
+
+    memcpy(lastTxPacket, buf, pktLen);
+    lastTxPacketLen = pktLen;
+    if (locValid) {
+        collarStateRememberFix();
+    }
+    collarStateCheckpoint("boot-report");
 }
 
 // ═══════════════════════════════════════════════
@@ -873,6 +1298,7 @@ static void sendWakeCheckin() {
     // Save copy for diagnostics; routine cellular is intentionally skipped.
     memcpy(lastTxPacket, buf, pktLen);
     lastTxPacketLen = pktLen;
+    collarStateCheckpoint("wake-checkin");
 }
 
 // ═══════════════════════════════════════════════
@@ -1021,9 +1447,9 @@ static void listenForCommands() {
 //   PKT_CMD_FIND   — Flash LED + play buzzer pattern ("Find My Pet")
 // ═══════════════════════════════════════════════
 static void handleReceivedCommand(const uint8_t *buf, uint8_t len) {
-    // Validate TLV v1.1 structure. Authentication of cloud-bound uplinks is
-    // performed by Supabase; local command authentication will be revised with
-    // the downlink command protocol.
+    // Validate TLV v1.1 structure only. Downlink command authentication is
+    // deliberately deferred to the later command-protocol milestone; these
+    // ACKed commands are for prototype/bench testing and are not production-secure.
     if (!pkt_validate_crc(buf, len)) {
         Serial.println("[RX] TLV structure failed — dropping");
         return;
@@ -1100,9 +1526,9 @@ static void handleReceivedCommand(const uint8_t *buf, uint8_t len) {
 // Apply Operating Profile
 // ═══════════════════════════════════════════════
 // ═══════════════════════════════════════════════
-// BLE Active Find Beacon
+// BLE Lost/Find Beacon
 //
-// When the collar enters PROFILE_ACTIVE (Active Find mode),
+// When the collar enters PROFILE_LOST (Lost Alert mode),
 // it starts advertising a BLE beacon named "BP_FIND_XXXX"
 // (where XXXX is the device ID in hex). The hub in Portable
 // Mode scans for these beacons and shows RSSI-based proximity.
@@ -1142,8 +1568,9 @@ static void applyProfile(bp_profile_t profile) {
 
     lora.setOutputPower(currentConfig->tx_power_dBm);
 
-    // BLE find beacon: advertise when in Active Find, stop otherwise
-    if (profile == PROFILE_ACTIVE) {
+    // BLE find beacon: Lost Alert only. Active is higher-frequency monitoring,
+    // not emergency close-range search.
+    if (profile == PROFILE_LOST) {
         bleFindBeaconStart();
     } else {
         bleFindBeaconStop();
@@ -1169,6 +1596,7 @@ static void applyProfile(bp_profile_t profile) {
                   currentConfig->sleep_interval_s,
                   currentConfig->cellular_ratio,
                   currentConfig->gps_continuous ? "continuous" : "on-demand");
+    collarStateSave("profile", true);
 }
 
 static uint16_t effectiveSleepIntervalS() {
@@ -1220,11 +1648,12 @@ static void debugConsoleHandleLine(String line) {
     }
 
     if (lower == "tx" || lower == "send" || lower == "wake") {
+        forceUserReportRequested = true;
         forceImmediateCycle = true;
         if (cycleTaskHandle != NULL) {
             xTaskNotifyGive(cycleTaskHandle);
         }
-        Serial.println("[DBG] Forced next cycle requested.");
+        Serial.println("[DBG] Forced user-requested report queued.");
         return;
     }
 
