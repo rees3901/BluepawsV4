@@ -229,10 +229,10 @@ button, input, select {
 
 .bp-layer-preview-toggle {
   display: block;
-  width: 112px;
-  padding: 3px;
+  width: 150px;
+  padding: 2px;
   overflow: hidden;
-  border: 1px solid rgb(115 196 255 / 55%);
+  border: 0.5px solid rgb(115 196 255 / 45%);
   border-radius: 9px;
   background: var(--bg-card);
   color: var(--text-primary);
@@ -249,8 +249,8 @@ button, input, select {
 
 .bp-layer-preview-map {
   display: block;
-  width: 104px;
-  height: 74px;
+  width: 146px;
+  height: 104px;
   overflow: hidden;
   border-radius: 7px;
   background: var(--bg-primary);
@@ -270,12 +270,12 @@ button, input, select {
 
 @media (max-width: 620px) {
   .bp-layer-preview-toggle {
-    width: 84px;
+    width: 110px;
   }
 
   .bp-layer-preview-map {
-    width: 76px;
-    height: 54px;
+    width: 106px;
+    height: 76px;
   }
 }
 
