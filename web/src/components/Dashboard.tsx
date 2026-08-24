@@ -343,7 +343,9 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
       .then((reports) => setDeviceReports(reports))
       .catch((error: unknown) => {
         console.error("Unable to load device report log", error);
-        setReportError("Unable to load the latest accepted reports for this pet.");
+        setDeviceReports([buildCurrentDeviceReport(device)]);
+        setReportError(null);
+        setToast("Showing the current dashboard snapshot because report history could not be loaded");
       })
       .finally(() => setReportLoading(false));
   }, [fetchReportsForDevice]);
@@ -359,7 +361,8 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
         downloadDeviceReports(device.name, reports);
       } catch (error) {
         console.error("Unable to export device report log", error);
-        setToast("Unable to export the report log");
+        downloadDeviceReports(device.name, [buildCurrentDeviceReport(device)]);
+        setToast("Exported the current dashboard snapshot because report history could not be loaded");
       }
     })();
   }, [fetchReportsForDevice]);

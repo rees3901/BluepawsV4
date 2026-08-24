@@ -33,7 +33,7 @@ export interface DeviceObservationPathRow {
   link_snr_db: number | null;
   first_received_at: string;
   last_received_at: string;
-  receive_count: number;
+  receipt_count: number;
 }
 
 export interface DeviceReport {
@@ -66,11 +66,14 @@ export async function loadDeviceReports(deviceId: number): Promise<DeviceReport[
   const observationIds = validObservations.map((row) => row.id);
   const { data: paths, error: pathError } = await supabase
     .from("observation_paths")
-    .select("observation_id,ingest_path,link_type,gateway_guid16,link_rssi_dbm,link_snr_db,first_received_at,last_received_at,receive_count")
+    .select("observation_id,ingest_path,link_type,gateway_guid16,link_rssi_dbm,link_snr_db,first_received_at,last_received_at,receipt_count")
     .in("observation_id", observationIds)
     .order("last_received_at", { ascending: false });
 
-  if (pathError) throw pathError;
+  if (pathError) {
+    console.warn("Unable to load accepted report path details from Supabase", pathError);
+    return validObservations.map((observation: DeviceObservationRow) => buildDeviceReport(observation, null));
+  }
 
   const pathsByObservation = new Map<number, DeviceObservationPathRow>();
   ((paths ?? []) as unknown[]).filter(isDeviceObservationPathRow).forEach((row) => {
@@ -113,7 +116,7 @@ export function buildCurrentDeviceReport(device: TelemetryDevice): DeviceReport 
         link_snr_db: device.snr,
         first_received_at: new Date(device.lastUpdate).toISOString(),
         last_received_at: new Date(device.lastUpdate).toISOString(),
-        receive_count: 1,
+        receipt_count: 1,
       }
     : null;
   return buildDeviceReport(observation, path);
@@ -164,6 +167,15 @@ export function buildDeviceReport(observation: DeviceObservationRow, path: Devic
       description: batteryDescription(observation.batt_mv),
     },
     {
+      field: "GPS detail",
+      data: observation.gnss_valid
+        ? `${observation.acc_m} m accuracy · ${observation.fix_age_s}s fix age · ${observation.sat_count} satellites`
+        : "No GPS fix in this report",
+      description: observation.gnss_valid
+        ? "Extra GPS quality details from the accepted collar report."
+        : "Expected for a home wake check-in or an indoor collar where GNSS was skipped or unavailable.",
+    },
+    {
       field: "Signal",
       data: signal,
       description: signalDescription(path?.link_type ?? null),
@@ -181,6 +193,13 @@ export function buildDeviceReport(observation: DeviceObservationRow, path: Devic
       field: "Sequence",
       data: String(observation.msg_seq_id),
       description: "A small rolling counter from the collar that helps identify new and duplicate reports.",
+    },
+    {
+      field: "Accepted routes",
+      data: path === null ? "Not reported" : String(path.receipt_count),
+      description: path === null
+        ? "No transport-route record was available for this report."
+        : "How many times this same authenticated collar packet has been seen on this route.",
     },
   ];
 
@@ -262,7 +281,7 @@ function isDeviceObservationPathRow(value: unknown): value is DeviceObservationP
     (row.link_snr_db === null || typeof row.link_snr_db === "number") &&
     typeof row.first_received_at === "string" &&
     typeof row.last_received_at === "string" &&
-    typeof row.receive_count === "number"
+    typeof row.receipt_count === "number"
   );
 }
 
