@@ -87,6 +87,8 @@ profile offgrid
 home
 portable
 offgrid
+provision on
+provision off
 clear
 help
 ```
@@ -97,8 +99,8 @@ The relay has three high-level profiles. These are intentionally coarse for now;
 
 | Profile | LoRa RX | Local AP/web | STA Wi-Fi/cloud relay | BLE Home beacon |
 |---|---:|---:|---:|---:|
-| Home | On | On | On when configured/connected | On |
-| Portable | On | On | On when configured/connected | Off |
+| Home | On | Off unless provisioning is needed/enabled | On when configured/connected | On |
+| Portable | On | Off unless provisioning is needed/enabled | On when configured/connected | Off |
 | Off-grid | On | On | Off | Off |
 
 Rationale:
@@ -106,10 +108,12 @@ Rationale:
 - `Home` means the hub is acting as the fixed home base. It advertises the BLE Home beacon so collars can decide they are safely at home.
 - `Portable` means the hub can travel with the user and can relay through a hotspot or router, but it must not impersonate the fixed home BLE beacon.
 - `Off-grid` means local-only search/diagnostic operation. It keeps receiving LoRa and serving its AP status page, but deliberately does not relay to Supabase.
+- `provision on` deliberately exposes the hub AP for first-time setup, Wi-Fi changes, or recovery. A fresh/unconfigured hub also exposes the AP automatically until Wi-Fi/cloud credentials are present.
+- `provision off` returns Home/Portable mode to the quieter customer-facing behaviour where the hub joins an external Wi-Fi network without broadcasting its own setup AP.
 
 ## Local status page
 
-The firmware starts a local Wi-Fi AP:
+When provisioning or off-grid mode is active, the firmware starts a local Wi-Fi AP:
 
 ```text
 SSID: BluePaws-Hub-V4

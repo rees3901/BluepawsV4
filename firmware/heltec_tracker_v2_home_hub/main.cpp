@@ -99,6 +99,8 @@ static SemaphoreHandle_t statsMutex = nullptr;
 static volatile bool radioIrq = false;
 static String serialLine;
 static HubCommProfile hubProfile = HUB_PROFILE_HOME;
+static bool provisioningMode = false;
+static bool apRunning = false;
 static BLEAdvertising *bleAdvertising = nullptr;
 static bool bleHomeBeaconAdvertising = false;
 
@@ -168,6 +170,14 @@ static bool hubProfileAllowsCloud() {
   return hubProfile == HUB_PROFILE_HOME || hubProfile == HUB_PROFILE_PORTABLE;
 }
 
+static bool hubNeedsProvisioning() {
+  return config.wifiSsid.length() == 0 || config.cloudUrl.length() == 0 || config.gatewayToken.length() == 0;
+}
+
+static bool hubShouldRunAp() {
+  return hubProfile == HUB_PROFILE_OFF_GRID || provisioningMode || hubNeedsProvisioning();
+}
+
 static bool hubProfileAdvertisesHomeBeacon() {
   return hubProfile == HUB_PROFILE_HOME;
 }
@@ -211,6 +221,7 @@ static void loadConfig() {
   uint8_t storedProfile = prefs.getUChar("profile", HUB_PROFILE_HOME);
   if (storedProfile > HUB_PROFILE_OFF_GRID) storedProfile = HUB_PROFILE_HOME;
   hubProfile = (HubCommProfile)storedProfile;
+  provisioningMode = prefs.getBool("provision", false);
 }
 
 static void saveConfig() {
@@ -231,6 +242,8 @@ static void printConfig() {
   Serial.printf("      Gateway   : %s\n", gatewayHex().c_str());
   Serial.printf("      Cloud     : %s\n", hubProfileAllowsCloud() ? "allowed by profile" : "disabled by off-grid profile");
   Serial.printf("      BLE Home  : %s\n", hubProfileAdvertisesHomeBeacon() ? "advertising" : "disabled for roaming/off-grid");
+  Serial.printf("      Provision : %s\n", provisioningMode ? "on" : "off");
+  Serial.printf("      Local AP  : %s\n", hubShouldRunAp() ? "enabled" : "disabled unless provisioning/off-grid");
 }
 
 static void printHelp() {
@@ -244,6 +257,7 @@ static void printHelp() {
   Serial.println("      home");
   Serial.println("      portable");
   Serial.println("      offgrid");
+  Serial.println("      provision on|off");
   Serial.println("      connect");
   Serial.println("      show");
   Serial.println("      clear");
@@ -268,10 +282,35 @@ static void connectWifi() {
   }
 }
 
+static void syncWifiMode() {
+  const bool apShouldRun = hubShouldRunAp();
+  const bool staShouldRun = hubProfileAllowsCloud();
+
+  if (staShouldRun && apShouldRun) {
+    WiFi.mode(WIFI_AP_STA);
+  } else if (staShouldRun) {
+    WiFi.mode(WIFI_STA);
+  } else {
+    WiFi.mode(WIFI_AP);
+  }
+
+  if (apShouldRun && !apRunning) {
+    WiFi.softAP(AP_SSID, AP_PASS, 6);
+    apRunning = true;
+    Serial.printf("[WIFI] AP started: %s | %s\n", AP_SSID, WiFi.softAPIP().toString().c_str());
+  } else if (!apShouldRun && apRunning) {
+    WiFi.softAPdisconnect(true);
+    apRunning = false;
+    Serial.println("[WIFI] AP stopped; Home/Portable profile is no longer in provisioning/off-grid mode.");
+  }
+
+  if (!staShouldRun && WiFi.status() == WL_CONNECTED) {
+    WiFi.disconnect(false, false);
+  }
+}
+
 static void startWifi() {
-  WiFi.mode(WIFI_AP_STA);
-  WiFi.softAP(AP_SSID, AP_PASS, 6);
-  Serial.printf("[WIFI] AP started: %s | %s\n", AP_SSID, WiFi.softAPIP().toString().c_str());
+  syncWifiMode();
   connectWifi();
 }
 
@@ -301,11 +340,9 @@ static void setBleHomeBeaconEnabled(bool enabled) {
 
 static void applyHubProfile() {
   setBleHomeBeaconEnabled(hubProfileAdvertisesHomeBeacon());
+  syncWifiMode();
 
   if (!hubProfileAllowsCloud()) {
-    if (WiFi.status() == WL_CONNECTED) {
-      WiFi.disconnect(false, false);
-    }
     Serial.println("[PROFILE] Off-grid mode: LoRa/AP/web stay active, cloud relay is disabled.");
     return;
   }
@@ -516,6 +553,8 @@ static String statusJson() {
   out += "\"profile_display\":\"" + String(hubProfileDisplay(hubProfile)) + "\",";
   out += "\"always_on\":true,";
   out += "\"cloud_allowed\":" + String(hubProfileAllowsCloud() ? "true" : "false") + ",";
+  out += "\"provisioning_mode\":" + String(provisioningMode ? "true" : "false") + ",";
+  out += "\"ap_enabled\":" + String(apRunning ? "true" : "false") + ",";
   out += "\"ble_home_advertising\":" + String(bleHomeBeaconAdvertising ? "true" : "false") + ",";
   out += "\"ap_ip\":\"" + WiFi.softAPIP().toString() + "\",";
   out += "\"sta_connected\":" + String(WiFi.status() == WL_CONNECTED ? "true" : "false") + ",";
@@ -589,18 +628,22 @@ static void handleSerialLine(String line) {
     config.wifiSsid = value;
     saveConfig();
     Serial.println("[CFG] Stored Wi-Fi SSID");
+    syncWifiMode();
   } else if (cmd == "pass") {
     config.wifiPass = value;
     saveConfig();
     Serial.println("[CFG] Stored Wi-Fi password");
+    syncWifiMode();
   } else if (cmd == "url") {
     config.cloudUrl = value;
     saveConfig();
     Serial.println("[CFG] Stored cloud URL");
+    syncWifiMode();
   } else if (cmd == "token") {
     config.gatewayToken = value;
     saveConfig();
     Serial.println("[CFG] Stored gateway bearer token");
+    syncWifiMode();
   } else if (cmd == "profile") {
     HubCommProfile nextProfile;
     if (parseHubProfile(value, nextProfile)) {
@@ -614,6 +657,22 @@ static void handleSerialLine(String line) {
     setHubProfile(HUB_PROFILE_PORTABLE);
   } else if (cmd == "offgrid") {
     setHubProfile(HUB_PROFILE_OFF_GRID);
+  } else if (cmd == "provision") {
+    String key = value;
+    key.toLowerCase();
+    if (key == "on" || key == "1" || key == "true") {
+      provisioningMode = true;
+      prefs.putBool("provision", provisioningMode);
+      Serial.println("[PROVISION] Provisioning AP mode enabled.");
+      syncWifiMode();
+    } else if (key == "off" || key == "0" || key == "false") {
+      provisioningMode = false;
+      prefs.putBool("provision", provisioningMode);
+      Serial.println("[PROVISION] Provisioning AP mode disabled.");
+      syncWifiMode();
+    } else {
+      Serial.println("[PROVISION] Use: provision on|off");
+    }
   } else if (cmd == "connect") {
     connectWifi();
   } else if (cmd == "show") {
@@ -623,6 +682,7 @@ static void handleSerialLine(String line) {
     prefs.clear();
     config = HubConfig{String(DEFAULT_STA_SSID), String(DEFAULT_STA_PASS), String(), String()};
     hubProfile = HUB_PROFILE_HOME;
+    provisioningMode = false;
     applyHubProfile();
     Serial.println("[CFG] Cleared stored config; restart recommended");
   } else if (cmd == "help" || cmd == "?") {
