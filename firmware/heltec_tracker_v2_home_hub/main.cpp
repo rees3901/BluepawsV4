@@ -25,6 +25,7 @@
 #include <BLEUtils.h>
 #include <BLEServer.h>
 #include <BLEAdvertising.h>
+#include <time.h>
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -51,6 +52,12 @@ static constexpr char AP_SSID[] = "BluePaws-Hub-V4";
 static constexpr char AP_PASS[] = "bluepaws4";
 static constexpr char DEFAULT_STA_SSID[] = "Reesnet Guest";
 static constexpr char DEFAULT_STA_PASS[] = "";
+static constexpr char NTP_PRIMARY[] = "pool.ntp.org";
+static constexpr char NTP_SECONDARY[] = "time.google.com";
+static constexpr char NTP_TERTIARY[] = "time.cloudflare.com";
+static constexpr uint32_t MIN_VALID_UNIX = 1700000000UL; // 2023-11-14, filters unset clocks
+static constexpr uint32_t NTP_RETRY_INTERVAL_MS = 60000UL;
+static constexpr uint32_t NTP_REFRESH_INTERVAL_MS = 6UL * 60UL * 60UL * 1000UL;
 static constexpr char MDNS_NAME[] = "bluepaws-hub";
 static constexpr uint16_t GATEWAY_GUID16 = 0x0016;
 static constexpr uint8_t LORA_RX_BUFFER_LEN = BP_MAX_PACKET_SIZE + 16;
@@ -101,6 +108,9 @@ static String serialLine;
 static HubCommProfile hubProfile = HUB_PROFILE_HOME;
 static bool provisioningMode = false;
 static bool apRunning = false;
+static bool ntpConfigured = false;
+static uint32_t lastNtpAttemptMs = 0;
+static uint32_t lastNtpSyncMs = 0;
 static BLEAdvertising *bleAdvertising = nullptr;
 static bool bleHomeBeaconAdvertising = false;
 
@@ -203,6 +213,50 @@ static bool parseHubProfile(const String &value, HubCommProfile &out) {
   return false;
 }
 
+static bool hubTimeSynced() {
+  time_t now = time(nullptr);
+  return now >= (time_t)MIN_VALID_UNIX && now <= (time_t)0xFFFFFFFFUL;
+}
+
+static uint32_t currentHubUnixOrFallback(uint32_t fallbackUnix) {
+  time_t now = time(nullptr);
+  if (now >= (time_t)MIN_VALID_UNIX && now <= (time_t)0xFFFFFFFFUL) {
+    return (uint32_t)now;
+  }
+  return fallbackUnix;
+}
+
+static bool syncHubClock(bool force) {
+  if (WiFi.status() != WL_CONNECTED) {
+    return false;
+  }
+
+  const uint32_t nowMs = millis();
+  const bool synced = hubTimeSynced();
+  const uint32_t interval = synced ? NTP_REFRESH_INTERVAL_MS : NTP_RETRY_INTERVAL_MS;
+  if (!force && lastNtpAttemptMs != 0 && (nowMs - lastNtpAttemptMs) < interval) {
+    return synced;
+  }
+
+  lastNtpAttemptMs = nowMs;
+  if (!ntpConfigured || force) {
+    configTime(0, 0, NTP_PRIMARY, NTP_SECONDARY, NTP_TERTIARY);
+    ntpConfigured = true;
+  }
+
+  for (uint8_t i = 0; i < 20; i++) {
+    if (hubTimeSynced()) {
+      lastNtpSyncMs = millis();
+      Serial.printf("[TIME] NTP synced: %lu\n", (unsigned long)time(nullptr));
+      return true;
+    }
+    vTaskDelay(pdMS_TO_TICKS(100));
+  }
+
+  Serial.println("[TIME] NTP sync not ready yet; gateway wrapper will temporarily fall back to collar TLV time.");
+  return false;
+}
+
 static void printHex(const uint8_t *bytes, uint8_t len) {
   for (uint8_t i = 0; i < len; i++) {
     if (bytes[i] < 0x10) Serial.print('0');
@@ -244,6 +298,11 @@ static void printConfig() {
   Serial.printf("      BLE Home  : %s\n", hubProfileAdvertisesHomeBeacon() ? "advertising" : "disabled for roaming/off-grid");
   Serial.printf("      Provision : %s\n", provisioningMode ? "on" : "off");
   Serial.printf("      Local AP  : %s\n", hubShouldRunAp() ? "enabled" : "disabled unless provisioning/off-grid");
+  Serial.printf("      Time/NTP  : %s", hubTimeSynced() ? "synced" : "not synced");
+  if (hubTimeSynced()) {
+    Serial.printf(" (%lu)", (unsigned long)time(nullptr));
+  }
+  Serial.println();
 }
 
 static void printHelp() {
@@ -258,6 +317,7 @@ static void printHelp() {
   Serial.println("      portable");
   Serial.println("      offgrid");
   Serial.println("      provision on|off");
+  Serial.println("      time");
   Serial.println("      connect");
   Serial.println("      show");
   Serial.println("      clear");
@@ -412,10 +472,7 @@ static String buildCloudJson(const CloudEntry &entry) {
   body += F("\",\"ingest_path\":\"lora_gateway\",\"gateway_guid16\":\"");
   body += gatewayHex();
   body += F("\",\"gateway_rx_time_unix\":");
-  // Until the hub has NTP-backed wall-clock time, use the collar packet's
-  // TLV timestamp as the gateway receive timestamp. This satisfies the
-  // Supabase wrapper contract with a valid uint32 bench-time value.
-  body += String(pkt_time_unix(entry.bytes));
+  body += String(currentHubUnixOrFallback(pkt_time_unix(entry.bytes)));
   body += F(",\"link_type\":\"lora\",\"link_rssi_dbm\":");
   body += String(entry.rssi);
   body += F(",\"link_snr_db\":");
@@ -561,6 +618,9 @@ static String statusJson() {
   out += "\"provisioning_mode\":" + String(provisioningMode ? "true" : "false") + ",";
   out += "\"ap_enabled\":" + String(apRunning ? "true" : "false") + ",";
   out += "\"ble_home_advertising\":" + String(bleHomeBeaconAdvertising ? "true" : "false") + ",";
+  out += "\"time_synced\":" + String(hubTimeSynced() ? "true" : "false") + ",";
+  out += "\"hub_time_unix\":" + String(hubTimeSynced() ? (uint32_t)time(nullptr) : 0) + ",";
+  out += "\"last_ntp_sync_ms\":" + String(lastNtpSyncMs) + ",";
   out += "\"ap_ip\":\"" + WiFi.softAPIP().toString() + "\",";
   out += "\"sta_connected\":" + String(WiFi.status() == WL_CONNECTED ? "true" : "false") + ",";
   out += "\"sta_ip\":\"" + (WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : String("")) + "\",";
@@ -614,6 +674,8 @@ static void wifiTask(void *param) {
     if (hubProfileAllowsCloud() && config.wifiSsid.length() > 0 && WiFi.status() != WL_CONNECTED) {
       Serial.println("[WIFI] STA disconnected; retrying according to active hub profile.");
       connectWifi();
+    } else if (WiFi.status() == WL_CONNECTED) {
+      syncHubClock(false);
     }
     vTaskDelay(pdMS_TO_TICKS(10000));
   }
@@ -680,6 +742,9 @@ static void handleSerialLine(String line) {
     }
   } else if (cmd == "connect") {
     connectWifi();
+  } else if (cmd == "time") {
+    syncHubClock(true);
+    Serial.println(statusJson());
   } else if (cmd == "show") {
     printConfig();
     Serial.println(statusJson());

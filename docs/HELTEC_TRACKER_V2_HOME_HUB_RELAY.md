@@ -89,9 +89,12 @@ portable
 offgrid
 provision on
 provision off
+time
 clear
 help
 ```
+
+`time` forces an NTP sync attempt and prints the current status JSON. The hub also attempts NTP automatically after STA Wi-Fi is connected, then periodically refreshes it.
 
 ## Hub communication profiles
 
@@ -145,7 +148,7 @@ For valid TLV packets, the hub sends:
 }
 ```
 
-Until the hub has NTP-backed wall-clock time, `gateway_rx_time_unix` uses the collar TLV packet timestamp as a valid bench-time placeholder. Supabase still records its own authoritative receive time.
+When STA Wi-Fi is connected, the hub syncs its clock from NTP and uses the hub's current Unix time for `gateway_rx_time_unix`. If NTP is not ready yet, `gateway_rx_time_unix` temporarily falls back to the collar TLV packet timestamp so the relay keeps working during bench tests. Supabase still records its own authoritative receive time.
 
 The HTTP request uses:
 
@@ -161,5 +164,5 @@ The Supabase `ingest-position` Edge Function has JWT verification disabled and p
 - Local AP GUI is a simple status page, not the final off-grid map UI.
 - No command downlink is implemented in this minimal relay firmware yet.
 - BLE Home beacon advertising is profile-controlled; authentication/rotation is future work.
-- Gateway receive time is omitted until NTP is added.
+- NTP is implemented for bench diagnostics, but production should add timezone-independent clock health handling and clearer UI warnings before relying on hub receive time operationally.
 - Production gateway secrets still need a proper provisioning/onboarding flow.
