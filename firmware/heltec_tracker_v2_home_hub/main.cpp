@@ -6,7 +6,12 @@
   relays it to the Supabase ingest-position Edge Function as HTTPS JSON.
 
   Secrets are configured at runtime over the USB serial monitor and stored in
-  ESP32 NVS. Do not commit Wi-Fi credentials or gateway bearer tokens.
+  ESP32 NVS. Reesnet Guest is used as the current open test-network default;
+  do not commit production Wi-Fi credentials or gateway bearer tokens.
+
+  The Home Hub is an always-on FreeRTOS application: LoRa receive, cloud relay,
+  local web UI, Wi-Fi management, and serial/profile control run as separate
+  tasks. There is intentionally no sleep path on the hub.
 */
 
 #include <Arduino.h>
@@ -44,9 +49,17 @@ static constexpr uint8_t PIN_LED = 18;
 
 static constexpr char AP_SSID[] = "BluePaws-Hub-V4";
 static constexpr char AP_PASS[] = "bluepaws4";
+static constexpr char DEFAULT_STA_SSID[] = "Reesnet Guest";
+static constexpr char DEFAULT_STA_PASS[] = "";
 static constexpr char MDNS_NAME[] = "bluepaws-hub";
 static constexpr uint16_t GATEWAY_GUID16 = 0x0016;
 static constexpr uint8_t LORA_RX_BUFFER_LEN = BP_MAX_PACKET_SIZE + 16;
+
+enum HubCommProfile : uint8_t {
+  HUB_PROFILE_HOME = 0,
+  HUB_PROFILE_PORTABLE = 1,
+  HUB_PROFILE_OFF_GRID = 2,
+};
 
 struct HubConfig {
   String wifiSsid;
@@ -85,6 +98,9 @@ static QueueHandle_t cloudQueue = nullptr;
 static SemaphoreHandle_t statsMutex = nullptr;
 static volatile bool radioIrq = false;
 static String serialLine;
+static HubCommProfile hubProfile = HUB_PROFILE_HOME;
+static BLEAdvertising *bleAdvertising = nullptr;
+static bool bleHomeBeaconAdvertising = false;
 
 static void onRadioIrq() {
   radioIrq = true;
@@ -130,6 +146,53 @@ static String gatewayHex() {
   return String(out);
 }
 
+static const char *hubProfileSlug(HubCommProfile profile) {
+  switch (profile) {
+    case HUB_PROFILE_HOME: return "home";
+    case HUB_PROFILE_PORTABLE: return "portable";
+    case HUB_PROFILE_OFF_GRID: return "off_grid";
+    default: return "home";
+  }
+}
+
+static const char *hubProfileDisplay(HubCommProfile profile) {
+  switch (profile) {
+    case HUB_PROFILE_HOME: return "Home";
+    case HUB_PROFILE_PORTABLE: return "Portable";
+    case HUB_PROFILE_OFF_GRID: return "Off-grid";
+    default: return "Home";
+  }
+}
+
+static bool hubProfileAllowsCloud() {
+  return hubProfile == HUB_PROFILE_HOME || hubProfile == HUB_PROFILE_PORTABLE;
+}
+
+static bool hubProfileAdvertisesHomeBeacon() {
+  return hubProfile == HUB_PROFILE_HOME;
+}
+
+static bool parseHubProfile(const String &value, HubCommProfile &out) {
+  String key = value;
+  key.trim();
+  key.toLowerCase();
+  key.replace("-", "_");
+
+  if (key == "home" || key == "0") {
+    out = HUB_PROFILE_HOME;
+    return true;
+  }
+  if (key == "portable" || key == "1") {
+    out = HUB_PROFILE_PORTABLE;
+    return true;
+  }
+  if (key == "offgrid" || key == "off_grid" || key == "off" || key == "2") {
+    out = HUB_PROFILE_OFF_GRID;
+    return true;
+  }
+  return false;
+}
+
 static void printHex(const uint8_t *bytes, uint8_t len) {
   for (uint8_t i = 0; i < len; i++) {
     if (bytes[i] < 0x10) Serial.print('0');
@@ -141,10 +204,13 @@ static void printHex(const uint8_t *bytes, uint8_t len) {
 
 static void loadConfig() {
   prefs.begin("bluepaws", false);
-  config.wifiSsid = prefs.getString("ssid", "");
-  config.wifiPass = prefs.getString("pass", "");
+  config.wifiSsid = prefs.getString("ssid", DEFAULT_STA_SSID);
+  config.wifiPass = prefs.getString("pass", DEFAULT_STA_PASS);
   config.cloudUrl = prefs.getString("url", "");
   config.gatewayToken = prefs.getString("token", "");
+  uint8_t storedProfile = prefs.getUChar("profile", HUB_PROFILE_HOME);
+  if (storedProfile > HUB_PROFILE_OFF_GRID) storedProfile = HUB_PROFILE_HOME;
+  hubProfile = (HubCommProfile)storedProfile;
 }
 
 static void saveConfig() {
@@ -157,11 +223,14 @@ static void saveConfig() {
 static void printConfig() {
   Serial.println();
   Serial.println("[CFG] Current hub relay configuration");
+  Serial.printf("      Profile   : %s\n", hubProfileDisplay(hubProfile));
   Serial.printf("      Wi-Fi SSID: %s\n", config.wifiSsid.length() ? config.wifiSsid.c_str() : "<not set>");
   Serial.printf("      Wi-Fi pass: %s\n", config.wifiPass.length() ? "<stored>" : "<not set>");
   Serial.printf("      Cloud URL : %s\n", config.cloudUrl.length() ? config.cloudUrl.c_str() : "<not set>");
   Serial.printf("      Token     : %s\n", config.gatewayToken.length() ? "<stored>" : "<not set>");
   Serial.printf("      Gateway   : %s\n", gatewayHex().c_str());
+  Serial.printf("      Cloud     : %s\n", hubProfileAllowsCloud() ? "allowed by profile" : "disabled by off-grid profile");
+  Serial.printf("      BLE Home  : %s\n", hubProfileAdvertisesHomeBeacon() ? "advertising" : "disabled for roaming/off-grid");
 }
 
 static void printHelp() {
@@ -171,6 +240,10 @@ static void printHelp() {
   Serial.println("      pass <your-wifi-password>");
   Serial.println("      url https://<project-ref>.supabase.co/functions/v1/ingest-position");
   Serial.println("      token <gateway-bearer-token>");
+  Serial.println("      profile home|portable|offgrid");
+  Serial.println("      home");
+  Serial.println("      portable");
+  Serial.println("      offgrid");
   Serial.println("      connect");
   Serial.println("      show");
   Serial.println("      clear");
@@ -178,12 +251,21 @@ static void printHelp() {
 }
 
 static void connectWifi() {
+  if (!hubProfileAllowsCloud()) {
+    Serial.printf("[WIFI] STA disabled in %s profile; AP/local status page remains available.\n",
+                  hubProfileDisplay(hubProfile));
+    return;
+  }
   if (config.wifiSsid.length() == 0) {
     Serial.println("[WIFI] STA SSID not set; AP-only mode remains available.");
     return;
   }
   Serial.printf("[WIFI] Connecting STA to %s...\n", config.wifiSsid.c_str());
-  WiFi.begin(config.wifiSsid.c_str(), config.wifiPass.c_str());
+  if (config.wifiPass.length() == 0) {
+    WiFi.begin(config.wifiSsid.c_str());
+  } else {
+    WiFi.begin(config.wifiSsid.c_str(), config.wifiPass.c_str());
+  }
 }
 
 static void startWifi() {
@@ -193,16 +275,51 @@ static void startWifi() {
   connectWifi();
 }
 
-static void startBleBeacon() {
+static void initBleBeacon() {
   BLEDevice::init(BLE_HOME_BEACON_NAME);
   BLEServer *bleServer = BLEDevice::createServer();
   (void)bleServer;
-  BLEAdvertising *advertising = BLEDevice::getAdvertising();
-  advertising->setScanResponse(true);
-  advertising->setMinPreferred(0x06);
-  advertising->setMinPreferred(0x12);
-  BLEDevice::startAdvertising();
-  Serial.printf("[BLE] Advertising Home beacon name '%s'\n", BLE_HOME_BEACON_NAME);
+  bleAdvertising = BLEDevice::getAdvertising();
+  bleAdvertising->setScanResponse(true);
+  bleAdvertising->setMinPreferred(0x06);
+  bleAdvertising->setMinPreferred(0x12);
+}
+
+static void setBleHomeBeaconEnabled(bool enabled) {
+  if (bleAdvertising == nullptr) return;
+
+  if (enabled && !bleHomeBeaconAdvertising) {
+    BLEDevice::startAdvertising();
+    bleHomeBeaconAdvertising = true;
+    Serial.printf("[BLE] Advertising Home beacon name '%s'\n", BLE_HOME_BEACON_NAME);
+  } else if (!enabled && bleHomeBeaconAdvertising) {
+    bleAdvertising->stop();
+    bleHomeBeaconAdvertising = false;
+    Serial.println("[BLE] Home beacon advertising disabled for this hub profile.");
+  }
+}
+
+static void applyHubProfile() {
+  setBleHomeBeaconEnabled(hubProfileAdvertisesHomeBeacon());
+
+  if (!hubProfileAllowsCloud()) {
+    if (WiFi.status() == WL_CONNECTED) {
+      WiFi.disconnect(false, false);
+    }
+    Serial.println("[PROFILE] Off-grid mode: LoRa/AP/web stay active, cloud relay is disabled.");
+    return;
+  }
+
+  if (WiFi.status() != WL_CONNECTED && config.wifiSsid.length() > 0) {
+    connectWifi();
+  }
+}
+
+static void setHubProfile(HubCommProfile profile) {
+  hubProfile = profile;
+  prefs.putUChar("profile", (uint8_t)hubProfile);
+  Serial.printf("[PROFILE] Hub profile set to %s\n", hubProfileDisplay(hubProfile));
+  applyHubProfile();
 }
 
 static void configureRadioOrHalt() {
@@ -345,6 +462,13 @@ static void cloudTask(void *param) {
       continue;
     }
 
+    if (!hubProfileAllowsCloud()) {
+      Serial.printf("[CLOUD] %s profile is local-only; skipping relay for device=%u seq=%u\n",
+                    hubProfileDisplay(hubProfile),
+                    pkt_device_id(entry.bytes),
+                    pkt_msg_seq(entry.bytes));
+      continue;
+    }
     if (WiFi.status() != WL_CONNECTED) {
       Serial.println("[CLOUD] STA Wi-Fi not connected; cannot relay yet");
       continue;
@@ -388,6 +512,11 @@ static String statusJson() {
   String out;
   out.reserve(420);
   out += "{";
+  out += "\"profile\":\"" + String(hubProfileSlug(hubProfile)) + "\",";
+  out += "\"profile_display\":\"" + String(hubProfileDisplay(hubProfile)) + "\",";
+  out += "\"always_on\":true,";
+  out += "\"cloud_allowed\":" + String(hubProfileAllowsCloud() ? "true" : "false") + ",";
+  out += "\"ble_home_advertising\":" + String(bleHomeBeaconAdvertising ? "true" : "false") + ",";
   out += "\"ap_ip\":\"" + WiFi.softAPIP().toString() + "\",";
   out += "\"sta_connected\":" + String(WiFi.status() == WL_CONNECTED ? "true" : "false") + ",";
   out += "\"sta_ip\":\"" + (WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString() : String("")) + "\",";
@@ -413,7 +542,7 @@ static void handleRoot() {
                   ".card{border:1px solid #1e5a86;border-radius:14px;background:#0d2940;padding:18px;max-width:780px}"
                   "code{color:#7bd0ff}button{padding:10px 14px;border-radius:8px}</style></head><body>"
                   "<div class='card'><p><code>BLUEPAWS V4</code></p><h1>Home Hub Relay</h1>"
-                  "<p>This Heltec Tracker V2 is receiving raw TLV over LoRa and relaying base64-wrapped HTTPS JSON when Wi-Fi/cloud are configured.</p>"
+                  "<p>This always-on Heltec Tracker V2 is receiving raw TLV over LoRa, serving this local status page, and relaying base64-wrapped HTTPS JSON when its profile permits cloud access.</p>"
                   "<pre id='status'>Loading...</pre></div>"
                   "<script>async function tick(){document.getElementById('status').textContent=JSON.stringify(await (await fetch('/api/status')).json(),null,2)} tick(); setInterval(tick,2000)</script>"
                   "</body></html>");
@@ -432,6 +561,17 @@ static void webTask(void *param) {
   for (;;) {
     server.handleClient();
     vTaskDelay(pdMS_TO_TICKS(5));
+  }
+}
+
+static void wifiTask(void *param) {
+  (void)param;
+  for (;;) {
+    if (hubProfileAllowsCloud() && config.wifiSsid.length() > 0 && WiFi.status() != WL_CONNECTED) {
+      Serial.println("[WIFI] STA disconnected; retrying according to active hub profile.");
+      connectWifi();
+    }
+    vTaskDelay(pdMS_TO_TICKS(10000));
   }
 }
 
@@ -461,6 +601,19 @@ static void handleSerialLine(String line) {
     config.gatewayToken = value;
     saveConfig();
     Serial.println("[CFG] Stored gateway bearer token");
+  } else if (cmd == "profile") {
+    HubCommProfile nextProfile;
+    if (parseHubProfile(value, nextProfile)) {
+      setHubProfile(nextProfile);
+    } else {
+      Serial.println("[PROFILE] Unknown profile. Use: home, portable, or offgrid.");
+    }
+  } else if (cmd == "home") {
+    setHubProfile(HUB_PROFILE_HOME);
+  } else if (cmd == "portable") {
+    setHubProfile(HUB_PROFILE_PORTABLE);
+  } else if (cmd == "offgrid") {
+    setHubProfile(HUB_PROFILE_OFF_GRID);
   } else if (cmd == "connect") {
     connectWifi();
   } else if (cmd == "show") {
@@ -468,7 +621,9 @@ static void handleSerialLine(String line) {
     Serial.println(statusJson());
   } else if (cmd == "clear") {
     prefs.clear();
-    config = HubConfig();
+    config = HubConfig{String(DEFAULT_STA_SSID), String(DEFAULT_STA_PASS), String(), String()};
+    hubProfile = HUB_PROFILE_HOME;
+    applyHubProfile();
     Serial.println("[CFG] Cleared stored config; restart recommended");
   } else if (cmd == "help" || cmd == "?") {
     printHelp();
@@ -503,6 +658,7 @@ void setup() {
   Serial.println("  Bluepaws V4 — Heltec Tracker V2 Home Hub");
   Serial.printf("  Gateway GUID16: %s\n", gatewayHex().c_str());
   Serial.println("  Role: raw LoRa TLV -> base64 HTTPS Supabase relay");
+  Serial.println("  Runtime: always-on FreeRTOS tasks, no hub sleep path");
   Serial.println("════════════════════════════════════════════");
 
   loadConfig();
@@ -514,10 +670,12 @@ void setup() {
   }
 
   startWifi();
-  startBleBeacon();
+  initBleBeacon();
+  applyHubProfile();
 
   xTaskCreatePinnedToCore(loraTask, "lora", 8192, nullptr, 3, nullptr, 1);
   xTaskCreatePinnedToCore(cloudTask, "cloud", 8192, nullptr, 2, nullptr, 0);
+  xTaskCreatePinnedToCore(wifiTask, "wifi", 4096, nullptr, 1, nullptr, 0);
   xTaskCreatePinnedToCore(webTask, "web", 8192, nullptr, 1, nullptr, 0);
   xTaskCreatePinnedToCore(serialTask, "serial", 4096, nullptr, 1, nullptr, 0);
 

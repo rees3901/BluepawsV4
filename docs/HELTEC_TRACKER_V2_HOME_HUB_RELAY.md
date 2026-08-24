@@ -10,6 +10,8 @@ RAK4631 collar testbed -> raw TLV over LoRa -> Heltec Tracker V2 hub -> HTTPS JS
 
 The Heltec receives the collar TLV unchanged, validates the TLV v1.1 structure, base64-encodes the raw packet, and relays it to the Supabase `ingest-position` Edge Function as a gateway packet.
 
+The hub is an always-on FreeRTOS application. There is no hub sleep state: LoRa receive, Wi-Fi management, cloud relay, serial/profile control, and the local web status page run as separate tasks.
+
 ## Hardware
 
 Board:
@@ -58,6 +60,15 @@ Monitor:
 
 Secrets are not committed. Configure the hub over the serial monitor. The ESP32 stores these values in NVS flash.
 
+For the current bench setup, the default STA Wi-Fi network is:
+
+```text
+SSID: Reesnet Guest
+Password: <blank/open network>
+```
+
+You can still override it over serial:
+
 ```text
 ssid YourWifiName
 pass YourWifiPassword
@@ -70,9 +81,31 @@ show
 Other serial commands:
 
 ```text
+profile home
+profile portable
+profile offgrid
+home
+portable
+offgrid
 clear
 help
 ```
+
+## Hub communication profiles
+
+The relay has three high-level profiles. These are intentionally coarse for now; they give us the skeleton needed for the later full Home Hub behaviour.
+
+| Profile | LoRa RX | Local AP/web | STA Wi-Fi/cloud relay | BLE Home beacon |
+|---|---:|---:|---:|---:|
+| Home | On | On | On when configured/connected | On |
+| Portable | On | On | On when configured/connected | Off |
+| Off-grid | On | On | Off | Off |
+
+Rationale:
+
+- `Home` means the hub is acting as the fixed home base. It advertises the BLE Home beacon so collars can decide they are safely at home.
+- `Portable` means the hub can travel with the user and can relay through a hotspot or router, but it must not impersonate the fixed home BLE beacon.
+- `Off-grid` means local-only search/diagnostic operation. It keeps receiving LoRa and serving its AP status page, but deliberately does not relay to Supabase.
 
 ## Local status page
 
@@ -122,6 +155,6 @@ The Supabase `ingest-position` Edge Function has JWT verification disabled and p
 
 - Local AP GUI is a simple status page, not the final off-grid map UI.
 - No command downlink is implemented in this minimal relay firmware yet.
-- BLE Home beacon advertising is enabled with the configured V4 name, but beacon authentication/rotation is future work.
+- BLE Home beacon advertising is profile-controlled; authentication/rotation is future work.
 - Gateway receive time is omitted until NTP is added.
 - Production gateway secrets still need a proper provisioning/onboarding flow.
