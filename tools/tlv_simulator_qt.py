@@ -211,8 +211,8 @@ TEST_RECIPES = {
         movement_metres=100,
     ),
     "Status/profile sweep": TestRecipe(
-        "16 valid packets covering every status and power-profile code so the web tile can be checked end-to-end.",
-        16,
+        "20 valid packets covering every status and power-profile code so the web tile can be checked end-to-end.",
+        20,
         2.0,
         strategy="protocol_sweep",
         movement_metres=50,
@@ -2608,6 +2608,7 @@ class BluepawsTlvConsole(QMainWindow):
             POWER_PROFILE_CODES["POWER_SAVE"],
             POWER_PROFILE_CODES["ACTIVE"],
             POWER_PROFILE_CODES["LOST_ALERT"],
+            POWER_PROFILE_CODES["DEBUG"],
         )
         reason_order = tuple(TX_REASON_CODES.values())
 

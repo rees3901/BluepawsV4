@@ -20,6 +20,7 @@ export const POWER_PROFILE_CODES = {
   NORMAL: 1,
   ACTIVE: 2,
   LOST_ALERT: 3,
+  DEBUG: 4,
 };
 
 export const TX_REASON_CODES = {
@@ -77,7 +78,7 @@ export const RECIPES = {
   status_profile_sweep: {
     label: "Status/profile sweep",
     description: "Cycles every status and power-profile code for end-to-end GUI verification.",
-    count: 16,
+    count: 20,
     interval: 2,
     movementMetres: 50,
   },
@@ -459,7 +460,7 @@ export function applyRecipeToDevice(settings, recipeKey, cycleIndex) {
     next.tagMode = "valid";
   } else if (recipeKey === "status_profile_sweep") {
     const statuses = [STATUS_CODES.HOME, STATUS_CODES.OUT, STATUS_CODES.LOST, STATUS_CODES.ERROR];
-    const profiles = [POWER_PROFILE_CODES.NORMAL, POWER_PROFILE_CODES.POWER_SAVE, POWER_PROFILE_CODES.ACTIVE, POWER_PROFILE_CODES.LOST_ALERT];
+    const profiles = [POWER_PROFILE_CODES.NORMAL, POWER_PROFILE_CODES.POWER_SAVE, POWER_PROFILE_CODES.ACTIVE, POWER_PROFILE_CODES.LOST_ALERT, POWER_PROFILE_CODES.DEBUG];
     const reasons = Object.values(TX_REASON_CODES);
     next.status = statuses[cycleIndex % statuses.length];
     next.powerProfile = profiles[Math.floor(cycleIndex / statuses.length) % profiles.length];
@@ -631,7 +632,7 @@ function normalizeDeviceSettings(input, fallbackDeviceId) {
     sequence: boundedInteger(settings.sequence, 0, 65_535, "message sequence"),
     timestamp: boundedInteger(settings.timestamp ?? nowUnix(), 0, 0xffff_ffff, "timestamp"),
     status: boundedInteger(settings.status, 0, 3, "status"),
-    powerProfile: boundedInteger(settings.powerProfile, 0, 3, "power profile"),
+    powerProfile: boundedInteger(settings.powerProfile, 0, 4, "power profile"),
     txReason: boundedInteger(settings.txReason, 0, 7, "TX reason"),
     flags: boundedInteger(settings.flags, 0, 255, "flags"),
     latitude: boundedNumber(settings.latitude, -90, 90, "latitude"),

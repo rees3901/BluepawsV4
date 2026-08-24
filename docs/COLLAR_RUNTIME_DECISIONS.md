@@ -41,12 +41,13 @@ Supported commands:
 | `profile powersave` | Switch to `POWER_SAVE`. |
 | `profile active` | Switch to `ACTIVE`. |
 | `profile lost` | Switch to `LOST_ALERT`. |
+| `profile debug` | Switch to development-only `DEBUG` profile. |
 | `debug on` | Override non-lost sleep cadence to 60 seconds and request the next cycle. |
 | `debug off` | Restore the selected profile's normal sleep cadence. |
 | `interval <seconds>` | Override non-lost sleep cadence to a custom 5–3600 second interval. |
 | `tx` | Request the next collar cycle immediately. |
 
-Debug cadence is deliberately an override on top of the selected profile. For example, `profile normal` plus `interval 30` keeps Normal profile semantics but wakes every 30 seconds for bench testing.
+The `DEBUG` power profile is a real TLV profile code (`power_profile = 4`) for end-to-end bench testing. Debug cadence is separate: it is deliberately an override on top of the selected profile. For example, `profile normal` plus `interval 30` keeps Normal profile semantics but wakes every 30 seconds for bench testing.
 
 The `tx` command mirrors the prototype short-button press: it queues a user-requested report using `tx_reason = INTERRUPT`.
 
@@ -63,7 +64,10 @@ Current spoof origin:
 | `POWER_SAVE` | Manual battery saving, low battery, or future “mostly home” automation | 30 min | Every 2 BLE-home wakes | Every 10 BLE-home wakes | Every 3 hours |
 | `NORMAL` | Default everyday collar behaviour | 10 min | Every BLE-home wake | Every 10 BLE-home wakes | Every 1 hour |
 | `ACTIVE` | Higher-frequency monitoring, not an emergency mode | 60 sec | Every BLE-home wake | Every 10 BLE-home wakes | Every 10 min |
+| `DEBUG` | Development-only noisy bench-test mode | 30 sec | Every BLE-home wake | Every BLE-home wake | Every 30 sec |
 | `LOST_ALERT` | Temporary emergency search mode | No normal sleep cadence | Separate emergency cadence | Continuous/aggressive where practical | Frequent fallback |
+
+`DEBUG` is for firmware and pipeline development only. It is intentionally noisy, should not be exposed as a normal customer control, and must not be confused with `LOST_ALERT` safety behaviour.
 
 `LOST_ALERT` is deliberately expensive. It should be temporary and user-triggered during active search, then auto-revert to a safer profile after a fixed safety timeout.
 

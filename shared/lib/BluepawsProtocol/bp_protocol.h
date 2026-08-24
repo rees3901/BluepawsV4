@@ -52,10 +52,13 @@ enum bp_profile_t : uint8_t {
     PROFILE_NORMAL    = 0x01,
     PROFILE_ACTIVE    = 0x02,
     PROFILE_LOST      = 0x03,
+    PROFILE_DEBUG     = 0x04,
 
     // Internal sentinel only; never put this value into a v1.1 packet.
     PROFILE_UNKNOWN   = 0xFF,
 };
+
+#define BP_MAX_V1_POWER_PROFILE PROFILE_DEBUG
 
 #define FLAG_GNSS_VALID        0x01
 #define FLAG_FIX_3D            0x02
@@ -162,6 +165,9 @@ static inline bp_profile_t bp_profile_from_name(const char *name) {
     if (strcmp(name, "emergency_lost") == 0) return PROFILE_LOST;
     if (strcmp(name, "lost") == 0)           return PROFILE_LOST;
     if (strcmp(name, "lost_alert") == 0)     return PROFILE_LOST;
+    if (strcmp(name, "debug") == 0)          return PROFILE_DEBUG;
+    if (strcmp(name, "dev") == 0)            return PROFILE_DEBUG;
+    if (strcmp(name, "dev_debug") == 0)      return PROFILE_DEBUG;
     return PROFILE_UNKNOWN;
 }
 
@@ -171,6 +177,7 @@ static inline const char *bp_profile_name(bp_profile_t p) {
     case PROFILE_NORMAL:    return "Normal";
     case PROFILE_ACTIVE:    return "Active";
     case PROFILE_LOST:      return "Lost Alert";
+    case PROFILE_DEBUG:     return "Debug";
     default:                return "Unknown";
     }
 }
@@ -347,7 +354,7 @@ static inline bool pkt_validate_structure(const uint8_t *buf, uint8_t total_len)
         return false;
     if (buf[27] != 0 || buf[28] != 0 || buf[29] != 0 || buf[30] != 0)
         return false;
-    if ((pkt_status(buf) > STATUS_ERROR) || (pkt_power_profile(buf) > PROFILE_LOST))
+    if ((pkt_status(buf) > STATUS_ERROR) || (pkt_power_profile(buf) > BP_MAX_V1_POWER_PROFILE))
         return false;
     if (pkt_tx_reason(buf) > TX_WAKE_CHECKIN)
         return false;

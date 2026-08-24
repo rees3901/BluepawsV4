@@ -157,7 +157,7 @@ function SearchPartyDeviceRow({ device, avatar, now, onCentre }: { device: Telem
   const status = STATUS[device.status.toLowerCase() as keyof typeof STATUS] ?? STATUS.error;
   const profileLower = device.profile.toLowerCase();
   const profileClass = `profile-${profileLower.replace("save", "").replaceAll(" ", "-")}`;
-  const profileLabel = profileLower === "powersave" ? "💤 PowerSave" : device.profile;
+  const profileLabel = profileLower === "powersave" ? "💤 PowerSave" : profileLower === "debug" ? "🧪 Debug" : device.profile;
   const distance = formatDistance(haversine(HOME.lat, HOME.lon, device.lat, device.lon));
 
   return (

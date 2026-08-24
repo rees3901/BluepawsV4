@@ -62,7 +62,7 @@ test("maps every TLV status and power profile code into stable dashboard labels"
     schema_version: 1,
   };
   const statuses = ["Home", "Out", "Lost", "Error"] as const;
-  const profiles = ["PowerSave", "Normal", "Active", "Emergency Lost"] as const;
+  const profiles = ["PowerSave", "Normal", "Active", "Emergency Lost", "Debug"] as const;
 
   for (const [statusCode, statusLabel] of statuses.entries()) {
     const device = positionToTelemetryDevice({ ...baseRow, status_code: statusCode });

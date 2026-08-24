@@ -331,13 +331,14 @@ function statusDescription(value: number) {
 }
 
 function profileLabel(value: number) {
-  return (["Power Save", "Normal", "Active", "Lost Alert"] as const)[value] ?? `Unknown (${value})`;
+  return (["Power Save", "Normal", "Active", "Lost Alert", "Debug"] as const)[value] ?? `Unknown (${value})`;
 }
 
 function profileDescription(value: number) {
   if (value === 0) return "Battery-conserving mode with less frequent reporting.";
   if (value === 1) return "Everyday tracking mode for normal collar use.";
   if (value === 2) return "More frequent reporting for closer monitoring.";
+  if (value === 4) return "Development-only noisy reporting mode used for bench testing.";
   return "Emergency search mode with aggressive reporting at the cost of battery life.";
 }
 
@@ -392,6 +393,7 @@ function profileCode(value: PowerProfile) {
   if (value === "PowerSave") return 0;
   if (value === "Active" || value === "Active Find") return 2;
   if (value === "Emergency Lost") return 3;
+  if (value === "Debug") return 4;
   return 1;
 }
 

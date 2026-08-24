@@ -953,7 +953,7 @@ static bool collarStateLoad() {
         loaded.version != BLUEPAWS_COLLAR_STATE_VERSION ||
         loaded.size != sizeof(loaded) ||
         loaded.checksum != collarStateChecksum(loaded) ||
-        loaded.profile > PROFILE_LOST) {
+        loaded.profile > BP_MAX_V1_POWER_PROFILE) {
         Serial.println("[STATE] Stored state failed validation.");
         return false;
     }
@@ -1705,8 +1705,10 @@ static void debugConsoleHandleLine(String line) {
             next = PROFILE_ACTIVE;
         } else if (value == "lost" || value == "lost_alert" || value == "lost-alert") {
             next = PROFILE_LOST;
+        } else if (value == "debug" || value == "dev" || value == "dev_debug" || value == "dev-debug") {
+            next = PROFILE_DEBUG;
         } else {
-            Serial.println("[DBG] Unknown profile. Use: normal, powersave, active, lost.");
+            Serial.println("[DBG] Unknown profile. Use: normal, powersave, active, lost, debug.");
             return;
         }
 
@@ -1732,6 +1734,7 @@ static void debugConsolePrintHelp() {
     Serial.println("      profile powersave    Set Power Save profile");
     Serial.println("      profile active       Set Active profile");
     Serial.println("      profile lost         Set Lost Alert profile");
+    Serial.println("      profile debug        Set development Debug profile");
     Serial.println("      debug on             Override sleep interval to 60s");
     Serial.println("      debug off            Restore profile sleep interval");
     Serial.println("      interval <seconds>   Override sleep interval, 5..3600s");

@@ -39,7 +39,7 @@ export function DeviceCard(props: DeviceCardProps) {
   const status = STATUS[device.status.toLowerCase() as keyof typeof STATUS] ?? STATUS.error;
   const profileLower = device.profile.toLowerCase();
   const profileClass = `profile-${profileLower.replace("save", "").replaceAll(" ", "-")}`;
-  const profileLabel = profileLower === "powersave" ? "💤 PowerSave" : device.profile;
+  const profileLabel = profileLower === "powersave" ? "💤 PowerSave" : profileLower === "debug" ? "🧪 Debug" : device.profile;
   const lastSeen = formatLastSeen(ageSeconds);
 
   return (

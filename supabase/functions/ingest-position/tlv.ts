@@ -157,7 +157,7 @@ export function parseTlvPacket(rawBytes: Uint8Array): ParsedTlvPacket {
   const status = state & 0x0f;
   const powerProfile = (state >>> 4) & 0x0f;
   if (status > 3) fail("reserved_status", "status uses a reserved v1 value");
-  if (powerProfile > 3) fail("reserved_power_profile", "power profile uses a reserved v1 value");
+  if (powerProfile > 4) fail("reserved_power_profile", "power profile uses a reserved v1 value");
 
   const txReason = view.getUint8(11);
   if (txReason > 7) fail("reserved_tx_reason", "tx_reason uses a reserved v1 value");

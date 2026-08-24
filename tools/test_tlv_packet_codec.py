@@ -216,8 +216,16 @@ class TlvPacketCodecTests(unittest.TestCase):
         key = bytes(32)
         wake_checkin = build_tlv_packet(packet_fields(tx_reason=7, flags=0x08), [], key)
         self.assertEqual(wake_checkin.packet[11], 7)
+        debug_profile = build_tlv_packet(packet_fields(power_profile=4), [], key)
+        self.assertEqual(debug_profile.packet[9] >> 4, 4)
+        self.assertEqual(
+            decode_tlv_payload(debug_profile.payload_b64, key)["header"]["power_profile"],
+            {"code": 4, "name": "DEBUG"},
+        )
         with self.assertRaisesRegex(ValueError, "TX reason"):
             build_tlv_packet(packet_fields(tx_reason=8), [], key)
+        with self.assertRaisesRegex(ValueError, "power profile"):
+            build_tlv_packet(packet_fields(power_profile=5), [], key)
         payload = build_tlv_packet(packet_fields(), [], key).payload_b64
         with self.assertRaisesRegex(ValueError, "cellular RF"):
             build_transport_wrapper(

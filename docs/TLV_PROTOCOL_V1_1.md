@@ -198,13 +198,15 @@ Stored in the upper nibble of `state`.
 | 1 | `NORMAL` | Standard tracking behaviour. |
 | 2 | `ACTIVE` | Higher frequency tracking. |
 | 3 | `LOST_ALERT` | Urgent lost-alert behaviour. |
-| 4-15 | `RESERVED` | Reserved. |
+| 4 | `DEBUG` | Development-only noisy bench-test reporting. Not customer-facing production behaviour. |
+| 5-15 | `RESERVED` | Reserved. |
 
 Examples:
 
 ```text
 0x11 = OUT + NORMAL
 0x32 = LOST + LOST_ALERT
+0x41 = OUT + DEBUG
 0x00 = HOME + POWER_SAVE
 ```
 
@@ -300,6 +302,12 @@ Current remaining TLV headroom:
 
 `command_id` was deliberately omitted. The collar should normally ACK the sequence number of the command/message it received. Supabase already knows what command was associated with that sequence number.
 
+The backend command queue uses a UUID as the permanent database/audit identity,
+but the collar ACK remains compact: `tx_reason = ACK` plus
+`acked_msg_seq_id = command_sequence_id`. See
+[`COLLAR_DOWNLINK_COMMANDS.md`](COLLAR_DOWNLINK_COMMANDS.md) for the delivery
+contract and command dictionary.
+
 `speed_cms` and `ack_status` were also omitted to keep the selected set under budget. Speed can be estimated by backend position deltas. ACK status is unnecessary for the first version because the ACK mainly confirms receipt, and the next telemetry packet confirms whether the state actually changed.
 
 ## 13. TLVs omitted from the collar packet for now
@@ -382,6 +390,7 @@ Transmit-power policy:
 | POWER_SAVE | 10 dBm |
 | NORMAL | 14 dBm |
 | ACTIVE | 20 dBm |
+| DEBUG | 14 dBm |
 | LOST_ALERT | 20 dBm |
 
 The higher-power profiles remain subject to the final product's UK regulatory compliance, including complete-system ERP after antenna gain and feeder losses.

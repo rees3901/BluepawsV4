@@ -56,11 +56,11 @@ test("encodes every visible status, power profile, and TX reason into the header
 test("status/profile sweep recipe covers all status and profile combinations", () => {
   const base = defaultDeviceSettings(1001);
   const seen = new Set();
-  for (let cycle = 0; cycle < 16; cycle += 1) {
+  for (let cycle = 0; cycle < 20; cycle += 1) {
     const next = applyRecipeToDevice(base, "status_profile_sweep", cycle);
     seen.add(`${next.status}:${next.powerProfile}`);
   }
-  assert.equal(seen.size, 16);
+  assert.equal(seen.size, 20);
 });
 
 test("builds a valid LoRa wrapper", () => {

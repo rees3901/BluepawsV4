@@ -13,6 +13,7 @@ import {
 const MAX_BODY_BYTES = 4_096;
 const MAX_FUTURE_SKEW_MS = 5 * 60 * 1_000;
 const LEGACY_SOURCE = "edge-api";
+const TX_REASON_ACK = 1;
 const TX_REASON_WAKE_CHECKIN = 7;
 const FLAG_HOME_BEACON_SEEN = 0x08;
 
@@ -45,6 +46,22 @@ interface TlvIngestResult {
   position_id: number | null;
   received_at: string;
   error_code: string | null;
+}
+
+interface PendingDeviceCommand {
+  id: string;
+  command_sequence_id: number;
+  command_type: string;
+  command_payload: Record<string, unknown>;
+  expires_at: string;
+}
+
+interface AckedDeviceCommand {
+  id: string;
+  command_sequence_id: number;
+  command_type: string;
+  status: string;
+  acknowledged_at: string;
 }
 
 Deno.serve(async (request: Request) => {
@@ -241,6 +258,13 @@ async function handleTlv(
     return unauthorized(requestId);
   }
 
+  const ackedCommand = packet.txReason === TX_REASON_ACK
+    ? await acknowledgeCommandIfPresent(supabase, packet.deviceGuid16, packet.tlvs, requestId)
+    : null;
+  const pendingCommand = metadata.ingestPath === "cellular_direct"
+    ? await claimNextCommand(supabase, packet.deviceGuid16, metadata.ingestPath, requestId)
+    : null;
+
   return json({
     accepted: true,
     format: "tlv",
@@ -252,10 +276,62 @@ async function handleTlv(
     payload_hash: payloadHash,
     ingest_path: metadata.ingestPath,
     link_type: metadata.linkType,
+    command_pending: pendingCommand !== null,
+    command: pendingCommand === null ? null : {
+      id: pendingCommand.id,
+      sequence_id: pendingCommand.command_sequence_id,
+      type: pendingCommand.command_type,
+      payload: pendingCommand.command_payload,
+      expires_at: pendingCommand.expires_at,
+    },
+    acked_command: ackedCommand === null ? null : {
+      id: ackedCommand.id,
+      sequence_id: ackedCommand.command_sequence_id,
+      type: ackedCommand.command_type,
+      status: ackedCommand.status,
+      acknowledged_at: ackedCommand.acknowledged_at,
+    },
     warnings,
     received_at: row.received_at,
     request_id: requestId,
   }, row.duplicate ? 200 : 201);
+}
+
+async function claimNextCommand(
+  supabase: SupabaseClient,
+  deviceId: number,
+  transport: string,
+  requestId: string,
+) {
+  const result = await supabase.rpc("bluepaws_claim_next_device_command", {
+    requested_device_id: deviceId,
+    requested_transport: transport,
+  });
+  if (result.error) {
+    console.error("Command claim failed", { requestId, code: result.error.code });
+    return null;
+  }
+  return firstRpcRow<PendingDeviceCommand>(result.data);
+}
+
+async function acknowledgeCommandIfPresent(
+  supabase: SupabaseClient,
+  deviceId: number,
+  tlvs: Record<string, unknown>,
+  requestId: string,
+) {
+  const ackedSequence = tlvs.acked_msg_seq_id;
+  if (!Number.isInteger(ackedSequence)) return null;
+
+  const result = await supabase.rpc("bluepaws_ack_device_command", {
+    requested_device_id: deviceId,
+    acked_command_sequence_id: ackedSequence,
+  });
+  if (result.error) {
+    console.error("Command ACK failed", { requestId, code: result.error.code });
+    return null;
+  }
+  return firstRpcRow<AckedDeviceCommand>(result.data);
 }
 
 function tlvWarnings(packet: ParsedTlvRequest["packet"]) {
