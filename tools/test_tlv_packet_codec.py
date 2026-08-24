@@ -228,6 +228,35 @@ class TlvPacketCodecTests(unittest.TestCase):
                 cell_rsrp_dbm=-100,
             )
 
+    def test_builds_boot_packet_without_gnss_using_existing_diagnostic_tlvs(self):
+        key = bytes(range(32))
+        built = build_tlv_packet(
+            packet_fields(
+                status=0,
+                flags=0xC8,
+                tx_reason=4,
+                latitude=0,
+                longitude=0,
+                accuracy_m=0,
+                fix_age_s=65_535,
+                satellite_count=255,
+            ),
+            [firmware_tlv("1.1"), known_tlv(0x06, 1), known_tlv(0x10, 3)],
+            key,
+        )
+
+        decoded = decode_tlv_payload(built.payload_b64, key)
+
+        self.assertEqual(decoded["header"]["tx_reason"], {"code": 4, "name": "BOOT"})
+        self.assertEqual(decoded["header"]["status"], {"code": 0, "name": "HOME"})
+        self.assertEqual(
+            decoded["header"]["flags"]["set"],
+            ["HOME_BEACON_SEEN", "STALE_FIX", "ERROR_PRESENT"],
+        )
+        self.assertIsNone(decoded["header"]["position"]["latitude"])
+        self.assertIsNone(decoded["header"]["position"]["longitude"])
+        self.assertTrue(decoded["authentication"]["valid"])
+
 
 if __name__ == "__main__":
     unittest.main()

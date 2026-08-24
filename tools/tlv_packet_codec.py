@@ -514,6 +514,7 @@ def decode_tlv_payload(
     reason_name = _name_for_code(TX_REASON_CODES, tx_reason)
     fix_age_s = struct.unpack_from("<H", packet, 24)[0]
     satellite_count = packet[26]
+    gnss_valid = bool(flags & FLAG_MASKS["GNSS_VALID"])
 
     return {
         "packet": {
@@ -540,8 +541,8 @@ def decode_tlv_payload(
             },
             "tx_reason": {"code": tx_reason, "name": reason_name},
             "position": {
-                "latitude": struct.unpack_from("<i", packet, 12)[0] / 10_000_000,
-                "longitude": struct.unpack_from("<i", packet, 16)[0] / 10_000_000,
+                "latitude": struct.unpack_from("<i", packet, 12)[0] / 10_000_000 if gnss_valid else None,
+                "longitude": struct.unpack_from("<i", packet, 16)[0] / 10_000_000 if gnss_valid else None,
                 "battery_mv": struct.unpack_from("<H", packet, 20)[0],
                 "accuracy_m": struct.unpack_from("<H", packet, 22)[0],
                 "fix_age_s": None if fix_age_s == 65_535 else fix_age_s,

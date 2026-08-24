@@ -141,6 +141,38 @@ test("accepts wake check-in packets without GNSS coordinates", () => {
   assert.equal(parsed.satelliteCount, 255);
 });
 
+test("accepts no-GNSS boot packets with existing diagnostic TLVs", () => {
+  const packet = buildPacket(Uint8Array.of(
+    0x04, 0x02, 0x01, 0x01,
+    0x06, 0x01, 0x03,
+    0x10, 0x04, 0x07, 0x00, 0x00, 0x00,
+  ));
+  packet[9] = 0x10;
+  packet[10] = 0xC8;
+  packet[11] = 4;
+  packet.fill(0, 12, 20);
+  new DataView(packet.buffer).setUint16(22, 0, true);
+  new DataView(packet.buffer).setUint16(24, 65_535, true);
+  packet[26] = 255;
+
+  const parsed = parseTlvPacket(packet);
+
+  assert.equal(parsed.status, 0);
+  assert.equal(parsed.powerProfile, 1);
+  assert.equal(parsed.txReason, 4);
+  assert.equal(parsed.flags, 0xC8);
+  assert.equal(parsed.gnssValid, false);
+  assert.equal(parsed.latitude, null);
+  assert.equal(parsed.longitude, null);
+  assert.equal(parsed.fixAgeSeconds, 65_535);
+  assert.equal(parsed.satelliteCount, 255);
+  assert.deepEqual(parsed.tlvs, {
+    fw_ver: 0x0101,
+    reset_reason: 3,
+    uptime_s: 7,
+  });
+});
+
 function buildPacket(tlvs = selectedTlvs()) {
   const body = new Uint8Array(32 + tlvs.length);
   const view = new DataView(body.buffer);
