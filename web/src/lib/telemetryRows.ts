@@ -23,6 +23,16 @@ export interface PositionRow {
   schema_version: number;
 }
 
+export interface DevicePresenceRow {
+  device_id: number;
+  household_id: string;
+  last_seen_at: string | null;
+  last_seen_status_code: number | null;
+  last_seen_power_profile_code: number | null;
+  last_seen_tx_reason: number | null;
+  last_seen_battery_mv: number | null;
+}
+
 export function positionToTelemetryDevice(row: PositionRow): TelemetryDevice {
   const recordedAt = Date.parse(row.recorded_at);
   const flags = row.flags;
@@ -45,6 +55,25 @@ export function positionToTelemetryDevice(row: PositionRow): TelemetryDevice {
     ingestPath: row.ingest_path,
     lastUpdate: recordedAt,
     source: row.source,
+  };
+}
+
+export function applyPresenceToTelemetryDevice(device: TelemetryDevice, row: DevicePresenceRow): TelemetryDevice {
+  if (row.device_id !== device.id || row.household_id.length === 0 || !row.last_seen_at) return device;
+  const lastSeenAt = Date.parse(row.last_seen_at);
+  if (!Number.isFinite(lastSeenAt) || lastSeenAt <= device.lastUpdate) return device;
+
+  const hasFreshBattery = row.last_seen_battery_mv !== null;
+  return {
+    ...device,
+    time: Math.floor(lastSeenAt / 1000),
+    status: row.last_seen_status_code === null ? device.status : statusName(row.last_seen_status_code),
+    profile: row.last_seen_power_profile_code === null ? device.profile : profileName(row.last_seen_power_profile_code),
+    batt: row.last_seen_battery_mv ?? device.batt,
+    batteryPercent: hasFreshBattery ? null : device.batteryPercent,
+    bleHome: device.bleHome || row.last_seen_tx_reason === 7 || row.last_seen_status_code === 0,
+    lastUpdate: lastSeenAt,
+    source: row.last_seen_tx_reason === 7 ? "tlv-wake-checkin" : device.source,
   };
 }
 
@@ -73,6 +102,20 @@ export function isPositionRow(value: unknown): value is PositionRow {
     typeof row.received_at === "string" &&
     typeof row.schema_version === "number" &&
     Number.isFinite(Date.parse(row.recorded_at))
+  );
+}
+
+export function isDevicePresenceRow(value: unknown): value is DevicePresenceRow {
+  if (!value || typeof value !== "object") return false;
+  const row = value as Record<string, unknown>;
+  return (
+    typeof row.device_id === "number" &&
+    typeof row.household_id === "string" &&
+    (row.last_seen_at === null || (typeof row.last_seen_at === "string" && Number.isFinite(Date.parse(row.last_seen_at)))) &&
+    nullableNumber(row.last_seen_status_code) &&
+    nullableNumber(row.last_seen_power_profile_code) &&
+    nullableNumber(row.last_seen_tx_reason) &&
+    nullableNumber(row.last_seen_battery_mv)
   );
 }
 
