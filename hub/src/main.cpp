@@ -1,7 +1,7 @@
 /*
   ┌─────────────────────────────────────────────────────────────┐
   │  BLUEPAWS V4 — HOME HUB FIRMWARE                            │
-  │  Hardware: Seeed XIAO ESP32-S3 + SX1262 LoRa                │
+  │  Hardware: Heltec Wireless Tracker V2 ESP32-S3 + SX1262     │
   │                                                             │
   │  The hub is the "base station" that sits at home. It:       │
   │   - Receives telemetry packets from collar(s) over LoRa     │
@@ -43,39 +43,17 @@
 #include <bp_protocol.h>     // Binary TLV packet format, builder & parser
 #include <bp_config.h>       // LoRa params, profiles, AES key, timing constants
 #include <bp_crypto.h>       // Legacy AES helper retained for downlink experiments
+#include "hub_config.h"      // Bench-safe defaults + local-only secret overrides
 #include "hub_pins.h"        // GPIO pin assignments for this board
 
 // ═══════════════════════════════════════════════
 // Configuration
 // ═══════════════════════════════════════════════
 
-// WiFi Access Point — the hub always creates this network so you
-// can connect directly from your phone/laptop even without home WiFi.
-#define WIFI_AP_SSID     "BluePaws-Hub"
-#define WIFI_AP_PASS     "bluepaws4"
-#define WIFI_AP_CHANNEL  6              // Fixed WiFi channel for the AP
-
-// WiFi Station — optionally connect to your home router for internet
-// access (needed for cloud relay). Can be set via web GUI at runtime
-// or overridden with build flags (-DWIFI_STA_SSID="MyNetwork").
-#ifndef WIFI_STA_SSID
-#define WIFI_STA_SSID    ""
-#endif
-#ifndef WIFI_STA_PASS
-#define WIFI_STA_PASS    ""
-#endif
-
-// Cloud endpoint URL — where telemetry gets POSTed (e.g. Supabase function).
-// Empty string = cloud relay disabled.
-#ifndef CLOUD_ENDPOINT
-#define CLOUD_ENDPOINT   ""
-#endif
-#ifndef CLOUD_BEARER_TOKEN
-#define CLOUD_BEARER_TOKEN ""
-#endif
-#ifndef GATEWAY_GUID16
-#define GATEWAY_GUID16 0x0016
-#endif
+// Naming note: older notes and logs may say "LoRa hub", "base station",
+// "receiving base station", or "Home Hub LoRa relay". In Bluepaws V4 these all
+// mean this Home Hub: it receives raw collar TLV over LoRa and optionally relays
+// the unchanged packet to Supabase in an HTTPS JSON wrapper.
 
 // mDNS hostname — after connecting, browse to http://bluepaws.local
 #define MDNS_HOSTNAME    "bluepaws"
@@ -151,6 +129,7 @@ struct cloud_entry_t {
     uint8_t  len;                      // Packet length
     int16_t  rssi;                     // Signal strength when received
     float    snr;                      // Signal-to-noise ratio when received
+    uint32_t gateway_rx_time_unix;      // Hub receive time used in cloud wrapper
 };
 
 // ── Legacy AES-128 key ──
@@ -189,6 +168,10 @@ static String staSSID = WIFI_STA_SSID;        // Current STA SSID (may be loaded
 static String staPass = WIFI_STA_PASS;        // Current STA password
 static String cloudEndpoint = CLOUD_ENDPOINT; // Cloud POST URL
 static String cloudToken = CLOUD_BEARER_TOKEN; // Gateway bearer token for Supabase Edge Function
+static bool hubProvisioningMode = HUB_PROVISIONING_MODE_DEFAULT;
+static bool hubApEnabled = false;
+static bool hubTimeSynced = false;
+static uint32_t lastNtpSyncMs = 0;
 
 // ── Hub Communications Profile ──
 // This is the user-selected operating profile. It must not flap merely because
@@ -285,13 +268,18 @@ static const char *hubCommProfileName(hub_comm_profile_t profile);
 static hub_comm_profile_t hubCommProfileFromString(const String &value);
 static bool hubProfileUsesBleScanning();
 static bool hubProfileAllowsCloudRelay();
+static bool hubProfileNeedsLocalAp();
 static void setHubCommunicationsProfile(hub_comm_profile_t profile);
 static void applyBleRoleForCurrentProfile();
+static void applyWifiRoleForCurrentProfile();
 static void updateConnectivityState();
 static void noteCloudPostResult(int httpCode);
+static void syncHubClock(bool force);
 
 // Packet handling pipeline
 static void handlePacket(const uint8_t *buf, uint8_t len, int16_t rssi, float snr);
+static void buildDeviceJson(const uint8_t *buf, int16_t rssi, float snr,
+                             char *out, size_t outLen);
 static void updateDeviceState(const uint8_t *buf, int16_t rssi, float snr);
 static void logToStorage(const uint8_t *buf, uint8_t len, int16_t rssi, float snr);
 static void sseBroadcast(const char *event, const char *data);
@@ -409,12 +397,43 @@ static bool hubProfileAllowsCloudRelay() {
     return hubCommProfile != HUB_COMM_OFF_GRID;
 }
 
+static bool hubProfileNeedsLocalAp() {
+    // The Home Hub should not advertise its own AP during normal connected
+    // Home operation. AP is explicit for Off-Grid/local-only and provisioning.
+    // If there is no STA SSID configured at all, keep AP up as a recovery path.
+    return hubCommProfile == HUB_COMM_OFF_GRID
+        || hubProvisioningMode
+        || staSSID.length() == 0;
+}
+
 static void setHubCommunicationsProfile(hub_comm_profile_t profile) {
     if (hubCommProfile == profile) return;
 
     hubCommProfile = profile;
     Serial.printf("[HUB] Communications profile → %s\n", hubCommProfileName(hubCommProfile));
+    applyWifiRoleForCurrentProfile();
     applyBleRoleForCurrentProfile();
+}
+
+static void applyWifiRoleForCurrentProfile() {
+    bool shouldEnableAp = hubProfileNeedsLocalAp();
+    wifi_mode_t desiredMode = shouldEnableAp ? WIFI_AP_STA : WIFI_STA;
+
+    if (WiFi.getMode() != desiredMode) {
+        WiFi.mode(desiredMode);
+    }
+
+    if (shouldEnableAp && !hubApEnabled) {
+        WiFi.softAP(WIFI_AP_SSID, WIFI_AP_PASS, WIFI_AP_CHANNEL);
+        hubApEnabled = true;
+        Serial.printf("[WIFI] AP enabled: %s @ %s\n",
+                      WIFI_AP_SSID, WiFi.softAPIP().toString().c_str());
+    } else if (!shouldEnableAp && hubApEnabled) {
+        WiFi.softAPdisconnect(true);
+        hubApEnabled = false;
+        WiFi.mode(WIFI_STA);
+        Serial.println("[WIFI] AP disabled for normal Home/Portable STA mode");
+    }
 }
 
 static void updateConnectivityState() {
@@ -446,6 +465,42 @@ static void noteCloudPostResult(int httpCode) {
     if (hubConnectivity.cloud_failures >= 3) {
         hubConnectivity.cloud_reachable = false;
     }
+}
+
+static bool unixTimeLooksValid(time_t value) {
+    // Reject unset/Unix-epoch-ish values and obviously bad future values.
+    // This project is active in 2026; 2025-01-01 is a safe low watermark.
+    return value >= 1735689600 && value <= 0xFFFFFFFF;
+}
+
+static void syncHubClock(bool force) {
+    if (WiFi.status() != WL_CONNECTED) {
+        return;
+    }
+
+    uint32_t nowMs = millis();
+    if (!force && hubTimeSynced && (nowMs - lastNtpSyncMs) < 3600000UL) {
+        return;
+    }
+
+    Serial.println("[TIME] Syncing Home Hub clock via NTP...");
+    configTime(0, 0, NTP_PRIMARY, NTP_SECONDARY, NTP_TERTIARY);
+
+    struct tm timeInfo;
+    for (uint8_t attempt = 0; attempt < 20; attempt++) {
+        if (getLocalTime(&timeInfo, 250)) {
+            time_t synced = time(nullptr);
+            if (unixTimeLooksValid(synced)) {
+                hubTimeSynced = true;
+                lastNtpSyncMs = millis();
+                Serial.printf("[TIME] NTP synced: %lu\n", (uint32_t)synced);
+                return;
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+
+    Serial.println("[TIME] NTP not ready yet; gateway wrapper will temporarily fall back to collar TLV time.");
 }
 
 // ═══════════════════════════════════════════════
@@ -484,15 +539,11 @@ static void initLoRa() {
 }
 
 static void initWiFi() {
-    // Run WiFi in AP+STA hybrid mode:
-    //   AP  = always on, so you can connect directly to "BluePaws-Hub"
-    //   STA = optionally connects to home router for internet access
-    WiFi.mode(WIFI_AP_STA);
-
-    // Start the Access Point (always available, even without home WiFi)
-    WiFi.softAP(WIFI_AP_SSID, WIFI_AP_PASS, WIFI_AP_CHANNEL);
-    Serial.printf("[WIFI] AP started: %s @ %s\n",
-                  WIFI_AP_SSID, WiFi.softAPIP().toString().c_str());
+    // Intentional Wi-Fi roles:
+    //   Home/Portable: STA for uplink/local LAN; AP off unless provisioning.
+    //   Off-Grid: AP/local GUI is primary; cloud relay is disabled.
+    WiFi.mode(hubProfileNeedsLocalAp() ? WIFI_AP_STA : WIFI_STA);
+    applyWifiRoleForCurrentProfile();
 
     // If we have saved STA credentials, try to connect to home router.
     // This gives us internet access for cloud relay.
@@ -508,9 +559,10 @@ static void initWiFi() {
             staConnected = true;
             hubConnectivity.wifi_connected = true;
             Serial.printf("[WIFI] STA connected: %s\n", WiFi.localIP().toString().c_str());
+            syncHubClock(true);
         } else {
             updateConnectivityState();
-            Serial.println("[WIFI] STA connection failed — AP only");
+            Serial.println("[WIFI] STA connection failed — LoRa RX remains active");
         }
     }
 
@@ -585,6 +637,7 @@ static void initStorage() {
                 if (key == "cloud_url")   cloudEndpoint = val;  // Cloud POST endpoint
                 if (key == "cloud_token") cloudToken = val;     // Gateway bearer token
                 if (key == "hub_mode")    hubCommProfile = hubCommProfileFromString(val);
+                if (key == "provisioning") hubProvisioningMode = (val == "1" || val == "true");
             }
             f.close();
             Serial.println("[FS] Config loaded");
@@ -800,6 +853,10 @@ static void handlePacket(const uint8_t *buf, uint8_t len, int16_t rssi, float sn
     ce.len  = len;
     ce.rssi = rssi;
     ce.snr  = snr;
+    time_t rxTime = time(nullptr);
+    ce.gateway_rx_time_unix = unixTimeLooksValid(rxTime)
+        ? (uint32_t)rxTime
+        : pkt_time_unix(buf);
     xQueueSend(cloudQueue, &ce, 0);
 
     // Step 7: Push the telemetry as JSON to all connected web browsers via SSE
@@ -1112,8 +1169,9 @@ static void handleApiStatus() {
     snprintf(buf, sizeof(buf),
         "{\"uptime\":%u,\"rxCount\":%u,\"txCount\":%u,"
         "\"crcFails\":%u,\"devices\":%u,\"logEntries\":%u,"
-        "\"staConnected\":%s,\"staIP\":\"%s\",\"apIP\":\"%s\","
+        "\"staConnected\":%s,\"staIP\":\"%s\",\"apEnabled\":%s,\"apIP\":\"%s\","
         "\"freeHeap\":%u,\"hubMode\":\"%s\","
+        "\"provisioning_mode\":%s,\"time_synced\":%s,\"hub_time_unix\":%u,"
         "\"mode\":\"%s\",\"wifi_connected\":%s,"
         "\"internet_reachable\":%s,\"cloud_reachable\":%s,"
         "\"last_cloud_success_ms\":%u,\"lora_rx_active\":%s}",
@@ -1121,9 +1179,13 @@ static void handleApiStatus() {
         crcFailCount, deviceCount, logEntryCount,
         staConnected ? "true" : "false",
         staConnected ? WiFi.localIP().toString().c_str() : "",
+        hubApEnabled ? "true" : "false",
         WiFi.softAPIP().toString().c_str(),
         ESP.getFreeHeap(),
         hubCommProfileName(hubCommProfile),
+        hubProvisioningMode ? "true" : "false",
+        hubTimeSynced ? "true" : "false",
+        (uint32_t)time(nullptr),
         hubCommProfileName(hubCommProfile),
         hubConnectivity.wifi_connected ? "true" : "false",
         hubConnectivity.internet_reachable ? "true" : "false",
@@ -1577,7 +1639,6 @@ static String buildCloudWrapperJson(const cloud_entry_t &entry) {
     char gateway[5];
     snprintf(gateway, sizeof(gateway), "%04X", (uint16_t)GATEWAY_GUID16);
 
-    uint32_t rxTime = (uint32_t)time(nullptr);
     String body = "{";
     body += "\"format\":\"tlv\",";
     body += "\"payload_b64\":\"";
@@ -1588,7 +1649,7 @@ static String buildCloudWrapperJson(const cloud_entry_t &entry) {
     body += gateway;
     body += "\",";
     body += "\"gateway_rx_time_unix\":";
-    body += String(rxTime);
+    body += String(entry.gateway_rx_time_unix);
     body += ",";
     body += "\"link_type\":\"lora\",";
     body += "\"link_rssi_dbm\":";
@@ -1632,6 +1693,7 @@ static void cloudTask(void *param) {
                 continue;
             }
 
+            syncHubClock(false);
             String body = buildCloudWrapperJson(entry);
 
             HTTPClient http;
