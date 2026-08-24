@@ -138,13 +138,14 @@ For valid TLV packets, the hub sends:
   "payload_b64": "<base64 raw collar TLV>",
   "ingest_path": "lora_gateway",
   "gateway_guid16": "0016",
+  "gateway_rx_time_unix": 1787486400,
   "link_type": "lora",
   "link_rssi_dbm": -105,
   "link_snr_db": 7.5
 }
 ```
 
-`gateway_rx_time_unix` is deliberately omitted until the hub has real NTP-backed wall-clock time. Supabase still records its own receive time.
+Until the hub has NTP-backed wall-clock time, `gateway_rx_time_unix` uses the collar TLV packet timestamp as a valid bench-time placeholder. Supabase still records its own authoritative receive time.
 
 The HTTP request uses:
 

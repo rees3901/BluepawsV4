@@ -406,12 +406,17 @@ static void configureRadioOrHalt() {
 
 static String buildCloudJson(const CloudEntry &entry) {
   String body;
-  body.reserve(256);
+  body.reserve(320);
   body += F("{\"format\":\"tlv\",\"payload_b64\":\"");
   body += base64Encode(entry.bytes, entry.len);
   body += F("\",\"ingest_path\":\"lora_gateway\",\"gateway_guid16\":\"");
   body += gatewayHex();
-  body += F("\",\"link_type\":\"lora\",\"link_rssi_dbm\":");
+  body += F("\",\"gateway_rx_time_unix\":");
+  // Until the hub has NTP-backed wall-clock time, use the collar packet's
+  // TLV timestamp as the gateway receive timestamp. This satisfies the
+  // Supabase wrapper contract with a valid uint32 bench-time value.
+  body += String(pkt_time_unix(entry.bytes));
+  body += F(",\"link_type\":\"lora\",\"link_rssi_dbm\":");
   body += String(entry.rssi);
   body += F(",\"link_snr_db\":");
   body += String(entry.snr, 1);
