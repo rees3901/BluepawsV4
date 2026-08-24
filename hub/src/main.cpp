@@ -82,6 +82,10 @@
 #define PRIO_BLE     1      // Lowest — BLE beacon just needs to stay alive
 
 #define LORA_RX_POLL_TIMEOUT_MS 250  // Short timed RX window; avoids relying solely on DIO1 ISR
+#define NTP_RETRY_INTERVAL_MS   30000UL
+#define NTP_REFRESH_INTERVAL_MS 3600000UL
+#define NTP_ATTEMPTS            30
+#define NTP_ATTEMPT_WAIT_MS     500
 
 // ═══════════════════════════════════════════════
 // Globals
@@ -174,6 +178,8 @@ static bool hubProvisioningMode = HUB_PROVISIONING_MODE_DEFAULT;
 static bool hubApEnabled = false;
 static bool hubTimeSynced = false;
 static uint32_t lastNtpSyncMs = 0;
+static uint32_t lastNtpAttemptMs = 0;
+static bool ntpFallbackLogged = false;
 
 // ── Hub Communications Profile ──
 // This is the user-selected operating profile. It must not flap merely because
@@ -481,28 +487,37 @@ static void syncHubClock(bool force) {
     }
 
     uint32_t nowMs = millis();
-    if (!force && hubTimeSynced && (nowMs - lastNtpSyncMs) < 3600000UL) {
+    if (!force && hubTimeSynced && (nowMs - lastNtpSyncMs) < NTP_REFRESH_INTERVAL_MS) {
+        return;
+    }
+    if (!force && !hubTimeSynced && lastNtpAttemptMs != 0
+        && (nowMs - lastNtpAttemptMs) < NTP_RETRY_INTERVAL_MS) {
         return;
     }
 
-    Serial.println("[TIME] Syncing Home Hub clock via NTP...");
+    lastNtpAttemptMs = nowMs;
+    Serial.printf("[TIME] Syncing Home Hub clock via NTP (%s, RSSI %d dBm)...\n",
+                  WiFi.localIP().toString().c_str(), WiFi.RSSI());
     configTime(0, 0, NTP_PRIMARY, NTP_SECONDARY, NTP_TERTIARY);
 
     struct tm timeInfo;
-    for (uint8_t attempt = 0; attempt < 20; attempt++) {
-        if (getLocalTime(&timeInfo, 250)) {
+    for (uint8_t attempt = 0; attempt < NTP_ATTEMPTS; attempt++) {
+        if (getLocalTime(&timeInfo, NTP_ATTEMPT_WAIT_MS)) {
             time_t synced = time(nullptr);
             if (unixTimeLooksValid(synced)) {
                 hubTimeSynced = true;
                 lastNtpSyncMs = millis();
+                ntpFallbackLogged = false;
                 Serial.printf("[TIME] NTP synced: %lu\n", (uint32_t)synced);
                 return;
             }
         }
-        vTaskDelay(pdMS_TO_TICKS(50));
     }
 
-    Serial.println("[TIME] NTP not ready yet; gateway wrapper will temporarily fall back to collar TLV time.");
+    if (!ntpFallbackLogged) {
+        Serial.println("[TIME] NTP not ready yet; gateway wrapper will temporarily fall back to collar TLV time.");
+        ntpFallbackLogged = true;
+    }
 }
 
 // ═══════════════════════════════════════════════
@@ -1413,6 +1428,9 @@ static void webTask(void *param) {
                 Serial.printf("[WIFI] STA reconnect attempt in %s profile\n",
                               hubCommProfileName(hubCommProfile));
                 WiFi.begin(staSSID.c_str(), staPass.c_str());
+            } else if (hubProfileAllowsCloudRelay()
+                       && hubConnectivity.wifi_connected) {
+                syncHubClock(false);
             }
         }
 
