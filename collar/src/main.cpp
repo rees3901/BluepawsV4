@@ -46,8 +46,12 @@
 #include <bp_protocol.h>     // Binary TLV packet format, builder & parser
 #include <bp_config.h>       // LoRa params, profiles, AES key, timing constants
 #include <bp_crypto.h>       // Legacy AES helper retained for downlink experiments
+#include <bp_hmac_sha256.h>  // Tiny embedded HMAC-SHA256 helper for TLV auth
 #include "collar_hardware_profile.h"  // Testbed/production guardrails
 #include "collar_pins.h"     // GPIO pin assignments for this board
+#if __has_include("collar_secrets.h")
+#include "collar_secrets.h"  // Local-only per-collar HMAC key; ignored by Git
+#endif
 
 // FreeRTOS (built into Adafruit nRF52 BSP — no separate install needed)
 #include <FreeRTOS.h>
@@ -61,6 +65,13 @@
 // ═══════════════════════════════════════════════
 #ifndef MY_DEVICE_ID
 #define MY_DEVICE_ID  0x0001
+#endif
+
+#if defined(COLLAR_HMAC_KEY_BYTES)
+static const uint8_t collarHmacKey[32] = COLLAR_HMAC_KEY_BYTES;
+#define BLUEPAWS_COLLAR_HMAC_CONFIGURED 1
+#else
+#define BLUEPAWS_COLLAR_HMAC_CONFIGURED 0
 #endif
 
 // ═══════════════════════════════════════════════
@@ -175,6 +186,7 @@ static void     sendStatusResponse(uint32_t cmdMsgSeq); // Respond to status que
 static void     sendLostModeAlert();       // Alert: lost mode 2hr timeout expired
 static void     sendWakeCheckin();         // Home wake check-in (no GNSS, no routine LTE)
 static void     transmitPacket(uint8_t *buf, uint8_t len, bool suppressLed = false);  // Raw TLV LoRa TX
+static uint8_t  finalizeAuthenticatedPacket(uint8_t *buf); // Append/sign TLV v1.1 HMAC tag
 
 // Command handling
 static void     handleReceivedCommand(const uint8_t *buf, uint8_t len);
@@ -723,6 +735,34 @@ static uint32_t compileTimeUnix() {
 }
 
 // ═══════════════════════════════════════════════
+// Finalize + Authenticate TLV v1.1 Packet
+//
+// pkt_finalize() appends the correctly-sized auth-tag area. If this collar has
+// been locally provisioned with a 32-byte HMAC key, replace that placeholder
+// with the first 8 bytes of HMAC-SHA256(key, header + TLVs).
+// ═══════════════════════════════════════════════
+static uint8_t finalizeAuthenticatedPacket(uint8_t *buf) {
+    uint8_t pktLen = pkt_finalize(buf);
+
+#if BLUEPAWS_COLLAR_HMAC_CONFIGURED
+    const uint8_t authenticatedLen = pktLen - BP_AUTH_TAG_SIZE;
+    bp_hmac_sha256_truncated8(collarHmacKey,
+                              sizeof(collarHmacKey),
+                              buf,
+                              authenticatedLen,
+                              &buf[authenticatedLen]);
+#else
+    static bool warned = false;
+    if (!warned) {
+        Serial.println("[AUTH] No collar HMAC key configured; using zero placeholder tag");
+        warned = true;
+    }
+#endif
+
+    return pktLen;
+}
+
+// ═══════════════════════════════════════════════
 // Build and Send Telemetry (PKT_TELEMETRY)
 // ═══════════════════════════════════════════════
 static void sendTelemetry() {
@@ -783,8 +823,7 @@ static void sendTelemetry() {
         pkt_add_tlv_u8(buf, TLV_RESET_REASON, lastError);
     }
 
-    // Finalize: append v1.1 8-byte auth tag placeholder, return total length.
-    uint8_t pktLen = pkt_finalize(buf);
+    uint8_t pktLen = finalizeAuthenticatedPacket(buf);
 
     Serial.printf("[TX] TELEMETRY seq=%lu status=%s size=%dB\n",
                   messageSeq, bp_status_display(status), pktLen);
@@ -823,7 +862,7 @@ static void sendWakeCheckin() {
         pkt_add_tlv_u8(buf, TLV_RESET_REASON, lastError);
     }
 
-    uint8_t pktLen = pkt_finalize(buf);
+    uint8_t pktLen = finalizeAuthenticatedPacket(buf);
 
     Serial.printf("[TX] WAKE_CHECKIN seq=%lu homeCycles=%d size=%dB\n",
                   messageSeq, homeCycleCount, pktLen);
@@ -849,7 +888,7 @@ static void sendModeAck(uint32_t cmdMsgSeq) {
     pkt_add_tlv_u16(buf, TLV_SLEEP_INTERVAL, currentConfig->sleep_interval_s);
     pkt_add_tlv_u32(buf, TLV_CMD_MSG_ID,    cmdMsgSeq);
 
-    uint8_t pktLen = pkt_finalize(buf);
+    uint8_t pktLen = finalizeAuthenticatedPacket(buf);
     Serial.printf("[TX] MODE_ACK for cmd seq %lu\n", cmdMsgSeq);
     transmitPacket(buf, pktLen);
 }
@@ -869,7 +908,7 @@ static void sendStatusResponse(uint32_t cmdMsgSeq) {
     pkt_add_tlv_u8(buf,  TLV_HOME_CYCLES,     homeCycleCount);
     pkt_add_tlv_u32(buf, TLV_CMD_MSG_ID,     cmdMsgSeq);
 
-    uint8_t pktLen = pkt_finalize(buf);
+    uint8_t pktLen = finalizeAuthenticatedPacket(buf);
     Serial.printf("[TX] STATUS_RESP for cmd seq %lu\n", cmdMsgSeq);
     transmitPacket(buf, pktLen);
 }
@@ -885,7 +924,7 @@ static void sendFindAck(uint32_t cmdMsgSeq) {
     pkt_add_tlv_u32(buf, TLV_CMD_MSG_ID, cmdMsgSeq);
     pkt_add_tlv_u8(buf,  TLV_PROFILE,    currentProfile);
 
-    uint8_t pktLen = pkt_finalize(buf);
+    uint8_t pktLen = finalizeAuthenticatedPacket(buf);
     Serial.printf("[TX] FIND_ACK for cmd seq %lu\n", cmdMsgSeq);
     transmitPacket(buf, pktLen);
 }
@@ -902,7 +941,7 @@ static void sendLostModeAlert() {
     pkt_add_tlv_u32(buf, TLV_DURATION_S, duration);
     pkt_add_tlv_u8(buf,  TLV_NEW_MODE,  (uint8_t)LOST_MODE_FALLBACK);
 
-    uint8_t pktLen = pkt_finalize(buf);
+    uint8_t pktLen = finalizeAuthenticatedPacket(buf);
     Serial.printf("[TX] ALERT: lost mode timeout after %lus\n", duration);
     transmitPacket(buf, pktLen);
 }

@@ -15,6 +15,14 @@
 #define PIN_LORA_BUSY  13
 #define PIN_LORA_DIO1  14
 
+// ── KCT8103L RF Front-End Module (Heltec Tracker V2.x) ──
+// The Tracker V2 routes the SX1262 through an external PA/LNA switch.
+// Power/enable must be driven or the SX1262 can initialise while the
+// effective antenna path is not usable. Keep CTX LOW for RX, HIGH for TX.
+#define PIN_FEM_VCTRL  7
+#define PIN_FEM_CSD    4
+#define PIN_FEM_CTX    5
+
 // ── Status LED ──
 // Heltec Wireless Tracker V2 onboard white LED.
 #ifndef LED_BUILTIN
