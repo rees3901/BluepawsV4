@@ -10,5 +10,8 @@ __pycache__/
 *.py[cod]
 .venv*/
 
+# PlatformIO build artefacts.
+.pio/
+
 # Local Supabase CLI link and runtime state.
 supabase/.temp/
