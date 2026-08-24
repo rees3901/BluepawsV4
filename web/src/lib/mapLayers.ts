@@ -62,6 +62,6 @@ export function alternatePreviewMapLayer(activeLayer: MapLayerName): MapLayerNam
 
 export function previewMapZoom(activeZoom: number, previewLayer: MapLayerName) {
   const layer = MAP_LAYER_DEFINITIONS[previewLayer];
-  const zoom = Math.floor(activeZoom) - 2;
+  const zoom = Math.floor(activeZoom) - 1;
   return Math.max(0, Math.min(layer.maxZoom, zoom));
 }

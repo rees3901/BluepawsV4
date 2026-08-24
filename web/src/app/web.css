@@ -185,7 +185,7 @@ button, input, select {
 }
 
 .bp-click-layer-control:not(.bp-layer-open) .leaflet-control-layers-toggle {
-  display: block !important;
+  display: none !important;
 }
 
 .bp-click-layer-control:not(.bp-layer-open) .leaflet-control-layers-list {
@@ -197,9 +197,7 @@ button, input, select {
 }
 
 .bp-click-layer-control.bp-layer-open .leaflet-control-layers-toggle {
-  display: block !important;
-  float: none !important;
-  margin: 0 0 8px auto !important;
+  display: none !important;
 }
 
 .bp-click-layer-control.bp-layer-open .leaflet-control-layers-list {
@@ -224,13 +222,18 @@ button, input, select {
   box-shadow: none !important;
 }
 
+.leaflet-top.leaflet-right .bp-click-layer-control {
+  margin-top: 8px !important;
+  margin-right: 8px !important;
+}
+
 .bp-layer-preview-toggle {
   display: block;
-  width: 116px;
-  padding: 4px;
+  width: 112px;
+  padding: 3px;
   overflow: hidden;
   border: 1px solid rgb(115 196 255 / 55%);
-  border-radius: 11px;
+  border-radius: 9px;
   background: var(--bg-card);
   color: var(--text-primary);
   cursor: pointer;
@@ -246,10 +249,10 @@ button, input, select {
 
 .bp-layer-preview-map {
   display: block;
-  width: 106px;
-  height: 76px;
+  width: 104px;
+  height: 74px;
   overflow: hidden;
-  border-radius: 8px;
+  border-radius: 7px;
   background: var(--bg-primary);
 }
 
@@ -257,48 +260,22 @@ button, input, select {
   display: none;
 }
 
-.bp-layer-preview-caption {
-  display: block;
-  padding: 4px 3px 2px;
-  color: var(--text-secondary);
-  font-size: 0.6rem;
-  font-weight: 700;
-  line-height: 1.1;
-  text-align: left;
-  text-transform: uppercase;
-}
-
-.bp-layer-preview-label {
-  color: var(--text-primary);
-  font-weight: 800;
-  text-transform: none;
-}
-
 .bp-click-layer-control.bp-layer-open {
   min-width: 190px;
 }
 
 .bp-click-layer-control.bp-layer-open .bp-layer-preview-toggle {
-  width: 100%;
-  margin-bottom: 8px;
-}
-
-.bp-click-layer-control.bp-layer-open .bp-layer-preview-map {
-  width: 100%;
+  display: none;
 }
 
 @media (max-width: 620px) {
   .bp-layer-preview-toggle {
-    width: 88px;
+    width: 84px;
   }
 
   .bp-layer-preview-map {
-    width: 78px;
-    height: 56px;
-  }
-
-  .bp-layer-preview-caption {
-    font-size: 0.55rem;
+    width: 76px;
+    height: 54px;
   }
 }
 

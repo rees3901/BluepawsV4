@@ -78,7 +78,6 @@ export default function TrackingMap(props: TrackingMapProps) {
     let currentLayerName: MapLayerName = "Street";
     let layerPreviewMap: L.Map | null = null;
     let layerPreviewLayer: L.TileLayer | null = null;
-    let layerPreviewLabel: HTMLElement | null = null;
     let layerPreviewUpdateTimer: number | null = null;
     const layerControl = L.control.layers(baseLayers, undefined, { position: "topright", collapsed: true }).addTo(map);
     const layerControlElement = layerControl.getContainer();
@@ -99,7 +98,6 @@ export default function TrackingMap(props: TrackingMapProps) {
       layerPreviewLayer = createTileLayer(previewLayerName).addTo(layerPreviewMap);
       layerPreviewMap.setMaxZoom(previewDefinition.maxZoom);
       layerPreviewMap.setView(center, zoom, { animate: false });
-      if (layerPreviewLabel) layerPreviewLabel.textContent = previewLayerName;
       window.setTimeout(() => layerPreviewMap?.invalidateSize(), 0);
     };
     const scheduleLayerPreviewUpdate = () => {
@@ -117,9 +115,6 @@ export default function TrackingMap(props: TrackingMapProps) {
       previewButton.title = "Preview alternate map style and choose map layer";
       previewButton.setAttribute("aria-label", "Preview alternate map style and choose map layer");
       const previewMapElement = L.DomUtil.create("span", "bp-layer-preview-map", previewButton);
-      const previewCaption = L.DomUtil.create("span", "bp-layer-preview-caption", previewButton);
-      previewCaption.textContent = "Preview ";
-      layerPreviewLabel = L.DomUtil.create("strong", "bp-layer-preview-label", previewCaption);
       L.DomEvent.disableClickPropagation(layerControlElement);
       L.DomEvent.disableScrollPropagation(layerControlElement);
       L.DomEvent.on(previewButton, "click", (event: Event) => {
