@@ -14,8 +14,7 @@
   integrity check. Cloud ingestion authenticates the collar packet with the
   8-byte truncated HMAC-SHA256 tag.
 
-  NOTE: pkt_finalize() currently appends a zero tag as an embedded-firmware
-  placeholder. Production collar firmware must replace it with:
+  Use pkt_finalize_hmac_sha256_64() to append the production-format tag:
     first 8 bytes of HMAC-SHA256(device_key, header + TLVs)
 */
 
@@ -25,6 +24,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdio.h>
+#include <bp_hmac_sha256.h>
 
 #define BP_PROTOCOL_VERSION   1
 #define BP_HEADER_SIZE        32
@@ -313,6 +313,17 @@ static inline bool pkt_add_tlv_log_info(uint8_t *buf, uint16_t entries, uint16_t
 static inline uint8_t pkt_finalize(uint8_t *buf) {
     uint8_t auth_off = BP_HEADER_SIZE + buf[31];
     memset(&buf[auth_off], 0, BP_AUTH_TAG_SIZE);
+    return auth_off + BP_AUTH_TAG_SIZE;
+}
+
+static inline uint8_t pkt_finalize_hmac_sha256_64(uint8_t *buf,
+                                                  const uint8_t *device_key,
+                                                  uint8_t device_key_len) {
+    uint8_t auth_off = BP_HEADER_SIZE + buf[31];
+    uint8_t digest[BP_SHA256_DIGEST_SIZE];
+    bp_hmac_sha256(device_key, device_key_len, buf, auth_off, digest);
+    memcpy(&buf[auth_off], digest, BP_AUTH_TAG_SIZE);
+    memset(digest, 0, sizeof(digest));
     return auth_off + BP_AUTH_TAG_SIZE;
 }
 

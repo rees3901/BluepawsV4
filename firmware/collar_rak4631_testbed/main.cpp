@@ -55,6 +55,12 @@ static constexpr uint16_t FAKE_BATTERY_MV = 3900;
 static constexpr uint16_t FAKE_ACCURACY_M = 8;
 static constexpr uint8_t FAKE_SATELLITES = 9;
 static constexpr uint16_t FW_VERSION_V0_1 = 0x0001;
+static constexpr uint8_t TEST_DEVICE_HMAC_KEY[32] = {
+  0xE1, 0x9F, 0x7E, 0x88, 0x71, 0x5A, 0x5D, 0x9D,
+  0x37, 0xE6, 0xF8, 0x86, 0x74, 0x90, 0xBB, 0x8A,
+  0x59, 0xCF, 0xE6, 0xE5, 0xD0, 0xC0, 0x7F, 0x90,
+  0x3E, 0x29, 0x02, 0x83, 0x99, 0x56, 0xC0, 0x52,
+};
 
 static constexpr uint16_t STACK_LORA = 4096;
 static constexpr uint16_t STACK_RUNTIME = 6144;
@@ -234,7 +240,9 @@ static TxPacket buildPacket(bp_status_t status,
   pkt_add_tlv_u16(packet.bytes, TLV_FW_VER, FW_VERSION_V0_1);
   pkt_add_tlv_u32(packet.bytes, TLV_UPTIME_S, millis() / 1000UL);
 
-  packet.len = pkt_finalize(packet.bytes);
+  packet.len = pkt_finalize_hmac_sha256_64(packet.bytes,
+                                           TEST_DEVICE_HMAC_KEY,
+                                           sizeof(TEST_DEVICE_HMAC_KEY));
   return packet;
 }
 
@@ -581,7 +589,7 @@ void setup() {
                 BP_MAX_PACKET_SIZE);
   Serial.printf("  Fake GPS centre: %.7f, %.7f\n", HOME_LAT, HOME_LON);
   Serial.println("  Radio path: raw TLV over private LoRa, no JSON");
-  Serial.println("  Auth tag: placeholder zero tag until embedded HMAC is wired");
+  Serial.println("  Auth tag: HMAC-SHA256-64 using device 1001 bench key");
   Serial.println("  Runtime: FreeRTOS LoRa + profile scheduler + serial command tasks");
   Serial.println("════════════════════════════════════════════");
 
