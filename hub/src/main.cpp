@@ -297,6 +297,7 @@ static void sendCommand(uint16_t target_id, bp_pkt_type_t type, bp_profile_t mod
 static void sendCommandFind(uint16_t target_id, bp_pkt_type_t type,
                               bp_profile_t mode, uint8_t ledFlash,
                               bp_buzzer_pattern_t buzzerPattern);
+static void sendStatusCommand(uint16_t target_id);
 static void checkPendingAcks();
 static void handleAck(const uint8_t *buf);
 
@@ -1224,6 +1225,25 @@ static void handleApiStatus() {
     httpServer.send(200, "application/json", buf);
 }
 
+static String getPostField(const String &body, const char *name) {
+    if (httpServer.hasArg(name)) {
+        return httpServer.arg(name);
+    }
+
+    String marker = String(name) + "=";
+    int idx = body.indexOf(marker);
+    if (idx < 0) {
+        return "";
+    }
+
+    String value = body.substring(idx + marker.length());
+    int ampIdx = value.indexOf('&');
+    if (ampIdx >= 0) {
+        value = value.substring(0, ampIdx);
+    }
+    return value;
+}
+
 // ── API: POST /api/command ──
 // Sends a mode-change command to a collar.
 // Body format: device=XXXX&mode=normal|active|lost|powersave
@@ -1240,17 +1260,14 @@ static void handleApiCommand() {
     uint16_t targetId = 0;
     bp_profile_t mode = PROFILE_UNKNOWN;
 
-    int dIdx = body.indexOf("device=");
-    if (dIdx >= 0) {
-        targetId = (uint16_t)strtoul(body.c_str() + dIdx + 7, NULL, 16);
+    String deviceStr = getPostField(body, "device");
+    if (deviceStr.length() > 0) {
+        targetId = (uint16_t)strtoul(deviceStr.c_str(), NULL, 16);
     }
 
     // Parse the desired operating mode
-    int mIdx = body.indexOf("mode=");
-    if (mIdx >= 0) {
-        String modeStr = body.substring(mIdx + 5);
-        int ampIdx = modeStr.indexOf('&');
-        if (ampIdx >= 0) modeStr = modeStr.substring(0, ampIdx);
+    String modeStr = getPostField(body, "mode");
+    if (modeStr.length() > 0) {
         mode = bp_profile_from_name(modeStr.c_str());  // "normal" → PROFILE_NORMAL, etc.
     }
 
@@ -1278,9 +1295,9 @@ static void handleApiFind() {
 
     // Parse target device ID
     uint16_t targetId = 0;
-    int dIdx = body.indexOf("device=");
-    if (dIdx >= 0) {
-        targetId = (uint16_t)strtoul(body.c_str() + dIdx + 7, NULL, 16);
+    String deviceStr = getPostField(body, "device");
+    if (deviceStr.length() > 0) {
+        targetId = (uint16_t)strtoul(deviceStr.c_str(), NULL, 16);
     }
 
     if (targetId == 0) {
@@ -1317,6 +1334,39 @@ static void handleApiFind() {
     snprintf(resp, sizeof(resp),
         "{\"ok\":true,\"device\":%u,\"pattern\":%u,\"flash\":%u}",
         targetId, pattern, flashCount);
+    httpServer.send(200, "application/json", resp);
+}
+
+// ── API: POST /api/device-status ──
+// Queues a collar status command. The collar replies with STATUS_RESP,
+// including its current profile, TX power, sleep interval, GPS warm-start
+// state, home-cycle counter, and original command sequence for ACK matching.
+// Body format: device=XXXX where XXXX is a hex device ID, e.g. 03E9 for 1001.
+static void handleApiDeviceStatusCommand() {
+    if (httpServer.method() != HTTP_POST) {
+        httpServer.send(405, "text/plain", "POST only");
+        return;
+    }
+
+    String body = httpServer.arg("plain");
+
+    uint16_t targetId = 0;
+    String deviceStr = getPostField(body, "device");
+    if (deviceStr.length() > 0) {
+        targetId = (uint16_t)strtoul(deviceStr.c_str(), NULL, 16);
+    }
+
+    if (targetId == 0) {
+        httpServer.send(400, "text/plain", "Bad request: device=XXXX required");
+        return;
+    }
+
+    sendStatusCommand(targetId);
+
+    char resp[128];
+    snprintf(resp, sizeof(resp),
+        "{\"ok\":true,\"device\":%u,\"command\":\"status\"}",
+        targetId);
     httpServer.send(200, "application/json", resp);
 }
 
@@ -1405,6 +1455,7 @@ static void initWebServer() {
     httpServer.on("/api/devices",  HTTP_GET,  handleApiDevices);  // Get all device states
     httpServer.on("/api/status",   HTTP_GET,  handleApiStatus);   // Get hub diagnostics
     httpServer.on("/api/command",  HTTP_POST, handleApiCommand);  // Send mode command
+    httpServer.on("/api/device-status", HTTP_POST, handleApiDeviceStatusCommand); // Request collar status
     httpServer.on("/api/find",     HTTP_POST, handleApiFind);     // Trigger find (buzzer+LED)
     httpServer.on("/api/config",   HTTP_POST, handleApiConfig);   // Save WiFi/cloud config
     httpServer.on("/api/ble",      HTTP_GET,  handleApiBle);       // BLE scan results (portable mode)
@@ -1755,6 +1806,11 @@ static void cloudTask(void *param) {
 // Convenience wrapper for mode commands (no buzzer/LED parameters)
 static void sendCommand(uint16_t target_id, bp_pkt_type_t type, bp_profile_t mode) {
     sendCommandFind(target_id, type, mode, 0, BUZZER_OFF);
+}
+
+// Convenience wrapper for status request commands.
+static void sendStatusCommand(uint16_t target_id) {
+    sendCommandFind(target_id, PKT_CMD_STATUS, PROFILE_UNKNOWN, 0, BUZZER_OFF);
 }
 
 // Full command builder — handles both mode commands and find commands.
