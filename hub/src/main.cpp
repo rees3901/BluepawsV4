@@ -120,6 +120,9 @@ static QueueHandle_t cmdQueue = NULL;
 struct cmd_entry_t {
     uint8_t  buf[BP_MAX_PACKET_SIZE];  // Pre-built packet (before encryption)
     uint8_t  len;                      // Packet length in bytes
+    uint16_t targetId;                 // Target collar
+    uint16_t cmdSeq;                   // Downlink command sequence for ACK matching
+    bp_pkt_type_t type;                // Command class
 };
 
 // ── Cloud Relay Queue ──
@@ -155,7 +158,7 @@ struct pending_cmd_t {
     uint32_t cmdSeq;        // msg_seq we assigned to this command
     uint16_t targetId;      // device_id of the target collar
     bp_pkt_type_t type;     // command type (PKT_CMD_MODE, PKT_CMD_FIND, etc.)
-    uint32_t sentAtMs;      // millis() timestamp when last sent
+    uint32_t sentAtMs;      // millis() timestamp when last sent; 0 = queued but not TX-confirmed yet
     uint8_t  retries;       // how many retransmissions so far
     uint8_t  buf[BP_MAX_PACKET_SIZE];  // original packet (for retransmission)
     uint8_t  len;           // packet length
@@ -165,6 +168,7 @@ struct pending_cmd_t {
 #define MAX_PENDING_CMDS 4                          // Up to 4 commands in-flight at once
 static pending_cmd_t pendingCmds[MAX_PENDING_CMDS];
 static SemaphoreHandle_t pendingMutex = NULL;       // Protects pendingCmds array
+static volatile TickType_t commandRxOpportunityUntil = 0;
 
 // ── WiFi / Cloud State ──
 static bool staConnected = false;             // true if connected to home router
@@ -304,6 +308,8 @@ static void sendCommandFind(uint16_t target_id, bp_pkt_type_t type,
 static void sendStatusCommand(uint16_t target_id);
 static void checkPendingAcks();
 static void handleAck(const uint8_t *buf);
+static void noteCommandSent(const cmd_entry_t &cmd);
+static void queuePendingCommandForDevice(uint16_t targetId);
 static void handleSerialCommand(String line);
 static void printSerialHelp();
 static void printHubSerialStatus();
@@ -735,7 +741,9 @@ static void loraTask(void *param) {
         // to avoid flooding the LoRa channel.
         cmd_entry_t cmd;
         TickType_t now = xTaskGetTickCount();
-        if ((now - lastCmdTx) >= pdMS_TO_TICKS(CMD_QUEUE_INTERVAL_MS)) {
+        bool collarRxOpportunity = commandRxOpportunityUntil != 0 &&
+                                   (int32_t)(commandRxOpportunityUntil - now) > 0;
+        if ((now - lastCmdTx) >= pdMS_TO_TICKS(CMD_QUEUE_INTERVAL_MS) || collarRxOpportunity) {
             if (xQueueReceive(cmdQueue, &cmd, 0) == pdTRUE) {
                 // Take SPI mutex, transmit, then go back to RX mode
                 if (xSemaphoreTake(loraMutex, pdMS_TO_TICKS(200))) {
@@ -747,11 +755,16 @@ static void loraTask(void *param) {
 
                     if (state == RADIOLIB_ERR_NONE) {
                         txCount++;
-                        Serial.printf("[LORA] CMD TX %d bytes\n", cmd.len);
+                        noteCommandSent(cmd);
+                        Serial.printf("[LORA] CMD TX %d bytes seq=%u -> %s\n",
+                                      cmd.len, cmd.cmdSeq, bp_device_name(cmd.targetId));
                     } else {
                         Serial.printf("[LORA] TX failed: %d\n", state);
                     }
                     lastCmdTx = now;
+                    if (collarRxOpportunity) {
+                        commandRxOpportunityUntil = 0;
+                    }
                 }
             }
         }
@@ -779,7 +792,12 @@ static void loraTask(void *param) {
 static void handleAck(const uint8_t *buf) {
     // The collar puts the original command's msg_seq in TLV_CMD_MSG_ID
     uint32_t ackedSeq = 0;
-    if (!pkt_tlv_get_u32(buf, TLV_CMD_MSG_ID, &ackedSeq)) return;
+    uint16_t ackedSeq16 = 0;
+    if (pkt_tlv_get_u16(buf, TLV_CMD_MSG_ID, &ackedSeq16)) {
+        ackedSeq = ackedSeq16;
+    } else if (!pkt_tlv_get_u32(buf, TLV_CMD_MSG_ID, &ackedSeq)) {
+        return;
+    }
 
     if (xSemaphoreTake(pendingMutex, pdMS_TO_TICKS(50))) {
         for (int i = 0; i < MAX_PENDING_CMDS; i++) {
@@ -803,6 +821,46 @@ static void handleAck(const uint8_t *buf) {
     }
 }
 
+static void noteCommandSent(const cmd_entry_t &cmd) {
+    if (xSemaphoreTake(pendingMutex, pdMS_TO_TICKS(20))) {
+        for (int i = 0; i < MAX_PENDING_CMDS; i++) {
+            if (pendingCmds[i].active && pendingCmds[i].cmdSeq == cmd.cmdSeq) {
+                pendingCmds[i].sentAtMs = millis();
+                break;
+            }
+        }
+        xSemaphoreGive(pendingMutex);
+    }
+}
+
+static void queuePendingCommandForDevice(uint16_t targetId) {
+    if (targetId == DEVICE_ID_HUB || targetId == DEVICE_ID_BROADCAST) return;
+
+    if (xSemaphoreTake(pendingMutex, pdMS_TO_TICKS(20))) {
+        for (int i = 0; i < MAX_PENDING_CMDS; i++) {
+            if (!pendingCmds[i].active || pendingCmds[i].targetId != targetId) continue;
+
+            cmd_entry_t cmd;
+            memcpy(cmd.buf, pendingCmds[i].buf, pendingCmds[i].len);
+            cmd.len = pendingCmds[i].len;
+            cmd.targetId = pendingCmds[i].targetId;
+            cmd.cmdSeq = (uint16_t)(pendingCmds[i].cmdSeq & 0xFFFF);
+            cmd.type = pendingCmds[i].type;
+
+            commandRxOpportunityUntil = xTaskGetTickCount() + pdMS_TO_TICKS(8000);
+            if (xQueueSendToFront(cmdQueue, &cmd, 0) == pdTRUE) {
+                Serial.printf("[CMD] RX window opportunity: queued seq %u -> %s\n",
+                              cmd.cmdSeq, bp_device_name(targetId));
+            } else {
+                Serial.printf("[CMD] RX window opportunity but command queue full for %s\n",
+                              bp_device_name(targetId));
+            }
+            break;
+        }
+        xSemaphoreGive(pendingMutex);
+    }
+}
+
 // Called every loop iteration by loraTask.
 // Checks if any pending commands have timed out waiting for ACK.
 // If so, retransmit up to CMD_MAX_RETRIES times, then expire.
@@ -811,16 +869,20 @@ static void checkPendingAcks() {
         uint32_t now = millis();
         for (int i = 0; i < MAX_PENDING_CMDS; i++) {
             if (!pendingCmds[i].active) continue;                      // Skip unused slots
+            if (pendingCmds[i].sentAtMs == 0) continue;                 // Queued but not TX-confirmed yet
             if (now - pendingCmds[i].sentAtMs < CMD_ACK_TIMEOUT_MS) continue;  // Not timed out yet
 
             if (pendingCmds[i].retries < CMD_MAX_RETRIES) {
                 // Haven't exhausted retries — re-queue the packet for TX
                 pendingCmds[i].retries++;
-                pendingCmds[i].sentAtMs = now;  // Reset timeout timer
+                pendingCmds[i].sentAtMs = 0;  // Timeout restarts when TX is confirmed
 
                 cmd_entry_t cmd;
                 memcpy(cmd.buf, pendingCmds[i].buf, pendingCmds[i].len);
                 cmd.len = pendingCmds[i].len;
+                cmd.targetId = pendingCmds[i].targetId;
+                cmd.cmdSeq = (uint16_t)(pendingCmds[i].cmdSeq & 0xFFFF);
+                cmd.type = pendingCmds[i].type;
                 xQueueSend(cmdQueue, &cmd, 0);  // Put back in TX queue
 
                 Serial.printf("[ACK] Retry %d/%d for seq %lu → %s\n",
@@ -904,6 +966,12 @@ static void handlePacket(const uint8_t *buf, uint8_t len, int16_t rssi, float sn
     char jsonBuf[384];
     buildDeviceJson(buf, rssi, snr, jsonBuf, sizeof(jsonBuf));
     sseBroadcast("telemetry", jsonBuf);
+
+    // Step 8: A valid uplink means the collar should now be in its short RX
+    // command window. If a bench command is pending for this collar, push it to
+    // the front of the LoRa TX queue immediately rather than waiting for blind
+    // retry timing.
+    queuePendingCommandForDevice(devId);
 }
 
 // Build a JSON string from a raw packet for the web GUI.
@@ -2071,11 +2139,14 @@ static void sendCommandFind(uint16_t target_id, bp_pkt_type_t type,
                               bp_buzzer_pattern_t buzzerPattern) {
     cmd_entry_t cmd;
     uint8_t txReason = (uint8_t)type;      // Temporary downlink compatibility mapping
-    uint32_t seq = ++cmdSeqCounter;        // Unique sequence number for ACK matching
+    uint16_t seq = (uint16_t)(++cmdSeqCounter & 0xFFFF); // Compact command sequence for ACK matching
+    if (seq == 0) {
+        seq = (uint16_t)(++cmdSeqCounter & 0xFFFF);
+    }
 
     // Build the fixed header. Downlink commands still use the compatibility
     // pkt_type names until the command protocol is formalized separately.
-    pkt_init(cmd.buf, DEVICE_ID_HUB, seq, 0, STATUS_OK, txReason);
+    pkt_init(cmd.buf, target_id, seq, 0, STATUS_HOME, PROFILE_NORMAL, 0, txReason);
 
     // Add TLV payload based on command type
     if (type == PKT_CMD_MODE && mode != PROFILE_UNKNOWN) {
@@ -2087,35 +2158,52 @@ static void sendCommandFind(uint16_t target_id, bp_pkt_type_t type,
         pkt_add_tlv_u8(cmd.buf, TLV_BUZZER_PATTERN, (uint8_t)buzzerPattern);  // Which sound to play
     }
 
-    // Override the device_id field with the TARGET collar's ID
-    // (pkt_init set it to DEVICE_ID_HUB, but commands are addressed to the collar)
-    memcpy(&cmd.buf[1], &target_id, 2);
-
     // Finalize: append the v1.1 auth-tag bytes and return total packet length.
     cmd.len = pkt_finalize(cmd.buf);
+    cmd.targetId = target_id;
+    cmd.cmdSeq = seq;
+    cmd.type = type;
 
-    // Queue the packet for the loraTask to transmit
+    bool pendingRegistered = false;
+    if (xSemaphoreTake(pendingMutex, pdMS_TO_TICKS(50))) {
+        for (int i = 0; i < MAX_PENDING_CMDS; i++) {
+            if (!pendingCmds[i].active) {
+                pendingCmds[i].cmdSeq   = seq;
+                pendingCmds[i].targetId = target_id;
+                pendingCmds[i].type     = type;
+                pendingCmds[i].sentAtMs = 0;
+                pendingCmds[i].retries  = 0;
+                memcpy(pendingCmds[i].buf, cmd.buf, cmd.len);
+                pendingCmds[i].len      = cmd.len;
+                pendingCmds[i].active   = true;
+                pendingRegistered = true;
+                break;
+            }
+        }
+        xSemaphoreGive(pendingMutex);
+    }
+
+    if (!pendingRegistered) {
+        Serial.printf("[CMD] No pending ACK slot available for %s\n",
+                      bp_device_name(target_id));
+        return;
+    }
+
+    // Queue the packet for the loraTask to transmit.
     if (xQueueSend(cmdQueue, &cmd, pdMS_TO_TICKS(100)) == pdTRUE) {
-        Serial.printf("[CMD] Queued type=0x%02X for %s (seq %lu)\n",
+        Serial.printf("[CMD] Queued type=0x%02X for %s (seq %u)\n",
                       type, bp_device_name(target_id), seq);
-
-        // Register in the pending ACK tracker so we can retry if needed
+    } else {
         if (xSemaphoreTake(pendingMutex, pdMS_TO_TICKS(50))) {
             for (int i = 0; i < MAX_PENDING_CMDS; i++) {
-                if (!pendingCmds[i].active) {
-                    // Found a free slot — store the command details
-                    pendingCmds[i].cmdSeq   = seq;
-                    pendingCmds[i].targetId = target_id;
-                    pendingCmds[i].type     = type;
-                    pendingCmds[i].sentAtMs = millis();
-                    pendingCmds[i].retries  = 0;
-                    memcpy(pendingCmds[i].buf, cmd.buf, cmd.len);
-                    pendingCmds[i].len      = cmd.len;
-                    pendingCmds[i].active   = true;
+                if (pendingCmds[i].active && pendingCmds[i].cmdSeq == seq) {
+                    pendingCmds[i].active = false;
                     break;
                 }
             }
             xSemaphoreGive(pendingMutex);
         }
+        Serial.printf("[CMD] Queue full; dropped command seq %u for %s\n",
+                      seq, bp_device_name(target_id));
     }
 }

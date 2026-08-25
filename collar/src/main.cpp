@@ -1307,12 +1307,13 @@ static void sendWakeCheckin() {
 static void sendModeAck(uint32_t cmdMsgSeq) {
     messageSeq++;
     uint8_t buf[BP_MAX_PACKET_SIZE];
-    pkt_init(buf, MY_DEVICE_ID, messageSeq, 0, STATUS_OK, PKT_MODE_ACK);
+    pkt_init(buf, MY_DEVICE_ID, messageSeq, 0,
+             STATUS_HOME, currentProfile, 0, TX_ACK);
 
     pkt_add_tlv_u8(buf,  TLV_PROFILE,       currentProfile);
     pkt_add_tlv_i8(buf,  TLV_TX_POWER,      currentConfig->tx_power_dBm);
     pkt_add_tlv_u16(buf, TLV_SLEEP_INTERVAL, currentConfig->sleep_interval_s);
-    pkt_add_tlv_u32(buf, TLV_CMD_MSG_ID,    cmdMsgSeq);
+    pkt_add_tlv_u16(buf, TLV_CMD_MSG_ID,    (uint16_t)(cmdMsgSeq & 0xFFFF));
 
     uint8_t pktLen = finalizeAuthenticatedPacket(buf);
     Serial.printf("[TX] MODE_ACK for cmd seq %lu\n", cmdMsgSeq);
@@ -1325,14 +1326,15 @@ static void sendModeAck(uint32_t cmdMsgSeq) {
 static void sendStatusResponse(uint32_t cmdMsgSeq) {
     messageSeq++;
     uint8_t buf[BP_MAX_PACKET_SIZE];
-    pkt_init(buf, MY_DEVICE_ID, messageSeq, 0, STATUS_OK, PKT_STATUS_RESP);
+    pkt_init(buf, MY_DEVICE_ID, messageSeq, 0,
+             STATUS_HOME, currentProfile, 0, TX_ACK);
 
     pkt_add_tlv_u8(buf,  TLV_PROFILE,        currentProfile);
     pkt_add_tlv_i8(buf,  TLV_TX_POWER,       currentConfig->tx_power_dBm);
     pkt_add_tlv_u16(buf, TLV_SLEEP_INTERVAL,  currentConfig->sleep_interval_s);
     pkt_add_tlv_u8(buf,  TLV_GPS_WARM,        gpsWarmStart ? 1 : 0);
     pkt_add_tlv_u8(buf,  TLV_HOME_CYCLES,     homeCycleCount);
-    pkt_add_tlv_u32(buf, TLV_CMD_MSG_ID,     cmdMsgSeq);
+    pkt_add_tlv_u16(buf, TLV_CMD_MSG_ID,     (uint16_t)(cmdMsgSeq & 0xFFFF));
 
     uint8_t pktLen = finalizeAuthenticatedPacket(buf);
     Serial.printf("[TX] STATUS_RESP for cmd seq %lu\n", cmdMsgSeq);
@@ -1345,9 +1347,10 @@ static void sendStatusResponse(uint32_t cmdMsgSeq) {
 static void sendFindAck(uint32_t cmdMsgSeq) {
     messageSeq++;
     uint8_t buf[BP_MAX_PACKET_SIZE];
-    pkt_init(buf, MY_DEVICE_ID, messageSeq, 0, STATUS_OK, PKT_FIND_ACK);
+    pkt_init(buf, MY_DEVICE_ID, messageSeq, 0,
+             STATUS_HOME, currentProfile, 0, TX_ACK);
 
-    pkt_add_tlv_u32(buf, TLV_CMD_MSG_ID, cmdMsgSeq);
+    pkt_add_tlv_u16(buf, TLV_CMD_MSG_ID, (uint16_t)(cmdMsgSeq & 0xFFFF));
     pkt_add_tlv_u8(buf,  TLV_PROFILE,    currentProfile);
 
     uint8_t pktLen = finalizeAuthenticatedPacket(buf);
