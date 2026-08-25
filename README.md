@@ -32,7 +32,10 @@ The Sequans GM02SP replaces the previous BG77 + L76K combination. A single modul
 BluepawsV4/
 ├── README.md                         # Repository overview
 ├── docs/
-│   └── TLV_PROTOCOL_V1_1.md           # Canonical TLV packet specification
+│   ├── TLV_PROTOCOL_V1_1.md          # Canonical TLV packet specification
+│   ├── DEV_TO_PROD_STRATEGY.md       # Environment promotion strategy
+│   ├── ENVIRONMENT_MATRIX.md         # DEV vs PROD separation rules
+│   └── PRODUCTION_READINESS_CHECKLIST.md # Go-live checklist
 ├── platformio.ini                    # Multi-environment build config
 ├── shared/lib/BluepawsProtocol/      # Shared protocol & config
 │   ├── README.md                     # Protocol implementation notes
@@ -114,6 +117,18 @@ npm run dev
 For Vercel, import this repository and select `web` as the project **Root Directory**. Leave the Install, Build, and Output settings at their detected Next.js defaults. See `web/README.md` for the exact deployment settings and the planned HTTPS Edge Function -> Supabase -> Realtime data path.
 
 The cloud ingestion schema, device registry, and authenticated Edge Function are under `supabase/`. See `tools/VPS_SIMULATOR.md` for the Ubuntu VPS client and `tools/TLV_SIMULATOR_GUI.md` for the desktop packet-builder and manual HTTPS test console.
+
+## Development and Production Environments
+
+The existing Supabase `BluepawsV4` project is the permanent DEV/Test environment. Production will use a separate clean Supabase project reconstructed from the version-controlled migrations in this repository. Development and simulator data must not be migrated into production.
+
+The same GitHub repository and Vercel project are used for both environments, with Vercel environment configuration selecting the appropriate Supabase project.
+
+See:
+
+- [`docs/DEV_TO_PROD_STRATEGY.md`](docs/DEV_TO_PROD_STRATEGY.md) for the authoritative promotion strategy and decision record.
+- [`docs/ENVIRONMENT_MATRIX.md`](docs/ENVIRONMENT_MATRIX.md) for DEV vs PROD separation rules.
+- [`docs/PRODUCTION_READINESS_CHECKLIST.md`](docs/PRODUCTION_READINESS_CHECKLIST.md) for the pre-launch security and operational checklist.
 
 ## TLV Protocol v1.1
 
