@@ -1,0 +1,11 @@
+FILE_TYPE = MULTI_PHYS_TABLE;
+
+PART 'BQ24074RGTR'
+CLASS = IC
+{========================================================================================}
+:"MANUFACTURER_NAME", "MANUFACTURER_PART_NUMBER"= "PART_NUMBER", "JEDEC_TYPE", "PACK_TYPE", "MOUSER_PART_NUMBER", "MOUSER_PRICE/STOCK", "ARROW_PART_NUMBER", "ARROW_PRICE/STOCK", "DESCRIPTION", "DATASHEET", "HEIGHT";
+{========================================================================================}
+ "Texas Instruments", "BQ24074RGTR" (!) = "", "QFN50P300X300X100-17N-D", "Quad Flat No-Lead", "595-BQ24074RGTR", "https://www.mouser.co.uk/ProductDetail/Texas-Instruments/BQ24074RGTR?qs=ZV%2Fxhq4oszp2Nll7fIx5wg%3D%3D", "BQ24074RGTR", "https://www.arrow.com/en/products/bq24074rgtr/texas-instruments?utm_currency=USD&region=nac", "USB-Friendly Li-Ion Battery Charger and Power-Path Management IC, 10.5V OVP", "http://www.ti.com/lit/ds/symlink/bq24074.pdf", "1 mm"
+END_PART
+
+END.

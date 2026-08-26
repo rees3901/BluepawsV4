@@ -1,0 +1,251 @@
+;Proteus Design Interchange Format
+(PDIF
+ (vendor "SamacSys Limited")
+ (version 1 0)
+ (library
+  (part "SIM8055-6-1-14-01-A"
+   (description "Memory Card Connectors Nano SIM Card Connector,Push-Pull Type, 6 PIN, SMT, with normally open card detection switch, Profile 1.35mm, with location post")
+   (family "CON")
+   (package "SIM8055611401A")
+   (attribute "Datasheet Link" "https://gct.co/connector/sim8055")
+   (attribute "Manufacturer_Name" "GCT (GLOBAL CONNECTOR TECHNOLOGY)")
+   (attribute "Manufacturer_Part_Number" "SIM8055-6-1-14-01-A")
+   (attribute "Mouser Part Number" "640-SIM8055611401A")
+   (attribute "Mouser Price/Stock" "https://www.mouser.co.uk/ProductDetail/GCT/SIM8055-6-1-14-01-A?qs=KUoIvG%2F9Ilbi5BaFCOA%2Fkg%3D%3D")
+   (attribute "Arrow Part Number" "")
+   (attribute "Arrow Price/Stock" "")
+   (gate
+    (symbol "SIM8055-6-1-14-01-A")
+    (pin "VCC" C1 PS)
+    (pin "RST" C2 PS)
+    (pin "CLK" C3 PS)
+    (pin "GND" C5 PS)
+    (pin "VPP" C6 PS)
+    (pin "I/O" C7 PS)
+    (pin "CD" CD1 PS)
+    (pin "MH1" MH1 PS)
+    (pin "MH2" MH2 PS)
+    (pin "MP1" MP1 PS)
+    (pin "MP2" MP2 PS)
+   )
+  )
+  (symbol "SIM8055-6-1-14-01-A"
+   (units THOU)
+   (origin (pt 0 0))
+   (graphic
+    (stroke 10)
+    (path (pt 200 100) (pt 800 100) (pt 800 -600) (pt 200 -600) (pt 200 100) (closed))
+   )
+   (terminal
+    (body (symbol "PIN") (pt 0 0) (rot 0) (mir 0) (visible true))
+    (name (pt 230 0) (rot 0) (just MIDDLE LEFT) (visible true))
+    (number (pt 140 20) (rot 0) (just BOTTOM RIGHT) (visible true)))
+   (terminal
+    (body (symbol "PIN") (pt 0 -100) (rot 0) (mir 0) (visible true))
+    (name (pt 230 0) (rot 0) (just MIDDLE LEFT) (visible true))
+    (number (pt 140 20) (rot 0) (just BOTTOM RIGHT) (visible true)))
+   (terminal
+    (body (symbol "PIN") (pt 0 -200) (rot 0) (mir 0) (visible true))
+    (name (pt 230 0) (rot 0) (just MIDDLE LEFT) (visible true))
+    (number (pt 140 20) (rot 0) (just BOTTOM RIGHT) (visible true)))
+   (terminal
+    (body (symbol "PIN") (pt 0 -300) (rot 0) (mir 0) (visible true))
+    (name (pt 230 0) (rot 0) (just MIDDLE LEFT) (visible true))
+    (number (pt 140 20) (rot 0) (just BOTTOM RIGHT) (visible true)))
+   (terminal
+    (body (symbol "PIN") (pt 0 -400) (rot 0) (mir 0) (visible true))
+    (name (pt 230 0) (rot 0) (just MIDDLE LEFT) (visible true))
+    (number (pt 140 20) (rot 0) (just BOTTOM RIGHT) (visible true)))
+   (terminal
+    (body (symbol "PIN") (pt 0 -500) (rot 0) (mir 0) (visible true))
+    (name (pt 230 0) (rot 0) (just MIDDLE LEFT) (visible true))
+    (number (pt 140 20) (rot 0) (just BOTTOM RIGHT) (visible true)))
+   (terminal
+    (body (symbol "PIN") (pt 1000 0) (rot 0) (mir X) (visible true))
+    (name (pt 230 0) (rot 0) (just MIDDLE LEFT) (visible true))
+    (number (pt 140 20) (rot 0) (just BOTTOM RIGHT) (visible true)))
+   (terminal
+    (body (symbol "PIN") (pt 1000 -100) (rot 0) (mir X) (visible true))
+    (name (pt 230 0) (rot 0) (just MIDDLE LEFT) (visible true))
+    (number (pt 140 20) (rot 0) (just BOTTOM RIGHT) (visible true)))
+   (terminal
+    (body (symbol "PIN") (pt 1000 -200) (rot 0) (mir X) (visible true))
+    (name (pt 230 0) (rot 0) (just MIDDLE LEFT) (visible true))
+    (number (pt 140 20) (rot 0) (just BOTTOM RIGHT) (visible true)))
+   (terminal
+    (body (symbol "PIN") (pt 1000 -300) (rot 0) (mir X) (visible true))
+    (name (pt 230 0) (rot 0) (just MIDDLE LEFT) (visible true))
+    (number (pt 140 20) (rot 0) (just BOTTOM RIGHT) (visible true)))
+   (terminal
+    (body (symbol "PIN") (pt 1000 -400) (rot 0) (mir X) (visible true))
+    (name (pt 230 0) (rot 0) (just MIDDLE LEFT) (visible true))
+    (number (pt 140 20) (rot 0) (just BOTTOM RIGHT) (visible true)))
+  )
+  (symbol "PIN"
+   (units THOU)
+   (origin (pt 0 0))
+   (graphic
+    (stroke 10)
+    (path (pt 0 0) (pt 200 0))))
+  (symbol "PINSHORT"
+   (units THOU)
+   (origin (pt 0 0))
+   (graphic
+    (stroke 10)
+    (path (pt 0 0) (pt 100 0))))
+  (package "SIM8055611401A"
+   (units MM)
+   (layer TASM
+    (graphic
+     (stroke 0.1)
+     (path
+      (closed true)
+      (pt -4.77 -6.1)
+      (pt 4.77 -6.1)
+      (pt 4.77 6.1)
+      (pt -4.77 6.1)
+      (pt -4.77 -6.1))))
+   (layer OCCA
+    (graphic
+     (stroke 0.1)
+     (path
+      (closed true)
+      (pt -6.8 7.145)
+      (pt 6.8 7.145)
+      (pt 6.8 -7.145)
+      (pt -6.8 -7.145)
+      (pt -6.8 7.145))))
+   (layer TSLK
+    (graphic
+     (stroke 0.2)
+     (path
+      (closed false)
+      (pt 2.54 -6.7)
+      (arc (pt 2.540 -6.700) (pt 2.490 -6.700) (pt 2.590 -6.600) (start 180.0) (sweep -90.0))
+      (pt 2.54 -6.6)
+      (arc (pt 2.540 -6.600) (pt 2.490 -6.700) (pt 2.590 -6.600) (start 180.0) (sweep 90.0))
+      (pt 2.54 -6.7)
+      (arc (pt 2.540 -6.700) (pt 2.490 -6.700) (pt 2.590 -6.600) (start 180.0) (sweep -90.0))
+      (pt 2.54 -6.6))))
+   (layer TSLK
+    (graphic
+     (stroke 0.2)
+     (path
+      (closed false)
+      (pt 3.4 -6.1)
+      (pt 4.77 -6.1)
+      (pt 4.8 -1.4))))
+   (layer TSLK
+    (graphic
+     (stroke 0.2)
+     (path
+      (closed false)
+      (pt 4.77 1.4)
+      (pt 4.77 3.2))))
+   (layer TSLK
+    (graphic
+     (stroke 0.2)
+     (path
+      (closed false)
+      (pt 3.4 6.1)
+      (pt 4.77 6.1)
+      (pt 4.77 5.2))))
+   (layer TSLK
+    (graphic
+     (stroke 0.2)
+     (path
+      (closed false)
+      (pt 0.8 6.1)
+      (pt 1.6 6.1))))
+   (layer TSLK
+    (graphic
+     (stroke 0.2)
+     (path
+      (closed false)
+      (pt -1.8 6.1)
+      (pt -0.8 6.1))))
+   (layer TSLK
+    (graphic
+     (stroke 0.2)
+     (path
+      (closed false)
+      (pt -3.4 6.1)
+      (pt -4.77 6.1)
+      (pt -4.77 1.4))))
+   (layer TSLK
+    (graphic
+     (stroke 0.2)
+     (path
+      (closed false)
+      (pt -4.77 -1.4)
+      (pt -4.77 -3.2))))
+   (layer TSLK
+    (graphic
+     (stroke 0.2)
+     (path
+      (closed false)
+      (pt -4.77 -5.2)
+      (pt -4.77 -6.1)
+      (pt -3.4 -6.1))))
+   (layer TSLK
+    (graphic
+     (stroke 0.2)
+     (path
+      (closed false)
+      (pt -1.8 -6.1)
+      (pt -0.8 -6.1))))
+   (layer TSLK
+    (graphic
+     (stroke 0.2)
+     (path
+      (closed false)
+      (pt 0.8 -6.1)
+      (pt 1.6 -6.1))))
+   (leg C1 (pt 2.540 -5.795) (padstack 0))
+   (leg C2 (pt 0.000 -5.795) (padstack 0))
+   (leg C3 (pt -2.540 -5.795) (padstack 0))
+   (leg C5 (pt 2.190 5.795) (padstack 4))
+   (leg C6 (pt 0.000 5.795) (padstack 0))
+   (leg C7 (pt -2.540 5.795) (padstack 0))
+   (leg CD1 (pt 2.890 5.795) (padstack 7))
+   (leg MH1 (pt -4.500 -4.150) (padstack 8))
+   (leg MH2 (pt 4.500 4.150) (padstack 9))
+   (leg MP1 (pt 5.300 -0.000) (padstack 10))
+   (leg MP2 (pt -5.300 -0.000) (padstack 11))
+   (padstack 0
+    (plated false)
+    (pad (layer TCOP) (rectf 0.700 1.000 0 0 0.000))
+   )
+   (padstack 4
+    (plated false)
+    (pad (layer TCOP) (rectf 0.500 0.700 0 0 90.000))
+   )
+   (padstack 7
+    (plated false)
+    (pad (layer TCOP) (rectf 0.500 0.700 0 0 90.000))
+   )
+   (padstack 8
+    (hole 0.9)
+    (plated true)
+    (pad (layer TCOP) (round 1.400))
+    (pad (layer INNER) (round 1.400))
+    (pad (layer BCOP) (round 1.400))
+   )
+   (padstack 9
+    (hole 0.7)
+    (plated true)
+    (pad (layer TCOP) (round 1.200))
+    (pad (layer INNER) (round 1.200))
+    (pad (layer BCOP) (round 1.200))
+   )
+   (padstack 10
+    (plated false)
+    (pad (layer TCOP) (rectf 1.000 2.000 0 0 90.000))
+   )
+   (padstack 11
+    (plated false)
+    (pad (layer TCOP) (rectf 1.000 2.000 0 0 90.000))
+   )
+  )
+ )
+)

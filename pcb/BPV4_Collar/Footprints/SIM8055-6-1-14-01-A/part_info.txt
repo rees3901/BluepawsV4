@@ -1,0 +1,9 @@
+Manufacturer=GCT (GLOBAL CONNECTOR TECHNOLOGY)
+PartNumber=SIM8055-6-1-14-01-A
+PartCategory=Connector
+PackageCategory=Other
+PinCount=11
+Version=2.7
+Released=2023-07-08 11:20:08
+Downloaded=2026-03-25 13:37:19
+3D=N

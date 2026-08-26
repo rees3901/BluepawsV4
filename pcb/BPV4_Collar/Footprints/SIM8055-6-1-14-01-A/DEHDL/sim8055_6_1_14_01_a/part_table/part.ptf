@@ -1,0 +1,11 @@
+FILE_TYPE = MULTI_PHYS_TABLE;
+
+PART 'SIM8055_6_1_14_01_A'
+CLASS = IO
+{========================================================================================}
+:"MANUFACTURER_NAME", "MANUFACTURER_PART_NUMBER"= "PART_NUMBER", "JEDEC_TYPE", "PACK_TYPE", "MOUSER_PART_NUMBER", "MOUSER_PRICE/STOCK", "ARROW_PART_NUMBER", "ARROW_PRICE/STOCK", "DESCRIPTION", "DATASHEET";
+{========================================================================================}
+ "GCT (GLOBAL CONNECTOR TECHNOLOGY)", "SIM8055-6-1-14-01-A" (!) = "", "SIM8055611401A", "Other", "640-SIM8055611401A", "https://www.mouser.co.uk/ProductDetail/GCT/SIM8055-6-1-14-01-A?qs=KUoIvG%2F9Ilbi5BaFCOA%2Fkg%3D%3D", "", "", "Memory Card Connectors Nano SIM Card Connector,Push-Pull Type, 6 PIN, SMT, with normally open card detection switch, Profile 1.35mm, with location post", "https://gct.co/connector/sim8055"
+END_PART
+
+END.

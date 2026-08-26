@@ -1,0 +1,9 @@
+Manufacturer=OMRON Electronics
+PartNumber=B3U-1000P
+PartCategory=Switch
+PackageCategory=Other
+PinCount=2
+Version=2.3
+Released=2017-07-12 12:14:33
+Downloaded=2026-04-11 16:46:04
+3D=Y

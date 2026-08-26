@@ -1,0 +1,18 @@
+.SKY65723-11 :1 ;RF Front End GPS GNSS LNA Module B13 Notch
+SKY6572311
+*STM IC
+*NGS
+*PLB 1="VCC" 2="VEN" 3="RF_IN" 4="N/C_1" 5="N/C_2" 6="RF_OUT" 7="EP"
+*MXP 7
+*DFN SKY65723-11
+~!Manufacturer_Name (Skyworks)
+~!Manufacturer_Part_Number (SKY65723-11)
+~!Mouser Part Number (873-SKY65723-11)
+~!Link Mouser Price/Stock (https://www.mouser.co.uk/ProductDetail/Skyworks-Solutions-Inc/SKY65723-11?qs=amGC7iS6iy%2FBJl3G6X1IOw%3D%3D)
+~!Arrow Part Number (-)
+~!Arrow Price/Stock (-)
+~!Link Datasheet (https://www.skyworksinc.com/-/media/SkyWorks/Documents/Products/2801-2900/SKY65723_11_203921F.pdf)
+~!Height (0.8mm)
+~!3D_Model (SKY65723-11)
+SKY65723-11
+1.1!U 2.1!U 3.1!U 4.1!U 5.1!U 6.1!U 7.1!U 

@@ -1,0 +1,14 @@
+Assembly Variant Service has detected improper attribute values
+
+Thu Sep 15 10:14:31 2022
+
+Current Job : HWPT011B8_2022-08-16.pcb
+
+
+Format:
+OBJ_NAME
+OLD_VALUE{EMPTY;TOO_LONG}
+NEW_VALUE{DELETED;TOO_LONG}
+RESUME
+
+

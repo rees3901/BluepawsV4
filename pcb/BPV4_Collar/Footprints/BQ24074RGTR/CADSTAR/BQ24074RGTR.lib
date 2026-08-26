@@ -1,0 +1,18 @@
+.BQ24074RGTR :1 ;USB-Friendly Li-Ion Battery Charger and Power-Path Management IC, 10.5V OVP
+QFN50P300X300X100-17N-D
+*STM IC
+*NGS
+*PLB 1="TS" 2="BAT_1" 3="BAT_2" 4="'CE'" 5="EN2" 6="EN1" 7="'PGOOD'" 8="VSS" 9="'CHG'" 10="OUT_1" 11="OUT_2" 12="ILIM" 13="IN" 14="TMR" 15="TD" 16="ISET" 17="GND"
+*MXP 17
+*DFN BQ24074RGTR
+~!Manufacturer_Name (Texas Instruments)
+~!Manufacturer_Part_Number (BQ24074RGTR)
+~!Mouser Part Number (595-BQ24074RGTR)
+~!Link Mouser Price/Stock (https://www.mouser.co.uk/ProductDetail/Texas-Instruments/BQ24074RGTR?qs=ZV%2Fxhq4oszp2Nll7fIx5wg%3D%3D)
+~!Arrow Part Number (BQ24074RGTR)
+~!Link Arrow Price/Stock (https://www.arrow.com/en/products/bq24074rgtr/texas-instruments?utm_currency=USD&region=nac)
+~!Link Datasheet (http://www.ti.com/lit/ds/symlink/bq24074.pdf)
+~!Height (1mm)
+~!3D_Model (BQ24074RGTR)
+BQ24074RGTR
+1.1!U 2.1!U 3.1!U 4.1!U 5.1!U 6.1!U 7.1!U 8.1!U 12.1!U 11.1!U 10.1!U 9.1!U 17.1!U 16.1!U 15.1!U 14.1!U 13.1!U 

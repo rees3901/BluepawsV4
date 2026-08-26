@@ -1,0 +1,9 @@
+Manufacturer=Murata Electronics
+PartNumber=LQW03AW10NJ00D
+PartCategory=Inductor
+PackageCategory=Other
+PinCount=2
+Version=5.6
+Released=2019-09-16 03:33:59
+Downloaded=2026-03-25 09:58:06
+3D=Y

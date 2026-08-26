@@ -1,0 +1,72 @@
+(Japanese_coding: sjis)
+(function "ECS_18436649"
+    (uver 1)
+    (cuser "SamacSys")
+    (uuser "SamacSys")
+    (ctime 2023-07-24-03:23:03)
+    (utime 2024-12-11-15:56:06)
+    (interface
+        (port "1" (symbPinId 1) (portType INOUT))
+        (port "2" (symbPinId 2) (portType INOUT))
+        (port "3" (symbPinId 3) (portType INOUT))
+    )
+    (property "symbolName" "CONUFL001-SMD-T")
+)
+
+
+(pinAssign "ECS_18436649"
+    (uver 1)
+    (cuser "SamacSys")
+    (uuser "SamacSys")
+    (ctime 2023-07-24-03:23:03)
+    (utime 2024-12-11-15:56:06)
+    (interface
+        (port "1" (symbPinId 1) (portName "SIG") (portType INOUT))
+        (port "2" (symbPinId 2) (portName "GND_1") (portType INOUT))
+        (port "3" (symbPinId 3) (portName "GND_2") (portType INOUT))
+    )
+    (internal
+        (funcInst (functionRef "ECS_18436649")
+                (port "1" (match "1"))
+                (port "2" (match "2"))
+                (port "3" (match "3"))
+        )
+    )
+    (property "usePowerBox" "No")
+    (property "symbolName" "CONUFL001-SMD-T")
+)
+
+
+(part "CONUFL001-SMD-T"
+    (uver 1)
+    (cuser "SamacSys")
+    (uuser "SamacSys")
+    (ctime 2023-07-24-03:23:03)
+    (utime 2024-12-11-15:56:06)
+    (packageRef "CONUFL001-SMD-T")
+    (pinAssignRef "ECS_18436649")
+    (interface
+        (port "1" (symbPinId 1) (portName "SIG") (portType INOUT))
+        (port "2" (symbPinId 2) (portName "GND_1") (portType INOUT))
+        (port "3" (symbPinId 3) (portName "GND_2") (portType INOUT))
+    )
+    (partClass UNDEF)
+    (useInSchema Y)
+    (useInLayout Y)
+    (inPartsList Y)
+    (partType NORMAL)
+    (placeRestriction FREE)
+    (property "enetNonSeries" "YES")
+    (property "refDesPrefix" "J")
+    (property "description" "RF Connectors / Coaxial Connectors T&R U.FL Straight Surface Mount Jack")
+    (property "Manufacturer_Name" "TE Connectivity")
+    (property "Manufacturer_Part_Number" "CONUFL001-SMD-T")
+    (property "Mouser_Part_Number" "N/A")
+    (property "Mouser_Price/Stock" "https://www.mouser.co.uk/ProductDetail/TE-Connectivity/CONUFL001-SMD-T?qs=3Rah4i%252BhyCHmRzMH%252BkLkPQ%3D%3D")
+    (property "Arrow_Part_Number" "CONUFL001-SMD-T")
+    (property "Arrow_Price/Stock" "https://www.arrow.com/en/products/conufl001-smd-t/te-connectivity?utm_currency=USD&region=nac")
+    (property "Datasheet_Link" "https://eu.mouser.com/datasheet/2/418/9/ENG_DS_CONUFL001_SMD_T_B-3238717.pdf")
+    (property "compAreaTopHeight" 1.3)
+)
+
+

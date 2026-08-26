@@ -1,0 +1,11 @@
+FILE_TYPE = MULTI_PHYS_TABLE;
+
+PART 'SKY65723_11'
+CLASS = IC
+{========================================================================================}
+:"MANUFACTURER_NAME", "MANUFACTURER_PART_NUMBER"= "PART_NUMBER", "JEDEC_TYPE", "PACK_TYPE", "MOUSER_PART_NUMBER", "MOUSER_PRICE/STOCK", "ARROW_PART_NUMBER", "ARROW_PRICE/STOCK", "DESCRIPTION", "DATASHEET", "HEIGHT";
+{========================================================================================}
+ "Skyworks", "SKY65723-11" (!) = "", "SKY6572311", "Other", "873-SKY65723-11", "https://www.mouser.co.uk/ProductDetail/Skyworks-Solutions-Inc/SKY65723-11?qs=amGC7iS6iy%2FBJl3G6X1IOw%3D%3D", "", "", "RF Front End GPS GNSS LNA Module B13 Notch", "https://www.skyworksinc.com/-/media/SkyWorks/Documents/Products/2801-2900/SKY65723_11_203921F.pdf", "0.8 mm"
+END_PART
+
+END.

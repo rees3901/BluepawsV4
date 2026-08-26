@@ -1,0 +1,13 @@
+(unit MM)
+
+(package "BQ24074RGTR"
+    (type UNDEF)
+    (uver 2)
+    (cuser "SamacSys")
+    (uuser "SamacSys")
+    (utime 2023-06-22-02:40:16)
+    (mountForm default
+        (footprintRef "QFN50P300X300X100-17N-D")
+        (spec "System")
+    )
+)

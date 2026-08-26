@@ -1,0 +1,9 @@
+EESchema-DOCLIB  Version 2.0
+#
+$CMP LQW03AW10NJ00D
+D LQW03AW_00 Series Inductor 10nH +/-5% 0201 (0603)
+K
+F https://search.murata.co.jp/Ceramy/image/img/P02/JELF243A-0109.pdf
+$ENDCMP
+#
+#End Doc Library

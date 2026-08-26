@@ -1,0 +1,20 @@
+ERC report (2026-03-26T22:38:37+0000, Encoding UTF8)
+
+***** Sheet /
+[duplicate_pins]: Symbol 'Conn_01x08' has multiple pins with the same pin number
+    ; error
+    @(1700 mils, 3750 mils): Symbol J6 [Conn_01x08]
+[lib_symbol_mismatch]: Symbol 'CONUFL001-SMD-T' doesn't match copy in library 'CONUFL001-SMD-T'
+    ; warning
+    @(2300 mils, 8500 mils): Symbol J9 [CONUFL001-SMD-T]
+[lib_symbol_mismatch]: Symbol 'CONUFL001-SMD-T' doesn't match copy in library 'CONUFL001-SMD-T'
+    ; warning
+    @(5650 mils, 9900 mils): Symbol J10 [CONUFL001-SMD-T]
+[lib_symbol_mismatch]: Symbol 'SKY65723-11' doesn't match copy in library 'SKY65723-11'
+    ; warning
+    @(6650 mils, 9700 mils): Symbol IC3 [SKY65723-11]
+[lib_symbol_mismatch]: Symbol 'SIM8055-6-1-14-00-A' doesn't match copy in library 'SIM8055-6-1-14-00-A'
+    ; warning
+    @(14900 mils, 7700 mils): Symbol J13 [SIM8055-6-1-14-00-A]
+
+ ** ERC messages: 5  Errors 1  Warnings 4

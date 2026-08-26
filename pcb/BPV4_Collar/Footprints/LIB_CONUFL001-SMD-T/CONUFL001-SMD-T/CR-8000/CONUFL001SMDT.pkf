@@ -1,0 +1,10 @@
+(unit MM)
+
+(package "CONUFL001SMDT"
+    (type UNDEF)
+    (uver 2)
+    (mountForm default
+        (footprintRef "CONUFL001SMDT")
+        (spec "default")
+    )
+)

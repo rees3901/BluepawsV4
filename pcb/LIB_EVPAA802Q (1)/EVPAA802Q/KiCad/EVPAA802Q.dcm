@@ -1,0 +1,9 @@
+EESchema-DOCLIB  Version 2.0
+#
+$CMP EVPAA802Q
+D Tactile Switches Swtch Lite Touch SMD 5.0N 1.7mm ht grey
+K
+F https://industry.panasonic.com/ac/cdn/e/control/switch/light-touch/catalog/sw_lt_eng_3529s.pdf
+$ENDCMP
+#
+#End Doc Library

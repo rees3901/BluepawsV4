@@ -1,0 +1,105 @@
+;Proteus Design Interchange Format
+(PDIF
+ (vendor "SamacSys Limited")
+ (version 1 0)
+ (library
+  (part "EVPAA802Q"
+   (description "Tactile Switches Swtch Lite Touch SMD 5.0N 1.7mm ht grey")
+   (family "SWI")
+   (package "EVPAA")
+   (attribute "Datasheet Link" "https://industry.panasonic.com/ac/cdn/e/control/switch/light-touch/catalog/sw_lt_eng_3529s.pdf")
+   (attribute "Manufacturer_Name" "Panasonic")
+   (attribute "Manufacturer_Part_Number" "EVPAA802Q")
+   (attribute "Mouser Part Number" "")
+   (attribute "Mouser Price/Stock" "")
+   (attribute "Arrow Part Number" "EVPAA802Q")
+   (attribute "Arrow Price/Stock" "https://www.arrow.com/en/products/evp-aa802q/panasonic?region=nac")
+   (gate
+    (symbol "EVPAA802Q")
+    (pin "NO_1" 1 PS)
+    (pin "COM_1" 2 PS)
+    (pin "NO_2" 3 PS)
+    (pin "COM_2" 4 PS)
+   )
+  )
+  (symbol "EVPAA802Q"
+   (units THOU)
+   (origin (pt 0 0))
+   (graphic
+    (stroke 10)
+    (path (pt 200 100) (pt 1000 100) (pt 1000 -200) (pt 200 -200) (pt 200 100) (closed))
+   )
+   (terminal
+    (body (symbol "PIN") (pt 0 0) (rot 0) (mir 0) (visible true))
+    (name (pt 230 0) (rot 0) (just MIDDLE LEFT) (visible true))
+    (number (pt 140 20) (rot 0) (just BOTTOM RIGHT) (visible true)))
+   (terminal
+    (body (symbol "PIN") (pt 0 -100) (rot 0) (mir 0) (visible true))
+    (name (pt 230 0) (rot 0) (just MIDDLE LEFT) (visible true))
+    (number (pt 140 20) (rot 0) (just BOTTOM RIGHT) (visible true)))
+   (terminal
+    (body (symbol "PIN") (pt 1200 0) (rot 0) (mir X) (visible true))
+    (name (pt 230 0) (rot 0) (just MIDDLE LEFT) (visible true))
+    (number (pt 140 20) (rot 0) (just BOTTOM RIGHT) (visible true)))
+   (terminal
+    (body (symbol "PIN") (pt 1200 -100) (rot 0) (mir X) (visible true))
+    (name (pt 230 0) (rot 0) (just MIDDLE LEFT) (visible true))
+    (number (pt 140 20) (rot 0) (just BOTTOM RIGHT) (visible true)))
+  )
+  (symbol "PIN"
+   (units THOU)
+   (origin (pt 0 0))
+   (graphic
+    (stroke 10)
+    (path (pt 0 0) (pt 200 0))))
+  (symbol "PINSHORT"
+   (units THOU)
+   (origin (pt 0 0))
+   (graphic
+    (stroke 10)
+    (path (pt 0 0) (pt 100 0))))
+  (package "EVPAA"
+   (units MM)
+   (layer TASM
+    (graphic
+     (stroke 0.254)
+     (path
+      (closed true)
+      (pt -1.75 1.45)
+      (pt 1.75 1.45)
+      (pt 1.75 -1.45)
+      (pt -1.75 -1.45)
+      (pt -1.75 1.45))))
+   (layer TSLK
+    (graphic
+     (stroke 0.254)
+     (path
+      (closed false)
+      (pt -1.75 1.45)
+      (pt 1.75 1.45))))
+   (layer TSLK
+    (graphic
+     (stroke 0.254)
+     (path
+      (closed false)
+      (pt 1.75 -1.45)
+      (pt -1.75 -1.45))))
+   (layer TSLK
+    (graphic
+     (stroke 0.254)
+     (circle
+      (pt -2.713 0.764) (pt -2.597 0.764)
+     )
+    )
+   )
+   (leg 1 (pt -1.675 0.725) (padstack 0))
+   (leg 2 (pt -1.675 -0.725) (padstack 0))
+   (leg 3 (pt 1.675 0.725) (padstack 0))
+   (leg 4 (pt 1.675 -0.725) (padstack 0))
+   (padstack 0
+    (plated false)
+    (pad (layer TCOP) (rectf 1.05 1.15 0 0 0))
+   )
+  )
+ )
+)

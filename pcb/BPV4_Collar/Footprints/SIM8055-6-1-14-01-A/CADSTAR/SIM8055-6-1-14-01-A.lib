@@ -1,0 +1,18 @@
+.SIM8055-6-1-14-01-A :1 ;Memory Card Connectors Nano SIM Card Connector,Push-Pull Type, 6 PIN, SMT, with normally open card detection switch, Profile 1.35mm, with location post
+SIM8055611401A
+*STM J
+*NGS
+*PNM 1=C1 2=C2 3=C3 4=C5 5=C6 6=C7 7=CD1 8=MH1 9=MH2 10=MP1 11=MP2
+*PLB 1="VCC" 2="RST" 3="CLK" 4="GND" 5="VPP" 6="I/O" 7="CD" 8="MH1" 9="MH2" 10="MP1" 11="MP2"
+*MXP 11
+*DFN SIM8055-6-1-14-01-A
+~!Manufacturer_Name (GCT (GLOBAL CONNECTOR TECHNOLOGY))
+~!Manufacturer_Part_Number (SIM8055-6-1-14-01-A)
+~!Mouser Part Number (640-SIM8055611401A)
+~!Link Mouser Price/Stock (https://www.mouser.co.uk/ProductDetail/GCT/SIM8055-6-1-14-01-A?qs=KUoIvG%2F9Ilbi5BaFCOA%2Fkg%3D%3D)
+~!Arrow Part Number (-)
+~!Arrow Price/Stock (-)
+~!Link Datasheet (https://gct.co/connector/sim8055)
+~!Height (-)
+SIM8055-6-1-14-01-A
+1.1!U 2.1!U 3.1!U 4.1!U 5.1!U 6.1!U 7.1!U 8.1!U 9.1!U 10.1!U 11.1!U 

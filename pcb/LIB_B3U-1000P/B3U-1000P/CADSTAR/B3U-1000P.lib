@@ -1,0 +1,18 @@
+.B3U-1000P :1 ;OMRON ELECTRONIC COMPONENTS - B3U-1000P - SWITCH, SPST-NO, 0.05A, 12V, SMD
+B3U-1000P
+*STM S
+*NGS
+*PLB 1="K" 2="A"
+*MXP 2
+*DFN B3U-1000P
+~!Manufacturer_Name (OMRON Electronics)
+~!Manufacturer_Part_Number (B3U-1000P)
+~!Mouser Part Number (653-B3U-1000P)
+~!Link Mouser Price/Stock (https://www.mouser.co.uk/ProductDetail/Omron-Electronics/B3U-1000P?qs=AO7BQMcsEu4ip80xyf2FwA%3D%3D)
+~!Arrow Part Number (B3U-1000P)
+~!Link Arrow Price/Stock (https://www.arrow.com/en/products/b3u1000p/omron?utm_currency=USD&region=europe)
+~!Link Datasheet (https://www.omron.com/ecb/products/pdf/en-b3u.pdf)
+~!Height (-)
+~!3D_Model (B3U-1000P)
+B3U-1000P
+1.1!U 2.1!U 

@@ -1,15 +1,21 @@
-# KiCad backup & autosave
-*.bak
-*~
-_autosave-*
-*.tmp
-
-# KiCad lock files
-*.lck
-
-# Backup directories
+# KiCad automatic backups
 *-backups/
+_autosave-*
 
-# OS junk
+# KiCad lock and local preference files
+*.lck
+*.lck.*
+*.kicad_prl
+
+# Generated caches
+fp-info-cache
+
+# Temporary editor and operating-system files
+*.bak
+*.tmp
+*.temp
+*.swp
+*.swo
 Thumbs.db
+Desktop.ini
 .DS_Store

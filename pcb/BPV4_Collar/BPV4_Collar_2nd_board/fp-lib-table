@@ -1,0 +1,7 @@
+(fp_lib_table
+  (version 7)
+  (lib (name "SIM8055-6-1-14-01-A")(type "KiCad")(uri "C:/Users/reesMiniPC/Desktop/cat tracker workspaces/BluePawsV4/PCB design/BPV4_Collar/Footprints/SIM8055-6-1-14-01-A/KiCad")(options "")(descr ""))
+  (lib (name "LIB_CONUFL001-SMD-T")(type "KiCad")(uri "C:/Users/reesMiniPC/Desktop/cat tracker workspaces/BluePawsV4/PCB design/BPV4_Collar/Footprints/LIB_CONUFL001-SMD-T/CONUFL001-SMD-T/KiCad")(options "")(descr ""))
+  (lib (name "LIB_SKY65723-11")(type "KiCad")(uri "C:/Users/reesMiniPC/Desktop/cat tracker workspaces/BluePawsV4/PCB design/BPV4_Collar/Footprints/LIB_SKY65723-11/SKY65723-11/KiCad")(options "")(descr ""))
+  (lib (name "NX3008NBKW_115")(type "KiCad")(uri "C:/Users/reesMiniPC/Desktop/cat tracker workspaces/BluePawsV4/PCB design/BPV4_Collar/Footprints/NX3008NBKW_115")(options "")(descr ""))
+)

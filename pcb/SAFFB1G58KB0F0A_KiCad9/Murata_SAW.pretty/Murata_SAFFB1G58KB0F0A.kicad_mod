@@ -1,0 +1,195 @@
+(footprint "Murata_SAFFB1G58KB0F0A"
+	(version 20240108)
+	(generator "OpenAI")
+	(layer "F.Cu")
+	(descr "Murata SAW filter SAFFB1G58KB0F0A, 1.1x0.9 mm, 5-pad, derived from datasheet recommended land pattern")
+	(tags "Murata SAW GNSS GPS GLONASS")
+	(property "Reference" "FL"
+		(at 0 -1.3 0)
+		(layer "F.SilkS")
+		(hide yes)
+		(uuid "1a7a34df-dbf4-45ce-896d-6313db5a4f1b")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Value" "SAFFB1G58KB0F0A"
+		(at 0 1.45 0)
+		(layer "F.Fab")
+		(uuid "e4e9d622-16cc-4ac4-a5cd-65c87b1494fc")
+		(effects
+			(font
+				(size 1 1)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Footprint" "Murata_SAW:Murata_SAFFB1G58KB0F0A"
+		(at 0 0 0)
+		(unlocked yes)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "1efbda10-4ca2-4db9-8ab3-aaea62bf4ac8")
+		(effects
+			(font
+				(size 1.27 1.27)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Datasheet" ""
+		(at 0 0 0)
+		(unlocked yes)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "0ad6fb7f-cf6b-43b6-a084-99b30c9f211e")
+		(effects
+			(font
+				(size 1.27 1.27)
+				(thickness 0.15)
+			)
+		)
+	)
+	(property "Description" "Murata SAW filter for GPS/GLONASS, pins 1 and 4 RF, pins 2/3/5 GND"
+		(at 0 0 0)
+		(unlocked yes)
+		(layer "F.Fab")
+		(hide yes)
+		(uuid "b3a299fd-bb8f-45b2-9f72-25de6ef62ea5")
+		(effects
+			(font
+				(size 1.27 1.27)
+				(thickness 0.15)
+			)
+		)
+	)
+	(attr smd)
+	(fp_line
+		(start -0.67 -0.57)
+		(end -0.67 0.57)
+		(stroke
+			(width 0.1)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(uuid "ea3b4f04-4d63-4ac8-95e9-a52023a0ca5d")
+	)
+	(fp_line
+		(start -0.67 0.57)
+		(end 0.67 0.57)
+		(stroke
+			(width 0.1)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(uuid "2d77cb80-4f93-46e0-8745-e7f4d1b8d8a3")
+	)
+	(fp_line
+		(start 0.67 -0.57)
+		(end -0.67 -0.57)
+		(stroke
+			(width 0.1)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(uuid "58f2ef98-5159-4158-b01e-5588a59d9183")
+	)
+	(fp_line
+		(start 0.67 0.57)
+		(end 0.67 -0.57)
+		(stroke
+			(width 0.1)
+			(type solid)
+		)
+		(layer "F.SilkS")
+		(uuid "d16ef9cf-f183-4f01-adc2-3c6af9668272")
+	)
+	(fp_circle
+		(center -0.95 -0.2)
+		(end -0.9 -0.2)
+		(stroke
+			(width 0.12)
+			(type solid)
+		)
+		(fill none)
+		(layer "F.SilkS")
+		(uuid "e5578eb7-8f0f-4e07-8576-97bc0b391c63")
+	)
+	(fp_rect
+		(start -0.85 -0.75)
+		(end 0.85 0.75)
+		(stroke
+			(width 0.05)
+			(type solid)
+		)
+		(fill none)
+		(layer "F.CrtYd")
+		(uuid "c9f7265e-d65c-4c14-817a-c7d464aa7722")
+	)
+	(fp_rect
+		(start -0.55 -0.45)
+		(end 0.55 0.45)
+		(stroke
+			(width 0.1)
+			(type solid)
+		)
+		(fill none)
+		(layer "F.Fab")
+		(uuid "e7a0bc73-e055-4251-b0f7-a8eaf48babce")
+	)
+	(fp_text user "${REFERENCE}"
+		(at 0 0 0)
+		(layer "F.Fab")
+		(uuid "1215c6cb-6b37-41f9-a2a5-4dd531620b83")
+		(effects
+			(font
+				(size 0.45 0.45)
+				(thickness 0.08)
+			)
+		)
+	)
+	(pad "1" smd rect
+		(at -0.325 -0.2)
+		(size 0.325 0.2)
+		(layers "F.Cu" "F.Paste" "F.Mask")
+		(uuid "bdb9fca6-3c69-4c66-8432-96c76a704e0f")
+	)
+	(pad "2" smd rect
+		(at -0.325 0.2)
+		(size 0.325 0.2)
+		(layers "F.Cu" "F.Paste" "F.Mask")
+		(uuid "d6928d08-e18d-49a8-8f6e-ea8d2c1e9872")
+	)
+	(pad "3" smd rect
+		(at 0 0.2)
+		(size 0.25 0.2)
+		(layers "F.Cu" "F.Paste" "F.Mask")
+		(uuid "cc0eca56-54aa-4324-b1dc-5ef8476ade03")
+	)
+	(pad "4" smd rect
+		(at 0.325 -0.2)
+		(size 0.325 0.2)
+		(layers "F.Cu" "F.Paste" "F.Mask")
+		(uuid "cb46d04c-1e4e-4801-82e2-990a2daa1982")
+	)
+	(pad "5" smd rect
+		(at 0 -0.2)
+		(size 0.25 0.2)
+		(layers "F.Cu" "F.Paste" "F.Mask")
+		(uuid "7991f0e9-510b-4f6e-a26f-3a2ea8dcfbbb")
+	)
+	(model "${KICAD9_3DMODEL_DIR}/RF_Filter.3dshapes/Filter_Murata_1.1x0.9mm.wrl"
+		(offset
+			(xyz 0 0 0)
+		)
+		(scale
+			(xyz 1 1 1)
+		)
+		(rotate
+			(xyz 0 0 0)
+		)
+	)
+)

@@ -1,0 +1,10 @@
+(unit MM)
+
+(package "GM02SP"
+    (type UNDEF)
+    (uver 2)
+    (mountForm default
+        (footprintRef "GM02SP")
+        (spec "default")
+    )
+)

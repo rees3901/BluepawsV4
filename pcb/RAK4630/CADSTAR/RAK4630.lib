@@ -1,0 +1,19 @@
+.RAK4630 :1 ;RF IC Transceiver Bluetooth, LoRa 915MHz, 920MHz, 923MHz SPI Interface
+RAK4630
+*STM IC
+*NGS
+*PLB 1="VBUS" 2="USB-" 3="USB+" 4="P0.13/I2C_SDA" 5="P0.14/I2C_SCL" 6="P0.15/UART2_RX" 7="P0.16/UART2_TX" 8="P0.17/UART2_DE" 9="P0.19/UART1_RX (AT COMMAND)" 10="P0.20/UART1_TX (AT COMMAND)" 11="P0.21/UART1_DE" 12="P0.10/NFC2" 13="P0.09/NFC1" 14="GND_1" 15="RF_BT" 16="GND_2" 17="NRF_RESET" 18="SWDCLK" 19="SWDIO" 20="VBAT_SX" 21="VBAT_IO_SX" 22="GND_3" 23="P0.24/I2C_SDA_2" 24="P0.25/I2C_SCL_2" 25="P1.01/SW1" 26="P1.02/SW2" 27="P1.03/LED1" 28="P1.04/LED2" &
+29="P0.03/QSPI_CLK" 30="P0.02/QSPI_DIO3" 31="P0.28/QSPI_DIO2" 32="P0.29/QSPI_DIO1" 33="P0.30/QSPI_DIO0" 34="P0.26/QSPI_CS" 35="GND_4" 36="GND_5" 37="RF_LORA" 38="GND_6" 39="P0.31/AIN7" 40="P0.05/AIN3" 41="P0.04/AIN2" 42="GND_7" 43="VDD_NRF" 44="VBAT_NRF"
+*MXP 44
+*DFN RAK4630
+~!Manufacturer_Name (RAK)
+~!Manufacturer_Part_Number (RAK4630)
+~!Mouser Part Number (-)
+~!Mouser Price/Stock (-)
+~!Arrow Part Number (-)
+~!Arrow Price/Stock (-)
+~!Link Datasheet (https://dl-docs.rakwireless.com/api/render/?emulateScreenMedia=false&pdf.format=legal&url=https%3A%2F%2Fdocs.rakwireless.com%2FProduct-Categories%2FWisDuo%2FRAK4630-Module%2FDatasheet%2F)
+~!Height (3mm)
+~!3D_Model (RAK4630)
+RAK4630
+1.1!U 2.1!U 3.1!U 4.1!U 5.1!U 6.1!U 7.1!U 8.1!U 9.1!U 10.1!U 11.1!U 12.1!U 13.1!U 14.1!U 15.1!U 16.1!U 17.1!U 18.1!U 19.1!U 20.1!U 21.1!U 22.1!U 23.1!U 24.1!U 25.1!U 26.1!U 27.1!U 28.1!U 29.1!U 30.1!U 31.1!U 32.1!U 33.1!U 34.1!U 35.1!U 36.1!U 37.1!U 38.1!U 39.1!U 40.1!U 41.1!U 42.1!U 43.1!U 44.1!U 

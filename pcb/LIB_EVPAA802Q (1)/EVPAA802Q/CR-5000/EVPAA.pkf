@@ -1,0 +1,10 @@
+(unit MM)
+
+(package "EVPAA"
+    (type UNDEF)
+    (uver 2)
+    (mountForm default
+        (footprintRef "EVPAA")
+        (spec "default")
+    )
+)
