@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-MAX_DEVICE_ID = 65_535
+MAX_PHYSICAL_ID = 65_534
 
 
 @dataclass(frozen=True)
@@ -39,8 +39,10 @@ class GeneratedGateway:
 
 
 def generate_device(device_id: int) -> GeneratedDevice:
-    if not 1 <= device_id <= MAX_DEVICE_ID:
-        raise ValueError("device ID must be from 1 to 65535")
+    if not 1 <= device_id <= MAX_PHYSICAL_ID:
+        raise ValueError("device ID must be from 1 to 65534")
+    if device_id % 16 == 0:
+        raise ValueError("device ID must not be a multiple of 16 (reserved for hubs)")
     return GeneratedDevice(
         device_id=device_id,
         bearer_token=secrets.token_urlsafe(32),
@@ -56,8 +58,10 @@ def generate_gateway(gateway_guid16: str, display_name: str) -> GeneratedGateway
         number = int(normalized, 16)
     except ValueError as error:
         raise ValueError("gateway GUID16 must be four hexadecimal characters") from error
-    if not 1 <= number <= MAX_DEVICE_ID:
-        raise ValueError("gateway GUID16 0000 is reserved")
+    if not 1 <= number <= MAX_PHYSICAL_ID:
+        raise ValueError("gateway GUID16 must be from 0001..FFFE")
+    if number % 16 != 0:
+        raise ValueError("gateway GUID16 must be a multiple of 16")
     clean_name = display_name.strip()
     if not 1 <= len(clean_name) <= 80:
         raise ValueError("gateway display name must contain 1..80 characters")
@@ -214,7 +218,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--gateway-guid16",
-        help="optional four-character hexadecimal LoRa gateway ID, for example 0016",
+        help="optional four-character hexadecimal LoRa gateway ID, for example 0010",
     )
     parser.add_argument(
         "--gateway-name", default="Bluepaws Test Hub", help="optional gateway display name"
@@ -227,15 +231,18 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     try:
         household_id = uuid.UUID(args.household_id)
-        if not 1 <= args.count <= MAX_DEVICE_ID:
-            raise ValueError("count must be from 1 to 65535")
-        final_device_id = args.start_device_id + args.count - 1
-        if not 1 <= args.start_device_id <= final_device_id <= MAX_DEVICE_ID:
-            raise ValueError("generated device IDs must all fit in the range 1..65535")
-        devices = [
-            generate_device(device_id)
-            for device_id in range(args.start_device_id, final_device_id + 1)
-        ]
+        if not 1 <= args.count <= MAX_PHYSICAL_ID:
+            raise ValueError("count must be from 1 to 65534")
+        if not 1 <= args.start_device_id <= MAX_PHYSICAL_ID:
+            raise ValueError("start device ID must be from 1 to 65534")
+        devices = []
+        candidate = args.start_device_id
+        while len(devices) < args.count and candidate <= MAX_PHYSICAL_ID:
+            if candidate % 16 != 0:
+                devices.append(generate_device(candidate))
+            candidate += 1
+        if len(devices) != args.count:
+            raise ValueError("not enough collar IDs remain before the reserved FFFF value")
         gateway = (
             generate_gateway(args.gateway_guid16, args.gateway_name)
             if args.gateway_guid16

@@ -16,8 +16,8 @@
     // After lora.readData(), before pkt_validate_crc():
     bp_aes_ctr_apply(buf, rxLen, key);
 
-  The nonce is derived from bytes already in the packet
-  (device_id + msg_seq), so no extra bytes are needed.
+  Legacy experiment only: this helper is not part of the locked TLV v1.2
+  contract and is not used by the active collar/Home Hub data path.
 */
 
 #ifndef BP_CRYPTO_H
@@ -120,8 +120,9 @@ static inline void _aes_encrypt_block(uint8_t blk[16], const uint8_t rk[176]) {
 // AES-128-CTR — Apply to packet buffer
 //
 // Nonce layout (16 bytes):
-//   [0-1]   device_id  (from packet bytes 1-2)
-//   [2-5]   msg_seq    (from packet bytes 3-6)
+//   [0-1]   source_id16      (from packet bytes 1-2)
+//   [2-3]   destination_id16 (from packet bytes 3-4)
+//   [4-5]   msg_seq_id       (from packet bytes 5-6)
 //   [6-11]  zero padding
 //   [12-15] block counter (big-endian)
 //
@@ -140,8 +141,7 @@ static inline void bp_aes_ctr_apply(uint8_t *buf, uint8_t len, const uint8_t key
     // Build nonce from packet header fields (already in buf before encryption)
     uint8_t nonce[16];
     memset(nonce, 0, 16);
-    memcpy(&nonce[0], &buf[1], 2);  // device_id
-    memcpy(&nonce[2], &buf[3], 4);  // msg_seq
+    memcpy(&nonce[0], &buf[1], 6);  // source + destination + sequence
 
     // Encrypt bytes 1..len-1 using CTR mode
     uint8_t ctr_block[16];

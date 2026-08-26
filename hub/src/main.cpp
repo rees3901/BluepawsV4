@@ -141,7 +141,7 @@ struct cloud_entry_t {
 };
 
 // ── Legacy AES-128 key ──
-// TLV v1.1 uplink packets are raw authenticated TLV over private LoRa. Keep
+// TLV v1.2 uplink packets are raw authenticated TLV over private LoRa. Keep
 // this only until the downlink command protocol is revised.
 static const uint8_t aesKey[16] = LORA_AES_KEY;
 
@@ -564,7 +564,7 @@ static void initLoRa() {
     hubConnectivity.lora_rx_active = true;
 
     Serial.println("OK");
-    Serial.println("[LORA] TLV v1.1 raw binary uplink enabled");
+    Serial.println("[LORA] TLV v1.2 raw binary uplink enabled");
 }
 
 static void femInit() {
@@ -921,7 +921,7 @@ static void checkPendingAcks() {
 // ═══════════════════════════════════════════════
 
 static void handlePacket(const uint8_t *buf, uint8_t len, int16_t rssi, float snr) {
-    // Step 1: Validate TLV v1.1 structure. Supabase validates HMAC.
+    // Step 1: Validate TLV v1.2 structure. Supabase validates HMAC.
     if (!pkt_validate_crc(buf, len)) {
         crcFailCount++;
         Serial.printf("[LORA] TLV structure fail #%u (len=%u)\n", crcFailCount, len);
@@ -935,14 +935,27 @@ static void handlePacket(const uint8_t *buf, uint8_t len, int16_t rssi, float sn
     }
 
     rxCount++;
-    uint16_t devId = pkt_device_id(buf);
+    uint16_t devId = pkt_source_id(buf);
+    uint16_t destinationId = pkt_destination_id(buf);
     uint8_t pktType = pkt_pkt_type(buf);
 
-    Serial.printf("[LORA] RX #%u from %s | type=0x%02X rssi=%d snr=%.1f\n",
-                  rxCount, bp_device_name(devId), pktType, rssi, snr);
+    if (!bp_is_collar_id(devId)) {
+        Serial.printf("[LORA] Ignoring non-collar source 0x%04X\n", devId);
+        return;
+    }
+    if (destinationId != BP_DEST_CLOUD
+        && destinationId != (uint16_t)GATEWAY_GUID16
+        && destinationId != BP_ID_BROADCAST) {
+        Serial.printf("[LORA] Packet for another destination 0x%04X\n", destinationId);
+        return;
+    }
+
+    Serial.printf("[LORA] RX #%u source=%04X destination=%04X | type=0x%02X rssi=%d snr=%.1f\n",
+                  rxCount, devId, destinationId, pktType, rssi, snr);
 
     // Step 3: If this is an ACK/response to a command we sent, match it up
-    if (pktType == PKT_MODE_ACK || pktType == PKT_FIND_ACK || pktType == PKT_STATUS_RESP) {
+    if ((pktType == PKT_MODE_ACK || pktType == PKT_FIND_ACK || pktType == PKT_STATUS_RESP)
+        && destinationId == (uint16_t)GATEWAY_GUID16) {
         handleAck(buf);
     }
 
@@ -2158,9 +2171,11 @@ static void sendCommandFind(uint16_t target_id, bp_pkt_type_t type,
         }
     }
 
-    // Build the fixed header. Downlink commands still use the compatibility
-    // pkt_type names until the command protocol is formalized separately.
-    pkt_init(cmd.buf, target_id, seq, 0, STATUS_HOME, PROFILE_NORMAL, 0, txReason);
+    // TLV v1.2 addresses the physical originator and logical recipient
+    // independently: this hub originates the command and the collar is the
+    // destination. The HMAC/reserved bytes cover both IDs.
+    pkt_init(cmd.buf, (uint16_t)GATEWAY_GUID16, target_id, seq, 0,
+             STATUS_HOME, PROFILE_NORMAL, 0, txReason);
 
     // Add TLV payload based on command type
     if (type == PKT_CMD_MODE && mode != PROFILE_UNKNOWN) {
@@ -2172,7 +2187,7 @@ static void sendCommandFind(uint16_t target_id, bp_pkt_type_t type,
         pkt_add_tlv_u8(cmd.buf, TLV_BUZZER_PATTERN, (uint8_t)buzzerPattern);  // Which sound to play
     }
 
-    // Finalize: append the v1.1 auth-tag bytes and return total packet length.
+    // Finalize: append the v1.2 auth-tag bytes and return total packet length.
     cmd.len = pkt_finalize(cmd.buf);
     cmd.targetId = target_id;
     cmd.cmdSeq = seq;

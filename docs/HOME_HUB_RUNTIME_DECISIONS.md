@@ -15,7 +15,7 @@ The Home Hub is an always-on ESP32-S3 + SX1262 gateway. It does not sleep during
 Its primary duties are:
 
 1. Keep LoRa receive active.
-2. Receive raw binary TLV v1.1 packets from collars.
+2. Receive raw binary TLV v1.2 packets from collars.
 3. Parse TLV locally for hub state, local diagnostics, and future off-grid UI.
 4. Preserve the original collar TLV payload unchanged.
 5. Base64-wrap that unchanged payload in an HTTPS JSON envelope for Supabase.
@@ -56,7 +56,7 @@ The Home Hub sends the unchanged collar TLV payload to Supabase as:
   "format": "tlv",
   "payload_b64": "<base64 raw collar TLV>",
   "ingest_path": "lora_gateway",
-  "gateway_guid16": "0016",
+  "gateway_guid16": "0010",
   "gateway_rx_time_unix": 1786537811,
   "link_type": "lora",
   "link_rssi_dbm": -97,
@@ -91,4 +91,4 @@ The current Home Hub prototype target is:
 - USB-C serial upload/monitor
 - Local V3-derived LoRa pin map: NSS 8, SCK 9, MOSI 10, MISO 11, RST 12, BUSY 13, DIO1 14
 
-The legacy BluePawz V3 receiver repo remains read-only reference material for board bring-up/pinout only. Bluepaws V4 uses the TLV v1.1 protocol and V4 LoRa profile.
+The legacy BluePawz V3 receiver repo remains read-only reference material for board bring-up/pinout only. Bluepaws V4 uses the TLV v1.2 protocol and V4 LoRa profile.

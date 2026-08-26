@@ -63,7 +63,7 @@ enum bp_profile_t : uint8_t {
     PROFILE_UNKNOWN   = 0xFF,
 };
 
-#define BP_MAX_V1_POWER_PROFILE PROFILE_DEBUG
+#define BP_MAX_POWER_PROFILE PROFILE_DEBUG
 
 #define FLAG_GNSS_VALID        0x01
 #define FLAG_FIX_3D            0x02
@@ -308,7 +308,7 @@ static inline bool pkt_validate_structure(const uint8_t *buf, uint8_t total_len)
     if (buf[29] != 0 || buf[30] != 0) return false;
     if (buf[31] > BP_MAX_TLV_SIZE) return false;
     if (total_len != BP_HEADER_SIZE + buf[31] + BP_AUTH_TAG_SIZE) return false;
-    if ((pkt_status(buf) > STATUS_ERROR) || (pkt_power_profile(buf) > BP_MAX_V1_POWER_PROFILE)) return false;
+    if ((pkt_status(buf) > STATUS_ERROR) || (pkt_power_profile(buf) > BP_MAX_POWER_PROFILE)) return false;
     if (pkt_tx_reason(buf) > TX_WAKE_CHECKIN) return false;
     uint16_t source = pkt_source_id(buf);
     if (!bp_is_hub_id(source) && !bp_is_collar_id(source)) return false;

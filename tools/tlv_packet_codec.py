@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reusable Bluepaws v1.1 TLV packet and HTTPS-wrapper primitives.
+"""Reusable Bluepaws v1.2 TLV packet and HTTPS-wrapper primitives.
 
 This module deliberately contains no GUI code.  Both the command-line fleet
 simulator and the desktop test console import it so they cannot silently drift
@@ -31,6 +31,10 @@ AUTH_TAG_SIZE = 8
 MAX_TLV_SIZE = 24
 MIN_PACKET_SIZE = HEADER_SIZE + AUTH_TAG_SIZE
 MAX_PACKET_SIZE = HEADER_SIZE + MAX_TLV_SIZE + AUTH_TAG_SIZE
+PROTOCOL_VERSION = 2
+CLOUD_DESTINATION_ID = 0x0000
+BROADCAST_ID = 0xFFFF
+MAX_PHYSICAL_ID = 0xFFFE
 
 STATUS_CODES = {
     "HOME": 0,
@@ -71,6 +75,7 @@ KNOWN_TLV_LENGTHS = {
     0x10: ("uptime_s", 4),
     0x13: ("activity_score", 1),
     0x20: ("acked_msg_seq_id", 2),
+    0xF1: ("profile", 1),
 }
 
 
@@ -109,7 +114,8 @@ class PacketFields:
     accuracy_m: int
     fix_age_s: int
     satellite_count: int
-    protocol_version: int = 1
+    destination_id: int = CLOUD_DESTINATION_ID
+    protocol_version: int = PROTOCOL_VERSION
 
 
 @dataclass(frozen=True)
@@ -170,7 +176,7 @@ def load_credential_bundle(path: Path) -> CredentialBundle:
         key_text = item.get("hmac_key_b64")
         if not isinstance(device_id, int) or isinstance(device_id, bool):
             raise ValueError("device_id must be an integer")
-        _range(device_id, 1, 65_535, "device_id")
+        _validate_collar_id(device_id, "device_id")
         if device_id in seen:
             raise ValueError(f"device_id {device_id} is duplicated")
         hmac_key = decode_hmac_key(key_text, f"device_id {device_id} HMAC key")
@@ -211,13 +217,12 @@ def load_credentials(path: Path) -> list[DeviceCredential]:
 
 def normalize_gateway_guid16(value: Any) -> str:
     if isinstance(value, int) and not isinstance(value, bool):
-        _range(value, 1, 0xFFFF, "gateway_guid16")
+        _validate_hub_id(value, "gateway_guid16")
         return f"{value:04X}"
     if not isinstance(value, str) or re.fullmatch(r"[0-9A-Fa-f]{4}", value.strip()) is None:
-        raise ValueError("gateway_guid16 must be four hexadecimal characters from 0001..FFFF")
+        raise ValueError("gateway_guid16 must be exactly four hexadecimal characters")
     normalized = value.strip().upper()
-    if int(normalized, 16) == 0:
-        raise ValueError("gateway_guid16 must be four hexadecimal characters from 0001..FFFF")
+    _validate_hub_id(int(normalized, 16), "gateway_guid16")
     return normalized
 
 
@@ -258,7 +263,7 @@ def encode_tlv(tlv_type: int, value: bytes) -> bytes:
 def known_tlv(tlv_type: int, value: int) -> TlvEntry:
     spec = KNOWN_TLV_LENGTHS.get(tlv_type)
     if spec is None:
-        raise ValueError(f"0x{tlv_type:02X} is not a selected v1.1 TLV")
+        raise ValueError(f"0x{tlv_type:02X} is not a selected v1.2 TLV")
     name, length = spec
     maximum = (1 << (length * 8)) - 1
     _range(value, 0, maximum, name)
@@ -268,7 +273,7 @@ def known_tlv(tlv_type: int, value: int) -> TlvEntry:
 def firmware_tlv(value: str) -> TlvEntry:
     parts = value.strip().split(".")
     if len(parts) != 2:
-        raise ValueError("firmware version must use major.minor, for example 1.1")
+        raise ValueError("firmware version must use major.minor, for example 1.2")
     try:
         major, minor = (int(part, 10) for part in parts)
     except ValueError as error:
@@ -329,23 +334,24 @@ def build_tlv_packet(
         encoded_tlvs.append(encode_tlv(entry.tlv_type, entry.value))
     tlv_bytes = b"".join(encoded_tlvs)
     if len(tlv_bytes) > MAX_TLV_SIZE:
-        raise ValueError(f"TLV section uses {len(tlv_bytes)} bytes; v1.1 allows at most 24")
+        raise ValueError(f"TLV section uses {len(tlv_bytes)} bytes; v1.2 allows at most 24")
 
     header = bytearray(HEADER_SIZE)
     header[0] = fields.protocol_version
     struct.pack_into("<H", header, 1, fields.device_id)
-    struct.pack_into("<H", header, 3, fields.message_sequence)
-    struct.pack_into("<I", header, 5, fields.timestamp)
-    header[9] = (fields.power_profile << 4) | fields.status
-    header[10] = fields.flags
-    header[11] = fields.tx_reason
-    struct.pack_into("<i", header, 12, round(fields.latitude * 10_000_000))
-    struct.pack_into("<i", header, 16, round(fields.longitude * 10_000_000))
-    struct.pack_into("<H", header, 20, fields.battery_mv)
-    struct.pack_into("<H", header, 22, fields.accuracy_m)
-    struct.pack_into("<H", header, 24, fields.fix_age_s)
-    header[26] = fields.satellite_count
-    # Bytes 27..30 stay zero by construction.
+    struct.pack_into("<H", header, 3, fields.destination_id)
+    struct.pack_into("<H", header, 5, fields.message_sequence)
+    struct.pack_into("<I", header, 7, fields.timestamp)
+    header[11] = (fields.power_profile << 4) | fields.status
+    header[12] = fields.flags
+    header[13] = fields.tx_reason
+    struct.pack_into("<i", header, 14, round(fields.latitude * 10_000_000))
+    struct.pack_into("<i", header, 18, round(fields.longitude * 10_000_000))
+    struct.pack_into("<H", header, 22, fields.battery_mv)
+    struct.pack_into("<H", header, 24, fields.accuracy_m)
+    struct.pack_into("<H", header, 26, fields.fix_age_s)
+    header[28] = fields.satellite_count
+    # Bytes 29..30 stay zero by construction.
     header[31] = len(tlv_bytes)
 
     body = bytes(header) + tlv_bytes
@@ -398,7 +404,7 @@ def build_transport_wrapper(
             gateway_number = int(gateway, 16)
         except ValueError as error:
             raise ValueError("gateway GUID must be exactly four hexadecimal characters") from error
-        _range(gateway_number, 1, 0xFFFF, "gateway GUID")
+        _validate_hub_id(gateway_number, "gateway GUID")
         if gateway_rx_time_unix is None:
             raise ValueError("gateway receive timestamp is required for LoRa")
         _range(gateway_rx_time_unix, 0, 0xFFFF_FFFF, "gateway receive timestamp")
@@ -441,25 +447,29 @@ def validate_payload_b64(value: str) -> bytes:
         raise ValueError(f"decoded TLV packet must contain {MIN_PACKET_SIZE}..{MAX_PACKET_SIZE} bytes")
     if len(decoded) != HEADER_SIZE + decoded[31] + AUTH_TAG_SIZE:
         raise ValueError("decoded packet length does not match its tlv_len header byte")
+    if decoded[0] != PROTOCOL_VERSION:
+        raise ValueError(f"protocol version must be {PROTOCOL_VERSION} for TLV v1.2")
+    if decoded[29:31] != b"\x00\x00":
+        raise ValueError("reserved header bytes must be zero")
     return decoded
 
 
 def decode_tlv_payload(
     payload_b64: str, hmac_key: bytes | None = None
 ) -> dict[str, Any]:
-    """Decode a v1.1 payload into a human-readable JSON-safe structure."""
+    """Decode a v1.2 payload into a human-readable JSON-safe structure."""
     packet = validate_payload_b64(payload_b64)
     if hmac_key is not None and (
         not isinstance(hmac_key, bytes) or len(hmac_key) != 32
     ):
         raise ValueError("HMAC key must contain exactly 32 bytes")
 
-    status_profile = packet[9]
+    status_profile = packet[11]
     status = status_profile & 0x0F
     power_profile = status_profile >> 4
-    flags = packet[10]
-    tx_reason = packet[11]
-    timestamp = struct.unpack_from("<I", packet, 5)[0]
+    flags = packet[12]
+    tx_reason = packet[13]
+    timestamp = struct.unpack_from("<I", packet, 7)[0]
     tlv_length = packet[31]
     tlv_bytes = packet[HEADER_SIZE : HEADER_SIZE + tlv_length]
 
@@ -513,8 +523,8 @@ def decode_tlv_payload(
     status_name = _name_for_code(STATUS_CODES, status)
     profile_name = _name_for_code(POWER_PROFILE_CODES, power_profile)
     reason_name = _name_for_code(TX_REASON_CODES, tx_reason)
-    fix_age_s = struct.unpack_from("<H", packet, 24)[0]
-    satellite_count = packet[26]
+    fix_age_s = struct.unpack_from("<H", packet, 26)[0]
+    satellite_count = packet[28]
     gnss_valid = bool(flags & FLAG_MASKS["GNSS_VALID"])
 
     return {
@@ -527,8 +537,10 @@ def decode_tlv_payload(
         },
         "header": {
             "protocol_version": packet[0],
+            "source_id16": struct.unpack_from("<H", packet, 1)[0],
+            "destination_id16": struct.unpack_from("<H", packet, 3)[0],
             "device_id": struct.unpack_from("<H", packet, 1)[0],
-            "message_sequence": struct.unpack_from("<H", packet, 3)[0],
+            "message_sequence": struct.unpack_from("<H", packet, 5)[0],
             "timestamp_unix": timestamp,
             "timestamp_utc": datetime.fromtimestamp(timestamp, timezone.utc)
             .isoformat()
@@ -542,14 +554,14 @@ def decode_tlv_payload(
             },
             "tx_reason": {"code": tx_reason, "name": reason_name},
             "position": {
-                "latitude": struct.unpack_from("<i", packet, 12)[0] / 10_000_000 if gnss_valid else None,
-                "longitude": struct.unpack_from("<i", packet, 16)[0] / 10_000_000 if gnss_valid else None,
-                "battery_mv": struct.unpack_from("<H", packet, 20)[0],
-                "accuracy_m": struct.unpack_from("<H", packet, 22)[0],
+                "latitude": struct.unpack_from("<i", packet, 14)[0] / 10_000_000 if gnss_valid else None,
+                "longitude": struct.unpack_from("<i", packet, 18)[0] / 10_000_000 if gnss_valid else None,
+                "battery_mv": struct.unpack_from("<H", packet, 22)[0],
+                "accuracy_m": struct.unpack_from("<H", packet, 24)[0],
                 "fix_age_s": None if fix_age_s == 65_535 else fix_age_s,
                 "satellite_count": None if satellite_count == 255 else satellite_count,
             },
-            "reserved_bytes_hex": packet[27:31].hex().upper(),
+            "reserved_bytes_hex": packet[29:31].hex().upper(),
         },
         "tlvs": decoded_tlvs,
         "authentication": {
@@ -602,9 +614,10 @@ def post_wrapper(
 
 
 def _validate_packet_fields(fields: PacketFields) -> None:
-    if fields.protocol_version != 1:
-        raise ValueError("the deployed protocol version must be 1")
-    _range(fields.device_id, 1, 65_535, "device ID")
+    if fields.protocol_version != PROTOCOL_VERSION:
+        raise ValueError(f"the deployed protocol version must be {PROTOCOL_VERSION}")
+    _validate_collar_id(fields.device_id, "device ID")
+    _range(fields.destination_id, CLOUD_DESTINATION_ID, BROADCAST_ID, "destination ID")
     _range(fields.message_sequence, 0, 65_535, "message sequence")
     _range(fields.timestamp, 0, 0xFFFF_FFFF, "timestamp")
     _range(fields.status, 0, 3, "status")
@@ -625,6 +638,20 @@ def _range(value: Any, minimum: int, maximum: int, field: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
         raise ValueError(f"{field} must be an integer from {minimum} to {maximum}")
     return value
+
+
+def _validate_collar_id(value: Any, field: str) -> int:
+    result = _range(value, 1, MAX_PHYSICAL_ID, field)
+    if result % 16 == 0:
+        raise ValueError(f"{field} must not be a multiple of 16 (reserved for hubs)")
+    return result
+
+
+def _validate_hub_id(value: Any, field: str) -> int:
+    result = _range(value, 1, MAX_PHYSICAL_ID, field)
+    if result % 16 != 0:
+        raise ValueError(f"{field} must be a multiple of 16")
+    return result
 
 
 def _optional_number(

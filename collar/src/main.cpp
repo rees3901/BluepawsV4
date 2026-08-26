@@ -155,6 +155,7 @@ static volatile bp_error_t lastError = BP_ERROR_NONE;
 // We store the last processed command sequence number and ignore
 // any duplicates, so the collar doesn't execute the same command twice.
 static uint32_t lastProcessedCmdSeq = 0;
+static uint16_t lastCommandSourceId = BP_DEFAULT_HUB_ID;
 
 // ── Lost Mode Tracking ──
 static volatile bool     inLostMode      = false;  // true = currently in emergency lost mode
@@ -189,7 +190,7 @@ static collar_persisted_state_t persistedState;
 static bool collarStateReady = false;
 
 // ── Legacy AES-128 key ──
-// TLV v1.1 uplink packets are sent as raw authenticated TLV over private LoRa.
+// TLV v1.2 uplink packets are sent as raw authenticated TLV over private LoRa.
 // Keep this only until the downlink command protocol is revised.
 static const uint8_t aesKey[16] = LORA_AES_KEY;
 
@@ -235,17 +236,17 @@ static void     peripheralsSleep();        // Sleep GNSS, LoRa, stop BLE
 static void     sendTelemetry();           // Build + send PKT_TELEMETRY
 static void     sendTelemetryWithReason(uint8_t txReason);    // TELEMETRY/INTERRUPT helper
 static void     sendBootReport(bool atHome, bool haveFix);    // Cold/reboot boot report
-static void     sendModeAck(uint32_t cmdMsgSeq);        // ACK a mode change command
-static void     sendStatusResponse(uint32_t cmdMsgSeq); // Respond to status query
+static void     sendModeAck(uint32_t cmdMsgSeq, uint16_t destinationId);        // ACK a mode change command
+static void     sendStatusResponse(uint32_t cmdMsgSeq, uint16_t destinationId); // Respond to status query
 static void     sendLostModeAlert();       // Alert: lost mode 2hr timeout expired
 static void     sendWakeCheckin();         // Home wake check-in (no GNSS, no routine LTE)
 static void     transmitPacket(uint8_t *buf, uint8_t len, bool suppressLed = false);  // Raw TLV LoRa TX
-static uint8_t  finalizeAuthenticatedPacket(uint8_t *buf); // Append/sign TLV v1.1 HMAC tag
+static uint8_t  finalizeAuthenticatedPacket(uint8_t *buf); // Append/sign TLV v1.2 HMAC tag
 
 // Command handling
 static void     handleReceivedCommand(const uint8_t *buf, uint8_t len);
 static void     applyProfile(bp_profile_t profile);  // Switch operating profile
-static void     sendFindAck(uint32_t cmdMsgSeq);     // ACK a find command
+static void     sendFindAck(uint32_t cmdMsgSeq, uint16_t destinationId);     // ACK a find command
 
 // BLE Lost/Find beacon (collar advertises only when in PROFILE_LOST)
 static void     bleFindBeaconStart();
@@ -953,7 +954,7 @@ static bool collarStateLoad() {
         loaded.version != BLUEPAWS_COLLAR_STATE_VERSION ||
         loaded.size != sizeof(loaded) ||
         loaded.checksum != collarStateChecksum(loaded) ||
-        loaded.profile > BP_MAX_V1_POWER_PROFILE) {
+        loaded.profile > BP_MAX_POWER_PROFILE) {
         Serial.println("[STATE] Stored state failed validation.");
         return false;
     }
@@ -1082,7 +1083,7 @@ static void buttonPoll() {
 }
 
 // ═══════════════════════════════════════════════
-// Finalize + Authenticate TLV v1.1 Packet
+// Finalize + Authenticate TLV v1.2 Packet
 //
 // pkt_finalize() appends the correctly-sized auth-tag area. If this collar has
 // been locally provisioned with a 32-byte HMAC key, replace that placeholder
@@ -1304,10 +1305,10 @@ static void sendWakeCheckin() {
 // ═══════════════════════════════════════════════
 // Send Mode ACK (PKT_MODE_ACK)
 // ═══════════════════════════════════════════════
-static void sendModeAck(uint32_t cmdMsgSeq) {
+static void sendModeAck(uint32_t cmdMsgSeq, uint16_t destinationId) {
     messageSeq++;
     uint8_t buf[BP_MAX_PACKET_SIZE];
-    pkt_init(buf, MY_DEVICE_ID, messageSeq, 0,
+    pkt_init(buf, MY_DEVICE_ID, destinationId, (uint16_t)(messageSeq & 0xFFFF), 0,
              STATUS_HOME, currentProfile, 0, TX_ACK);
 
     pkt_add_tlv_u8(buf,  TLV_PROFILE,       currentProfile);
@@ -1323,10 +1324,10 @@ static void sendModeAck(uint32_t cmdMsgSeq) {
 // ═══════════════════════════════════════════════
 // Send Status Response (PKT_STATUS_RESP)
 // ═══════════════════════════════════════════════
-static void sendStatusResponse(uint32_t cmdMsgSeq) {
+static void sendStatusResponse(uint32_t cmdMsgSeq, uint16_t destinationId) {
     messageSeq++;
     uint8_t buf[BP_MAX_PACKET_SIZE];
-    pkt_init(buf, MY_DEVICE_ID, messageSeq, 0,
+    pkt_init(buf, MY_DEVICE_ID, destinationId, (uint16_t)(messageSeq & 0xFFFF), 0,
              STATUS_HOME, currentProfile, 0, TX_ACK);
 
     pkt_add_tlv_u8(buf,  TLV_PROFILE,        currentProfile);
@@ -1344,10 +1345,10 @@ static void sendStatusResponse(uint32_t cmdMsgSeq) {
 // ═══════════════════════════════════════════════
 // Send Find ACK (PKT_FIND_ACK)
 // ═══════════════════════════════════════════════
-static void sendFindAck(uint32_t cmdMsgSeq) {
+static void sendFindAck(uint32_t cmdMsgSeq, uint16_t destinationId) {
     messageSeq++;
     uint8_t buf[BP_MAX_PACKET_SIZE];
-    pkt_init(buf, MY_DEVICE_ID, messageSeq, 0,
+    pkt_init(buf, MY_DEVICE_ID, destinationId, (uint16_t)(messageSeq & 0xFFFF), 0,
              STATUS_HOME, currentProfile, 0, TX_ACK);
 
     pkt_add_tlv_u16(buf, TLV_CMD_MSG_ID, (uint16_t)(cmdMsgSeq & 0xFFFF));
@@ -1378,7 +1379,7 @@ static void sendLostModeAlert() {
 // ═══════════════════════════════════════════════
 // LoRa Transmit
 //
-// Wakes the radio, transmits the raw TLV v1.1 packet, then provides visual
+// Wakes the radio, transmits the raw TLV v1.2 packet, then provides visual
 // feedback via LED flashes.
 // LED pattern tells you the result: normal flashes = OK,
 // 2 slow flashes = timeout, 6 rapid flashes = error.
@@ -1450,7 +1451,7 @@ static void listenForCommands() {
 //   PKT_CMD_FIND   — Flash LED + play buzzer pattern ("Find My Pet")
 // ═══════════════════════════════════════════════
 static void handleReceivedCommand(const uint8_t *buf, uint8_t len) {
-    // Validate TLV v1.1 structure only. Downlink command authentication is
+    // Validate TLV v1.2 structure only. Downlink command authentication is
     // deliberately deferred to the later command-protocol milestone; these
     // ACKed commands are for prototype/bench testing and are not production-secure.
     if (!pkt_validate_crc(buf, len)) {
@@ -1458,10 +1459,15 @@ static void handleReceivedCommand(const uint8_t *buf, uint8_t len) {
         return;
     }
 
-    // Check if this command is addressed to us (or is a broadcast)
-    uint16_t targetId = pkt_device_id(buf);
+    // v1.2 explicitly distinguishes the command originator from its target.
+    uint16_t sourceId = pkt_source_id(buf);
+    uint16_t targetId = pkt_destination_id(buf);
     if (targetId != MY_DEVICE_ID && targetId != DEVICE_ID_BROADCAST) {
         Serial.printf("[RX] Not for us (0x%04X)\n", targetId);
+        return;
+    }
+    if (!bp_is_hub_id(sourceId)) {
+        Serial.printf("[RX] Command source is not a hub (0x%04X)\n", sourceId);
         return;
     }
 
@@ -1476,12 +1482,13 @@ static void handleReceivedCommand(const uint8_t *buf, uint8_t len) {
         // The original ACK may have been lost. Do not apply the command twice,
         // but repeat the correct ACK so hub/cloud delivery can converge.
         Serial.printf("[RX] Duplicate cmd seq %lu — re-ACKing\n", cmdSeq);
-        if (pktType == PKT_CMD_MODE) sendModeAck(cmdSeq);
-        else if (pktType == PKT_CMD_STATUS) sendStatusResponse(cmdSeq);
-        else if (pktType == PKT_CMD_FIND) sendFindAck(cmdSeq);
+        if (pktType == PKT_CMD_MODE) sendModeAck(cmdSeq, lastCommandSourceId);
+        else if (pktType == PKT_CMD_STATUS) sendStatusResponse(cmdSeq, lastCommandSourceId);
+        else if (pktType == PKT_CMD_FIND) sendFindAck(cmdSeq, lastCommandSourceId);
         return;
     }
     lastProcessedCmdSeq = cmdSeq;
+    lastCommandSourceId = sourceId;
 
     switch (pktType) {
     case PKT_CMD_MODE: {
@@ -1492,7 +1499,7 @@ static void handleReceivedCommand(const uint8_t *buf, uint8_t len) {
             Serial.printf("[RX] CMD_MODE → %s (seq %lu)\n",
                           bp_profile_name((bp_profile_t)newProfile), cmdSeq);
             applyProfile((bp_profile_t)newProfile);  // Apply new settings (TX power, sleep time, etc.)
-            sendModeAck(cmdSeq);                     // ACK back to hub with new config
+            sendModeAck(cmdSeq, sourceId);           // ACK back to the originating hub
         } else {
             Serial.println("[RX] CMD_MODE missing TLV_PROFILE");
         }
@@ -1501,7 +1508,7 @@ static void handleReceivedCommand(const uint8_t *buf, uint8_t len) {
     case PKT_CMD_STATUS:
         // Hub wants a status report — send back current config details
         Serial.printf("[RX] CMD_STATUS (seq %lu)\n", cmdSeq);
-        sendStatusResponse(cmdSeq);
+        sendStatusResponse(cmdSeq, sourceId);
         break;
     case PKT_CMD_FIND: {
         // "Find My Pet" — flash the LED and play a buzzer sound
@@ -1521,7 +1528,7 @@ static void handleReceivedCommand(const uint8_t *buf, uint8_t len) {
             buzzerPlayPattern((bp_buzzer_pattern_t)pattern);  // Audible alert
         }
 
-        sendFindAck(cmdSeq);  // ACK back to hub
+        sendFindAck(cmdSeq, sourceId);  // ACK back to the originating hub
         break;
     }
     default:

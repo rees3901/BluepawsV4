@@ -24,19 +24,19 @@ class TlvSimulatorTests(unittest.TestCase):
     def test_gateway_auth_resolves_from_bundle_and_allows_explicit_override(self):
         bundle = CredentialBundle(
             devices=(DeviceCredential(1001, "d" * 48, bytes(32)),),
-            gateways=(GatewayCredential("0016", "g" * 48, "Test Hub"),),
+            gateways=(GatewayCredential("0010", "g" * 48, "Test Hub"),),
         )
-        self.assertEqual(resolve_gateway_auth(bundle, None, None), ("0016", "g" * 48))
+        self.assertEqual(resolve_gateway_auth(bundle, None, None), ("0010", "g" * 48))
         self.assertEqual(
-            resolve_gateway_auth(bundle, "0016", "x" * 48), ("0016", "x" * 48)
+            resolve_gateway_auth(bundle, "0010", "x" * 48), ("0010", "x" * 48)
         )
 
     def test_gateway_auth_requires_selection_when_bundle_has_multiple_hubs(self):
         bundle = CredentialBundle(
             devices=(DeviceCredential(1001, "d" * 48, bytes(32)),),
             gateways=(
-                GatewayCredential("0016", "g" * 48),
-                GatewayCredential("0017", "h" * 48),
+                GatewayCredential("0010", "g" * 48),
+                GatewayCredential("0020", "h" * 48),
             ),
         )
         with self.assertRaisesRegex(ValueError, "multiple gateways"):
@@ -72,10 +72,12 @@ class TlvSimulatorTests(unittest.TestCase):
         packet = build_packet(state, random.Random(1), 0, timestamp=1_700_000_000)
         tlv_length = packet[31]
         self.assertEqual(len(packet), 32 + tlv_length + 8)
+        self.assertEqual(packet[0], 2)
         self.assertEqual(struct.unpack_from("<H", packet, 1)[0], 1001)
-        self.assertEqual(struct.unpack_from("<H", packet, 3)[0], 42)
-        self.assertEqual(struct.unpack_from("<i", packet, 12)[0], 515_000_000)
-        self.assertEqual(packet[27:31], bytes(4))
+        self.assertEqual(struct.unpack_from("<H", packet, 3)[0], 0)
+        self.assertEqual(struct.unpack_from("<H", packet, 5)[0], 42)
+        self.assertEqual(struct.unpack_from("<i", packet, 14)[0], 515_000_000)
+        self.assertEqual(packet[29:31], bytes(2))
         expected = hmac.new(key, packet[:-8], hashlib.sha256).digest()[:8]
         self.assertEqual(packet[-8:], expected)
 
@@ -94,11 +96,13 @@ class TlvSimulatorTests(unittest.TestCase):
 
     def test_lora_wrapper_preserves_packet_and_route_metadata(self):
         packet_data = bytearray(40)
+        packet_data[0] = 2
+        struct.pack_into("<H", packet_data, 1, 1001)
         packet_data[31] = 0
         packet = bytes(packet_data)
-        wrapper = build_wrapper(packet, "lora_gateway", random.Random(1), "0016")
+        wrapper = build_wrapper(packet, "lora_gateway", random.Random(1), "0010")
         self.assertEqual(wrapper["ingest_path"], "lora_gateway")
-        self.assertEqual(wrapper["gateway_guid16"], "0016")
+        self.assertEqual(wrapper["gateway_guid16"], "0010")
         self.assertEqual(base64.b64decode(wrapper["payload_b64"]), packet)
 
 

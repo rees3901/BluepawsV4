@@ -5,22 +5,24 @@ import { bytesToBase64, parseTlvPacket, parseTlvRequest, sha256Hex, TlvDecodeErr
 
 const KEY = Uint8Array.from({ length: 32 }, (_value, index) => index);
 
-test("decodes the locked v1.1 header, selected TLVs, and transport wrapper", () => {
+test("decodes the locked v1.2 addressed header, selected TLVs, and transport wrapper", () => {
   const raw = buildPacket();
   const parsed = parseTlvRequest({
     format: "tlv",
     ingest_path: "lora_gateway",
     link_type: "lora",
-    gateway_guid16: "0016",
+    gateway_guid16: "0010",
     gateway_rx_time_unix: 1_786_537_811,
     link_rssi_dbm: -92,
     link_snr_db: 6.25,
     payload_b64: bytesToBase64(raw),
   });
 
-  assert.equal(parsed.metadata.gatewayGuid16, 0x0016);
+  assert.equal(parsed.metadata.gatewayGuid16, 0x0010);
   assert.equal(parsed.metadata.ingestPath, "lora_hub");
   assert.equal(parsed.packet.deviceGuid16, 0x04a7);
+  assert.equal(parsed.packet.sourceId16, 0x04a7);
+  assert.equal(parsed.packet.destinationId16, 0x0000);
   assert.equal(parsed.packet.messageSequenceId, 10_542);
   assert.equal(parsed.packet.status, 1);
   assert.equal(parsed.packet.powerProfile, 1);
@@ -37,7 +39,7 @@ test("decodes the locked v1.1 header, selected TLVs, and transport wrapper", () 
 });
 
 test("produces a stable backend payload hash without adding bytes to the packet", async () => {
-  assert.equal(await sha256Hex(buildPacket()), "8b4e42daccafbffcf76fb12dd2a28d02fbd0f0362ae19b677c1a6b185aa7c535");
+  assert.equal(await sha256Hex(buildPacket()), "8ac24d13cbbd75c8f6fb0cbc0f41c9f7b837a5d7a0603a8011d65b7596dcc6a1");
 });
 
 test("preserves an unknown TLV while safely skipping it", () => {
@@ -53,7 +55,7 @@ test("rejects malformed packets and ambiguous known TLVs", () => {
   assertDecodeError(() => parseTlvPacket(buildPacket(Uint8Array.of(0x06, 0x01, 0x01, 0x06, 0x01, 0x02))), "duplicate_tlv");
 
   const reserved = buildPacket();
-  reserved[27] = 1;
+  reserved[29] = 1;
   assertDecodeError(() => parseTlvPacket(reserved), "reserved_header_nonzero");
 });
 
@@ -84,13 +86,49 @@ test("recognizes a valid direct cellular wrapper", () => {
   assert.equal(parsed.metadata.gatewayGuid16, null);
 });
 
-test("decodes every v1.1 status, power profile, and TX reason code from the header", () => {
+test("decodes the v1.2 profile command and ACK TLV", () => {
+  const packet = buildPacket(Uint8Array.of(0xf1, 0x01, 0x04));
+  assert.deepEqual(parseTlvPacket(packet).tlvs, { profile: 4 });
+});
+
+test("enforces v1.2 source roles and destination routing", () => {
+  assertDecodeError(() => parseTlvRequest({
+    ingest_path: "cellular_direct",
+    link_type: "lte",
+    payload_b64: bytesToBase64(buildPacket(selectedTlvs(), 0x0010)),
+  }), "invalid_destination");
+
+  assertDecodeError(() => parseTlvRequest({
+    ingest_path: "lora_hub",
+    link_type: "lora",
+    gateway_guid16: "0010",
+    gateway_rx_time_unix: 1_786_537_811,
+    payload_b64: bytesToBase64(buildPacket(selectedTlvs(), 0x0020)),
+  }), "invalid_destination");
+
+  assertDecodeError(() => parseTlvRequest({
+    ingest_path: "cellular_direct",
+    link_type: "lte",
+    payload_b64: bytesToBase64(buildPacket(selectedTlvs(), 0x0000, 0x0010)),
+  }), "invalid_source_role");
+
+  const hubAck = parseTlvRequest({
+    ingest_path: "lora_hub",
+    link_type: "lora",
+    gateway_guid16: "0010",
+    gateway_rx_time_unix: 1_786_537_811,
+    payload_b64: bytesToBase64(buildPacket(selectedTlvs(), 0x0010)),
+  });
+  assert.equal(hubAck.packet.destinationId16, 0x0010);
+});
+
+test("decodes every v1.2 status, power profile, and TX reason code from the header", () => {
   for (let status = 0; status <= 3; status += 1) {
     for (let powerProfile = 0; powerProfile <= 4; powerProfile += 1) {
       for (let txReason = 0; txReason <= 7; txReason += 1) {
         const packet = buildPacket();
-        packet[9] = (powerProfile << 4) | status;
-        packet[11] = txReason;
+        packet[11] = (powerProfile << 4) | status;
+        packet[13] = txReason;
 
         const parsed = parseTlvPacket(packet);
 
@@ -102,31 +140,31 @@ test("decodes every v1.1 status, power profile, and TX reason code from the head
   }
 });
 
-test("rejects reserved v1.1 status, power profile, and TX reason codes", () => {
+test("rejects reserved v1.2 status, power profile, and TX reason codes", () => {
   const reservedStatus = buildPacket();
-  reservedStatus[9] = 0x04;
+  reservedStatus[11] = 0x04;
   assertDecodeError(() => parseTlvPacket(reservedStatus), "reserved_status");
 
   const reservedPowerProfile = buildPacket();
-  reservedPowerProfile[9] = 0x50;
+  reservedPowerProfile[11] = 0x50;
   assertDecodeError(
     () => parseTlvPacket(reservedPowerProfile),
     "reserved_power_profile",
   );
 
   const reservedTxReason = buildPacket();
-  reservedTxReason[11] = 8;
+  reservedTxReason[13] = 8;
   assertDecodeError(() => parseTlvPacket(reservedTxReason), "reserved_tx_reason");
 });
 
 test("accepts wake check-in packets without GNSS coordinates", () => {
   const packet = buildPacket();
-  packet[9] = 0x00;
-  packet[10] = 0x08;
-  packet[11] = 7;
-  packet.fill(0, 12, 20);
-  new DataView(packet.buffer).setUint16(24, 65_535, true);
-  packet[26] = 255;
+  packet[11] = 0x00;
+  packet[12] = 0x08;
+  packet[13] = 7;
+  packet.fill(0, 14, 22);
+  new DataView(packet.buffer).setUint16(26, 65_535, true);
+  packet[28] = 255;
 
   const parsed = parseTlvPacket(packet);
 
@@ -147,13 +185,13 @@ test("accepts no-GNSS boot packets with existing diagnostic TLVs", () => {
     0x06, 0x01, 0x03,
     0x10, 0x04, 0x07, 0x00, 0x00, 0x00,
   ));
-  packet[9] = 0x10;
-  packet[10] = 0xC8;
-  packet[11] = 4;
-  packet.fill(0, 12, 20);
+  packet[11] = 0x10;
+  packet[12] = 0xC8;
+  packet[13] = 4;
+  packet.fill(0, 14, 22);
   new DataView(packet.buffer).setUint16(22, 0, true);
-  new DataView(packet.buffer).setUint16(24, 65_535, true);
-  packet[26] = 255;
+  new DataView(packet.buffer).setUint16(26, 65_535, true);
+  packet[28] = 255;
 
   const parsed = parseTlvPacket(packet);
 
@@ -173,22 +211,23 @@ test("accepts no-GNSS boot packets with existing diagnostic TLVs", () => {
   });
 });
 
-function buildPacket(tlvs = selectedTlvs()) {
+function buildPacket(tlvs = selectedTlvs(), destinationId = 0x0000, sourceId = 0x04a7) {
   const body = new Uint8Array(32 + tlvs.length);
   const view = new DataView(body.buffer);
-  view.setUint8(0, 1);
-  view.setUint16(1, 0x04a7, true);
-  view.setUint16(3, 10_542, true);
-  view.setUint32(5, 1_786_537_810, true);
-  view.setUint8(9, 0x11);
-  view.setUint8(10, 0x13);
-  view.setUint8(11, 0);
-  view.setInt32(12, 519_058_165, true);
-  view.setInt32(16, -22_394_678, true);
-  view.setUint16(20, 3_700, true);
-  view.setUint16(22, 12, true);
-  view.setUint16(24, 3, true);
-  view.setUint8(26, 8);
+  view.setUint8(0, 2);
+  view.setUint16(1, sourceId, true);
+  view.setUint16(3, destinationId, true);
+  view.setUint16(5, 10_542, true);
+  view.setUint32(7, 1_786_537_810, true);
+  view.setUint8(11, 0x11);
+  view.setUint8(12, 0x13);
+  view.setUint8(13, 0);
+  view.setInt32(14, 519_058_165, true);
+  view.setInt32(18, -22_394_678, true);
+  view.setUint16(22, 3_700, true);
+  view.setUint16(24, 12, true);
+  view.setUint16(26, 3, true);
+  view.setUint8(28, 8);
   view.setUint8(31, tlvs.length);
   body.set(tlvs, 32);
 

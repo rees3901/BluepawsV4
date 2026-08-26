@@ -59,7 +59,7 @@ If no command exists:
 }
 ```
 
-The collar then ACKs with a normal TLV v1.1 packet using:
+The collar then ACKs with a TLV v1.2 packet using:
 
 - `tx_reason = ACK`
 - `TLV_ACKED_MSG_SEQ_ID = command.sequence_id`
@@ -70,17 +70,17 @@ The backend keeps the UUID command ID for audit and web UI state, but the embedd
 
 For `ingest_path = lora_hub`, the collar sends raw TLV over private LoRa. The Home Hub receives it, wraps it for HTTPS, and relays it to Supabase.
 
-The Home Hub's authenticated telemetry POST is also the command check. The Edge Function returns the next pending command in that HTTP response, and the Home Hub immediately transmits the corresponding TLV v1.1 downlink during the collar's 10-second RX window. If delivery or the ACK is missed, the same command remains retryable until acknowledged, superseded, or expired.
+The Home Hub's authenticated telemetry POST is also the command check. The Edge Function returns the next pending command in that HTTP response, and the Home Hub immediately transmits the corresponding TLV v1.2 downlink during the collar's 10-second RX window. If delivery or the ACK is missed, the same command remains retryable until acknowledged, superseded, or expired.
 
 The collar ACK format remains the same:
 
 - `tx_reason = ACK`
 - `TLV_ACKED_MSG_SEQ_ID = command.sequence_id`
 
-This fits TLV v1.1 without consuming another header flag or changing the protocol version:
+This fits TLV v1.2 without consuming another header flag:
 
-- profile commands use `tx_reason = CONFIG` plus `TLV_PROFILE`;
-- acknowledgements use `tx_reason = ACK` plus `TLV_ACKED_MSG_SEQ_ID`;
+- profile commands use `source_id16 = hub`, `destination_id16 = collar`, `tx_reason = CONFIG`, and `TLV_PROFILE`;
+- acknowledgements reverse the addresses and use `tx_reason = ACK` plus `TLV_ACKED_MSG_SEQ_ID`;
 - the command header `message_sequence_id` is the backend's compact 16-bit command sequence;
 - a repeated sequence is not applied twice, but is ACKed again in case the earlier ACK was lost.
 

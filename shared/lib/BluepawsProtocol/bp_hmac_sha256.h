@@ -1,7 +1,7 @@
 /*
   Bluepaws V4 — tiny SHA-256 / HMAC-SHA256 helper
 
-  Used by embedded testbed firmware to produce the TLV v1.1 8-byte truncated
+  Used by embedded testbed firmware to produce the TLV v1.2 8-byte truncated
   authentication tag without relying on platform-specific crypto libraries.
 */
 

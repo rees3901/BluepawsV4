@@ -202,7 +202,7 @@ The original power-saving design was: wake, scan for the BLE home beacon, and if
 ## 5. TLV Protocol
 
 - [x] ~~Binary TLV protocol library exists and is shared by hub/collar.~~
-- [x] ~~Canonical protocol documentation exists at `docs/TLV_PROTOCOL_V1_1.md`.~~
+- [x] ~~Canonical protocol documentation exists at `docs/TLV_PROTOCOL_V1_2.md`.~~
 - [x] ~~Ingestion runbook exists at `docs/TLV_INGESTION_RUNBOOK.md`.~~
 - [x] ~~`msg_seq_id` is used by the ingestion/deduplication model.~~
 - [x] ~~Ingress RF/network metadata is represented outside the collar payload by the backend ingest model.~~

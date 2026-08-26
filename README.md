@@ -32,7 +32,7 @@ The Sequans GM02SP replaces the previous BG77 + L76K combination. A single modul
 BluepawsV4/
 ├── README.md                         # Repository overview
 ├── docs/
-│   ├── TLV_PROTOCOL_V1_1.md          # Canonical TLV packet specification
+│   ├── TLV_PROTOCOL_V1_2.md          # Canonical TLV packet specification
 │   ├── DEV_TO_PROD_STRATEGY.md       # Environment promotion strategy
 │   ├── ENVIRONMENT_MATRIX.md         # DEV vs PROD separation rules
 │   └── PRODUCTION_READINESS_CHECKLIST.md # Go-live checklist
@@ -56,7 +56,7 @@ BluepawsV4/
 │   ├── mock-server.js                # Node.js mock hub for local GUI dev
 │   ├── vps_position_simulator.py     # Legacy JSON HTTPS simulator
 │   ├── tlv_telemetry_simulator.py    # Headless TLV fleet simulator
-│   ├── tlv_packet_codec.py           # Shared v1.1 packet/wrapper codec
+│   ├── tlv_packet_codec.py           # Shared v1.2 packet/wrapper codec
 │   └── tlv_simulator_gui.py          # Desktop TLV test console
 ├── web/                              # Next.js + TypeScript customer dashboard
 │   ├── src/app/                      # App Router entry point
@@ -130,12 +130,12 @@ See:
 - [`docs/ENVIRONMENT_MATRIX.md`](docs/ENVIRONMENT_MATRIX.md) for DEV vs PROD separation rules.
 - [`docs/PRODUCTION_READINESS_CHECKLIST.md`](docs/PRODUCTION_READINESS_CHECKLIST.md) for the pre-launch security and operational checklist.
 
-## TLV Protocol v1.1
+## TLV Protocol v1.2
 
 The canonical protocol document is:
 
 ```text
-docs/TLV_PROTOCOL_V1_1.md
+docs/TLV_PROTOCOL_V1_2.md
 ```
 
 The system is moving away from production JSON telemetry. JSON remains useful for debugging, logs, exports and admin APIs, but LoRa and cellular telemetry should use the compact binary TLV packet.

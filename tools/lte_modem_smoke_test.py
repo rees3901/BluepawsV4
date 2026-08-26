@@ -3,7 +3,7 @@
 
 This is a transport smoke-test, not a replacement for the local TLV web console.
 It proves the PC -> UART -> EG800K -> LTE -> Supabase Edge Function path using
-the same v1.1 TLV packet builder and wrapper contract as the existing tools.
+the same v1.2 TLV packet builder and wrapper contract as the existing tools.
 """
 
 from __future__ import annotations
