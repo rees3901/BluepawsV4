@@ -1473,7 +1473,12 @@ static void handleReceivedCommand(const uint8_t *buf, uint8_t len) {
     // We track the last processed sequence number to avoid executing
     // the same command multiple times (e.g. switching profile twice).
     if (cmdSeq != 0 && cmdSeq == lastProcessedCmdSeq) {
-        Serial.printf("[RX] Duplicate cmd seq %lu — ignoring\n", cmdSeq);
+        // The original ACK may have been lost. Do not apply the command twice,
+        // but repeat the correct ACK so hub/cloud delivery can converge.
+        Serial.printf("[RX] Duplicate cmd seq %lu — re-ACKing\n", cmdSeq);
+        if (pktType == PKT_CMD_MODE) sendModeAck(cmdSeq);
+        else if (pktType == PKT_CMD_STATUS) sendStatusResponse(cmdSeq);
+        else if (pktType == PKT_CMD_FIND) sendFindAck(cmdSeq);
         return;
     }
     lastProcessedCmdSeq = cmdSeq;

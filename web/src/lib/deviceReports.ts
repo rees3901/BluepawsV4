@@ -391,7 +391,7 @@ function statusCode(value: CollarStatus) {
 
 function profileCode(value: PowerProfile) {
   if (value === "PowerSave") return 0;
-  if (value === "Active" || value === "Active Find") return 2;
+  if (value === "Active") return 2;
   if (value === "Emergency Lost") return 3;
   if (value === "Debug") return 4;
   return 1;

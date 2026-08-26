@@ -114,9 +114,10 @@ enum bp_tlv_type_t : uint8_t {
     TLV_ACTIVITY_SCORE    = 0x13,  // u8   — simple activity/movement score
     TLV_ACKED_MSG_SEQ_ID  = 0x20,  // u16  — command/message sequence being ACK'd
 
+    TLV_PROFILE           = 0xF1,  // u8 — v1.1 downlink requested power profile
+
     // Compatibility aliases for old sketch call sites. Keep these out of
     // production packets unless the protocol document formally assigns them.
-    TLV_PROFILE           = 0xF1,
     TLV_TX_POWER          = 0xF2,
     TLV_SLEEP_INTERVAL    = 0xF3,
     TLV_GPS_WARM          = 0xF4,

@@ -8,6 +8,8 @@ import { DeviceReportModal } from "@/components/DeviceReportModal";
 import { GuidedTour } from "@/components/GuidedTour";
 import { AccountMenu } from "@/components/AccountMenu";
 import { defaultDeviceAvatar } from "@/lib/defaultDeviceAvatar";
+import { queuePowerProfileCommand } from "@/lib/deviceCommands";
+import { CUSTOMER_POWER_PROFILES, powerProfileLabel, type CustomerPowerProfile } from "@/lib/powerProfiles";
 import { deviceCardOrderStorageKey, moveDeviceBefore, orderDeviceIds, pinDeviceFirst } from "@/lib/deviceCardOrder";
 import { buildCurrentDeviceReport, deviceReportsToCsv, loadDeviceReports, type DeviceReport } from "@/lib/deviceReports";
 import { loadDeviceAppearances, revokeAvatarUrls } from "@/lib/deviceAppearances";
@@ -71,6 +73,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
   const [mapCommand, setMapCommand] = useState<MapCommand | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [commandDevice, setCommandDevice] = useState<SelectedDevice | null>(null);
+  const [commandSending, setCommandSending] = useState(false);
   const [findDevice, setFindDevice] = useState<SelectedDevice | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [now, setNow] = useState(0);
@@ -94,6 +97,27 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
   const familyHydrating = familyContextMissing && (!preferencesReady || familyRetryCount < FAMILY_HYDRATION_RETRY_DELAYS_MS.length);
 
   const orderedDeviceIds = useMemo(() => orderDeviceIds(devices.map((device) => device.id), cardOrder), [cardOrder, devices]);
+
+  const handlePowerProfileCommand = useCallback(async (profile: CustomerPowerProfile) => {
+    if (!commandDevice || commandSending) return;
+    if (tutorialMode) {
+      setCommandDevice(null);
+      setToast(`Tutorial command preview: ${powerProfileLabel(profile)}`);
+      return;
+    }
+
+    setCommandSending(true);
+    try {
+      const command = await queuePowerProfileCommand(commandDevice.id, profile);
+      setCommandDevice(null);
+      const expiry = new Date(command.expires_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      setToast(`${powerProfileLabel(profile)} queued until ${expiry}`);
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "Unable to queue collar command");
+    } finally {
+      setCommandSending(false);
+    }
+  }, [commandDevice, commandSending, tutorialMode]);
   const orderedDevices = useMemo(() => {
     const devicesById = new Map(devices.map((device) => [device.id, device]));
     return orderedDeviceIds.flatMap((deviceId) => {
@@ -565,7 +589,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
       {tutorialPromptOpen && (
         <TutorialWelcomeCard onStart={startTutorialFromPrompt} onDismiss={dismissTutorialPrompt} />
       )}
-      {commandDevice && <CommandModal device={commandDevice} onClose={() => setCommandDevice(null)} onSend={(mode) => { setCommandDevice(null); setToast(tutorialMode ? `Tutorial command preview: ${mode}` : "Command sending is not connected yet"); }} />}
+      {commandDevice && <CommandModal device={commandDevice} sending={commandSending} onClose={() => { if (!commandSending) setCommandDevice(null); }} onSend={handlePowerProfileCommand} />}
       {findDevice && <FindModal device={findDevice} onClose={() => setFindDevice(null)} onSend={() => { setFindDevice(null); setToast(tutorialMode ? "Tutorial Find Alert previewed" : "Find Alert sending is not connected yet"); }} />}
       {reportDevice && (
         <DeviceReportModal
@@ -678,14 +702,15 @@ function TutorialWelcomeCard({ onStart, onDismiss }: { onStart: () => void; onDi
   );
 }
 
-function CommandModal({ device, onClose, onSend }: { device: SelectedDevice; onClose: () => void; onSend: (mode: string) => void }) {
-  const [mode, setMode] = useState("normal");
+function CommandModal({ device, sending, onClose, onSend }: { device: SelectedDevice; sending: boolean; onClose: () => void; onSend: (mode: CustomerPowerProfile) => void }) {
+  const [mode, setMode] = useState<CustomerPowerProfile>("normal");
   return (
     <div className="modal" role="dialog" aria-modal="true" aria-labelledby="command-title">
       <div className="modal-content">
         <h2 id="command-title">Send Command</h2><p>Device: <strong>{device.name}</strong></p>
-        <div className="form-group"><label htmlFor="cmdMode">Change Mode</label><select id="cmdMode" value={mode} onChange={(event) => setMode(event.target.value)}><option value="normal">Normal</option><option value="powersave">PowerSave</option><option value="active_find">Active Find</option><option value="emergency_lost">Emergency Lost</option></select></div>
-        <div className="modal-actions"><button className="btn-primary" onClick={() => onSend(mode)}>Send</button><button className="btn-secondary" onClick={onClose}>Cancel</button></div>
+        <div className="form-group"><label htmlFor="cmdMode">Change Power Profile</label><select id="cmdMode" value={mode} disabled={sending} onChange={(event) => setMode(event.target.value as CustomerPowerProfile)}>{CUSTOMER_POWER_PROFILES.map((profile) => <option key={profile.value} value={profile.value}>{profile.label}</option>)}</select></div>
+        <p className="form-hint">Bluepaws attempts delivery on the collar&apos;s next check-in. The command remains pending for up to one hour.</p>
+        <div className="modal-actions"><button className="btn-primary" disabled={sending} onClick={() => onSend(mode)}>{sending ? "Queueing…" : "Send command"}</button><button className="btn-secondary" disabled={sending} onClick={onClose}>Cancel</button></div>
       </div>
     </div>
   );

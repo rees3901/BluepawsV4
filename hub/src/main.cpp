@@ -31,6 +31,7 @@
 #include <BLEServer.h>
 #include <BLEAdvertising.h>
 #include <HTTPClient.h>      // HTTP client for cloud POST relay
+#include <ArduinoJson.h>     // Parse pending commands returned by the Edge Function
 #include <time.h>
 
 // ── FreeRTOS primitives ──
@@ -304,7 +305,9 @@ static device_state_t *findDevice(uint16_t id);
 static void sendCommand(uint16_t target_id, bp_pkt_type_t type, bp_profile_t mode);
 static void sendCommandFind(uint16_t target_id, bp_pkt_type_t type,
                               bp_profile_t mode, uint8_t ledFlash,
-                              bp_buzzer_pattern_t buzzerPattern);
+                              bp_buzzer_pattern_t buzzerPattern,
+                              uint16_t sequenceOverride = 0);
+static bool queueCloudCommandResponse(const String &response, uint16_t expectedDeviceId);
 static void sendStatusCommand(uint16_t target_id);
 static void checkPendingAcks();
 static void handleAck(const uint8_t *buf);
@@ -2103,8 +2106,15 @@ static void cloudTask(void *param) {
             http.addHeader("Authorization", authHeader);
 
             int code = http.POST(body);
+            String response = code > 0 ? http.getString() : String();
             if (code > 0) {
                 Serial.printf("[CLOUD] POST wrapper %dB TLV → %d\n", entry.len, code);
+                if (response.length() > 0) {
+                    Serial.printf("[CLOUD] Response: %s\n", response.c_str());
+                }
+                if (code >= 200 && code < 300) {
+                    queueCloudCommandResponse(response, pkt_device_id(entry.buf));
+                }
             } else {
                 Serial.printf("[CLOUD] POST failed: %s\n", http.errorToString(code).c_str());
             }
@@ -2136,12 +2146,16 @@ static void sendStatusCommand(uint16_t target_id) {
 // Full command builder — handles both mode commands and find commands.
 static void sendCommandFind(uint16_t target_id, bp_pkt_type_t type,
                               bp_profile_t mode, uint8_t ledFlash,
-                              bp_buzzer_pattern_t buzzerPattern) {
+                              bp_buzzer_pattern_t buzzerPattern,
+                              uint16_t sequenceOverride) {
     cmd_entry_t cmd;
     uint8_t txReason = (uint8_t)type;      // Temporary downlink compatibility mapping
-    uint16_t seq = (uint16_t)(++cmdSeqCounter & 0xFFFF); // Compact command sequence for ACK matching
+    uint16_t seq = sequenceOverride;
     if (seq == 0) {
-        seq = (uint16_t)(++cmdSeqCounter & 0xFFFF);
+        seq = (uint16_t)(++cmdSeqCounter & 0xFFFF); // Compact command sequence for ACK matching
+        if (seq == 0) {
+            seq = (uint16_t)(++cmdSeqCounter & 0xFFFF);
+        }
     }
 
     // Build the fixed header. Downlink commands still use the compatibility
@@ -2206,4 +2220,42 @@ static void sendCommandFind(uint16_t target_id, bp_pkt_type_t type,
         Serial.printf("[CMD] Queue full; dropped command seq %u for %s\n",
                       seq, bp_device_name(target_id));
     }
+}
+
+// Convert the authenticated cloud queue response into the existing LoRa
+// profile command. The backend sequence is retained verbatim so the collar's
+// TLV ACK can close the correct database row.
+static bool queueCloudCommandResponse(const String &response, uint16_t expectedDeviceId) {
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, response);
+    if (error || !doc["command_pending"].as<bool>()) return false;
+
+    JsonObject command = doc["command"].as<JsonObject>();
+    uint16_t sequence = command["sequence_id"] | 0;
+    const char *type = command["type"] | "";
+    const char *profileName = command["payload"]["profile"] | "";
+    if (sequence == 0) {
+        Serial.println("[CLOUD CMD] Ignored command with invalid sequence");
+        return false;
+    }
+
+    bp_profile_t profile = PROFILE_UNKNOWN;
+    if (strcmp(type, "set_profile") == 0) {
+        profile = bp_profile_from_name(profileName);
+    } else if (strcmp(type, "enter_lost_alert") == 0) {
+        profile = PROFILE_LOST;
+    } else if (strcmp(type, "exit_lost_alert") == 0) {
+        const char *fallback = command["payload"]["fallback_profile"] | "active";
+        profile = bp_profile_from_name(fallback);
+    }
+
+    if (profile == PROFILE_UNKNOWN) {
+        Serial.printf("[CLOUD CMD] Unsupported command '%s' for device %u\n", type, expectedDeviceId);
+        return false;
+    }
+
+    sendCommandFind(expectedDeviceId, PKT_CMD_MODE, profile, 0, BUZZER_OFF, sequence);
+    Serial.printf("[CLOUD CMD] Queued %s seq=%u for device %u\n",
+                  bp_profile_name(profile), sequence, expectedDeviceId);
+    return true;
 }

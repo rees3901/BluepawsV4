@@ -261,9 +261,15 @@ async function handleTlv(
   const ackedCommand = packet.txReason === TX_REASON_ACK
     ? await acknowledgeCommandIfPresent(supabase, packet.deviceGuid16, packet.tlvs, requestId)
     : null;
-  const pendingCommand = metadata.ingestPath === "cellular_direct"
-    ? await claimNextCommand(supabase, packet.deviceGuid16, metadata.ingestPath, requestId)
-    : null;
+  // Both transports are request/response delivery opportunities. LTE collars
+  // consume this response directly; a Home Hub converts the returned command
+  // to the existing LoRa downlink packet while the collar RX window is open.
+  const pendingCommand = await claimNextCommand(
+    supabase,
+    packet.deviceGuid16,
+    metadata.ingestPath,
+    requestId,
+  );
 
   return json({
     accepted: true,
