@@ -1714,6 +1714,8 @@ static void printSerialHelp() {
     Serial.println("      reboot");
     Serial.println("      wifi ssid=\"Your SSID\" pass=\"Your password\"");
     Serial.println("      wifi ssid=\"Open network\"");
+    Serial.println("      cloud token=\"gateway-bearer-token\"");
+    Serial.println("      cloud url=\"https://project.supabase.co/functions/v1/ingest-position\"");
     Serial.println("      cmd mode 1001 active");
     Serial.println("      cmd mode 1001 normal");
     Serial.println("      cmd status 1001");
@@ -1782,6 +1784,29 @@ static void handleSerialCommand(String line) {
         Serial.printf("[CMD] Saved Wi-Fi SSID '%s'. Rebooting to reconnect...\n", staSSID.c_str());
         delay(500);
         ESP.restart();
+        return;
+    }
+
+    if (lower.startsWith("cloud ")) {
+        String newToken;
+        String newUrl;
+        extractSerialArg(line, "token", newToken);
+        extractSerialArg(line, "url", newUrl);
+        if (newToken.length() == 0 && newUrl.length() == 0) {
+            Serial.println("[CMD] Usage: cloud token=\"gateway-bearer-token\" [url=\"https://...\"]");
+            return;
+        }
+
+        if (newToken.length() > 0) cloudToken = newToken;
+        if (newUrl.length() > 0) cloudEndpoint = newUrl;
+        if (!saveHubConfigToFlash()) {
+            Serial.println("[CMD] Failed to save cloud config to LittleFS.");
+            return;
+        }
+
+        Serial.printf("[CMD] Cloud configuration saved (token=%s, endpoint=%s).\n",
+                      cloudToken.length() ? "stored" : "not set",
+                      cloudEndpoint.c_str());
         return;
     }
 

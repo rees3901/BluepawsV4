@@ -308,7 +308,11 @@ def main() -> int:
                 print("[INFO] Waiting for the next natural collar TX/RX window.")
 
         presence_checks = [
-            ("HUB", [r"\[LORA\].*RX", rf"Collar_{target_hex}|device={args.target_id}"], args.timeout),
+            (
+                "HUB",
+                [r"\[LORA\].*RX", rf"source={target_hex}|Collar_{target_hex}|device={args.target_id}"],
+                args.timeout,
+            ),
         ]
         if not args.skip_sniffer:
             presence_checks.append(("SNIFFER", [r"\[RX\]", rf"device={args.target_id}"], args.timeout))
