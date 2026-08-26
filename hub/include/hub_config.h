@@ -32,8 +32,10 @@
 #define CLOUD_BEARER_TOKEN ""
 #endif
 
+// TLV v1.2 physical hub IDs are non-zero multiples of 16.
+// 16 decimal == 0x0010. Do not confuse this with 0x0016 (22 decimal).
 #ifndef GATEWAY_GUID16
-#define GATEWAY_GUID16 0x0016
+#define GATEWAY_GUID16 0x0010
 #endif
 
 // In normal Home mode the hub should use STA Wi-Fi and keep its own AP off.
