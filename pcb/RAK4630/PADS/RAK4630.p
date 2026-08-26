@@ -1,0 +1,63 @@
+*PADS-LIBRARY-PART-TYPES-V9*
+
+RAK4630 RAK4630 I ANA 9 1 0 0 0
+TIMESTAMP 2026.03.25.12.40.07
+"Manufacturer_Name" RAK
+"Manufacturer_Part_Number" RAK4630
+"Mouser Part Number" 
+"Mouser Price/Stock" 
+"Arrow Part Number" 
+"Arrow Price/Stock" 
+"Description" RF IC Transceiver Bluetooth, LoRa 915MHz, 920MHz, 923MHz SPI Interface
+"Datasheet Link" https://dl-docs.rakwireless.com/api/render/?emulateScreenMedia=false&pdf.format=legal&url=https%3A%2F%2Fdocs.rakwireless.com%2FProduct-Categories%2FWisDuo%2FRAK4630-Module%2FDatasheet%2F
+"Geometry.Height" 3mm
+GATE 1 44 0
+RAK4630
+1 0 U VBUS
+2 0 U USB-
+3 0 U USB+
+4 0 U P0.13/I2C_SDA
+5 0 U P0.14/I2C_SCL
+6 0 U P0.15/UART2_RX
+7 0 U P0.16/UART2_TX
+8 0 U P0.17/UART2_DE
+9 0 U P0.19/UART1_RX_(AT_COMMAND)
+10 0 U P0.20/UART1_TX_(AT_COMMAND)
+11 0 U P0.21/UART1_DE
+12 0 U P0.10/NFC2
+13 0 U P0.09/NFC1
+14 0 U GND_1
+15 0 U RF_BT
+16 0 U GND_2
+17 0 U NRF_RESET
+18 0 U SWDCLK
+19 0 U SWDIO
+20 0 U VBAT_SX
+21 0 U VBAT_IO_SX
+22 0 U GND_3
+23 0 U P0.24/I2C_SDA_2
+24 0 U P0.25/I2C_SCL_2
+25 0 U P1.01/SW1
+26 0 U P1.02/SW2
+27 0 U P1.03/LED1
+28 0 U P1.04/LED2
+29 0 U P0.03/QSPI_CLK
+30 0 U P0.02/QSPI_DIO3
+31 0 U P0.28/QSPI_DIO2
+32 0 U P0.29/QSPI_DIO1
+33 0 U P0.30/QSPI_DIO0
+34 0 U P0.26/QSPI_CS
+35 0 U GND_4
+36 0 U GND_5
+37 0 U RF_LORA
+38 0 U GND_6
+39 0 U P0.31/AIN7
+40 0 U P0.05/AIN3
+41 0 U P0.04/AIN2
+42 0 U GND_7
+43 0 U VDD_NRF
+44 0 U VBAT_NRF
+
+*END*
+*REMARK* SamacSys ECAD Model
+17998741/1983153/2.50/44/3/Integrated Circuit

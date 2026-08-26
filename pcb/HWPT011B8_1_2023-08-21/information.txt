@@ -1,0 +1,73 @@
+Deliver Package Information
+---------------------------
+
+Delivery Package
+ |
+ |- Information.txt (This File)
+ |-"Project"-ReleaseNote_"YYYY-MM-DD"_R"release".doc (MS Word format)
+ |-"Project"-ReleaseNote_"YYYY-MM-DD"_R"release".pdf (PDF format)
+ |
+ |-BASIC (Directory)
+ |  |
+ |  |-"Project""Rev"BM_"YYYY-MM-DD".xls Bill of Materials (excel format)
+ |  |-BOM-"Project""Rev"_"YYYY-MM-DD".pdf Bill of Materials (PDF format)
+ |  |-SCH-"Project""Rev"_"YYYY-MM-DD".pdf Schematic sheets (PDF format)
+ |  |-PCB-"Project""Rev"_"YYYY-MM-DD".pdf PCB Plots (PDF format)
+ |
+ |-ECAD (Directory)
+ |  |
+ |  |-"Project""Rev"_"YYYY-MM-DD".sch         (Schematic in PADS Logic VX2.1 file format)
+ |  |-"Project""Rev"_"YYYY-MM-DD"_V2005_0.txt (Schematic in PADS Logic V2005.0 ASCII format)
+ |  |-"Project""Rev"_"YYYY-MM-DD".pcb         (PCB in PADS Layout VX2.1 file format)
+ |  |-"Project""Rev"_"YYYY-MM-DD"_V2005_0.asc (PCB in PADS Layout V2005.0 ASCII format)
+ |  
+ |-MANUFACTURING (Directory)
+    |
+    |-Bare_Board
+    |  |
+    |  |- ReadMe_PCB.txt (locations for additional Bare Board specific information)
+    |  |
+    |  |-"Project""Rev"_"YYYY-MM-DD".zip(archive format)
+    |  |  |
+    |  |  |-"Project""Rev"MD     Manufacturing Drawing           (.pho Gerber & .rep text)
+    |  |  |-"Project""Rev"Wn     Wiring (n is the layer).        (.pho Gerber & .rep text)
+    |  |  |-"Project""Rev"Rn     Solder Resist (n is the layer). (.pho Gerber & .rep text)
+    |  |  |-"Project""Rev"Pn     Solder Paste (n is the layer).  (.pho Gerber & .rep text)
+    |  |  |-"Project""Rev"Sn     Silkscreen (n is the layer).    (.pho Gerber & .rep text)
+    |  |  |-"Project""Rev"An     Assembly (n is the layer).      (.pho Gerber & .rep text)
+    |  |  | 
+    |  |  |-"Project""Rev"NC     NC Drill files (Through holes) ( .drt, .tol, .rep)
+    |  |  |-"Project""Rev"NC_nm  NC Drill files (Partial Vias)  ( .drt, .tol, .rep)
+    |  |  |                      Where n is start layer, m is end layer.(e.g 12= 1 to 2)
+    |  |  |
+    |  |  |-"Project""Rev".ipc   Netlist Information (in IPC-D-356A format)
+    |
+    |-PCB_Assembly
+       |
+       |- ReadMe_Manufacturing.txt (locations for additional Assembly specific information)
+       |
+       |-"Project""Rev"XY_"YYYY-MM-DD".txt (Pick and Place location File)
+
+
+Manufacturing Formats.
+----------------------
+
+Gerber Format
+-------------
+Output Format:-   RS274-X
+Units:-           Metric
+Digits :-         3(Leading),4(Trailing)
+Co-Ordinates:-    Absolute
+Zero Suppress:-   Leading
+Suppress Repeat:- Yes
+
+Excellon Drill Formats
+----------------------
+Output Format:-   ASCII
+Units:-           Imperial/English
+Digits :-         2(Leading),4(Trailing)
+Co-Ordinates:-    Absolute
+Zero Suppress:-   Trailing
+Suppress Repeat:- Yes
+
+------------------------------------------ END ------------------------------------------

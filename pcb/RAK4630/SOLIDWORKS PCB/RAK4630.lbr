@@ -1,0 +1,261 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--/17998741/1983153/2.50/44/3/Integrated Circuit/-->
+<!DOCTYPE curve SYSTEM "eagle.dtd">
+<eagle version="7.7.0">
+<drawing>
+<settings>
+<setting alwaysvectorfont="no"/>
+<setting verticaltext="up"/>
+</settings>
+<grid distance="0.1" unitdist="inch" unit="inch" style="lines" multiple="1" display="no" altdistance="0.01" altunitdist="inch" altunit="inch"/>
+<layers>
+<layer number="1" name="Top" color="4" fill="1" visible="yes" active="yes"/>
+<layer number="16" name="Bottom" color="1" fill="1" visible="yes" active="yes"/>
+<layer number="17" name="Pads" color="2" fill="1" visible="yes" active="yes"/>
+<layer number="18" name="Vias" color="2" fill="1" visible="yes" active="yes"/>
+<layer number="19" name="Unrouted" color="6" fill="1" visible="yes" active="yes"/>
+<layer number="20" name="Dimension" color="15" fill="1" visible="yes" active="yes"/>
+<layer number="21" name="tPlace" color="7" fill="1" visible="yes" active="yes"/>
+<layer number="22" name="bPlace" color="7" fill="1" visible="yes" active="yes"/>
+<layer number="23" name="tOrigins" color="15" fill="1" visible="yes" active="yes"/>
+<layer number="24" name="bOrigins" color="15" fill="1" visible="yes" active="yes"/>
+<layer number="25" name="tNames" color="7" fill="1" visible="yes" active="yes"/>
+<layer number="26" name="bNames" color="7" fill="1" visible="yes" active="yes"/>
+<layer number="27" name="tValues" color="7" fill="1" visible="yes" active="yes"/>
+<layer number="28" name="bValues" color="7" fill="1" visible="yes" active="yes"/>
+<layer number="29" name="tStop" color="7" fill="3" visible="no" active="yes"/>
+<layer number="30" name="bStop" color="7" fill="6" visible="no" active="yes"/>
+<layer number="31" name="tCream" color="7" fill="4" visible="no" active="yes"/>
+<layer number="32" name="bCream" color="7" fill="5" visible="no" active="yes"/>
+<layer number="33" name="tFinish" color="6" fill="3" visible="no" active="yes"/>
+<layer number="34" name="bFinish" color="6" fill="6" visible="no" active="yes"/>
+<layer number="35" name="tGlue" color="7" fill="4" visible="no" active="yes"/>
+<layer number="36" name="bGlue" color="7" fill="5" visible="no" active="yes"/>
+<layer number="37" name="tTest" color="7" fill="1" visible="no" active="yes"/>
+<layer number="38" name="bTest" color="7" fill="1" visible="no" active="yes"/>
+<layer number="39" name="tKeepout" color="4" fill="11" visible="yes" active="yes"/>
+<layer number="40" name="bKeepout" color="1" fill="11" visible="yes" active="yes"/>
+<layer number="41" name="tRestrict" color="4" fill="10" visible="yes" active="yes"/>
+<layer number="42" name="bRestrict" color="1" fill="10" visible="yes" active="yes"/>
+<layer number="43" name="vRestrict" color="2" fill="10" visible="yes" active="yes"/>
+<layer number="44" name="Drills" color="7" fill="1" visible="no" active="yes"/>
+<layer number="45" name="Holes" color="7" fill="1" visible="no" active="yes"/>
+<layer number="46" name="Milling" color="3" fill="1" visible="no" active="yes"/>
+<layer number="47" name="Measures" color="7" fill="1" visible="no" active="yes"/>
+<layer number="48" name="Document" color="7" fill="1" visible="yes" active="yes"/>
+<layer number="49" name="Reference" color="7" fill="1" visible="yes" active="yes"/>
+<layer number="51" name="tDocu" color="7" fill="1" visible="yes" active="yes"/>
+<layer number="52" name="bDocu" color="7" fill="1" visible="yes" active="yes"/>
+<layer number="90" name="Modules" color="5" fill="1" visible="yes" active="yes"/>
+<layer number="91" name="Nets" color="2" fill="1" visible="yes" active="yes"/>
+<layer number="92" name="Busses" color="1" fill="1" visible="yes" active="yes"/>
+<layer number="93" name="Pins" color="2" fill="1" visible="no" active="yes"/>
+<layer number="94" name="Symbols" color="4" fill="1" visible="yes" active="yes"/>
+<layer number="95" name="Names" color="7" fill="1" visible="yes" active="yes"/>
+<layer number="96" name="Values" color="7" fill="1" visible="yes" active="yes"/>
+<layer number="97" name="Info" color="7" fill="1" visible="yes" active="yes"/>
+<layer number="98" name="Guide" color="6" fill="1" visible="yes" active="yes"/>
+</layers>
+<library>
+<description>&lt;RF IC Transceiver Bluetooth, LoRa 915MHz, 920MHz, 923MHz SPI Interface&lt;/b&gt;&lt;p&gt;
+&lt;author&gt;Created by SamacSys&lt;/author&gt;</description>
+<packages>
+<package name="RAK4630">
+<description>&lt;b&gt;RAK4630-1&lt;/b&gt;&lt;br&gt;
+</description>
+<smd name="1" x="8.200" y="7.370" dx="1.300" dy="0.900" layer="1" rot="R90"/>
+<smd name="2" x="7.000" y="7.370" dx="1.300" dy="0.900" layer="1" rot="R90"/>
+<smd name="3" x="5.800" y="7.370" dx="1.300" dy="0.900" layer="1" rot="R90"/>
+<smd name="4" x="4.600" y="7.370" dx="1.300" dy="0.900" layer="1" rot="R90"/>
+<smd name="5" x="3.400" y="7.370" dx="1.300" dy="0.900" layer="1" rot="R90"/>
+<smd name="6" x="2.200" y="7.370" dx="1.300" dy="0.900" layer="1" rot="R90"/>
+<smd name="7" x="1.000" y="7.370" dx="1.300" dy="0.900" layer="1" rot="R90"/>
+<smd name="8" x="-0.200" y="7.370" dx="1.300" dy="0.900" layer="1" rot="R90"/>
+<smd name="9" x="-1.400" y="7.370" dx="1.300" dy="0.900" layer="1" rot="R90"/>
+<smd name="10" x="-2.600" y="7.370" dx="1.300" dy="0.900" layer="1" rot="R90"/>
+<smd name="11" x="-3.800" y="7.370" dx="1.300" dy="0.900" layer="1" rot="R90"/>
+<smd name="12" x="-5.000" y="7.370" dx="1.300" dy="0.900" layer="1" rot="R90"/>
+<smd name="13" x="-6.200" y="7.370" dx="1.300" dy="0.900" layer="1" rot="R90"/>
+<smd name="14" x="-11.370" y="5.410" dx="1.300" dy="0.900" layer="1" rot="R0"/>
+<smd name="15" x="-11.370" y="4.210" dx="1.300" dy="0.900" layer="1" rot="R0"/>
+<smd name="16" x="-11.370" y="1.810" dx="1.300" dy="0.900" layer="1" rot="R0"/>
+<smd name="17" x="-11.370" y="0.610" dx="1.300" dy="0.900" layer="1" rot="R0"/>
+<smd name="18" x="-11.370" y="-0.590" dx="1.300" dy="0.900" layer="1" rot="R0"/>
+<smd name="19" x="-11.370" y="-1.790" dx="1.300" dy="0.900" layer="1" rot="R0"/>
+<smd name="20" x="-11.370" y="-2.990" dx="1.300" dy="0.900" layer="1" rot="R0"/>
+<smd name="21" x="-11.370" y="-4.190" dx="1.300" dy="0.900" layer="1" rot="R0"/>
+<smd name="22" x="-11.370" y="-5.390" dx="1.300" dy="0.900" layer="1" rot="R0"/>
+<smd name="23" x="-8.700" y="-7.370" dx="1.300" dy="0.900" layer="1" rot="R90"/>
+<smd name="24" x="-7.500" y="-7.370" dx="1.300" dy="0.900" layer="1" rot="R90"/>
+<smd name="25" x="-6.300" y="-7.370" dx="1.300" dy="0.900" layer="1" rot="R90"/>
+<smd name="26" x="-5.100" y="-7.370" dx="1.300" dy="0.900" layer="1" rot="R90"/>
+<smd name="27" x="-3.900" y="-7.370" dx="1.300" dy="0.900" layer="1" rot="R90"/>
+<smd name="28" x="-2.700" y="-7.370" dx="1.300" dy="0.900" layer="1" rot="R90"/>
+<smd name="29" x="-1.500" y="-7.370" dx="1.300" dy="0.900" layer="1" rot="R90"/>
+<smd name="30" x="-0.300" y="-7.370" dx="1.300" dy="0.900" layer="1" rot="R90"/>
+<smd name="31" x="0.900" y="-7.370" dx="1.300" dy="0.900" layer="1" rot="R90"/>
+<smd name="32" x="2.100" y="-7.370" dx="1.300" dy="0.900" layer="1" rot="R90"/>
+<smd name="33" x="3.300" y="-7.370" dx="1.300" dy="0.900" layer="1" rot="R90"/>
+<smd name="34" x="4.500" y="-7.370" dx="1.300" dy="0.900" layer="1" rot="R90"/>
+<smd name="35" x="5.700" y="-7.370" dx="1.300" dy="0.900" layer="1" rot="R90"/>
+<smd name="36" x="11.370" y="-5.450" dx="1.300" dy="0.900" layer="1" rot="R0"/>
+<smd name="37" x="11.370" y="-4.250" dx="1.300" dy="0.900" layer="1" rot="R0"/>
+<smd name="38" x="11.370" y="-1.850" dx="1.300" dy="0.900" layer="1" rot="R0"/>
+<smd name="39" x="11.370" y="-0.650" dx="1.300" dy="0.900" layer="1" rot="R0"/>
+<smd name="40" x="11.370" y="0.550" dx="1.300" dy="0.900" layer="1" rot="R0"/>
+<smd name="41" x="11.370" y="1.750" dx="1.300" dy="0.900" layer="1" rot="R0"/>
+<smd name="42" x="11.370" y="2.950" dx="1.300" dy="0.900" layer="1" rot="R0"/>
+<smd name="43" x="11.370" y="4.150" dx="1.300" dy="0.900" layer="1" rot="R0"/>
+<smd name="44" x="11.370" y="5.350" dx="1.300" dy="0.900" layer="1" rot="R0"/>
+<text x="0.000" y="0.000" align="center" size="1.27" layer="25" rot="R0" >&gt;NAME</text>
+<text x="0.000" y="0.000" align="center" size="1.27" layer="27" rot="R0" >&gt;VALUE</text>
+<wire x1="-11.5" y1="7.5" x2="11.5" y2="7.5" width="0.1" layer="51"/>
+<wire x1="11.5" y1="7.5" x2="11.5" y2="-7.5" width="0.1" layer="51"/>
+<wire x1="11.5" y1="-7.5" x2="-11.5" y2="-7.5" width="0.1" layer="51"/>
+<wire x1="-11.5" y1="-7.5" x2="-11.5" y2="7.5" width="0.1" layer="51"/>
+<wire x1="-13.02" y1="9.02" x2="13.02" y2="9.02" width="0.1" layer="51"/>
+<wire x1="13.02" y1="9.02" x2="13.02" y2="-9.02" width="0.1" layer="51"/>
+<wire x1="13.02" y1="-9.02" x2="-13.02" y2="-9.02" width="0.1" layer="51"/>
+<wire x1="-13.02" y1="-9.02" x2="-13.02" y2="9.02" width="0.1" layer="51"/>
+<wire x1="-7" y1="7.5" x2="-11.5" y2="7.5" width="0.2" layer="21"/>
+<wire x1="-11.5" y1="7.5" x2="-11.5" y2="6.25" width="0.2" layer="21"/>
+<wire x1="9" y1="7.5" x2="11.5" y2="7.5" width="0.2" layer="21"/>
+<wire x1="11.5" y1="7.5" x2="11.5" y2="6.25" width="0.2" layer="21"/>
+<wire x1="6.5" y1="-7.5" x2="11.5" y2="-7.5" width="0.2" layer="21"/>
+<wire x1="11.5" y1="-7.5" x2="11.5" y2="-6.25" width="0.2" layer="21"/>
+<wire x1="8.2" y1="8.5" x2="8.2" y2="8.5" width="0.1" layer="21"/>
+<wire x1="8.200" y1="8.500" x2="8.200" y2="8.600" width="0.1" layer="21" curve="180.0"/>
+<wire x1="8.2" y1="8.6" x2="8.2" y2="8.6" width="0.1" layer="21"/>
+<wire x1="8.200" y1="8.600" x2="8.200" y2="8.500" width="0.1" layer="21" curve="180.0"/>
+<wire x1="-11.5" y1="-6.25" x2="-11.5" y2="-7.5" width="0.2" layer="21"/>
+<wire x1="-11.5" y1="-7.5" x2="-9.5" y2="-7.5" width="0.2" layer="21"/>
+</package>
+</packages>
+<symbols>
+<symbol name="RAK4630">
+<wire x1="5.08" y1="40.64" x2="40.64" y2="40.64" width="0.254" layer="94"/>
+<wire x1="40.64" y1="-45.72" x2="40.64" y2="40.64" width="0.254" layer="94"/>
+<wire x1="40.64" y1="-45.72" x2="5.08" y2="-45.72" width="0.254" layer="94"/>
+<wire x1="5.08" y1="40.64" x2="5.08" y2="-45.72" width="0.254" layer="94"/>
+<text x="41.91" y="45.72" align="center-left" size="1.778" layer="95">&gt;NAME</text>
+<text x="41.91" y="43.18" align="center-left" size="1.778" layer="96">&gt;VALUE</text>
+<pin name="VBUS" x="38.1" y="45.72" length="middle" direction="io" rot="R270"/>
+<pin name="USB-" x="35.56" y="45.72" length="middle" direction="io" rot="R270"/>
+<pin name="USB+" x="33.02" y="45.72" length="middle" direction="io" rot="R270"/>
+<pin name="P0.13/I2C_SDA" x="30.48" y="45.72" length="middle" direction="io" rot="R270"/>
+<pin name="P0.14/I2C_SCL" x="27.94" y="45.72" length="middle" direction="io" rot="R270"/>
+<pin name="P0.15/UART2_RX" x="25.4" y="45.72" length="middle" direction="io" rot="R270"/>
+<pin name="P0.16/UART2_TX" x="22.86" y="45.72" length="middle" direction="io" rot="R270"/>
+<pin name="P0.17/UART2_DE" x="20.32" y="45.72" length="middle" direction="io" rot="R270"/>
+<pin name="P0.19/UART1_RX_(AT_COMMAND)" x="17.78" y="45.72" length="middle" direction="io" rot="R270"/>
+<pin name="P0.20/UART1_TX_(AT_COMMAND)" x="15.24" y="45.72" length="middle" direction="io" rot="R270"/>
+<pin name="P0.21/UART1_DE" x="12.7" y="45.72" length="middle" direction="io" rot="R270"/>
+<pin name="P0.10/NFC2" x="10.16" y="45.72" length="middle" direction="io" rot="R270"/>
+<pin name="P0.09/NFC1" x="7.62" y="45.72" length="middle" direction="io" rot="R270"/>
+<pin name="GND_1" x="0" y="0" length="middle" direction="io" rot="R0"/>
+<pin name="RF_BT" x="0" y="-2.54" length="middle" direction="io" rot="R0"/>
+<pin name="GND_2" x="0" y="-5.08" length="middle" direction="io" rot="R0"/>
+<pin name="NRF_RESET" x="0" y="-7.62" length="middle" direction="io" rot="R0"/>
+<pin name="SWDCLK" x="0" y="-10.16" length="middle" direction="io" rot="R0"/>
+<pin name="SWDIO" x="0" y="-12.7" length="middle" direction="io" rot="R0"/>
+<pin name="VBAT_SX" x="0" y="-15.24" length="middle" direction="io" rot="R0"/>
+<pin name="VBAT_IO_SX" x="0" y="-17.78" length="middle" direction="io" rot="R0"/>
+<pin name="GND_3" x="0" y="-20.32" length="middle" direction="io" rot="R0"/>
+<pin name="P0.24/I2C_SDA_2" x="7.62" y="-50.8" length="middle" direction="io" rot="R90"/>
+<pin name="P0.25/I2C_SCL_2" x="10.16" y="-50.8" length="middle" direction="io" rot="R90"/>
+<pin name="P1.01/SW1" x="12.7" y="-50.8" length="middle" direction="io" rot="R90"/>
+<pin name="P1.02/SW2" x="15.24" y="-50.8" length="middle" direction="io" rot="R90"/>
+<pin name="P1.03/LED1" x="17.78" y="-50.8" length="middle" direction="io" rot="R90"/>
+<pin name="P1.04/LED2" x="20.32" y="-50.8" length="middle" direction="io" rot="R90"/>
+<pin name="P0.03/QSPI_CLK" x="22.86" y="-50.8" length="middle" direction="io" rot="R90"/>
+<pin name="P0.02/QSPI_DIO3" x="25.4" y="-50.8" length="middle" direction="io" rot="R90"/>
+<pin name="P0.28/QSPI_DIO2" x="27.94" y="-50.8" length="middle" direction="io" rot="R90"/>
+<pin name="P0.29/QSPI_DIO1" x="30.48" y="-50.8" length="middle" direction="io" rot="R90"/>
+<pin name="P0.30/QSPI_DIO0" x="33.02" y="-50.8" length="middle" direction="io" rot="R90"/>
+<pin name="P0.26/QSPI_CS" x="35.56" y="-50.8" length="middle" direction="io" rot="R90"/>
+<pin name="GND_4" x="38.1" y="-50.8" length="middle" direction="io" rot="R90"/>
+<pin name="GND_5" x="45.72" y="-20.32" length="middle" direction="io" rot="R180"/>
+<pin name="RF_LORA" x="45.72" y="-17.78" length="middle" direction="io" rot="R180"/>
+<pin name="GND_6" x="45.72" y="-15.24" length="middle" direction="io" rot="R180"/>
+<pin name="P0.31/AIN7" x="45.72" y="-12.7" length="middle" direction="io" rot="R180"/>
+<pin name="P0.05/AIN3" x="45.72" y="-10.16" length="middle" direction="io" rot="R180"/>
+<pin name="P0.04/AIN2" x="45.72" y="-7.62" length="middle" direction="io" rot="R180"/>
+<pin name="GND_7" x="45.72" y="-5.08" length="middle" direction="io" rot="R180"/>
+<pin name="VDD_NRF" x="45.72" y="-2.54" length="middle" direction="io" rot="R180"/>
+<pin name="VBAT_NRF" x="45.72" y="0" length="middle" direction="io" rot="R180"/>
+</symbol>
+</symbols>
+<devicesets>
+<deviceset name="RAK4630" prefix="IC">
+<description>&lt;b&gt;RF IC Transceiver Bluetooth, LoRa 915MHz, 920MHz, 923MHz SPI Interface&lt;/b&gt;&lt;p&gt;
+Source: &lt;a href="https://dl-docs.rakwireless.com/api/render/?emulateScreenMedia=false&amp;pdf.format=legal&amp;url=https://docs.rakwireless.com/Product-Categories/WisDuo/RAK4630-Module/Datasheet/"&gt; Datasheet &lt;/a&gt;</description>
+<gates>
+<gate name="G$1" symbol="RAK4630" x="0" y="0"/>
+</gates>
+<devices>
+<device name="" package="RAK4630">
+<connects>
+<connect gate="G$1" pin="VBUS" pad="1"/>
+<connect gate="G$1" pin="USB-" pad="2"/>
+<connect gate="G$1" pin="USB+" pad="3"/>
+<connect gate="G$1" pin="P0.13/I2C_SDA" pad="4"/>
+<connect gate="G$1" pin="P0.14/I2C_SCL" pad="5"/>
+<connect gate="G$1" pin="P0.15/UART2_RX" pad="6"/>
+<connect gate="G$1" pin="P0.16/UART2_TX" pad="7"/>
+<connect gate="G$1" pin="P0.17/UART2_DE" pad="8"/>
+<connect gate="G$1" pin="P0.19/UART1_RX_(AT_COMMAND)" pad="9"/>
+<connect gate="G$1" pin="P0.20/UART1_TX_(AT_COMMAND)" pad="10"/>
+<connect gate="G$1" pin="P0.21/UART1_DE" pad="11"/>
+<connect gate="G$1" pin="P0.10/NFC2" pad="12"/>
+<connect gate="G$1" pin="P0.09/NFC1" pad="13"/>
+<connect gate="G$1" pin="GND_1" pad="14"/>
+<connect gate="G$1" pin="RF_BT" pad="15"/>
+<connect gate="G$1" pin="GND_2" pad="16"/>
+<connect gate="G$1" pin="NRF_RESET" pad="17"/>
+<connect gate="G$1" pin="SWDCLK" pad="18"/>
+<connect gate="G$1" pin="SWDIO" pad="19"/>
+<connect gate="G$1" pin="VBAT_SX" pad="20"/>
+<connect gate="G$1" pin="VBAT_IO_SX" pad="21"/>
+<connect gate="G$1" pin="GND_3" pad="22"/>
+<connect gate="G$1" pin="P0.24/I2C_SDA_2" pad="23"/>
+<connect gate="G$1" pin="P0.25/I2C_SCL_2" pad="24"/>
+<connect gate="G$1" pin="P1.01/SW1" pad="25"/>
+<connect gate="G$1" pin="P1.02/SW2" pad="26"/>
+<connect gate="G$1" pin="P1.03/LED1" pad="27"/>
+<connect gate="G$1" pin="P1.04/LED2" pad="28"/>
+<connect gate="G$1" pin="P0.03/QSPI_CLK" pad="29"/>
+<connect gate="G$1" pin="P0.02/QSPI_DIO3" pad="30"/>
+<connect gate="G$1" pin="P0.28/QSPI_DIO2" pad="31"/>
+<connect gate="G$1" pin="P0.29/QSPI_DIO1" pad="32"/>
+<connect gate="G$1" pin="P0.30/QSPI_DIO0" pad="33"/>
+<connect gate="G$1" pin="P0.26/QSPI_CS" pad="34"/>
+<connect gate="G$1" pin="GND_4" pad="35"/>
+<connect gate="G$1" pin="GND_5" pad="36"/>
+<connect gate="G$1" pin="RF_LORA" pad="37"/>
+<connect gate="G$1" pin="GND_6" pad="38"/>
+<connect gate="G$1" pin="P0.31/AIN7" pad="39"/>
+<connect gate="G$1" pin="P0.05/AIN3" pad="40"/>
+<connect gate="G$1" pin="P0.04/AIN2" pad="41"/>
+<connect gate="G$1" pin="GND_7" pad="42"/>
+<connect gate="G$1" pin="VDD_NRF" pad="43"/>
+<connect gate="G$1" pin="VBAT_NRF" pad="44"/>
+</connects>
+<technologies>
+<technology name="">
+<attribute name="Manufacturer_Name" value="RAK" constant="no"/>
+<attribute name="Manufacturer_Part_Number" value="RAK4630" constant="no"/>
+<attribute name="Mouser_Part_Number" value="" constant="no"/>
+<attribute name="Mouser_Price-Stock" value="" constant="no"/>
+<attribute name="Arrow_Part_Number" value="" constant="no"/>
+<attribute name="Arrow_Price-Stock" value="" constant="no"/>
+<attribute name="Description" value="RF IC Transceiver Bluetooth, LoRa 915MHz, 920MHz, 923MHz SPI Interface" constant="no"/>
+<attribute name="Height" value="3mm" constant="no"/>
+</technology>
+</technologies>
+</device>
+</devices>
+</deviceset>
+</devicesets>
+</library>
+</drawing>
+</eagle>

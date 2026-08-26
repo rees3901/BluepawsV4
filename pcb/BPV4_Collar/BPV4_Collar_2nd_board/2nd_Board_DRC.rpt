@@ -1,0 +1,14 @@
+** Drc report for BPV4_Collar_2nd_board.kicad_pcb **
+** Created on 2026-05-15T11:14:04+0100 **
+
+** Found 1 DRC violations **
+[clearance]: Clearance violation (netclass 'SIM' clearance 0.2000 mm; actual 0.1800 mm)
+    Rule: netclass 'SIM'; error
+    @(101.3500 mm, 60.4816 mm): Pad 1 [VSIM] of C21 on F.Cu
+    @(101.3500 mm, 61.1216 mm): Pad 2 [GND] of C21 on F.Cu
+
+** Found 0 unconnected pads **
+
+** Found 0 Footprint errors **
+
+** End of Report **

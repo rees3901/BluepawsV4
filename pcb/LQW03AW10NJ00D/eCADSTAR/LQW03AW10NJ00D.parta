@@ -1,0 +1,68 @@
+(Japanese_coding: sjis)
+(function "ECS_708787"
+    (uver 1)
+    (cuser "SamacSys")
+    (uuser "SamacSys")
+    (ctime 2019-09-16-03:33:59)
+    (utime 2025-01-03-15:31:59)
+    (interface
+        (port "1" (symbPinId 1) (portType INOUT))
+        (port "2" (symbPinId 2) (portType INOUT))
+    )
+    (property "symbolName" "LQW03AW10NJ00D")
+)
+
+
+(pinAssign "ECS_708787"
+    (uver 1)
+    (cuser "SamacSys")
+    (uuser "SamacSys")
+    (ctime 2019-09-16-03:33:59)
+    (utime 2025-01-03-15:31:59)
+    (interface
+        (port "1" (symbPinId 1) (portName "1") (portType INOUT))
+        (port "2" (symbPinId 2) (portName "2") (portType INOUT))
+    )
+    (internal
+        (funcInst (functionRef "ECS_708787")
+                (port "1" (match "1"))
+                (port "2" (match "2"))
+        )
+    )
+    (property "usePowerBox" "No")
+    (property "symbolName" "LQW03AW10NJ00D")
+)
+
+
+(part "LQW03AW10NJ00D"
+    (uver 1)
+    (cuser "SamacSys")
+    (uuser "SamacSys")
+    (ctime 2019-09-16-03:33:59)
+    (utime 2025-01-03-15:31:59)
+    (packageRef "LQW03AW10NJ00D")
+    (pinAssignRef "ECS_708787")
+    (interface
+        (port "1" (symbPinId 1) (portName "1") (portType INOUT))
+        (port "2" (symbPinId 2) (portName "2") (portType INOUT))
+    )
+    (partClass UNDEF)
+    (useInSchema Y)
+    (useInLayout Y)
+    (inPartsList Y)
+    (partType NORMAL)
+    (placeRestriction FREE)
+    (property "enetNonSeries" "NO")
+    (property "refDesPrefix" "L")
+    (property "description" "LQW03AW_00 Series Inductor 10nH +/-5% 0201 (0603)")
+    (property "Manufacturer_Name" "Murata Electronics")
+    (property "Manufacturer_Part_Number" "LQW03AW10NJ00D")
+    (property "Mouser_Part_Number" "81-LQW03AW10NJ00D")
+    (property "Mouser_Price/Stock" "https://www.mouser.co.uk/ProductDetail/Murata-Electronics/LQW03AW10NJ00D?qs=5lbl9CW7Yx%2FLHUKnOlvV8g%3D%3D")
+    (property "Arrow_Part_Number" "LQW03AW10NJ00D")
+    (property "Arrow_Price/Stock" "https://www.arrow.com/en/products/lqw03aw10nj00d/murata-manufacturing?region=nac")
+    (property "Datasheet_Link" "https://search.murata.co.jp/Ceramy/image/img/P02/JELF243A-0109.pdf")
+    (property "compAreaTopHeight" 0.45)
+)
+
+

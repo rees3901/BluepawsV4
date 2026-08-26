@@ -1,0 +1,8 @@
+(sym_lib_table
+  (version 7)
+  (lib (name "GNSS SKY65723-11")(type "Legacy")(uri "C:/Users/reesMiniPC/Desktop/cat tracker workspaces/BluePawsV4/PCB design/BPV4_Collar/Footprints/LIB_SKY65723-11/SKY65723-11/KiCad/SKY65723-11.lib")(options "")(descr ""))
+  (lib (name "GM02SP")(type "Legacy")(uri "C:/Users/reesMiniPC/Desktop/cat tracker workspaces/BluePawsV4/PCB design/BPV4_Collar/Footprints/LIB_GM02SP (1)/GM02SP/KiCad/GM02SP.lib")(options "")(descr ""))
+  (lib (name "Coax SMD CONUFL001-SMD-T")(type "Legacy")(uri "C:/Users/reesMiniPC/Desktop/cat tracker workspaces/BluePawsV4/PCB design/BPV4_Collar/Footprints/LIB_CONUFL001-SMD-T/CONUFL001-SMD-T/KiCad/CONUFL001-SMD-T.lib")(options "")(descr ""))
+  (lib (name "simcartd SIM8055-6-1-14-01-A")(type "Legacy")(uri "C:/Users/reesMiniPC/Desktop/cat tracker workspaces/BluePawsV4/PCB design/BPV4_Collar/Footprints/SIM8055-6-1-14-01-A/KiCad/SIM8055-6-1-14-01-A.lib")(options "")(descr ""))
+  (lib (name "SKY65723-11")(type "Legacy")(uri "C:/Users/reesMiniPC/Desktop/cat tracker workspaces/BluePawsV4/PCB design/BPV4_Collar/Footprints/LIB_SKY65723-11/SKY65723-11/KiCad/SKY65723-11.lib")(options "")(descr ""))
+)

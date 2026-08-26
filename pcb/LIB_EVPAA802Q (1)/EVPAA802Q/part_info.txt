@@ -1,0 +1,9 @@
+Manufacturer=Panasonic
+PartNumber=EVPAA802Q
+PartCategory=Switch
+PackageCategory=Other
+PinCount=4
+Version=2.1
+Released=2018-11-07 08:50:17
+Downloaded=2026-04-10 22:35:57
+3D=N

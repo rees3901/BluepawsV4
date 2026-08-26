@@ -1,0 +1,11 @@
+FILE_TYPE = MULTI_PHYS_TABLE;
+
+PART 'LQW03AW10NJ00D'
+CLASS = DISCRETE
+{========================================================================================}
+:"MANUFACTURER_NAME", "MANUFACTURER_PART_NUMBER"= "PART_NUMBER", "JEDEC_TYPE", "PACK_TYPE", "MOUSER_PART_NUMBER", "MOUSER_PRICE/STOCK", "ARROW_PART_NUMBER", "ARROW_PRICE/STOCK", "DESCRIPTION", "DATASHEET", "HEIGHT";
+{========================================================================================}
+ "Murata Electronics", "LQW03AW10NJ00D" (!) = "", "LQW03AW10NJ00D", "Other", "81-LQW03AW10NJ00D", "https://www.mouser.co.uk/ProductDetail/Murata-Electronics/LQW03AW10NJ00D?qs=5lbl9CW7Yx%2FLHUKnOlvV8g%3D%3D", "LQW03AW10NJ00D", "https://www.arrow.com/en/products/lqw03aw10nj00d/murata-manufacturing?region=nac", "LQW03AW_00 Series Inductor 10nH +/-5% 0201 (0603)", "https://search.murata.co.jp/Ceramy/image/img/P02/JELF243A-0109.pdf", "0.45 mm"
+END_PART
+
+END.

@@ -1,0 +1,11 @@
+FILE_TYPE = MULTI_PHYS_TABLE;
+
+PART 'GM02SP'
+CLASS = IC
+{========================================================================================}
+:"MANUFACTURER_NAME", "MANUFACTURER_PART_NUMBER"= "PART_NUMBER", "JEDEC_TYPE", "PACK_TYPE", "MOUSER_PART_NUMBER", "MOUSER_PRICE/STOCK", "ARROW_PART_NUMBER", "ARROW_PRICE/STOCK", "DESCRIPTION", "DATASHEET";
+{========================================================================================}
+ "Sequans", "GM02SP" (!) = "", "GM02SP", "Other", "440-GM02SP", "https://www.mouser.co.uk/ProductDetail/Sequans/GM02SP?qs=1Kr7Jg1SGW%252BxgXvT7tnerA%3D%3D", "", "", "MONARCH 2 LTE M/NB-IOT WITH GNSS", "https://fccid.io/2AAGMGM02S/User-Manual/User-manual-v2-5084773.pdf"
+END_PART
+
+END.

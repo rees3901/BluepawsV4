@@ -1,0 +1,9 @@
+EESchema-DOCLIB  Version 2.0
+#
+$CMP RAK4630
+D RF IC Transceiver Bluetooth, LoRa 915MHz, 920MHz, 923MHz SPI Interface
+K
+F https://dl-docs.rakwireless.com/api/render/?emulateScreenMedia=false&pdf.format=legal&url=https%3A%2F%2Fdocs.rakwireless.com%2FProduct-Categories%2FWisDuo%2FRAK4630-Module%2FDatasheet%2F
+$ENDCMP
+#
+#End Doc Library

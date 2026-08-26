@@ -1,0 +1,9 @@
+Manufacturer=RAK
+PartNumber=RAK4630
+PartCategory=Integrated Circuit
+PackageCategory=Other
+PinCount=44
+Version=1.5
+Released=2023-04-30 11:07:49
+Downloaded=2026-03-25 12:40:07
+3D=Y

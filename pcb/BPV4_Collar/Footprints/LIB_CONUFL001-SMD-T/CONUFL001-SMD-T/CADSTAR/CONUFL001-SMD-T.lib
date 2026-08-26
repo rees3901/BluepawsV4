@@ -1,0 +1,18 @@
+.CONUFL001-SMD-T :1 ;RF Connectors / Coaxial Connectors T&R U.FL Straight Surface Mount Jack
+CONUFL001SMDT
+*STM J
+*NGS
+*PLB 1="SIG" 2="GND_1" 3="GND_2"
+*MXP 3
+*DFN CONUFL001-SMD-T
+~!Manufacturer_Name (TE Connectivity)
+~!Manufacturer_Part_Number (CONUFL001-SMD-T)
+~!Mouser Part Number (N/A)
+~!Link Mouser Price/Stock (https://www.mouser.co.uk/ProductDetail/TE-Connectivity/CONUFL001-SMD-T?qs=3Rah4i%252BhyCHmRzMH%252BkLkPQ%3D%3D)
+~!Arrow Part Number (CONUFL001-SMD-T)
+~!Link Arrow Price/Stock (https://www.arrow.com/en/products/conufl001-smd-t/te-connectivity?utm_currency=USD&region=nac)
+~!Link Datasheet (https://eu.mouser.com/datasheet/2/418/9/ENG_DS_CONUFL001_SMD_T_B-3238717.pdf)
+~!Height (1.3mm)
+~!3D_Model (CONUFL001-SMD-T)
+CONUFL001-SMD-T
+1.1!U 2.1!U 3.1!U 

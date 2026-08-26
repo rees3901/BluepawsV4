@@ -1,0 +1,18 @@
+.LQW03AW10NJ00D :1 ;LQW03AW_00 Series Inductor 10nH +/-5% 0201 (0603)
+LQW03AW10NJ00D
+*STM L
+*NGS
+*PLB 1="1" 2="2"
+*MXP 2
+*DFN LQW03AW10NJ00D
+~!Manufacturer_Name (Murata Electronics)
+~!Manufacturer_Part_Number (LQW03AW10NJ00D)
+~!Mouser Part Number (81-LQW03AW10NJ00D)
+~!Link Mouser Price/Stock (https://www.mouser.co.uk/ProductDetail/Murata-Electronics/LQW03AW10NJ00D?qs=5lbl9CW7Yx%2FLHUKnOlvV8g%3D%3D)
+~!Arrow Part Number (LQW03AW10NJ00D)
+~!Link Arrow Price/Stock (https://www.arrow.com/en/products/lqw03aw10nj00d/murata-manufacturing?region=nac)
+~!Link Datasheet (https://search.murata.co.jp/Ceramy/image/img/P02/JELF243A-0109.pdf)
+~!Height (0.45mm)
+~!3D_Model (LQW03AW10NJ00D)
+LQW03AW10NJ00D
+1.1!U 2.1!U 

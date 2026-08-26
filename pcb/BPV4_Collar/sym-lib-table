@@ -1,0 +1,11 @@
+(sym_lib_table
+  (version 7)
+  (lib (name "RAK4630_sym")(type "KiCad")(uri "${KIPRJMOD}/Footprints/RAK4630/KiCad/RAK4630.kicad_sym")(options "")(descr ""))
+  (lib (name "RAK4630_lib")(type "Legacy")(uri "${KIPRJMOD}/Footprints/RAK4630/KiCad/RAK4630.lib")(options "")(descr ""))
+  (lib (name "SKY65723-11")(type "KiCad")(uri "${KIPRJMOD}/Footprints/LIB_SKY65723-11/SKY65723-11/KiCad/SKY65723-11.kicad_sym")(options "")(descr ""))
+  (lib (name "CPT-7502-65-SMT-TR")(type "KiCad")(uri "C:/Users/reesMiniPC/Desktop/cat tracker workspaces/BluePawsV4/PCB design/CPT-7502-65-SMT-TR/CPT-7502-65-SMT-TR.kicad_sym")(options "")(descr ""))
+  (lib (name "LIS2DW12TR")(type "KiCad")(uri "C:/Users/reesMiniPC/Desktop/cat tracker workspaces/BluePawsV4/PCB design/ul_LIS2DW12TR/KiCADv6/2026-04-11_14-46-54.kicad_sym")(options "")(descr ""))
+  (lib (name "B3U-1000P")(type "KiCad")(uri "C:/Users/reesMiniPC/Desktop/cat tracker workspaces/BluePawsV4/PCB design/LIB_B3U-1000P/B3U-1000P/KiCad/B3U-1000P.kicad_sym")(options "")(descr ""))
+  (lib (name "SM03B-SRSS-TB_LF__SN_")(type "KiCad")(uri "C:/Users/reesMiniPC/Desktop/cat tracker workspaces/BluePawsV4/PCB design/LIB_SM03B-SRSS-TB_LF__SN_/SM03B-SRSS-TB_LF__SN_/KiCad/SM03B-SRSS-TB_LF__SN_.kicad_sym")(options "")(descr ""))
+  (lib (name "DMG2305UX-13")(type "KiCad")(uri "C:/Users/reesMiniPC/Desktop/cat tracker workspaces/BluePawsV4/PCB design/LIB_DMG2305UX-13/DMG2305UX-13/KiCad/DMG2305UX-13.kicad_sym")(options "")(descr ""))
+)

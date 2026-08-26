@@ -1,0 +1,9 @@
+Manufacturer=Skyworks
+PartNumber=SKY65723-11
+PartCategory=Integrated Circuit
+PackageCategory=Other
+PinCount=7
+Version=1.3
+Released=2023-10-05 04:39:27
+Downloaded=2026-03-25 17:06:11
+3D=Y

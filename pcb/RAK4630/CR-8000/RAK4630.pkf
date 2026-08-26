@@ -1,0 +1,10 @@
+(unit MM)
+
+(package "RAK4630"
+    (type UNDEF)
+    (uver 2)
+    (mountForm default
+        (footprintRef "RAK4630")
+        (spec "default")
+    )
+)

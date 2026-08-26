@@ -1,0 +1,17 @@
+.EVPAA802Q :1 ;Tactile Switches Swtch Lite Touch SMD 5.0N 1.7mm ht grey
+EVPAA
+*STM S
+*NGS
+*PLB 1="NO_1" 2="COM_1" 3="NO_2" 4="COM_2"
+*MXP 4
+*DFN EVPAA802Q
+~!Manufacturer_Name (Panasonic)
+~!Manufacturer_Part_Number (EVPAA802Q)
+~!Mouser Part Number (-)
+~!Mouser Price/Stock (-)
+~!Arrow Part Number (EVPAA802Q)
+~!Link Arrow Price/Stock (https://www.arrow.com/en/products/evp-aa802q/panasonic?region=nac)
+~!Link Datasheet (https://industry.panasonic.com/ac/cdn/e/control/switch/light-touch/catalog/sw_lt_eng_3529s.pdf)
+~!Height (-)
+EVPAA802Q
+1.1!U 2.1!U 3.1!U 4.1!U 

@@ -1,0 +1,186 @@
+ERC report (2026-03-26T12:15:25+0000, Encoding UTF8)
+
+***** Sheet /
+[lib_symbol_mismatch]: Symbol 'TPS62840DLCR' doesn't match copy in library 'TPS62840DLCR'
+    ; warning
+    @(2350 mils, 9300 mils): Symbol U3 [TPS62840DLCR]
+
+***** Sheet /Modem_Daughterboard/
+[no_connect_connected]: A pin with a “no connection” flag is connected
+    ; warning
+    @(7100 mils, 1750 mils): Symbol IC5 Pin 2 [GPIO9/_SPI_CLK, Passive, Line]
+    @(7100 mils, 1750 mils): No Connect
+[no_connect_connected]: A pin with a “no connection” flag is connected
+    ; warning
+    @(7100 mils, 1850 mils): Symbol IC5 Pin 3 [GPIO7/_SPI_SDI, Passive, Line]
+    @(7100 mils, 1850 mils): No Connect
+[no_connect_connected]: A pin with a “no connection” flag is connected
+    ; warning
+    @(7100 mils, 1950 mils): Symbol IC5 Pin 4 [GPIO8/_SPI_SDO, Passive, Line]
+    @(7100 mils, 1950 mils): No Connect
+[no_connect_connected]: A pin with a “no connection” flag is connected
+    ; warning
+    @(7100 mils, 2050 mils): Symbol IC5 Pin 5 [GPIO10/_SPI_CSN1, Passive, Line]
+    @(7100 mils, 2050 mils): No Connect
+[no_connect_connected]: A pin with a “no connection” flag is connected
+    ; warning
+    @(7100 mils, 2250 mils): Symbol IC5 Pin 7 [GPIO11/_SPI_CSN2, Passive, Line]
+    @(7100 mils, 2250 mils): No Connect
+[no_connect_connected]: A pin with a “no connection” flag is connected
+    ; warning
+    @(7100 mils, 2450 mils): Symbol IC5 Pin 9 [GPIO33/_TX_IND, Passive, Line]
+    @(7100 mils, 2450 mils): No Connect
+[no_connect_connected]: A pin with a “no connection” flag is connected
+    ; warning
+    @(7100 mils, 2550 mils): Symbol IC5 Pin 10 [GPIO34/_ANT_TUNE0, Passive, Line]
+    @(7100 mils, 2550 mils): No Connect
+[no_connect_connected]: A pin with a “no connection” flag is connected
+    ; warning
+    @(7100 mils, 2650 mils): Symbol IC5 Pin 11 [GPIO35/_ANT_TUNE1, Passive, Line]
+    @(7100 mils, 2650 mils): No Connect
+[no_connect_connected]: A pin with a “no connection” flag is connected
+    ; warning
+    @(7100 mils, 3050 mils): Symbol IC5 Pin 15 [DNC_1, Passive, Line]
+    @(7100 mils, 3050 mils): No Connect
+[no_connect_connected]: A pin with a “no connection” flag is connected
+    ; warning
+    @(7100 mils, 3150 mils): Symbol IC5 Pin 16 [RING0, Passive, Line]
+    @(7100 mils, 3150 mils): No Connect
+[no_connect_connected]: A pin with a “no connection” flag is connected
+    ; warning
+    @(7100 mils, 3250 mils): Symbol IC5 Pin 17 [DNC_2, Passive, Line]
+    @(7100 mils, 3250 mils): No Connect
+[no_connect_connected]: A pin with a “no connection” flag is connected
+    ; warning
+    @(7100 mils, 3350 mils): Symbol IC5 Pin 18 [GPIO32/_PWM1/_PULSE1, Passive, Line]
+    @(7100 mils, 3350 mils): No Connect
+[no_connect_connected]: A pin with a “no connection” flag is connected
+    ; warning
+    @(7100 mils, 3450 mils): Symbol IC5 Pin 19 [GPIO31/_PWM0/_PULSE0/_19M2_OUT, Passive, Line]
+    @(7100 mils, 3450 mils): No Connect
+[no_connect_connected]: A pin with a “no connection” flag is connected
+    ; warning
+    @(7100 mils, 3650 mils): Symbol IC5 Pin 21 [GPIO21/CTS3, Passive, Line]
+    @(7100 mils, 3650 mils): No Connect
+[no_connect_connected]: A pin with a “no connection” flag is connected
+    ; warning
+    @(7100 mils, 3750 mils): Symbol IC5 Pin 22 [GPIO20/RXD3, Passive, Line]
+    @(7100 mils, 3750 mils): No Connect
+[no_connect_connected]: A pin with a “no connection” flag is connected
+    ; warning
+    @(7100 mils, 3850 mils): Symbol IC5 Pin 23 [GPIO22/RTS3, Passive, Line]
+    @(7100 mils, 3850 mils): No Connect
+[no_connect_connected]: A pin with a “no connection” flag is connected
+    ; warning
+    @(7100 mils, 3950 mils): Symbol IC5 Pin 24 [GPIO19/TXD3, Passive, Line]
+    @(7100 mils, 3950 mils): No Connect
+[no_connect_connected]: A pin with a “no connection” flag is connected
+    ; warning
+    @(7100 mils, 4050 mils): Symbol IC5 Pin 25 [GPIO18/_RTS2/DSR0, Passive, Line]
+    @(7100 mils, 4050 mils): No Connect
+[no_connect_connected]: A pin with a “no connection” flag is connected
+    ; warning
+    @(7100 mils, 4250 mils): Symbol IC5 Pin 27 [GPIO17/_CTS2/DCD0, Passive, Line]
+    @(7100 mils, 4250 mils): No Connect
+[no_connect_connected]: A pin with a “no connection” flag is connected
+    ; warning
+    @(7100 mils, 4850 mils): Symbol IC5 Pin 33 [RTS0, Passive, Line]
+    @(7100 mils, 4850 mils): No Connect
+[no_connect_connected]: A pin with a “no connection” flag is connected
+    ; warning
+    @(7100 mils, 5450 mils): Symbol IC5 Pin 39 [GPIO25/SIM1_IO, Passive, Line]
+    @(7100 mils, 5450 mils): No Connect
+[no_connect_connected]: A pin with a “no connection” flag is connected
+    ; warning
+    @(7100 mils, 5550 mils): Symbol IC5 Pin 40 [GPIO26/SIM1_CLK, Passive, Line]
+    @(7100 mils, 5550 mils): No Connect
+[no_connect_connected]: A pin with a “no connection” flag is connected
+    ; warning
+    @(2800 mils, 8600 mils): Symbol AE3 Pin 1 [A, Input, Line]
+    @(2800 mils, 8600 mils): No Connect
+[no_connect_connected]: A pin with a “no connection” flag is connected
+    ; warning
+    @(7100 mils, 5650 mils): Symbol IC5 Pin 41 [GPIO27/SIM1_RESETN, Passive, Line]
+    @(7100 mils, 5650 mils): No Connect
+[no_connect_connected]: A pin with a “no connection” flag is connected
+    ; warning
+    @(7100 mils, 6250 mils): Symbol IC5 Pin 47 [WAKE1, Passive, Line]
+    @(7100 mils, 6250 mils): No Connect
+[no_connect_connected]: A pin with a “no connection” flag is connected
+    ; warning
+    @(7100 mils, 6450 mils): Symbol IC5 Pin 49 [WAKE2, Passive, Line]
+    @(7100 mils, 6450 mils): No Connect
+[no_connect_connected]: A pin with a “no connection” flag is connected
+    ; warning
+    @(7100 mils, 6850 mils): Symbol IC5 Pin 53 [DNC_3, Passive, Line]
+    @(7100 mils, 6850 mils): No Connect
+[no_connect_connected]: A pin with a “no connection” flag is connected
+    ; warning
+    @(7100 mils, 7050 mils): Symbol IC5 Pin 55 [WAKE3, Passive, Line]
+    @(7100 mils, 7050 mils): No Connect
+[no_connect_connected]: A pin with a “no connection” flag is connected
+    ; warning
+    @(7100 mils, 7250 mils): Symbol IC5 Pin 57 [WAKE4, Passive, Line]
+    @(7100 mils, 7250 mils): No Connect
+[no_connect_connected]: A pin with a “no connection” flag is connected
+    ; warning
+    @(10100 mils, 2650 mils): Symbol IC5 Pin 71 [DNC_4, Passive, Line]
+    @(10100 mils, 2650 mils): No Connect
+[no_connect_connected]: A pin with a “no connection” flag is connected
+    ; warning
+    @(10100 mils, 2750 mils): Symbol IC5 Pin 72 [ADC1, Passive, Line]
+    @(10100 mils, 2750 mils): No Connect
+[no_connect_connected]: A pin with a “no connection” flag is connected
+    ; warning
+    @(10100 mils, 2950 mils): Symbol IC5 Pin 74 [DNC_5, Passive, Line]
+    @(10100 mils, 2950 mils): No Connect
+[no_connect_connected]: A pin with a “no connection” flag is connected
+    ; warning
+    @(10100 mils, 3050 mils): Symbol IC5 Pin 75 [DNC_6, Passive, Line]
+    @(10100 mils, 3050 mils): No Connect
+[no_connect_connected]: A pin with a “no connection” flag is connected
+    ; warning
+    @(10100 mils, 3150 mils): Symbol IC5 Pin 76 [DNC_7, Passive, Line]
+    @(10100 mils, 3150 mils): No Connect
+[no_connect_connected]: A pin with a “no connection” flag is connected
+    ; warning
+    @(10100 mils, 3250 mils): Symbol IC5 Pin 77 [DNC_8, Passive, Line]
+    @(10100 mils, 3250 mils): No Connect
+[no_connect_connected]: A pin with a “no connection” flag is connected
+    ; warning
+    @(10100 mils, 5050 mils): Symbol IC5 Pin 95 [GPIO23/_I2C_SDA, Passive, Line]
+    @(10100 mils, 5050 mils): No Connect
+[no_connect_connected]: A pin with a “no connection” flag is connected
+    ; warning
+    @(10100 mils, 5150 mils): Symbol IC5 Pin 96 [GPIO4/_PCM_CLK, Passive, Line]
+    @(10100 mils, 5150 mils): No Connect
+[no_connect_connected]: A pin with a “no connection” flag is connected
+    ; warning
+    @(10100 mils, 5250 mils): Symbol IC5 Pin 97 [GPIO24/_I2C_SCL, Passive, Line]
+    @(10100 mils, 5250 mils): No Connect
+[no_connect_connected]: A pin with a “no connection” flag is connected
+    ; warning
+    @(10100 mils, 5350 mils): Symbol IC5 Pin 98 [GPIO3/_PCM_RXD, Passive, Line]
+    @(10100 mils, 5350 mils): No Connect
+[no_connect_connected]: A pin with a “no connection” flag is connected
+    ; warning
+    @(10100 mils, 5450 mils): Symbol IC5 Pin 99 [GPIO5/_PCM_FS, Passive, Line]
+    @(10100 mils, 5450 mils): No Connect
+[no_connect_connected]: A pin with a “no connection” flag is connected
+    ; warning
+    @(10100 mils, 5550 mils): Symbol IC5 Pin 100 [GPIO6/_PCM_TXD, Passive, Line]
+    @(10100 mils, 5550 mils): No Connect
+[no_connect_connected]: A pin with a “no connection” flag is connected
+    ; warning
+    @(6600 mils, 9950 mils): Symbol IC3 Pin 4 [N/C_1, Passive, Line]
+    @(6600 mils, 9950 mils): No Connect
+[no_connect_connected]: A pin with a “no connection” flag is connected
+    ; warning
+    @(7900 mils, 9650 mils): Symbol IC3 Pin 5 [N/C_2, Passive, Line]
+    @(7900 mils, 9650 mils): No Connect
+[no_connect_connected]: A pin with a “no connection” flag is connected
+    ; warning
+    @(14400 mils, 7650 mils): Symbol J12 Pin C6 [VPP, Passive, Line]
+    @(14400 mils, 7650 mils): No Connect
+
+ ** ERC messages: 45  Errors 0  Warnings 45
