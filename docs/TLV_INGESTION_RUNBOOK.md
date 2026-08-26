@@ -1,6 +1,6 @@
 # TLV ingestion deployment and provisioning runbook
 
-This runbook introduces authenticated Bluepaws v1.1 TLV telemetry without
+This runbook deploys authenticated Bluepaws v1.2 TLV telemetry without
 removing the existing JSON test contract. Apply it to staging first. Do not put
 real bearer tokens, HMAC keys, Supabase server keys, or Vault values in Git,
 screenshots, logs, chat, or browser code.
@@ -17,8 +17,8 @@ npm run typecheck
 npm run build
 Set-Location ..
 python -m unittest discover -s tools -p "test_*.py"
-npx --yes deno check supabase/functions/ingest-position/index.ts
-npx --yes deno test supabase/functions/ingest-position/tlv.test.ts
+npx --yes deno check --config supabase/functions/ingest-position/deno.json supabase/functions/ingest-position/index.ts
+npx --yes deno test --config supabase/functions/ingest-position/deno.json supabase/functions/ingest-position/tlv.test.ts
 ```
 
 ## 2. Apply the database migration
@@ -78,7 +78,7 @@ python3 tools/generate_tlv_credentials.py \
   --count 5 \
   --start-device-id 1001 \
   --household-id '<TEST-HOUSEHOLD-UUID>' \
-  --gateway-guid16 0016
+  --gateway-guid16 0010
 ```
 
 Run the generated `tools/devices.provision.sql` once in the Supabase SQL
@@ -136,7 +136,7 @@ insert into public.gateways (
   display_name
 )
 values (
-  22,
+  16,
   '<same-household-uuid-as-the-test-collars>',
   'Bluepaws Test Hub'
 );
@@ -145,11 +145,19 @@ insert into public.gateway_ingest_credentials (
   gateway_guid16,
   token_hash
 )
-values (22, '<sha256-from-the-local-command>');
+values (16, '<sha256-from-the-local-command>');
 ```
 
-The JSON wrapper represents gateway `22` as the four-character hexadecimal
-string `"0016"`. A gateway can relay only collars in its own household.
+The JSON wrapper represents gateway `16` as the four-character hexadecimal
+string `"0010"`. Under v1.2, provisioned hubs use non-zero IDs divisible by
+16; provisioned collars use the remaining physical IDs. A gateway can relay
+only collars in its own household.
+
+Legacy test gateway `0016` is decimal `22`, so it is not a valid v1.2 hub ID.
+Do not merely change the firmware constant while retaining its old database
+credential. Provision gateway decimal `16` (`0010`) with a new bearer token,
+store that same token on the Home Hub, verify the new route, and only then
+disable or delete the legacy decimal-22 gateway credential.
 
 ## 5. Deploy the Edge Function
 
@@ -180,7 +188,7 @@ in separate arrays inside one credentials bundle:
   ],
   "gateways": [
     {
-      "gateway_guid16": "0016",
+      "gateway_guid16": "0010",
       "display_name": "Bluepaws Test Hub",
       "bearer_token": "gateway-plaintext-token"
     }
@@ -202,7 +210,7 @@ bundle:
 python3 tools/tlv_telemetry_simulator.py --transport lora_gateway --device-count 1 --iterations 5 --interval 2
 ```
 
-With multiple bundled gateways, add `--gateway-guid16 0016`. Explicit gateway
+With multiple bundled gateways, add `--gateway-guid16 0010`. Explicit gateway
 environment variables remain supported as temporary overrides.
 
 New observations return HTTP `201`. Exact packet retries return `200` with

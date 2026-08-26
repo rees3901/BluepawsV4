@@ -4,7 +4,7 @@
   This file deliberately separates bench/testbed behaviour from the production
   TLV contract. A RAK4631 bench collar may spoof GNSS and drift around a known
   coordinate for development, but that fact is not written into the authenticated
-  collar TLV packet. The cloud should see the same v1.1 payload shape either way.
+  collar TLV packet. The cloud should see the same v1.2 payload shape either way.
 
   Production builds should override:
     -DBLUEPAWS_TESTBED_BUILD=0

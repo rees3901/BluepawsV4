@@ -1,7 +1,7 @@
 # Bluepaws EG800K LTE modem smoke test
 
 This tool proves the PC → UART → Quectel EG800K-EU → LTE → Supabase Edge Function
-path using the same TLV v1.1 packet and JSON HTTPS wrapper used by the local TLV
+path using the same TLV v1.2 packet and JSON HTTPS wrapper used by the local TLV
 web console.
 
 It is intentionally separate from the web console until the modem path is proven.

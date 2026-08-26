@@ -1344,10 +1344,10 @@
     }
 
     // ═══════════════════════════════════════════════
-    // Command Modal — Change Collar Operating Mode
+    // Command Modal — Change Collar Power Profile
     //
-    // Opens a dialog where the user selects a mode (Normal, PowerSave,
-    // Active Find, Emergency Lost) and sends it to the collar via
+    // Opens a dialog where the user selects a profile (Normal, Power Save,
+    // Active, Emergency Lost) and sends it to the collar via
     // POST /api/command. The hub builds a LoRa PKT_CMD_MODE packet.
     // ═══════════════════════════════════════════════
     var cmdTargetId = 0;  // Device ID for the command modal

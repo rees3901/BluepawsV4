@@ -6,7 +6,10 @@ export const DEFAULT_ENDPOINT = "https://ykcdaonkvwemedotdpdr.supabase.co/functi
 export const HEADER_SIZE = 32;
 export const AUTH_TAG_SIZE = 8;
 export const MAX_TLV_SIZE = 24;
-export const MAX_DEVICE_ID = 65_535;
+export const PROTOCOL_VERSION = 2;
+export const CLOUD_DESTINATION_ID = 0x0000;
+export const BROADCAST_ID = 0xFFFF;
+export const MAX_PHYSICAL_ID = 65_534;
 
 export const STATUS_CODES = {
   HOME: 0,
@@ -51,6 +54,7 @@ export const KNOWN_TLVS = {
   uptime_s: { type: 0x10, length: 4, label: "Uptime seconds" },
   activity_score: { type: 0x13, length: 1, label: "Activity score" },
   acked_msg_seq_id: { type: 0x20, length: 2, label: "Acked message sequence" },
+  profile: { type: 0xF1, length: 1, label: "Power profile command/ACK" },
 };
 
 export const RECIPES = {
@@ -124,6 +128,7 @@ export function defaultDeviceSettings(deviceId, index = 0) {
   return {
     enabled: true,
     deviceId,
+    destinationId: CLOUD_DESTINATION_ID,
     sequence: randomInt(1, 65_000),
     timestamp: nowUnix(),
     status: STATUS_CODES.OUT,
@@ -141,11 +146,12 @@ export function defaultDeviceSettings(deviceId, index = 0) {
     customTagHex: "",
     includeTlvs: false,
     knownTlvs: {
-      fw_ver: "1.1",
+      fw_ver: "1.2",
       reset_reason: 1,
       uptime_s: 60,
       activity_score: 42,
       acked_msg_seq_id: 0,
+      profile: "",
     },
     customTlvs: [],
   };
@@ -155,7 +161,7 @@ export function defaultWrapperSettings() {
   return {
     endpoint: DEFAULT_ENDPOINT,
     transport: "cellular_direct",
-    gatewayGuid16: "0016",
+    gatewayGuid16: "0010",
     gatewayRxTimeUnix: nowUnix(),
     linkRssiDbm: -104,
     linkSnrDb: 7.0,
@@ -213,7 +219,8 @@ export function summarizeBundle(bundle) {
 }
 
 export function generateDeviceCredential(deviceId) {
-  validateRange(toInteger(deviceId, "device ID"), 1, MAX_DEVICE_ID, "device ID");
+  const id = toInteger(deviceId, "device ID");
+  validateCollarId(id, "device ID");
   return {
     device_id: Number(deviceId),
     bearer_token: crypto.randomBytes(32).toString("base64url"),
@@ -322,19 +329,20 @@ export function buildDiagnosticPacket(deviceSettings, credential) {
   const settings = normalizeDeviceSettings(deviceSettings, device.device_id);
   const tlvs = buildTlvEntries(settings);
   const body = Buffer.alloc(HEADER_SIZE + tlvs.length);
-  body.writeUInt8(1, 0);
+  body.writeUInt8(PROTOCOL_VERSION, 0);
   body.writeUInt16LE(settings.deviceId, 1);
-  body.writeUInt16LE(settings.sequence, 3);
-  body.writeUInt32LE(settings.timestamp, 5);
-  body.writeUInt8((settings.powerProfile << 4) | settings.status, 9);
-  body.writeUInt8(settings.flags, 10);
-  body.writeUInt8(settings.txReason, 11);
-  body.writeInt32LE(Math.round(settings.latitude * 10_000_000), 12);
-  body.writeInt32LE(Math.round(settings.longitude * 10_000_000), 16);
-  body.writeUInt16LE(settings.batteryMv, 20);
-  body.writeUInt16LE(settings.accuracyM, 22);
-  body.writeUInt16LE(settings.fixAgeS, 24);
-  body.writeUInt8(settings.satelliteCount, 26);
+  body.writeUInt16LE(settings.destinationId, 3);
+  body.writeUInt16LE(settings.sequence, 5);
+  body.writeUInt32LE(settings.timestamp, 7);
+  body.writeUInt8((settings.powerProfile << 4) | settings.status, 11);
+  body.writeUInt8(settings.flags, 12);
+  body.writeUInt8(settings.txReason, 13);
+  body.writeInt32LE(Math.round(settings.latitude * 10_000_000), 14);
+  body.writeInt32LE(Math.round(settings.longitude * 10_000_000), 18);
+  body.writeUInt16LE(settings.batteryMv, 22);
+  body.writeUInt16LE(settings.accuracyM, 24);
+  body.writeUInt16LE(settings.fixAgeS, 26);
+  body.writeUInt8(settings.satelliteCount, 28);
   body.writeUInt8(tlvs.length, 31);
   tlvs.copy(body, HEADER_SIZE);
   const hmacKey = decodeHmacKey(device.hmac_key_b64);
@@ -517,8 +525,9 @@ export function decodeTlvPacket(packet, hmacKey = null) {
   if (raw.length < HEADER_SIZE + AUTH_TAG_SIZE) throw new Error("packet is too short");
   const tlvLength = raw[31];
   if (raw.length !== HEADER_SIZE + tlvLength + AUTH_TAG_SIZE) throw new Error("packet length does not match tlv_len");
-  const statusProfile = raw[9];
-  const flags = raw[10];
+  if (raw[0] !== PROTOCOL_VERSION) throw new Error(`protocol version must be ${PROTOCOL_VERSION}`);
+  const statusProfile = raw[11];
+  const flags = raw[12];
   const transmittedTag = raw.subarray(raw.length - AUTH_TAG_SIZE);
   const authenticatedBytes = raw.subarray(0, raw.length - AUTH_TAG_SIZE);
   const expectedTag = hmacKey ? crypto.createHmac("sha256", hmacKey).update(authenticatedBytes).digest().subarray(0, AUTH_TAG_SIZE) : null;
@@ -532,9 +541,11 @@ export function decodeTlvPacket(packet, hmacKey = null) {
     },
     header: {
       protocol_version: raw[0],
+      source_id16: raw.readUInt16LE(1),
+      destination_id16: raw.readUInt16LE(3),
       device_id: raw.readUInt16LE(1),
-      message_sequence: raw.readUInt16LE(3),
-      timestamp_unix: raw.readUInt32LE(5),
+      message_sequence: raw.readUInt16LE(5),
+      timestamp_unix: raw.readUInt32LE(7),
       status: namedCode(STATUS_CODES, statusProfile & 0x0f),
       power_profile: namedCode(POWER_PROFILE_CODES, statusProfile >>> 4),
       flags: {
@@ -542,16 +553,16 @@ export function decodeTlvPacket(packet, hmacKey = null) {
         hex: `0x${flags.toString(16).padStart(2, "0").toUpperCase()}`,
         set: Object.entries(FLAG_MASKS).filter(([, mask]) => (flags & mask) !== 0).map(([name]) => name),
       },
-      tx_reason: namedCode(TX_REASON_CODES, raw[11]),
+      tx_reason: namedCode(TX_REASON_CODES, raw[13]),
       position: {
-        latitude: round7(raw.readInt32LE(12) / 10_000_000),
-        longitude: round7(raw.readInt32LE(16) / 10_000_000),
-        battery_mv: raw.readUInt16LE(20),
-        accuracy_m: raw.readUInt16LE(22),
-        fix_age_s: raw.readUInt16LE(24) === 65_535 ? null : raw.readUInt16LE(24),
-        satellite_count: raw[26] === 255 ? null : raw[26],
+        latitude: round7(raw.readInt32LE(14) / 10_000_000),
+        longitude: round7(raw.readInt32LE(18) / 10_000_000),
+        battery_mv: raw.readUInt16LE(22),
+        accuracy_m: raw.readUInt16LE(24),
+        fix_age_s: raw.readUInt16LE(26) === 65_535 ? null : raw.readUInt16LE(26),
+        satellite_count: raw[28] === 255 ? null : raw[28],
       },
-      reserved_bytes_hex: raw.subarray(27, 31).toString("hex").toUpperCase(),
+      reserved_bytes_hex: raw.subarray(29, 31).toString("hex").toUpperCase(),
     },
     tlvs: decodeTlvs(raw.subarray(HEADER_SIZE, HEADER_SIZE + tlvLength)),
     authentication: {
@@ -585,7 +596,7 @@ function buildTlvEntries(settings) {
     entries.push(Buffer.concat([Buffer.from([type, value.length]), value]));
   }
   const tlvs = Buffer.concat(entries);
-  if (tlvs.length > MAX_TLV_SIZE) throw new Error(`TLV section uses ${tlvs.length} bytes; v1.1 allows at most ${MAX_TLV_SIZE}`);
+  if (tlvs.length > MAX_TLV_SIZE) throw new Error(`TLV section uses ${tlvs.length} bytes; v1.2 allows at most ${MAX_TLV_SIZE}`);
   return tlvs;
 }
 
@@ -626,9 +637,11 @@ function decodeTlvs(tlvBytes) {
 function normalizeDeviceSettings(input, fallbackDeviceId) {
   const settings = input || {};
   const deviceId = toInteger(settings.deviceId ?? fallbackDeviceId, "device ID");
+  validateCollarId(deviceId, "device ID");
   return {
     ...settings,
     deviceId,
+    destinationId: boundedInteger(settings.destinationId ?? CLOUD_DESTINATION_ID, 0, BROADCAST_ID, "destination ID"),
     sequence: boundedInteger(settings.sequence, 0, 65_535, "message sequence"),
     timestamp: boundedInteger(settings.timestamp ?? nowUnix(), 0, 0xffff_ffff, "timestamp"),
     status: boundedInteger(settings.status, 0, 3, "status"),
@@ -648,7 +661,7 @@ function normalizeDeviceSettings(input, fallbackDeviceId) {
 function normalizeDeviceCredential(input) {
   const credential = input || {};
   const deviceId = toInteger(credential.device_id, "device_id");
-  validateRange(deviceId, 1, MAX_DEVICE_ID, "device_id");
+  validateCollarId(deviceId, "device_id");
   const bearerToken = validateBearerToken(credential.bearer_token ?? credential.token, `device ${deviceId} bearer token`);
   const hmacKey = String(credential.hmac_key_b64 || "").trim();
   decodeHmacKey(hmacKey);
@@ -665,14 +678,25 @@ function normalizeGatewayCredential(input) {
 
 function normalizeGatewayGuid16(value) {
   if (typeof value === "number") {
-    validateRange(value, 1, MAX_DEVICE_ID, "gateway GUID16");
+    validateHubId(value, "gateway GUID16");
     return value.toString(16).padStart(4, "0").toUpperCase();
   }
   const text = String(value || "").trim().toUpperCase();
-  if (!/^[0-9A-F]{4}$/.test(text) || Number.parseInt(text, 16) === 0) {
-    throw new Error("gateway GUID16 must be four hexadecimal characters from 0001..FFFF");
+  if (!/^[0-9A-F]{4}$/.test(text)) {
+    throw new Error("gateway GUID16 must be exactly four hexadecimal characters");
   }
+  validateHubId(Number.parseInt(text, 16), "gateway GUID16");
   return text;
+}
+
+function validateCollarId(value, field) {
+  validateRange(value, 1, MAX_PHYSICAL_ID, field);
+  if ((value & 0x000F) === 0) throw new Error(`${field} must not be a multiple of 16 (reserved for hubs)`);
+}
+
+function validateHubId(value, field) {
+  validateRange(value, 1, MAX_PHYSICAL_ID, field);
+  if ((value & 0x000F) !== 0) throw new Error(`${field} must be a multiple of 16`);
 }
 
 function hmacTag(settings, expectedTag) {

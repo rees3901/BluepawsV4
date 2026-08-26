@@ -310,6 +310,20 @@ contract and command dictionary.
 
 `speed_cms` and `ack_status` were also omitted to keep the selected set under budget. Speed can be estimated by backend position deltas. ACK status is unnecessary for the first version because the ACK mainly confirms receipt, and the next telemetry packet confirms whether the state actually changed.
 
+### 12.1 Downlink power-profile command
+
+TLV v1.1 also defines the minimal Home Hub/LTE downlink needed for power-profile control:
+
+| Type | Name | Length | Value type | Purpose |
+|---:|---|---:|---|---|
+| `0xF1` | `profile` | 1 | `u8` | Requested power-profile code (`0..4`) when `tx_reason = CONFIG`. |
+
+The command header carries the target collar `device_id` and the backend's
+16-bit `message_sequence_id`. The collar replies with `tx_reason = ACK` and
+`acked_msg_seq_id` set to that same sequence. This does not consume a new
+header flag or require a protocol-version change. Downlink authentication is
+still deferred and must not yet be treated as production-secure.
+
 ## 13. TLVs omitted from the collar packet for now
 
 | Omitted TLV | Reason |

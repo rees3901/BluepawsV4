@@ -32,7 +32,7 @@ class CredentialGeneratorTests(unittest.TestCase):
 
     def test_sql_hashes_bearers_and_stages_hmacs_for_vault(self) -> None:
         device = generate_device(1001)
-        gateway = generate_gateway("0016", "Test Hub")
+        gateway = generate_gateway("0010", "Test Hub")
         household_id = uuid.UUID("6e799f91-3027-4c8f-b239-09531939e79e")
 
         sql = provisioning_sql([device], household_id, 1, gateway)
@@ -43,7 +43,7 @@ class CredentialGeneratorTests(unittest.TestCase):
         self.assertIn(hashlib.sha256(gateway.bearer_token.encode()).hexdigest(), sql)
         self.assertIn(device.hmac_key_b64, sql)
         self.assertIn("vault.create_secret", sql)
-        self.assertIn("values (22,", sql)
+        self.assertIn("values (16,", sql)
         self.assertNotIn("set household_id = excluded.household_id", sql)
 
     def test_cli_outputs_loadable_private_bundle(self) -> None:
@@ -59,7 +59,7 @@ class CredentialGeneratorTests(unittest.TestCase):
                     "--household-id",
                     "6e799f91-3027-4c8f-b239-09531939e79e",
                     "--gateway-guid16",
-                    "0016",
+                    "0010",
                     "--output",
                     str(json_path),
                     "--sql-output",
@@ -72,12 +72,27 @@ class CredentialGeneratorTests(unittest.TestCase):
             self.assertEqual(parsed["schema_version"], 1)
             bundle = load_credential_bundle(json_path)
             self.assertEqual([item.device_id for item in bundle.devices], [2001, 2002, 2003])
-            self.assertEqual(bundle.gateways[0].gateway_guid16, "0016")
+            self.assertEqual(bundle.gateways[0].gateway_guid16, "0010")
             self.assertTrue(sql_path.read_text(encoding="utf-8").endswith("\n"))
 
     def test_bundle_has_explicit_empty_gateways_array(self) -> None:
         bundle = credential_bundle([generate_device(1001)], None)
         self.assertEqual(bundle["gateways"], [])
+
+    def test_cli_skips_ids_reserved_for_hubs(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            json_path = Path(directory) / "devices.json"
+            sql_path = Path(directory) / "provision.sql"
+            result = main([
+                "--count", "3",
+                "--start-device-id", "1007",
+                "--household-id", "6e799f91-3027-4c8f-b239-09531939e79e",
+                "--output", str(json_path),
+                "--sql-output", str(sql_path),
+            ])
+            self.assertEqual(result, 0)
+            bundle = load_credential_bundle(json_path)
+            self.assertEqual([item.device_id for item in bundle.devices], [1007, 1009, 1010])
 
 
 if __name__ == "__main__":

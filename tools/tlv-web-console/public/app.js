@@ -171,7 +171,8 @@ function renderDeviceDetail() {
     return;
   }
   detail.innerHTML = `
-    <label>Fleet target device ID <input id="configured-device-id" type="number" min="1" max="65535" value="${state.configuredDeviceId ?? settings.deviceId}"></label>
+    <label>Fleet target device ID <input id="configured-device-id" type="number" min="1" max="65534" value="${state.configuredDeviceId ?? settings.deviceId}"><small>Multiples of 16 are reserved for hubs</small></label>
+    <label>Destination ID16 <input data-detail="destinationId" type="number" min="0" max="65535" value="${settings.destinationId ?? 0}"><small>0 = cloud, 65535 = broadcast</small></label>
     <label>Status
       <select data-detail="status">
         ${detailOptions(state.meta.constants.statuses, settings.status)}
@@ -220,6 +221,7 @@ function renderDeviceDetail() {
         <label>Uptime seconds <input data-tlv="uptime_s" type="number" value="${settings.knownTlvs.uptime_s}"></label>
         <label>Activity score <input data-tlv="activity_score" type="number" value="${settings.knownTlvs.activity_score}"></label>
         <label>Acked seq <input data-tlv="acked_msg_seq_id" type="number" value="${settings.knownTlvs.acked_msg_seq_id}"></label>
+        <label>Profile command/ACK <input data-tlv="profile" type="number" min="0" max="4" value="${settings.knownTlvs.profile ?? ""}"></label>
       </div>
     </details>
   `;
@@ -244,7 +246,7 @@ function renderWrapperForm() {
         ${option("lora_hub", "LoRa home-hub relay", wrapper.transport)}
       </select>
     </label>
-    <label>Gateway GUID16 <input data-wrapper="gatewayGuid16" value="${wrapper.gatewayGuid16 || "0016"}"></label>
+    <label>Gateway GUID16 <input data-wrapper="gatewayGuid16" value="${wrapper.gatewayGuid16 || "0010"}"><small>Hub IDs are multiples of 16</small></label>
     <label>Gateway RX Unix <input data-wrapper="gatewayRxTimeUnix" type="number" value="${wrapper.gatewayRxTimeUnix || Math.floor(Date.now() / 1000)}"></label>
     <label>Link RSSI dBm <input data-wrapper="linkRssiDbm" type="number" step="0.1" value="${wrapper.linkRssiDbm ?? ""}"></label>
     <label>Link SNR dB <input data-wrapper="linkSnrDb" type="number" step="0.1" value="${wrapper.linkSnrDb ?? ""}"></label>
@@ -626,8 +628,8 @@ async function addConfiguredDeviceToFleet() {
   const value = explicitValue || prompt("Device ID to add or update in the fleet", String(suggestedDeviceId));
   if (!value) return;
   const deviceId = Number(value);
-  if (!Number.isInteger(deviceId) || deviceId < 1 || deviceId > 65535) {
-    alert("Device ID must be an integer from 1 to 65535.");
+  if (!Number.isInteger(deviceId) || deviceId < 1 || deviceId > 65534 || deviceId % 16 === 0) {
+    alert("Collar ID must be 1..65534 and must not be a multiple of 16.");
     return;
   }
 
@@ -658,7 +660,7 @@ async function deleteDevice(deviceId) {
 }
 
 async function addGateway() {
-  const gateway = prompt("Gateway GUID16", "0016");
+  const gateway = prompt("Gateway GUID16", "0010");
   const displayName = prompt("Gateway display name", "Bluepaws Test Hub");
   await api("/api/credentials/add-gateway", { method: "POST", body: { gateway_guid16: gateway, display_name: displayName } });
   await refreshCredentials();
@@ -717,14 +719,14 @@ function nextSuggestedDeviceId() {
   const used = new Set(state.credentials.devices.map((device) => device.device_id));
   const selected = Number(state.selectedDeviceId);
   if (Number.isInteger(selected)) {
-    for (let deviceId = selected + 1; deviceId <= 65535; deviceId += 1) {
-      if (!used.has(deviceId)) return deviceId;
+    for (let deviceId = selected + 1; deviceId <= 65534; deviceId += 1) {
+      if (deviceId % 16 !== 0 && !used.has(deviceId)) return deviceId;
     }
   }
-  for (let deviceId = 1001; deviceId <= 65535; deviceId += 1) {
-    if (!used.has(deviceId)) return deviceId;
+  for (let deviceId = 1001; deviceId <= 65534; deviceId += 1) {
+    if (deviceId % 16 !== 0 && !used.has(deviceId)) return deviceId;
   }
-  return 65535;
+  return 65534;
 }
 
 async function api(path, options = {}) {

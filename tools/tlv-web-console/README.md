@@ -1,6 +1,6 @@
 # Bluepaws TLV Web Console
 
-Local-only support and diagnostic web console for building Bluepaws TLV v1.1 packets, wrapping them for HTTPS ingestion, and sending test telemetry to the Supabase Edge Function.
+Local-only support and diagnostic web console for building Bluepaws TLV v1.2 packets, including explicit source/destination addressing, wrapping them for HTTPS ingestion, and sending test telemetry to the Supabase Edge Function.
 
 This is deliberately separate from the customer-facing Vercel app. It is intended to run on a trusted local development/support machine.
 

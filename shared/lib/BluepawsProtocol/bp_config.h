@@ -32,7 +32,7 @@
 #define LORA_LBT_BACKOFF_MAX 500      // ms
 
 // Legacy AES-128 encryption key (16 bytes)
-// TLV v1.1 uplink packets are authenticated, not encrypted. Keep this only for
+// TLV v1.2 uplink packets are authenticated, not encrypted. Keep this only for
 // older command-path experiments until the downlink command protocol is revised.
 #ifndef LORA_AES_KEY
 #define LORA_AES_KEY { \

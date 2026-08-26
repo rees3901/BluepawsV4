@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Send authenticated Bluepaws v1.1 TLV telemetry through HTTPS wrappers."""
+"""Send authenticated Bluepaws v1.2 TLV telemetry through HTTPS wrappers."""
 
 from __future__ import annotations
 
@@ -82,7 +82,7 @@ def build_packet(
             satellite_count=9,
         ),
         (
-            known_tlv(0x04, 0x0101),
+            known_tlv(0x04, 0x0102),
             known_tlv(0x10, state.uptime_seconds),
             known_tlv(0x13, rng.randint(0, 100)),
         ),
@@ -141,7 +141,7 @@ def initialise_states(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Simulate authenticated Bluepaws v1.1 TLV collars."
+        description="Simulate authenticated Bluepaws v1.2 TLV collars."
     )
     parser.add_argument("--url", default=os.getenv("BLUEPAWS_INGEST_URL", DEFAULT_URL))
     parser.add_argument(

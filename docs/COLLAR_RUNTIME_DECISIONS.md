@@ -8,7 +8,7 @@ PlatformIO note: the `collar` environment now uses the `wiscore_rak4631` board d
 
 ## Terminology
 
-The collar sends one canonical payload: the Bluepaws TLV v1.1 binary packet.
+The collar sends one canonical payload: the Bluepaws TLV v1.2 binary packet.
 
 - Private LoRa path: collar sends raw binary TLV to the Home Hub.
 - Home Hub cloud path: Home Hub base64-encodes the unchanged collar TLV and wraps it in the HTTPS JSON envelope.

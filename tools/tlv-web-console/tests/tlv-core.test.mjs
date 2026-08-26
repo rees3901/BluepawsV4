@@ -23,6 +23,9 @@ test("builds a valid TLV packet and LTE wrapper", () => {
   assert.equal(settings.driftMetres, 300);
   assert.equal(preview.packet_size_bytes, 40);
   assert.equal(preview.hmac_valid, true);
+  assert.equal(preview.decoded.header.protocol_version, 2);
+  assert.equal(preview.decoded.header.source_id16, 1001);
+  assert.equal(preview.decoded.header.destination_id16, 0);
   assert.equal(preview.decoded.header.device_id, 1001);
   assert.equal(preview.decoded.header.status.name, "OUT");
   assert.equal(preview.wrapper.ingest_path, "cellular_direct");
@@ -42,9 +45,9 @@ test("encodes every visible status, power profile, and TX reason into the header
           txReason,
         }, credential);
 
-        assert.equal(packet.packet[9] & 0x0f, status, statusName);
-        assert.equal(packet.packet[9] >>> 4, powerProfile, profileName);
-        assert.equal(packet.packet[11], txReason, reasonName);
+        assert.equal(packet.packet[11] & 0x0f, status, statusName);
+        assert.equal(packet.packet[11] >>> 4, powerProfile, profileName);
+        assert.equal(packet.packet[13], txReason, reasonName);
         assert.equal(packet.decoded.header.status.name, statusName);
         assert.equal(packet.decoded.header.power_profile.name, profileName);
         assert.equal(packet.decoded.header.tx_reason.name, reasonName);
@@ -69,14 +72,14 @@ test("builds a valid LoRa wrapper", () => {
   const wrapper = buildTransportWrapper(packet.payload_b64, {
     ...defaultWrapperSettings(),
     transport: "lora_hub",
-    gatewayGuid16: "0016",
+    gatewayGuid16: "0010",
     gatewayRxTimeUnix: 1_786_537_811,
   });
 
   assert.equal(wrapper.ingest_path, "lora_gateway");
   assert.equal(wrapper.format, "tlv");
   assert.equal(wrapper.link_type, "lora");
-  assert.equal(wrapper.gateway_guid16, "0016");
+  assert.equal(wrapper.gateway_guid16, "0010");
   assert.equal(wrapper.gateway_rx_time_unix, 1_786_537_811);
   assert.equal(wrapper.cell_rsrp_dbm, undefined);
 });
@@ -85,6 +88,14 @@ test("loads legacy and bundle credential JSON", () => {
   const credential = generateDeviceCredential(2001);
   assert.equal(parseCredentialBundle(JSON.stringify([credential])).devices[0].device_id, 2001);
   assert.equal(parseCredentialBundle(JSON.stringify({ schema_version: 1, devices: [credential], gateways: [] })).devices[0].device_id, 2001);
+});
+
+test("enforces the v1.2 physical ID role allocation", () => {
+  assert.throws(() => generateDeviceCredential(1008), /multiple of 16/);
+  assert.throws(() => buildTransportWrapper(
+    buildDiagnosticPacket(defaultDeviceSettings(1001), generateDeviceCredential(1001)).payload_b64,
+    { ...defaultWrapperSettings(), transport: "lora_hub", gatewayGuid16: "0016" },
+  ), /multiple of 16/);
 });
 
 test("provisioning SQL hashes bearer tokens and includes HMAC material for Vault", () => {

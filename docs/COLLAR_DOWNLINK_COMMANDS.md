@@ -6,7 +6,7 @@ This document locks the first production-shaped command-routing model for collar
 
 Collars are not directly addressable servers. They sleep, they do not have stable public IP addresses, and they may sit behind carrier NAT. Commands are therefore routed by `device_id`, not by IP address.
 
-The backend stores pending commands for a collar. A command can only be delivered when the collar creates a delivery opportunity by waking and checking in.
+The backend stores pending commands for a collar for up to one hour. A command can only be delivered when the collar creates a delivery opportunity by waking and checking in. Queueing is therefore immediate, while radio delivery is opportunistic and retryable.
 
 ```text
 User or system queues command for device 1001
@@ -59,7 +59,7 @@ If no command exists:
 }
 ```
 
-The collar then ACKs with a normal TLV v1.1 packet using:
+The collar then ACKs with a TLV v1.2 packet using:
 
 - `tx_reason = ACK`
 - `TLV_ACKED_MSG_SEQ_ID = command.sequence_id`
@@ -70,12 +70,19 @@ The backend keeps the UUID command ID for audit and web UI state, but the embedd
 
 For `ingest_path = lora_hub`, the collar sends raw TLV over private LoRa. The Home Hub receives it, wraps it for HTTPS, and relays it to Supabase.
 
-The first implementation should let the Home Hub poll for pending commands by `device_id`, then transmit the command during the collar's RX window. Later, this can be upgraded to Realtime/WebSocket delivery to the hub.
+The Home Hub's authenticated telemetry POST is also the command check. The Edge Function returns the next pending command in that HTTP response, and the Home Hub immediately transmits the corresponding TLV v1.2 downlink during the collar's 10-second RX window. If delivery or the ACK is missed, the same command remains retryable until acknowledged, superseded, or expired.
 
 The collar ACK format remains the same:
 
 - `tx_reason = ACK`
 - `TLV_ACKED_MSG_SEQ_ID = command.sequence_id`
+
+This fits TLV v1.2 without consuming another header flag:
+
+- profile commands use `source_id16 = hub`, `destination_id16 = collar`, `tx_reason = CONFIG`, and `TLV_PROFILE`;
+- acknowledgements reverse the addresses and use `tx_reason = ACK` plus `TLV_ACKED_MSG_SEQ_ID`;
+- the command header `message_sequence_id` is the backend's compact 16-bit command sequence;
+- a repeated sequence is not applied twice, but is ACKed again in case the earlier ACK was lost.
 
 ## Initial command dictionary
 
@@ -124,6 +131,8 @@ sent
   ↓ too many delivery attempts
 failed
 ```
+
+Customer power-profile commands expire one hour after creation. Queueing a newer profile command for the same collar cancels any older unacknowledged profile command so a stale selection cannot be applied later.
 
 ## Security notes
 

@@ -111,7 +111,7 @@ async function handleApi(request, response, url) {
     const body = await readJson(request);
     credentialBundle = upsertGateway(
       credentialBundle,
-      generateGatewayCredential(body.gateway_guid16 || "0016", body.display_name || "Bluepaws Test Hub"),
+      generateGatewayCredential(body.gateway_guid16 || "0010", body.display_name || "Bluepaws Test Hub"),
     );
     json(response, 200, { path: credentialPath, bundle: summarizeBundle(credentialBundle) });
     return;
@@ -213,8 +213,8 @@ function findGateway(gatewayGuid16) {
 
 function nextDeviceId() {
   const used = new Set(credentialBundle.devices.map((device) => device.device_id));
-  for (let id = 1001; id <= 65_535; id += 1) {
-    if (!used.has(id)) return id;
+  for (let id = 1001; id <= 65_534; id += 1) {
+    if (id % 16 !== 0 && !used.has(id)) return id;
   }
   throw new Error("no free device IDs remain");
 }

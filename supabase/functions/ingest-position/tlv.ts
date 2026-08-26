@@ -13,6 +13,7 @@ const KNOWN_TLVS = new Map<number, { name: string; length: number; read: (view: 
   [0x10, { name: "uptime_s", length: 4, read: (view, offset) => view.getUint32(offset, true) }],
   [0x13, { name: "activity_score", length: 1, read: (view, offset) => view.getUint8(offset) }],
   [0x20, { name: "acked_msg_seq_id", length: 2, read: (view, offset) => view.getUint16(offset, true) }],
+  [0xf1, { name: "profile", length: 1, read: (view, offset) => view.getUint8(offset) }],
 ]);
 
 const WRAPPER_FIELDS = new Set([
@@ -142,6 +143,19 @@ export function parseTlvRequest(value: unknown): ParsedTlvRequest {
   if (typeof body.payload_b64 !== "string") fail("invalid_base64", "payload_b64 must be a Base64 string");
   const rawBytes = decodeBase64(body.payload_b64);
 
+  const packet = parseTlvPacket(rawBytes);
+  if (!isCollarId16(packet.sourceId16)) {
+    fail("invalid_source_role", "ingestion accepts collar source IDs only");
+  }
+  if (normalizedIngestPath === "cellular_direct" && packet.destinationId16 !== CLOUD_DESTINATION_ID) {
+    fail("invalid_destination", "cellular_direct packets must target the cloud destination 0000");
+  }
+  if (normalizedIngestPath === "lora_hub"
+      && packet.destinationId16 !== CLOUD_DESTINATION_ID
+      && packet.destinationId16 !== gatewayGuid16) {
+    fail("invalid_destination", "LoRa packets must target the cloud or the relaying gateway");
+  }
+
   return {
     metadata: {
       ingestPath: normalizedIngestPath,
@@ -154,7 +168,7 @@ export function parseTlvRequest(value: unknown): ParsedTlvRequest {
       cellRsrqDb: optionalNumber(body.cell_rsrq_db, -100, 0, "cell_rsrq_db"),
       cellSinrDb: optionalNumber(body.cell_sinr_db, -100, 100, "cell_sinr_db"),
     },
-    packet: parseTlvPacket(rawBytes),
+    packet,
   };
 }
 

@@ -296,8 +296,37 @@ Selected TLVs remain:
 | `0x10` | `uptime_s` | 4 | 6 |
 | `0x13` | `activity_score` | 1 | 3 |
 | `0x20` | `acked_msg_seq_id` | 2 | 4 |
+| `0xF1` | `profile` | 1 | 3 |
 
-All selected TLVs together cost 20 bytes, leaving 4 bytes TLV headroom.
+The five telemetry/diagnostic TLVs through `0x20` cost 20 bytes together,
+leaving 4 bytes of telemetry headroom. `profile` is a command/ACK TLV and is
+not normally combined with that complete telemetry set.
+
+### 14.1 Power-profile command
+
+A Home Hub profile command uses:
+
+```text
+source_id16      = provisioned hub ID (multiple of 16)
+destination_id16 = target collar ID
+tx_reason        = CONFIG
+TLV 0xF1         = requested power profile u8
+```
+
+The collar acknowledgement uses:
+
+```text
+source_id16      = collar ID
+destination_id16 = originating hub ID
+tx_reason        = ACK
+TLV 0x20         = acknowledged command msg_seq_id
+TLV 0xF1         = resulting power profile u8 (where included)
+```
+
+The 1.2 addresses identify the participants; TLV `0x20` correlates the exact
+command. Prototype firmware currently performs structural routing and ACK
+testing without verifying downlink authentication. This remains explicitly
+non-production until a hub-to-collar key/proof model is locked and implemented.
 
 ## 15. Transport separation
 

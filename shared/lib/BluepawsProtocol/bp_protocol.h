@@ -63,7 +63,7 @@ enum bp_profile_t : uint8_t {
     PROFILE_UNKNOWN   = 0xFF,
 };
 
-#define BP_MAX_V1_POWER_PROFILE PROFILE_DEBUG
+#define BP_MAX_POWER_PROFILE PROFILE_DEBUG
 
 #define FLAG_GNSS_VALID        0x01
 #define FLAG_FIX_3D            0x02
@@ -109,24 +109,28 @@ enum bp_error_t : uint8_t {
 };
 
 enum bp_tlv_type_t : uint8_t {
-    TLV_FW_VER           = 0x04,
-    TLV_RESET_REASON     = 0x06,
-    TLV_UPTIME_S         = 0x10,
-    TLV_ACTIVITY_SCORE   = 0x13,
-    TLV_ACKED_MSG_SEQ_ID = 0x20,
-    TLV_PROFILE          = 0xF1,
-    TLV_TX_POWER         = 0xF2,
-    TLV_SLEEP_INTERVAL   = 0xF3,
-    TLV_GPS_WARM         = 0xF4,
-    TLV_HOME_CYCLES      = 0xF5,
-    TLV_LOG_INFO         = 0xF6,
-    TLV_LOST_MODE_S      = TLV_UPTIME_S,
-    TLV_NEW_MODE         = 0xF7,
-    TLV_DURATION_S       = TLV_UPTIME_S,
-    TLV_CMD_MSG_ID       = TLV_ACKED_MSG_SEQ_ID,
-    TLV_LED_FLASH        = 0xF8,
-    TLV_BUZZER_PATTERN   = 0xF9,
-    TLV_ERROR_TYPE       = TLV_RESET_REASON,
+    TLV_FW_VER            = 0x04,  // u16  — firmware version, (major << 8) | minor
+    TLV_RESET_REASON      = 0x06,  // u8   — reset/cold-start diagnostic
+    TLV_UPTIME_S          = 0x10,  // u32  — seconds since boot
+    TLV_ACTIVITY_SCORE    = 0x13,  // u8   — simple activity/movement score
+    TLV_ACKED_MSG_SEQ_ID  = 0x20,  // u16  — command/message sequence being ACK'd
+
+    TLV_PROFILE           = 0xF1,  // u8   — v1.2 downlink requested power profile
+
+    // Compatibility aliases for old sketch call sites. Keep these out of
+    // production packets unless the protocol document formally assigns them.
+    TLV_TX_POWER          = 0xF2,
+    TLV_SLEEP_INTERVAL    = 0xF3,
+    TLV_GPS_WARM          = 0xF4,
+    TLV_HOME_CYCLES       = 0xF5,
+    TLV_LOG_INFO          = 0xF6,
+    TLV_LOST_MODE_S       = TLV_UPTIME_S,
+    TLV_NEW_MODE          = 0xF7,
+    TLV_DURATION_S        = TLV_UPTIME_S,
+    TLV_CMD_MSG_ID        = TLV_ACKED_MSG_SEQ_ID,
+    TLV_LED_FLASH         = 0xF8,
+    TLV_BUZZER_PATTERN    = 0xF9,
+    TLV_ERROR_TYPE        = TLV_RESET_REASON,
 };
 
 static char _bp_dev_name_buf[16];
@@ -304,7 +308,7 @@ static inline bool pkt_validate_structure(const uint8_t *buf, uint8_t total_len)
     if (buf[29] != 0 || buf[30] != 0) return false;
     if (buf[31] > BP_MAX_TLV_SIZE) return false;
     if (total_len != BP_HEADER_SIZE + buf[31] + BP_AUTH_TAG_SIZE) return false;
-    if ((pkt_status(buf) > STATUS_ERROR) || (pkt_power_profile(buf) > BP_MAX_V1_POWER_PROFILE)) return false;
+    if ((pkt_status(buf) > STATUS_ERROR) || (pkt_power_profile(buf) > BP_MAX_POWER_PROFILE)) return false;
     if (pkt_tx_reason(buf) > TX_WAKE_CHECKIN) return false;
     uint16_t source = pkt_source_id(buf);
     if (!bp_is_hub_id(source) && !bp_is_collar_id(source)) return false;

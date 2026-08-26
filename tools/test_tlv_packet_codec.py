@@ -60,7 +60,7 @@ class TlvPacketCodecTests(unittest.TestCase):
                         ],
                         "gateways": [
                             {
-                                "gateway_guid16": "0016",
+                                "gateway_guid16": "0010",
                                 "bearer_token": "g" * 48,
                                 "display_name": "Test Hub",
                             }
@@ -71,7 +71,7 @@ class TlvPacketCodecTests(unittest.TestCase):
             )
             bundle = load_credential_bundle(bundle_path)
             self.assertEqual(bundle.devices[0].device_id, 1001)
-            self.assertEqual(bundle.gateways[0].gateway_guid16, "0016")
+            self.assertEqual(bundle.gateways[0].gateway_guid16, "0010")
             self.assertEqual(bundle.gateways[0].display_name, "Test Hub")
 
             legacy_path = Path(directory) / "legacy.json"
@@ -106,21 +106,34 @@ class TlvPacketCodecTests(unittest.TestCase):
                 ],
             }
             path.write_text(json.dumps(body), encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, "0001..FFFF"):
+            with self.assertRaisesRegex(ValueError, "integer from 1 to 65534"):
                 load_credential_bundle(path)
+
+    def test_rejects_ids_assigned_to_the_wrong_v12_role(self):
+        with self.assertRaisesRegex(ValueError, "reserved for hubs"):
+            build_tlv_packet(packet_fields(device_id=1008), [], bytes(32))
+        with self.assertRaisesRegex(ValueError, "multiple of 16"):
+            build_transport_wrapper(
+                build_tlv_packet(packet_fields(), [], bytes(32)).payload_b64,
+                "lora_hub",
+                gateway_guid16="0016",
+                gateway_rx_time_unix=1,
+            )
 
     def test_builds_locked_layout_and_valid_hmac(self):
         key = bytes(range(32))
         built = build_tlv_packet(
             packet_fields(),
-            [firmware_tlv("1.1"), known_tlv(0x10, 60), known_tlv(0x13, 42)],
+            [firmware_tlv("1.2"), known_tlv(0x10, 60), known_tlv(0x13, 42)],
             key,
         )
         packet = built.packet
-        self.assertEqual(packet[0], 1)
+        self.assertEqual(packet[0], 2)
         self.assertEqual(struct.unpack_from("<H", packet, 1)[0], 1001)
-        self.assertEqual(struct.unpack_from("<i", packet, 12)[0], 515_000_000)
-        self.assertEqual(packet[27:31], bytes(4))
+        self.assertEqual(struct.unpack_from("<H", packet, 3)[0], 0)
+        self.assertEqual(struct.unpack_from("<H", packet, 5)[0], 42)
+        self.assertEqual(struct.unpack_from("<i", packet, 14)[0], 515_000_000)
+        self.assertEqual(packet[29:31], bytes(2))
         self.assertEqual(len(packet), 32 + packet[31] + 8)
         self.assertEqual(packet[-8:], hmac.new(key, packet[:-8], hashlib.sha256).digest()[:8])
         self.assertEqual(validate_payload_b64(built.payload_b64), packet)
@@ -130,7 +143,7 @@ class TlvPacketCodecTests(unittest.TestCase):
         built = build_tlv_packet(
             packet_fields(),
             [
-                firmware_tlv("1.1"),
+                firmware_tlv("1.2"),
                 known_tlv(0x10, 60),
                 TlvEntry(0x7E, bytes.fromhex("A1B2")),
             ],
@@ -141,12 +154,14 @@ class TlvPacketCodecTests(unittest.TestCase):
 
         self.assertEqual(decoded["packet"]["size_bytes"], len(built.packet))
         self.assertEqual(decoded["header"]["device_id"], 1001)
+        self.assertEqual(decoded["header"]["source_id16"], 1001)
+        self.assertEqual(decoded["header"]["destination_id16"], 0)
         self.assertEqual(decoded["header"]["status"], {"code": 1, "name": "OUT"})
         self.assertEqual(
             decoded["header"]["flags"]["set"], ["GNSS_VALID", "FIX_3D"]
         )
         self.assertEqual(decoded["header"]["position"]["latitude"], 51.5)
-        self.assertEqual(decoded["tlvs"][0]["value"], "1.1")
+        self.assertEqual(decoded["tlvs"][0]["value"], "1.2")
         self.assertEqual(decoded["tlvs"][1]["value"], 60)
         self.assertEqual(decoded["tlvs"][2]["name"], "unknown")
         self.assertEqual(decoded["tlvs"][2]["value"], "A1B2")
@@ -201,7 +216,7 @@ class TlvPacketCodecTests(unittest.TestCase):
         lora = build_transport_wrapper(
             payload,
             "lora_hub",
-            gateway_guid16="0016",
+            gateway_guid16="0010",
             gateway_rx_time_unix=1_700_000_001,
             link_rssi_dbm=-92,
             link_snr_db=6.25,
@@ -209,15 +224,15 @@ class TlvPacketCodecTests(unittest.TestCase):
         self.assertEqual(lora["format"], "tlv")
         self.assertEqual(lora["ingest_path"], "lora_gateway")
         self.assertEqual(lora["link_type"], "lora")
-        self.assertEqual(lora["gateway_guid16"], "0016")
+        self.assertEqual(lora["gateway_guid16"], "0010")
         self.assertNotIn("cell_rsrp_dbm", lora)
 
     def test_rejects_backend_reserved_values_and_invalid_cross_transport_fields(self):
         key = bytes(32)
         wake_checkin = build_tlv_packet(packet_fields(tx_reason=7, flags=0x08), [], key)
-        self.assertEqual(wake_checkin.packet[11], 7)
+        self.assertEqual(wake_checkin.packet[13], 7)
         debug_profile = build_tlv_packet(packet_fields(power_profile=4), [], key)
-        self.assertEqual(debug_profile.packet[9] >> 4, 4)
+        self.assertEqual(debug_profile.packet[11] >> 4, 4)
         self.assertEqual(
             decode_tlv_payload(debug_profile.payload_b64, key)["header"]["power_profile"],
             {"code": 4, "name": "DEBUG"},
@@ -231,7 +246,7 @@ class TlvPacketCodecTests(unittest.TestCase):
             build_transport_wrapper(
                 payload,
                 "lora_hub",
-                gateway_guid16="0016",
+                gateway_guid16="0010",
                 gateway_rx_time_unix=1,
                 cell_rsrp_dbm=-100,
             )
@@ -249,7 +264,7 @@ class TlvPacketCodecTests(unittest.TestCase):
                 fix_age_s=65_535,
                 satellite_count=255,
             ),
-            [firmware_tlv("1.1"), known_tlv(0x06, 1), known_tlv(0x10, 3)],
+            [firmware_tlv("1.2"), known_tlv(0x06, 1), known_tlv(0x10, 3)],
             key,
         )
 
