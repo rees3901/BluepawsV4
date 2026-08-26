@@ -3,6 +3,9 @@ const AUTH_TAG_BYTES = 8;
 const MAX_TLV_BYTES = 24;
 const MIN_PACKET_BYTES = FIXED_HEADER_BYTES + AUTH_TAG_BYTES;
 const MAX_PACKET_BYTES = FIXED_HEADER_BYTES + MAX_TLV_BYTES + AUTH_TAG_BYTES;
+const PROTOCOL_VERSION = 2;
+const CLOUD_DESTINATION_ID = 0x0000;
+const BROADCAST_ID = 0xffff;
 
 const KNOWN_TLVS = new Map<number, { name: string; length: number; read: (view: DataView, offset: number) => number }>([
   [0x04, { name: "fw_ver", length: 2, read: (view, offset) => view.getUint16(offset, true) }],
@@ -43,7 +46,13 @@ export interface TransportMetadata {
 }
 
 export interface ParsedTlvPacket {
-  protocolVersion: 1;
+  protocolVersion: 2;
+  sourceId16: number;
+  destinationId16: number;
+  /**
+   * Storage/API compatibility alias only.
+   * v1.2 source_id16 is the same provisioned identity previously called device_guid16.
+   */
   deviceGuid16: number;
   messageSequenceId: number;
   timeUnix: number;
@@ -83,6 +92,14 @@ export function isTlvRequest(value: unknown) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value) && "payload_b64" in value);
 }
 
+export function isHubId16(id: number) {
+  return Number.isInteger(id) && id > 0 && id < BROADCAST_ID && (id & 0x000f) === 0;
+}
+
+export function isCollarId16(id: number) {
+  return Number.isInteger(id) && id > 0 && id < BROADCAST_ID && (id & 0x000f) !== 0;
+}
+
 export function parseTlvRequest(value: unknown): ParsedTlvRequest {
   const body = objectBody(value, "body must be a JSON object");
   rejectUnknownFields(body, WRAPPER_FIELDS);
@@ -111,15 +128,15 @@ export function parseTlvRequest(value: unknown): ParsedTlvRequest {
       fail("invalid_gateway", "gateway_guid16 must be exactly four hexadecimal characters");
     }
     gatewayGuid16 = Number.parseInt(body.gateway_guid16, 16);
-    if (gatewayGuid16 === 0) fail("invalid_gateway", "gateway_guid16 0000 is reserved");
+    if (!isHubId16(gatewayGuid16)) {
+      fail("invalid_gateway", "gateway_guid16 must be a provisionable hub ID divisible by 16");
+    }
     gatewayRxTimeUnix = integer(body.gateway_rx_time_unix, 0, 0xffff_ffff, "gateway_rx_time_unix");
     if (body.cell_rsrp_dbm !== undefined || body.cell_rsrq_db !== undefined || body.cell_sinr_db !== undefined) {
       fail("transport_mismatch", "cellular RF fields are not valid for a LoRa wrapper");
     }
-  } else {
-    if (body.gateway_guid16 !== undefined || body.gateway_rx_time_unix !== undefined) {
-      fail("transport_mismatch", "gateway fields are not valid for a cellular_direct wrapper");
-    }
+  } else if (body.gateway_guid16 !== undefined || body.gateway_rx_time_unix !== undefined) {
+    fail("transport_mismatch", "gateway fields are not valid for a cellular_direct wrapper");
   }
 
   if (typeof body.payload_b64 !== "string") fail("invalid_base64", "payload_b64 must be a Base64 string");
@@ -148,22 +165,31 @@ export function parseTlvPacket(rawBytes: Uint8Array): ParsedTlvPacket {
 
   const view = new DataView(rawBytes.buffer, rawBytes.byteOffset, rawBytes.byteLength);
   const protocolVersion = view.getUint8(0);
-  if (protocolVersion !== 1) fail("unsupported_protocol", "protocol version must be 1");
+  if (protocolVersion !== PROTOCOL_VERSION) {
+    fail("unsupported_protocol", `protocol version must be ${PROTOCOL_VERSION} for TLV v1.2`);
+  }
 
-  const deviceGuid16 = view.getUint16(1, true);
-  if (deviceGuid16 === 0) fail("invalid_device", "device_guid16 0000 is reserved");
+  const sourceId16 = view.getUint16(1, true);
+  const destinationId16 = view.getUint16(3, true);
 
-  const state = view.getUint8(9);
+  if (sourceId16 === CLOUD_DESTINATION_ID || sourceId16 === BROADCAST_ID) {
+    fail("invalid_source", "source_id16 cannot be 0000 or FFFF");
+  }
+  if (!isHubId16(sourceId16) && !isCollarId16(sourceId16)) {
+    fail("invalid_source", "source_id16 is outside the provisionable physical ID namespace");
+  }
+
+  const state = view.getUint8(11);
   const status = state & 0x0f;
   const powerProfile = (state >>> 4) & 0x0f;
-  if (status > 3) fail("reserved_status", "status uses a reserved v1 value");
-  if (powerProfile > 4) fail("reserved_power_profile", "power profile uses a reserved v1 value");
+  if (status > 3) fail("reserved_status", "status uses a reserved v1.2 value");
+  if (powerProfile > 4) fail("reserved_power_profile", "power profile uses a reserved v1.2 value");
 
-  const txReason = view.getUint8(11);
-  if (txReason > 7) fail("reserved_tx_reason", "tx_reason uses a reserved v1 value");
+  const txReason = view.getUint8(13);
+  if (txReason > 7) fail("reserved_tx_reason", "tx_reason uses a reserved v1.2 value");
 
-  for (let offset = 27; offset <= 30; offset += 1) {
-    if (view.getUint8(offset) !== 0) fail("reserved_header_nonzero", "reserved header bytes must be zero");
+  if (view.getUint8(29) !== 0 || view.getUint8(30) !== 0) {
+    fail("reserved_header_nonzero", "reserved header bytes must be zero");
   }
 
   const tlvLength = view.getUint8(31);
@@ -173,9 +199,9 @@ export function parseTlvPacket(rawBytes: Uint8Array): ParsedTlvPacket {
     fail("packet_length_mismatch", "decoded packet length does not match tlv_len");
   }
 
-  const latitudeE7 = view.getInt32(12, true);
-  const longitudeE7 = view.getInt32(16, true);
-  const flags = view.getUint8(10);
+  const latitudeE7 = view.getInt32(14, true);
+  const longitudeE7 = view.getInt32(18, true);
+  const flags = view.getUint8(12);
   const gnssValid = (flags & 0x01) !== 0;
   const latitude = gnssValid ? latitudeE7 / 10_000_000 : null;
   const longitude = gnssValid ? longitudeE7 / 10_000_000 : null;
@@ -184,10 +210,12 @@ export function parseTlvPacket(rawBytes: Uint8Array): ParsedTlvPacket {
 
   const authenticatedLength = FIXED_HEADER_BYTES + tlvLength;
   return {
-    protocolVersion: 1,
-    deviceGuid16,
-    messageSequenceId: view.getUint16(3, true),
-    timeUnix: view.getUint32(5, true),
+    protocolVersion: PROTOCOL_VERSION,
+    sourceId16,
+    destinationId16,
+    deviceGuid16: sourceId16,
+    messageSequenceId: view.getUint16(5, true),
+    timeUnix: view.getUint32(7, true),
     status,
     powerProfile,
     flags,
@@ -195,10 +223,10 @@ export function parseTlvPacket(rawBytes: Uint8Array): ParsedTlvPacket {
     latitude,
     longitude,
     gnssValid,
-    batteryMillivolts: view.getUint16(20, true),
-    accuracyMetres: view.getUint16(22, true),
-    fixAgeSeconds: view.getUint16(24, true),
-    satelliteCount: view.getUint8(26),
+    batteryMillivolts: view.getUint16(22, true),
+    accuracyMetres: view.getUint16(24, true),
+    fixAgeSeconds: view.getUint16(26, true),
+    satelliteCount: view.getUint8(28),
     tlvs: parseTlvs(view, tlvLength),
     rawBytes,
     authenticatedBytes: rawBytes.slice(0, authenticatedLength),
