@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { DeviceCard, DownloadIcon } from "@/components/DeviceCard";
+import { DeviceCard, DownloadIcon, type DeviceCardProps } from "@/components/DeviceCard";
 import { DeviceReportModal } from "@/components/DeviceReportModal";
 import { GuidedTour } from "@/components/GuidedTour";
 import { AccountMenu } from "@/components/AccountMenu";
@@ -11,7 +11,7 @@ import { defaultDeviceAvatar } from "@/lib/defaultDeviceAvatar";
 import { queuePowerProfileCommand } from "@/lib/deviceCommands";
 import { useCollarFeedback } from "@/lib/useCollarFeedback";
 import { useHubPresence } from "@/lib/useHubPresence";
-import { hubAvatar, hubMapDevice } from "@/lib/hubPresence";
+import { hubAvatar, hubMapDevice, type HubPresence } from "@/lib/hubPresence";
 import { HubCard } from "@/components/HubCard";
 import { commandMessage } from "@/lib/collarFeedback";
 import { CUSTOMER_POWER_PROFILES, powerProfileLabel, type CustomerPowerProfile } from "@/lib/powerProfiles";
@@ -26,6 +26,11 @@ import { getTutorialTelemetrySource } from "@/lib/telemetry";
 import { resolveTutorialStartup } from "@/lib/tutorialMode";
 import type { FamilyRole } from "@/lib/familySelection";
 import type { DeviceAction, DeviceAvatar, MapCommand, TelemetryConnectionStatus, TelemetryDevice, TrailPoint } from "@/types/telemetry";
+
+// Hub persistence is separate; the device card and dashboard interactions are shared.
+function DashboardDeviceCard({ hub, onHubSaved, ...cardProps }: DeviceCardProps & { hub?: HubPresence; onHubSaved: () => void }) {
+  return hub ? <HubCard hub={hub} onSaved={onHubSaved} cardProps={cardProps} /> : <DeviceCard {...cardProps} />;
+}
 
 const TrackingMap = dynamic(() => import("@/components/TrackingMap"), {
   ssr: false,
@@ -101,11 +106,12 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
   const familyContextMissing = !tutorialMode && (householdId === null || householdAccessVersion === null);
   const familyHydrating = familyContextMissing && (!preferencesReady || familyRetryCount < FAMILY_HYDRATION_RETRY_DELAYS_MS.length);
 
-  const orderedDeviceIds = useMemo(() => orderDeviceIds(devices.map((device) => device.id), cardOrder), [cardOrder, devices]);
   const reportVersion = devices.map(device => `${device.id}:${device.lastUpdate}:${device.seq}`).join(",");
   const { feedback, refresh: refreshFeedback } = useCollarFeedback(hasFamilyContext ? householdId : null, reportVersion);
   const { hubs, error: hubError, refresh: refreshHubs } = useHubPresence(hasFamilyContext ? householdId : null);
   const mapHubs = useMemo(() => hubs.map(hubMapDevice), [hubs]);
+  const mapDevices = useMemo(() => [...mapHubs, ...devices], [devices, mapHubs]);
+  const orderedDeviceIds = useMemo(() => orderDeviceIds(mapDevices.map(device => device.id), cardOrder), [cardOrder, mapDevices]);
 
   const handlePowerProfileCommand = useCallback(async (profile: CustomerPowerProfile) => {
     if (!commandDevice || commandSending) return;
@@ -129,19 +135,18 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
     }
   }, [commandDevice, commandSending, tutorialMode, refreshFeedback]);
   const orderedDevices = useMemo(() => {
-    const devicesById = new Map(devices.map((device) => [device.id, device]));
+    const devicesById = new Map(mapDevices.map((device) => [device.id, device]));
     return orderedDeviceIds.flatMap((deviceId) => {
       const device = devicesById.get(deviceId);
       return device ? [device] : [];
     });
-  }, [devices, orderedDeviceIds]);
+  }, [mapDevices, orderedDeviceIds]);
 
   const avatars = useMemo<Record<number, DeviceAvatar>>(() => Object.fromEntries(orderedDevices.map((device) => [
     device.id,
     (!tutorialMode ? customAvatars[device.id] : undefined) ?? defaultDeviceAvatar(device.id),
   ])), [customAvatars, orderedDevices, tutorialMode]);
-  const mapDevices = useMemo(() => [...devices, ...mapHubs], [devices, mapHubs]);
-  const mapAvatars = useMemo(() => ({ ...avatars, ...Object.fromEntries(hubs.map(h => [-h.gateway_guid16, hubAvatar(h)])) }), [avatars, hubs]);
+  const mapAvatars = useMemo<Record<number, DeviceAvatar>>(() => ({ ...avatars, ...Object.fromEntries(hubs.map(h => [-h.gateway_guid16, hubAvatar(h)])) }), [avatars, hubs]);
 
   const replaceCustomAvatars = useCallback((next: Record<number, DeviceAvatar>) => {
     revokeAvatarUrls(customAvatarsRef.current);
@@ -291,11 +296,12 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
     return () => window.clearTimeout(timer);
   }, [toast]);
 
-  const allTrailsVisible = devices.length > 0 && devices.every((device) => trailIds.has(device.id));
+  const allTrailsVisible = mapDevices.length > 0 && mapDevices.every((device) => trailIds.has(device.id));
 
   const requestTrailHistory = useCallback((deviceIds: number[]) => {
     if (tutorialMode) return;
-    const missingDeviceIds = deviceIds.filter((deviceId) => trailHistory[deviceId] === undefined);
+    // Hub trails accumulate from its own fixes in TrackingMap, not collar history.
+    const missingDeviceIds = deviceIds.filter((deviceId) => deviceId > 0 && trailHistory[deviceId] === undefined);
     if (missingDeviceIds.length === 0) return;
 
     void Promise.allSettled(
@@ -321,6 +327,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
   }, [trailHistory, tutorialMode]);
 
   const handleAction = useCallback((device: TelemetryDevice, action: DeviceAction) => {
+    if (device.entity === "hub" && (action === "find" || action === "command")) return;
     if (action === "jump") {
       setFollowedId((current) => followedDeviceAfterAction(current, device.id, "jump"));
       setMapCommand({ type: "jump", deviceId: device.id, nonce: Date.now() });
@@ -348,21 +355,21 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
       return;
     }
 
-    const deviceIds = devices.map((device) => device.id);
+    const deviceIds = mapDevices.map((device) => device.id);
     setTrailIds(new Set(deviceIds));
     requestTrailHistory(deviceIds);
-  }, [allTrailsVisible, devices, requestTrailHistory]);
+  }, [allTrailsVisible, mapDevices, requestTrailHistory]);
 
   const handleCardDrop = useCallback((targetId: number) => {
     setDragOverDeviceId(null);
-    setCardOrder((current) => moveDeviceBefore(orderDeviceIds(devices.map((device) => device.id), current), draggingDeviceId ?? targetId, targetId));
+    setCardOrder((current) => moveDeviceBefore(orderDeviceIds(mapDevices.map((device) => device.id), current), draggingDeviceId ?? targetId, targetId));
     setDraggingDeviceId(null);
-  }, [devices, draggingDeviceId]);
+  }, [mapDevices, draggingDeviceId]);
 
   const handleCardPin = useCallback((deviceId: number) => {
-    setCardOrder((current) => pinDeviceFirst(orderDeviceIds(devices.map((device) => device.id), current), deviceId));
-    setToast("Pet pinned to the top of this browser");
-  }, [devices]);
+    setCardOrder((current) => pinDeviceFirst(orderDeviceIds(mapDevices.map((device) => device.id), current), deviceId));
+    setToast("Device pinned to the top of this browser");
+  }, [mapDevices]);
 
   const fetchReportsForDevice = useCallback(async (device: TelemetryDevice) => {
     if (tutorialMode) return [buildCurrentDeviceReport(device)];
@@ -537,9 +544,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
         {portableMode && <div className="portable-banner">PORTABLE MODE</div>}
         <div id="deviceCards">
           {hubError && <p role="status">{hubError}</p>}
-          {hubs.map(hub => <HubCard key={hub.gateway_guid16} hub={hub} now={now} onSaved={refreshHubs}
-            onJump={() => { setFollowedId(null); setMapCommand({ type: "jump", deviceId: -hub.gateway_guid16, nonce: Date.now() }); }} />)}
-          {devices.length === 0 && (
+          {mapDevices.length === 0 && (
             <div className="telemetry-empty-state" role="status">
               <span className="telemetry-empty-icon" aria-hidden="true">⌁</span>
               <strong>{emptyTitle}</strong>
@@ -550,11 +555,14 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
               </div>
             </div>
           )}
-          {orderedDevices.map((device) => (
-            <DeviceCard
+          {orderedDevices.map((device) => {
+            const hub = device.entity === "hub" ? hubs.find(h => h.gateway_guid16 === -device.id) : undefined;
+            return <DashboardDeviceCard
+              hub={hub}
+              onHubSaved={refreshHubs}
               key={device.id}
               device={device}
-              avatar={avatars[device.id]}
+              avatar={mapAvatars[device.id]}
               expanded={expandedIds.includes(device.id)}
               dragging={draggingDeviceId === device.id}
               dragOver={dragOverDeviceId === device.id && draggingDeviceId !== device.id}
@@ -576,8 +584,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
               onPinTop={() => handleCardPin(device.id)}
               onReportLog={() => handleReportLog(device)}
               onReportExport={() => handleReportExport(device)}
-            />
-          ))}
+            />; })}
         </div>
       </aside>
 

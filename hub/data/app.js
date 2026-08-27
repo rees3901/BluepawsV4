@@ -635,6 +635,7 @@
     function editLocalAppearance(deviceId) {
         var dev = devices[deviceId];
         if (!dev) return;
+        if (dev.data.entity === 'hub') { HubPresencePanel.edit(); return; }
         var name = window.prompt('Local collar name (stored only on this Home Hub)', dev.data.name || ('Device ' + deviceId));
         if (!name) return;
         var emoji = window.prompt('Emoji or short symbol', dev.avatar.emoji || '🐾');
@@ -700,6 +701,7 @@
     // ═══════════════════════════════════════════════
     function updateDevice(data) {
         var id = data.id;
+        if (id < 0 && data.entity !== 'hub') return;
         var dev = devices[id];
 
         // First time seeing this device — create a new entry with
@@ -719,7 +721,7 @@
                 avatar: av,         // Assigned emoji + color
                 trailColor: tc      // Trail line color
             };
-            avatarIndex++;
+            if (data.entity !== 'hub') avatarIndex++;
             devices[id] = dev;
         }
 
@@ -732,10 +734,10 @@
 
         dev.data = data;               // Store latest telemetry payload
         dev.lastUpdate = Date.now() - Math.max(0, Number(data.age || 0)) * 1000;
-        HubFeedback.receiveWindow(dev, data, performance.now());
+        if (data.entity !== 'hub') HubFeedback.receiveWindow(dev, data, performance.now());
 
         // Only update map if we have valid GPS coordinates
-        if (data.hasGps && data.lat !== 0 && data.lon !== 0) {
+        if (data.hasGps && Number.isFinite(data.lat) && Number.isFinite(data.lon)) {
             var latlng = [data.lat, data.lon];
 
             if (!dev.marker) {
@@ -743,7 +745,7 @@
                 // using a custom div icon with the device's emoji avatar
                 var icon = L.divIcon({
                     className: '',
-                    html: '<div class="bp-marker" id="marker-' + id + '" style="border-color:' + dev.avatar.color + '">' + dev.avatar.emoji + '</div>',
+                    html: '<div class="bp-marker" id="marker-' + id + '" style="border-color:' + escapeHtml(dev.avatar.color) + '">' + escapeHtml(dev.avatar.emoji) + '</div>',
                     iconSize: [32, 32],
                     iconAnchor: [16, 16]  // Center the icon on the position
                 });
@@ -797,6 +799,7 @@
             var markerEl = document.getElementById('marker-' + id);
             if (markerEl) {
                 markerEl.className = 'bp-marker';
+                markerEl.textContent = dev.avatar.emoji;
                 markerEl.style.borderColor = dev.avatar.color;
                 if (data.status === 'Home') markerEl.classList.add('status-home');
                 if (data.status === 'Lost' || data.status === 'LostTimeout' || data.status === 'LostAlert') markerEl.classList.add('status-lost');
@@ -807,7 +810,8 @@
             // 100 points per collar, matching the off-grid history contract.
             // Renders as a dashed polyline in the device's trail color.
             if (dev.showTrail) {
-                dev.trail.push(latlng);
+                var previous = dev.trail[dev.trail.length - 1];
+                if (!previous || previous[0] !== latlng[0] || previous[1] !== latlng[1]) dev.trail.push(latlng);
                 while (dev.trail.length > 100) dev.trail.shift();
                 if (dev.trailLine) {
                     dev.trailLine.setLatLngs(dev.trail);  // Update existing polyline
@@ -834,6 +838,7 @@
     }
 
     function loadDeviceHistory(deviceId) {
+        if (deviceId < 0) return Promise.resolve(); // Hub trails use its own live fixes.
         return fetch('/api/history?device=' + encodeURIComponent(deviceId) + '&limit=100')
             .then(function (response) { return response.json(); })
             .then(function (payload) {
@@ -874,6 +879,10 @@
     var OFFLINE_THRESHOLD_MS = 600000;  // Fixed 10-minute local stale threshold
 
     function getCollarStatus(dev) {
+        if (dev.data.entity === 'hub') return {
+            emoji: dev.data.hub.mode === 'home' ? '🏡' : '📱',
+            label: dev.data.status, css: dev.data.hub.mode === 'home' ? 'status-home' : 'status-out'
+        };
         var age = Date.now() - dev.lastUpdate;
         if (age >= OFFLINE_THRESHOLD_MS) return STATUS_OFFLINE;
         var key = (dev.data.status || '').toLowerCase();
@@ -902,6 +911,31 @@
         '<line x1="12" y1="1" x2="12" y2="5"/>' +
         '</svg>';
 
+    function escapeHtml(value) {
+        return String(value == null ? '' : value).replace(/[&<>"']/g, function (c) {
+            return {'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[c];
+        });
+    }
+
+    function hubSignal(data) {
+        return '<span class="signal-indicator" title="Home Hub Wi-Fi uplink signal"><span class="sig-label">Wi-Fi ' +
+            (Number.isFinite(data.rssi) ? data.rssi + ' dBm' : 'not connected') + '</span></span>';
+    }
+
+    function coordinateHtml(data) {
+        if (!data.hasGps || !Number.isFinite(data.lat) || !Number.isFinite(data.lon)) return 'Waiting for GPS fix';
+        return '<a class="card-coords card-coords-link" target="_blank" rel="noopener" href="https://www.google.com/maps?q=' +
+            data.lat.toFixed(6) + ',' + data.lon.toFixed(6) + '">' + data.lat.toFixed(5) + ', ' + data.lon.toFixed(5) + '</a>';
+    }
+
+    function hubDetailRows(data) {
+        return '<span class="label">Hub ID</span><span class="value">' + escapeHtml(data.hub.gateway_guid16) + '</span>' +
+            '<span class="label">GPS fix</span><span class="value">' +
+            (data.hasGps ? escapeHtml(data.hub.fix_age_s) + 's old' : 'Not acquired') + '</span>' +
+            '<span class="label">Home beacon</span><span class="value">' +
+            (data.hub.ble_advertising ? 'Advertising' : 'Off') + '</span>';
+    }
+
     function buildPopup(dev) {
         var data = dev.data;
         var isFollowed = (followedDeviceId === dev.id);
@@ -910,14 +944,16 @@
         var st = getCollarStatus(dev);
         return '<div class="popup-content">' +
             '<div class="popup-header">' +
-                '<span style="font-size:20px">' + dev.avatar.emoji + '</span> ' +
-                '<strong>' + data.name + '</strong>' +
+                '<span style="font-size:20px">' + escapeHtml(dev.avatar.emoji) + '</span> ' +
+                '<strong>' + escapeHtml(data.name) + '</strong>' +
                 '<span class="card-status ' + st.css + '" style="margin-left:6px;font-size:10px">' + st.emoji + ' ' + st.label + '</span>' +
             '</div>' +
             '<div class="popup-grid">' +
-                '<span class="label">Signal</span><span class="value">' + renderSignalBars(data.rssi, data.snr) + '</span>' +
-                '<span class="label">Battery</span><span class="value">' + renderBatteryBars(data.batt) + '</span>' +
-                '<span class="label">Dist From Hub</span><span class="value">' + distStr + '</span>' +
+                '<span class="label">Coordinates</span><span class="value">' + coordinateHtml(data) + '</span>' +
+                '<span class="label">Signal</span><span class="value">' + (data.entity === 'hub' ? hubSignal(data) : renderSignalBars(data.rssi, data.snr)) + '</span>' +
+                (data.entity === 'hub' ? hubDetailRows(data) :
+                    '<span class="label">Battery</span><span class="value">' + renderBatteryBars(data.batt) + '</span>' +
+                    '<span class="label">Dist From Hub</span><span class="value">' + distStr + '</span>') +
             '</div>' +
             '<div class="card-actions popup-actions">' +
                 buildActionButtons(dev, isFollowed) +
@@ -938,7 +974,7 @@
     // ═══════════════════════════════════════════════
     // Shared action buttons HTML used in both card detail and map popup
     function buildActionButtons(dev, isFollowed) {
-        return '<button class="btn-action btn-jump" data-action="jump" data-id="' + dev.id + '" title="Jump to location">' +
+        var html = '<button class="btn-action btn-jump" ' + (dev.data.hasGps ? '' : 'disabled ') + 'data-action="jump" data-id="' + dev.id + '" title="Jump to location">' +
                 '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M1 8h11M8 4l4 4-4 4"/></svg>' +
                 ' Jump To' +
             '</button>' +
@@ -949,8 +985,11 @@
             '<button class="btn-action btn-trail' + (dev.showTrail ? ' active' : '') + '" data-action="trail" data-id="' + dev.id + '" title="Toggle breadcrumb trail">' +
                 '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M2 14l4-4 3 3 5-7v2l-5 7-3-3-4 4v-2z"/></svg>' +
                 ' Trail' +
-            '</button>' +
-            '<button class="btn-action btn-find" data-action="find" data-id="' + dev.id + '" title="Find Alert — trigger buzzer + LED">' +
+            '</button>';
+        if (dev.data.entity === 'hub') return html +
+            '<button class="btn-action" data-action="bluetooth" data-id="' + dev.id + '" aria-pressed="' + !!dev.data.hub.ble_enabled +
+            '" title="Home beacon operates only on primary Home Wi-Fi">ᛒ Bluetooth ' + (dev.data.hub.ble_enabled ? 'On' : 'Off') + '</button>';
+        return html + '<button class="btn-action btn-find" data-action="find" data-id="' + dev.id + '" title="Find Alert — trigger buzzer + LED">' +
                 '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a4 4 0 00-4 4c0 1.2.4 2 1 3l-2 5h10l-2-5c.6-1 1-1.8 1-3a4 4 0 00-4-4zm0 13a2 2 0 01-2-2h4a2 2 0 01-2 2z"/></svg>' +
                 ' Find Alert' +
             '</button>' +
@@ -973,20 +1012,22 @@
                 if (action === 'jump') focusDevice(devId);
                 if (action === 'follow') toggleFollow(devId);
                 if (action === 'trail') toggleTrail(devId);
+                if (dev.data.entity === 'hub') {
+                    if (action === 'bluetooth') HubPresencePanel.toggleBluetooth();
+                    return;
+                }
                 if (action === 'find') openFindModal(devId, dev.data.name);
                 if (action === 'cmd') sendModeCmd(devId, dev.data.name);
             });
         });
     }
 
-    var expandedCardId = null;  // Only one card expanded at a time
+    var expandedCardIds = []; // Shared four-card limit, including the hub.
 
     function toggleCardExpand(deviceId) {
-        if (expandedCardId === deviceId) {
-            expandedCardId = null;  // Collapse
-        } else {
-            expandedCardId = deviceId;  // Expand this one
-        }
+        expandedCardIds = expandedCardIds.indexOf(deviceId) >= 0
+            ? expandedCardIds.filter(function (id) { return id !== deviceId; })
+            : expandedCardIds.concat(deviceId).slice(-4);
         // Re-render all cards to update expanded state
         for (var id in devices) {
             renderDeviceCard(devices[id]);
@@ -995,6 +1036,7 @@
 
     function renderDeviceCard(dev) {
         var data = dev.data;
+        var isHub = data.entity === 'hub';
         var container = document.getElementById('deviceCards');
         var card = document.getElementById('card-' + dev.id);
         var isNew = false;
@@ -1011,7 +1053,7 @@
         // Calculate time since last update — cards older than 10 minutes get dimmed
         var age = Math.floor((Date.now() - dev.lastUpdate) / 1000);
         var stale = age >= 600;  // 10 minutes
-        var isExpanded = (expandedCardId === dev.id);
+        var isExpanded = expandedCardIds.indexOf(dev.id) >= 0;
         card.className = 'device-card' + (stale ? ' stale' : '') + (isExpanded ? ' expanded' : '');
 
         var st = getCollarStatus(dev);
@@ -1037,27 +1079,28 @@
         // Row 3: distance from home | last seen
         var html =
             '<div class="card-summary">' +
-                '<div class="card-avatar" style="border-color:' + dev.avatar.color + '">' + dev.avatar.emoji + '</div>' +
+                '<div class="card-avatar-wrap"><div class="card-avatar" style="border-color:' + escapeHtml(dev.avatar.color) + '">' + escapeHtml(dev.avatar.emoji) + '</div>' +
+                '<button type="button" class="card-avatar-edit" title="Customise marker" aria-label="Customise marker">+</button></div>' +
                 '<div class="card-identity">' +
                     '<div class="card-name-row">' +
-                        '<span class="card-name">' + data.name + '</span>' +
+                        '<span class="card-name">' + escapeHtml(data.name) + '</span>' +
                         '<span class="card-status ' + st.css + '">' + st.emoji + ' ' + st.label + '</span>' +
-                        '<span class="card-profile ' + profileClass + '">' + profileLabel + '</span>' +
+                        (isHub ? '' : '<span class="card-profile ' + profileClass + '">' + profileLabel + '</span>') +
                         (data.verification === 'pending' ? '<span class="verification-badge pending">Locally received — verification pending</span>' : '') +
                         (data.verification === 'rejected' ? '<span class="verification-badge rejected">Rejected by cloud</span>' : '') +
                         (data.errorPresent === true ? '<span class="error-badge" title="The collar set its ERROR_PRESENT flag. Lost Alert alone is not a fault.">Collar reported a fault</span>' : '') +
                     '</div>' +
                     '<div class="card-indicators">' +
-                        '<span class="card-indicator-group">' + renderBatteryBars(data.batt) + '</span>' +
-                        '<span class="card-indicator-group">' + renderSignalBars(data.rssi, data.snr) + '</span>' +
-                        '<span class="collar-awake" data-awake="' + dev.id + '" hidden></span>' +
+                        (isHub ? '' : '<span class="card-indicator-group">' + renderBatteryBars(data.batt) + '</span>') +
+                        '<span class="card-indicator-group">' + (isHub ? hubSignal(data) : renderSignalBars(data.rssi, data.snr)) + '</span>' +
+                        (isHub ? '' : '<span class="collar-awake" data-awake="' + dev.id + '" hidden></span>') +
                         (hubPortableMode && bleResults[dev.id] ? '<span class="card-indicator-group">' + renderBleProximity(bleResults[dev.id].rssi) + '</span>' : '') +
                     '</div>' +
                     '<div class="card-indicators card-indicators-row3">' +
-                        '<span class="card-indicator-group card-dist-group" title="Distance from home">' +
+                        (isHub ? '' : '<span class="card-indicator-group card-dist-group" title="Distance from home">' +
                             ICON_HOME_DIST +
                             '<span class="card-dist-value">' + distStr + '</span>' +
-                        '</span>' +
+                        '</span>') +
                         '<span class="card-indicator-group card-lastseen-group" title="Last seen">' +
                             ICON_STOPWATCH +
                             '<span class="card-lastseen-value">' + lastSeenStr + '</span>' +
@@ -1070,13 +1113,7 @@
         // ── Expanded detail (shown only when card is expanded) ──
         if (isExpanded) {
             // Coordinate display — hyperlinked to Google Maps
-            var coordHtml = '<span class="card-coords">---, ---</span>';
-            if (data.hasGps && data.lat !== 0 && data.lon !== 0) {
-                var coordStr = data.lat.toFixed(5) + ', ' + data.lon.toFixed(5);
-                var gmapsUrl = 'https://www.google.com/maps?q=' + data.lat.toFixed(6) + ',' + data.lon.toFixed(6);
-                coordHtml =
-                    '<a href="' + gmapsUrl + '" target="_blank" rel="noopener" class="card-coords card-coords-link" title="Open in Google Maps">' + coordStr + '</a>';
-            }
+            var coordHtml = coordinateHtml(data);
 
             var logEntries = deviceLogs[dev.id] || [];
             var logContent = logEntries.length ? logEntries.join('\n') : 'No messages yet.';
@@ -1085,15 +1122,16 @@
                 '<div class="card-detail">' +
                     '<div class="card-grid">' +
                         '<span class="label">Coordinates</span><span class="value">' + coordHtml + '</span>' +
-                        '<span class="label">Power Profile</span><span class="value">' + data.profile + '</span>' +
-                        '<span class="label">Dist From Hub</span><span class="value">' + distStr + '</span>' +
+                        (isHub ? hubDetailRows(data) :
+                            '<span class="label">Power Profile</span><span class="value">' + escapeHtml(data.profile) + '</span>' +
+                            '<span class="label">Dist From Hub</span><span class="value">' + distStr + '</span>') +
                         '<span class="label">Last seen</span><span class="value" data-detail-age>' + formatAge(age) + '</span>' +
                     '</div>' +
 
                     '<div class="card-actions">' +
                         buildActionButtons(dev, isFollowed) +
                     '</div>' +
-                    '<div class="command-feedback" data-command-feedback="' + dev.id + '" role="status" hidden></div>' +
+                    (isHub ? '' : '<div class="command-feedback" data-command-feedback="' + dev.id + '" role="status" hidden></div>' +
 
                     '<div class="log-btn-row">' +
                         '<button class="btn-device-log btn-secondary" data-logid="' + dev.id + '">Message Log</button>' +
@@ -1102,12 +1140,15 @@
                     '</div>' +
                     '<div id="deviceLogPanel-' + dev.id + '" class="device-log-panel hidden">' +
                         '<pre id="deviceLog-' + dev.id + '" class="console-log device-log">' + logContent + '</pre>' +
-                    '</div>' +
+                    '</div>') +
                 '</div>';
         }
 
         card.innerHTML = html;
         updateCardFeedback(dev);
+        card.querySelector('.card-avatar-edit').onclick = function(e) {
+            e.stopPropagation(); editLocalAppearance(dev.id);
+        };
 
         // Wire up action buttons and message log toggle (only present when expanded)
         if (isExpanded) {
@@ -1154,7 +1195,7 @@
         var summary = card.querySelector('.card-summary');
         if (summary) {
             summary.addEventListener('click', function (e) {
-                if (e.target.closest('.btn-action') || e.target.closest('a')) return;
+                if (e.target.closest('button,a,input,select,textarea')) return;
                 toggleCardExpand(dev.id);
             });
         }
@@ -1377,7 +1418,6 @@
     // ═══════════════════════════════════════════════
     function fitAllMarkers() {
         var bounds = [];
-        if (typeof HubPresencePanel !== 'undefined' && HubPresencePanel.point()) bounds.push(HubPresencePanel.point());
         for (var id in devices) {
             if (devices[id].marker) {
                 bounds.push(devices[id].marker.getLatLng());
@@ -1720,6 +1760,11 @@
 
     // Jump to a device's location and open its popup
     function focusDevice(deviceId) {
+        var previouslyFollowed = followedDeviceId;
+        followedDeviceId = null;
+        if (previouslyFollowed !== null && devices[previouslyFollowed]) {
+            renderDeviceCard(devices[previouslyFollowed]);
+        }
         var dev = devices[deviceId];
         if (dev && dev.marker) {
             map.setView(dev.marker.getLatLng(), 17);  // Zoom level 17 = close-up
@@ -1737,8 +1782,9 @@
         refreshHubStatus();
         loadTheme();     // Restore dark/light preference from localStorage
         initMap();       // Create Leaflet map with tile layers
-        if (typeof HubPresencePanel !== 'undefined') HubPresencePanel.start(map, protectedFetch, function(lat,lon) {
-            hubHomeLat=lat; hubHomeLon=lon; // Only the hub's own GNSS is a distance origin.
+        if (typeof HubPresencePanel !== 'undefined') HubPresencePanel.start(protectedFetch, function(data) {
+            hubHomeLat=data.hasGps ? data.lat : null; hubHomeLon=data.hasGps ? data.lon : null;
+            updateDevice(data); // Shared cards, markers, popups and navigation.
         });
         connectSSE();    // Open SSE connection for real-time updates
 
