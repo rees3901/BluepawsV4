@@ -1,0 +1,13 @@
+/* Same hub card structure in cloud and local dashboards. */
+.hub-summary { width:100%; display:flex; align-items:center; gap:12px; border:0; padding:14px; background:transparent; color:inherit; text-align:left; cursor:pointer; }
+.hub-summary > span:nth-child(2) { flex:1; min-width:0; }
+.hub-summary strong,.hub-summary small { display:block; overflow-wrap:anywhere; }
+.hub-summary small { color:var(--text-muted,#94a3b8); font-size:12px; margin-top:5px; }
+.hub-card .card-detail { padding:0 14px 14px; }
+.hub-card.stale { opacity:.55; }
+.hub-editor { display:grid; gap:8px; margin-top:12px; }
+.hub-editor label { display:grid; gap:4px; font-size:12px; }
+.hub-editor input { min-width:0; padding:7px; border:1px solid #36556a; border-radius:6px; background:#10232f; color:#edf6ff; }
+.hub-editor input[type=color] { width:100%; height:36px; padding:2px; }
+.hub-map-icon { display:flex; width:48px; height:48px; align-items:center; justify-content:center; border:3px solid; border-radius:50%; font-size:28px; background:#10232f; box-sizing:border-box; }
+.hub-map-icon::after { content:""; position:absolute; top:45px; left:18px; border:6px solid transparent; border-top:12px solid var(--hub-colour,#38bdf8); }

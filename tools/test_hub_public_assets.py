@@ -37,7 +37,7 @@ class PublicAssetTests(unittest.TestCase):
             '/leaflet.js', '/leaflet.css', '/basemap.json',
             '/images/marker-icon.png', '/images/marker-icon-2x.png',
             '/images/marker-shadow.png',
-            '/welcome.js', '/feedback.js',
+            '/welcome.js', '/feedback.js', '/hub-presence.js', '/hub-presence.css',
         })
         self.assertIn('HTTP_GET && publicAsset && LittleFS.exists(path)', handler)
         for path in allowed:

@@ -10,6 +10,9 @@ import { AccountMenu } from "@/components/AccountMenu";
 import { defaultDeviceAvatar } from "@/lib/defaultDeviceAvatar";
 import { queuePowerProfileCommand } from "@/lib/deviceCommands";
 import { useCollarFeedback } from "@/lib/useCollarFeedback";
+import { useHubPresence } from "@/lib/useHubPresence";
+import { hubAvatar, hubMapDevice } from "@/lib/hubPresence";
+import { HubCard } from "@/components/HubCard";
 import { commandMessage } from "@/lib/collarFeedback";
 import { CUSTOMER_POWER_PROFILES, powerProfileLabel, type CustomerPowerProfile } from "@/lib/powerProfiles";
 import { deviceCardOrderStorageKey, moveDeviceBefore, orderDeviceIds, pinDeviceFirst } from "@/lib/deviceCardOrder";
@@ -101,6 +104,8 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
   const orderedDeviceIds = useMemo(() => orderDeviceIds(devices.map((device) => device.id), cardOrder), [cardOrder, devices]);
   const reportVersion = devices.map(device => `${device.id}:${device.lastUpdate}:${device.seq}`).join(",");
   const { feedback, refresh: refreshFeedback } = useCollarFeedback(hasFamilyContext ? householdId : null, reportVersion);
+  const { hubs, error: hubError, refresh: refreshHubs } = useHubPresence(hasFamilyContext ? householdId : null);
+  const mapHubs = useMemo(() => hubs.map(hubMapDevice), [hubs]);
 
   const handlePowerProfileCommand = useCallback(async (profile: CustomerPowerProfile) => {
     if (!commandDevice || commandSending) return;
@@ -135,6 +140,8 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
     device.id,
     (!tutorialMode ? customAvatars[device.id] : undefined) ?? defaultDeviceAvatar(device.id),
   ])), [customAvatars, orderedDevices, tutorialMode]);
+  const mapDevices = useMemo(() => [...devices, ...mapHubs], [devices, mapHubs]);
+  const mapAvatars = useMemo(() => ({ ...avatars, ...Object.fromEntries(hubs.map(h => [-h.gateway_guid16, hubAvatar(h)])) }), [avatars, hubs]);
 
   const replaceCustomAvatars = useCallback((next: Record<number, DeviceAvatar>) => {
     revokeAvatarUrls(customAvatarsRef.current);
@@ -529,6 +536,9 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
         {tutorialMode && <div className="tutorial-mode-banner">TUTORIAL MODE — SIMULATED DATA</div>}
         {portableMode && <div className="portable-banner">PORTABLE MODE</div>}
         <div id="deviceCards">
+          {hubError && <p role="status">{hubError}</p>}
+          {hubs.map(hub => <HubCard key={hub.gateway_guid16} hub={hub} now={now} onSaved={refreshHubs}
+            onJump={() => { setFollowedId(null); setMapCommand({ type: "jump", deviceId: -hub.gateway_guid16, nonce: Date.now() }); }} />)}
           {devices.length === 0 && (
             <div className="telemetry-empty-state" role="status">
               <span className="telemetry-empty-icon" aria-hidden="true">⌁</span>
@@ -571,7 +581,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
         </div>
       </aside>
 
-      <TrackingMap devices={devices} avatars={avatars} sidebarOpen={sidebarOpen} followedId={followedId} trailIds={trailIds} trailHistory={trailHistory} command={mapCommand} onAction={handleAction} />
+      <TrackingMap devices={mapDevices} avatars={mapAvatars} sidebarOpen={sidebarOpen} followedId={followedId} trailIds={trailIds} trailHistory={trailHistory} command={mapCommand} onAction={handleAction} />
 
       {settingsOpen && (
         <SettingsModal

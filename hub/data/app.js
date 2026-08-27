@@ -225,26 +225,6 @@
     var hubHomeLat = null;
     var hubHomeLon = null;
 
-    function loadHubHome() {
-        try {
-            var lat = localStorage.getItem('bp_hub_lat');
-            var lon = localStorage.getItem('bp_hub_lon');
-            if (lat && lon) {
-                hubHomeLat = parseFloat(lat);
-                hubHomeLon = parseFloat(lon);
-            }
-        } catch (e) {}
-    }
-
-    function setHubHome(lat, lon) {
-        hubHomeLat = lat;
-        hubHomeLon = lon;
-        try {
-            localStorage.setItem('bp_hub_lat', lat.toString());
-            localStorage.setItem('bp_hub_lon', lon.toString());
-        } catch (e) {}
-    }
-
     // Haversine distance between two lat/lon points (returns meters)
     function haversineDistance(lat1, lon1, lat2, lon2) {
         var R = 6371000;  // Earth radius in meters
@@ -758,11 +738,6 @@
         if (data.hasGps && data.lat !== 0 && data.lon !== 0) {
             var latlng = [data.lat, data.lon];
 
-            // Set hub home position from first GPS fix (hub is near the collar at startup)
-            if (hubHomeLat === null) {
-                setHubHome(data.lat, data.lon);
-            }
-
             if (!dev.marker) {
                 // First GPS fix for this device — create a map marker
                 // using a custom div icon with the device's emoji avatar
@@ -1075,6 +1050,7 @@
                     '<div class="card-indicators">' +
                         '<span class="card-indicator-group">' + renderBatteryBars(data.batt) + '</span>' +
                         '<span class="card-indicator-group">' + renderSignalBars(data.rssi, data.snr) + '</span>' +
+                        '<span class="collar-awake" data-awake="' + dev.id + '" hidden></span>' +
                         (hubPortableMode && bleResults[dev.id] ? '<span class="card-indicator-group">' + renderBleProximity(bleResults[dev.id].rssi) + '</span>' : '') +
                     '</div>' +
                     '<div class="card-indicators card-indicators-row3">' +
@@ -1086,7 +1062,6 @@
                             ICON_STOPWATCH +
                             '<span class="card-lastseen-value">' + lastSeenStr + '</span>' +
                         '</span>' +
-                        '<span class="collar-awake" data-awake="' + dev.id + '" hidden></span>' +
                     '</div>' +
                 '</div>' +
                 '<span class="card-chevron">' + (isExpanded ? '&#9650;' : '&#9660;') + '</span>' +
@@ -1220,7 +1195,7 @@
         if (awake) {
             var seconds = Math.max(0, Math.ceil(((dev.rxUntil || 0) - performance.now()) / 1000));
             awake.hidden = seconds === 0;
-            awake.textContent = seconds ? '💡 ' + seconds + 's' : '';
+            awake.textContent = seconds ? '💡' : '';
             awake.title = 'Recently heard — expected command receive window, not a guarantee of delivery';
             awake.setAttribute('aria-label', 'Recently heard; expected receive window ' + seconds + ' seconds');
         }
@@ -1402,6 +1377,7 @@
     // ═══════════════════════════════════════════════
     function fitAllMarkers() {
         var bounds = [];
+        if (typeof HubPresencePanel !== 'undefined' && HubPresencePanel.point()) bounds.push(HubPresencePanel.point());
         for (var id in devices) {
             if (devices[id].marker) {
                 bounds.push(devices[id].marker.getLatLng());
@@ -1760,8 +1736,10 @@
     function init() {
         refreshHubStatus();
         loadTheme();     // Restore dark/light preference from localStorage
-        loadHubHome();   // Restore hub home position from localStorage
         initMap();       // Create Leaflet map with tile layers
+        if (typeof HubPresencePanel !== 'undefined') HubPresencePanel.start(map, protectedFetch, function(lat,lon) {
+            hubHomeLat=lat; hubHomeLon=lon; // Only the hub's own GNSS is a distance origin.
+        });
         connectSSE();    // Open SSE connection for real-time updates
 
         // On desktop (>768px), show sidebar by default. On mobile, hide it.

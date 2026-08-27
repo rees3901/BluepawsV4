@@ -25,7 +25,7 @@ test('Lost Alert is not a fault in the cloud card',()=>{
   const html=render({reportedFlags:0,awakeSeconds:7,commandFeedback:{text:'Command pending: profile → Active',pending:true,status:'pending'}});
   assert.match(html,/status-lost/); assert.match(html,/Emergency Lost/);
   assert.doesNotMatch(html,/class="error-badge"/);
-  assert.match(html,/💡 7s/); assert.match(html,/command-feedback pending/);
+  assert.match(html,/💡/); assert.match(html,/command-feedback pending/);
 });
 test('fresh presence flags clear old position faults; real faults remain visible',()=>{
   assert.doesNotMatch(render({device:{...device,error:'Module'},reportedFlags:0}),/class="error-badge"/);

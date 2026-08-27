@@ -30,4 +30,11 @@
 #endif
 #define PIN_LED        LED_BUILTIN
 
+// Heltec Tracker V2 UC6580: GNSS TX -> MCU RX33, GNSS RX <- MCU TX34.
+// V2 Vext is active HIGH (not the older V1 active-low example).
+#define PIN_GNSS_RX 33
+#define PIN_GNSS_TX 34
+#define PIN_GNSS_RESET 35
+#define PIN_GNSS_POWER 3
+
 #endif // HUB_PINS_H

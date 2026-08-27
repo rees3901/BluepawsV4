@@ -22,6 +22,7 @@
 
 // ── Arduino / ESP32 core ──
 #include <Arduino.h>
+#include <Preferences.h>
 #include <RadioLib.h>        // SX1262 LoRa radio driver
 #include <WiFi.h>            // WiFi AP+STA dual mode
 #include <DNSServer.h>       // Captive portal wildcard DNS in Off-Grid mode
@@ -209,6 +210,12 @@ static String cloudToken = CLOUD_BEARER_TOKEN; // Gateway bearer token for Supab
 static bool hubProvisioningMode = HUB_PROVISIONING_MODE_DEFAULT;
 static std::atomic<bool> hubApEnabled{false};
 static std::atomic<bool> homeBeaconAllowed{false};
+static std::atomic<bool> hubBeaconEnabled{true}; // User preference; cannot bypass Home Wi-Fi gate.
+static std::atomic<bool> hubBeaconAdvertising{false}; // Actual BLE task state.
+static void initHubPresence();
+static void handleHubPresence();
+static void handleHubPreferences();
+static void postHubPresence();
 static std::atomic<bool> clearOfflineSessions{false};
 static std::atomic<bool> knownWifiAvailable{false};
 static std::atomic<bool> modeChangePending{false};
@@ -444,6 +451,7 @@ void setup() {
     // Initialise hardware subsystems (order matters: storage first to load config)
     initStorage();  // Mount LittleFS, load saved WiFi/cloud config
     initLoRa();     // SPI + SX1262 radio setup, start listening
+    initHubPresence(); // Own GNSS task and persisted hub preferences, never collar-derived.
     initBLE();      // BLE home beacon advertising
 
     // Create FreeRTOS tasks, each pinned to a specific core.
@@ -2194,7 +2202,8 @@ static void handleNotFound() {
     bool publicAsset = path == "/leaflet.js" || path == "/leaflet.css"
         || path == "/basemap.json" || path == "/images/marker-icon.png"
         || path == "/images/marker-icon-2x.png" || path == "/images/marker-shadow.png"
-        || path == "/welcome.js" || path == "/feedback.js";
+        || path == "/welcome.js" || path == "/feedback.js"
+        || path == "/hub-presence.js" || path == "/hub-presence.css";
     if (httpServer.method() == HTTP_GET && publicAsset && LittleFS.exists(path)) {
         File f = LittleFS.open(path, "r");
         // Determine MIME type from file extension
@@ -2246,6 +2255,8 @@ static void initWebServer() {
     httpServer.on("/api/history", HTTP_GET, handleApiHistory);
     httpServer.on("/api/history.csv", HTTP_GET, handleApiHistoryCsv);
     httpServer.on("/api/status",   HTTP_GET,  handleApiStatus);   // Get hub diagnostics
+    httpServer.on("/api/hub-presence", HTTP_GET, handleHubPresence);
+    httpServer.on("/api/hub-preferences", HTTP_POST, handleHubPreferences);
     httpServer.on("/api/device-meta", HTTP_POST, handleApiDeviceMetadata);
     httpServer.on("/api/command",  HTTP_POST, handleApiCommand);  // Send mode command
     httpServer.on("/api/commands", HTTP_GET, handleApiCommands);
@@ -2657,6 +2668,7 @@ static FindBeaconCallbacks findBeaconCb;
 // ═══════════════════════════════════════════════
 
 static void applyBleRoleForCurrentProfile() {
+    hubBeaconAdvertising = false;
     if (hubProfileUsesBleScanning()) {
         // Stop home beacon
         BLEDevice::getAdvertising()->stop();
@@ -2685,8 +2697,9 @@ static void applyBleRoleForCurrentProfile() {
         xSemaphoreGive(bleMutex);
     }
 
-    if (homeBeaconAllowed) {
+    if (homeBeaconAllowed && hubBeaconEnabled) {
         BLEDevice::getAdvertising()->start();
+        hubBeaconAdvertising = true;
         Serial.println("[BLE] Primary Wi-Fi connected: home beacon advertising");
     } else {
         BLEDevice::getAdvertising()->stop();
@@ -2821,7 +2834,7 @@ static void bleTask(void *param) {
     (void)param;
     int previousRole = -1;
     for (;;) {
-        int role = hubProfileUsesBleScanning() ? 2 : (homeBeaconAllowed ? 1 : 0);
+        int role = hubProfileUsesBleScanning() ? 2 : (homeBeaconAllowed && hubBeaconEnabled ? 1 : 0);
         if (role != previousRole) {
             applyBleRoleForCurrentProfile(); // BLE operations never called by web/network tasks
             previousRole = role;
@@ -3080,6 +3093,7 @@ static void cloudTask(void *param) {
     cloud_entry_t entry;
 
     for (;;) {
+        postHubPresence(); // Independent of collar traffic; at most once per minute.
         // Block until a packet is queued (or timeout after 5s for housekeeping)
         if (xQueueReceive(cloudQueue, &entry, pdMS_TO_TICKS(5000)) == pdTRUE) {
             updateConnectivityState();
@@ -3331,3 +3345,5 @@ static bool queueCloudCommandResponse(const String &response, uint16_t expectedD
                   bp_profile_name(profile), sequence, expectedDeviceId);
     return true;
 }
+
+#include "hub_presence_impl.h"
