@@ -13,7 +13,7 @@ class PublicAssetTests(unittest.TestCase):
             'static void handleFavicon()', 1)[0]
         self.assertIn('httpServer.client().localIP() == WiFi.softAPIP()', portal)
         self.assertIn('if (!isCaptivePortalClient())', portal)
-        self.assertIn('"http://" + WiFi.softAPIP().toString() + "/"', portal)
+        self.assertIn('"http://" + WiFi.softAPIP().toString() + "/welcome"', portal)
         self.assertIn('sendHeader("Location", target, true)', portal)
         self.assertIn('send(302,', portal)
         for path in ['/redirect', '/fwlink', '/connecttest.txt', '/ncsi.txt', '/generate_204', '/hotspot-detect.html']:
@@ -37,10 +37,48 @@ class PublicAssetTests(unittest.TestCase):
             '/leaflet.js', '/leaflet.css', '/basemap.json',
             '/images/marker-icon.png', '/images/marker-icon-2x.png',
             '/images/marker-shadow.png',
+            '/welcome.js',
         })
         self.assertIn('HTTP_GET && publicAsset && LittleFS.exists(path)', handler)
         for path in allowed:
             self.assertTrue((ROOT / 'hub/data' / path.lstrip('/')).is_file())
+
+    def test_mdns_hostname_is_not_redirected_as_foreign(self):
+        source = (ROOT / 'hub/src/main.cpp').read_text(encoding='utf-8')
+        host = source.split('static bool hasForeignPortalHost() {', 1)[1].split(
+            'static void handleCaptiveProbe()', 1)[0]
+        self.assertIn('host.toLowerCase()', host)
+        self.assertIn('host.endsWith(":80")', host)
+        self.assertIn('host.endsWith(".")', host)
+        self.assertIn('host != String(MDNS_HOSTNAME) + ".local"', host)
+
+    def test_welcome_page_is_separate_and_offline_ready(self):
+        source = (ROOT / 'hub/src/main.cpp').read_text(encoding='utf-8')
+        html = (ROOT / 'hub/data/welcome.html').read_text(encoding='utf-8')
+        self.assertIn('httpServer.on("/welcome", HTTP_GET, handleWelcome)', source)
+        self.assertIn('httpServer.on("/",             HTTP_GET,  handleRoot)', source)
+        self.assertIn('href="http://192.168.4.1/"', html)
+        self.assertIn('href="http://bluepaws.local/"', html)
+        self.assertIn('Use this network as is', html)
+        self.assertIn('Open tracking dashboard', html)
+        self.assertIn('<noscript>', html)
+        self.assertNotRegex(html, r'(?:src|href)="https://')
+        self.assertNotIn('window.open', html)
+        self.assertNotIn('http-equiv="refresh"', html)
+
+    def test_welcome_stats_are_small_read_only_and_ap_scoped(self):
+        source = (ROOT / 'hub/src/main.cpp').read_text(encoding='utf-8')
+        handler = source.split('static void handleApiWelcome() {', 1)[1].split(
+            'static void handleFavicon()', 1)[0]
+        self.assertIn('if (!isCaptivePortalClient())', handler)
+        self.assertIn('sendHeader("Cache-Control", "no-store")', handler)
+        self.assertIn('xSemaphoreTake(deviceMutex, pdMS_TO_TICKS(50))', handler)
+        self.assertIn('httpServer.send(503', handler)
+        self.assertIn('age < 600', handler)
+        self.assertIn('doc["last_report_age_s"] = nullptr', handler)
+        self.assertEqual(set(re.findall(r'doc\["([^\"]+)"\]', handler)), {
+            'hub_id', 'recent_collars', 'known_collars', 'last_report_age_s', 'time_synced',
+        })
 
     def test_config_write_requires_provisioning_outside_offgrid(self):
         source = (ROOT / 'hub/src/main.cpp').read_text(encoding='utf-8')

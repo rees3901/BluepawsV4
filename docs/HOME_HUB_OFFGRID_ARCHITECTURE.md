@@ -303,3 +303,52 @@ Do not use an old filesystem backup over more recent received packets.
 
 The separately observed 49-byte LoRa command-reply structural failures are not
 fixed by this web change and still require protocol/ACK diagnostics.
+
+## Captive welcome page and browser handoff
+
+Captive probes and unknown captured external hostnames now redirect to
+`http://192.168.4.1/welcome`, a small, locally bundled entry page. The full
+dashboard remains at `http://192.168.4.1/`. The existing mDNS hostname
+`http://bluepaws.local/` is explicitly recognised, including case-insensitive
+Host values, the normal `:80` suffix and a DNS trailing dot. It no longer
+gets mistaken for an external captive-probe hostname.
+
+The welcome page provides Bluepaws branding, a prominent dashboard link, both
+IP and hostname links, and instructions for remaining connected when the OS
+closes its temporary sign-in window. It does not pretend that the hotspot has
+internet access, force an external browser launch, or redirect on a timer.
+The numeric IP remains the primary route because mDNS resolution depends on
+the client and its network configuration.
+
+`GET /welcome` and `GET /api/welcome` are AP-side only. The snapshot contains
+the hub ID, number of collars heard in the last ten minutes, known collar
+count, youngest available report age (null when absent), and clock-sync state.
+It contains no credentials, coordinates, names or command interfaces. The
+page makes one request at a time, refreshes every 15 seconds while visible,
+aborts after five seconds, and uses no SSE connection. Navigation remains
+available without JavaScript or when the snapshot fails. Approximate timing
+and cached/unverified reports are identified rather than implying cloud
+validation. The existing private filesystem/API boundaries remain unchanged.
+
+Android's “Use this network as is” action can close the captive window; a
+normal link cannot guarantee that the OS opens a separate browser. Windows
+may reach Microsoft's own redirect through another adapter/VPN instead of
+the hub. Users should stay on the hub Wi-Fi and open the numeric address in
+their normal browser in either case. Do not claim that this page fixes OS
+network selection or guarantees automatic captive-window launch.
+
+Verification:
+
+```powershell
+node --test tools/test_hub_welcome.mjs tools/test_hub_device_cards.mjs
+py -3.11 tools/test_hub_public_assets.py
+python -m platformio run -e hub
+```
+
+Ten executable JavaScript checks, eleven Python regression checks and the hub
+build pass. Browser verification of the actual welcome assets used a local
+read-only preview with synthetic hub statistics; no console errors occurred.
+Hardware flashing was attempted but COM7 was occupied, so the new welcome
+routes, mDNS host handling and device OS captive behaviour still require an
+on-hub check. Both firmware and updated filesystem assets must be uploaded,
+preserving a fresh backup of credentials, local appearances and the journal.

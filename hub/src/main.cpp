@@ -1439,7 +1439,9 @@ static bool hasForeignPortalHost() {
     String host = httpServer.hostHeader();
     host.toLowerCase();
     if (host.endsWith(":80")) host.remove(host.length() - 3);
-    return host.length() && host != WiFi.softAPIP().toString();
+    if (host.endsWith(".")) host.remove(host.length() - 1);
+    return host.length() && host != WiFi.softAPIP().toString()
+        && host != String(MDNS_HOSTNAME) + ".local";
 }
 
 static void handleCaptiveProbe() {
@@ -1447,10 +1449,64 @@ static void handleCaptiveProbe() {
         httpServer.send(404, "text/plain", "Not found");
         return;
     }
-    String target = "http://" + WiFi.softAPIP().toString() + "/";
+    String target = "http://" + WiFi.softAPIP().toString() + "/welcome";
     httpServer.sendHeader("Cache-Control", "no-store");
     httpServer.sendHeader("Location", target, true);
-    httpServer.send(302, "text/html", "<a href=\"" + target + "\">Open Bluepaws Home Hub</a>");
+    httpServer.send(302, "text/html", "<a href=\"" + target + "\">Welcome to Bluepaws Home Hub</a>");
+}
+
+// A small entry page for OS sign-in windows; the full dashboard stays at /.
+// Do not fake Internet validation or attempt to force another application open.
+static void handleWelcome() {
+    if (!isCaptivePortalClient()) {
+        httpServer.send(404, "text/plain", "Not found");
+        return;
+    }
+    if (hasForeignPortalHost()) { handleCaptiveProbe(); return; }
+    httpServer.sendHeader("Cache-Control", "no-store");
+    File file = LittleFS.open("/welcome.html", "r");
+    if (!file) {
+        httpServer.send(200, "text/html", "<h1>Welcome to Bluepaws</h1>"
+            "<p>Internet is not required. Stay connected to the hub Wi-Fi.</p>"
+            "<p><a href=\"/\">Open tracking dashboard</a></p>");
+        return;
+    }
+    httpServer.streamFile(file, "text/html; charset=utf-8");
+    file.close();
+}
+
+// Small read-only snapshot: no location, credentials, names, commands or SSE.
+static void handleApiWelcome() {
+    httpServer.sendHeader("Cache-Control", "no-store");
+    if (!isCaptivePortalClient()) {
+        httpServer.send(404, "application/json", "{\"error\":\"not_found\"}");
+        return;
+    }
+    if (!xSemaphoreTake(deviceMutex, pdMS_TO_TICKS(50))) {
+        httpServer.send(503, "application/json", "{\"error\":\"busy\"}");
+        return;
+    }
+    uint8_t recent = 0;
+    uint32_t lastAge = UINT32_MAX;
+    for (uint8_t i = 0; i < deviceCount; ++i) {
+        const uint32_t age = deviceAgeSeconds(devices[i]);
+        if (age < 600) ++recent;
+        if (age < lastAge) lastAge = age;
+    }
+    const uint8_t known = deviceCount;
+    xSemaphoreGive(deviceMutex);
+    char gateway[5];
+    snprintf(gateway, sizeof(gateway), "%04X", (uint16_t)GATEWAY_GUID16);
+    JsonDocument doc;
+    doc["hub_id"] = gateway;
+    doc["recent_collars"] = recent;
+    doc["known_collars"] = known;
+    if (lastAge != UINT32_MAX) doc["last_report_age_s"] = lastAge;
+    else doc["last_report_age_s"] = nullptr;
+    doc["time_synced"] = hubTimeSynced;
+    String json;
+    serializeJson(doc, json);
+    httpServer.send(200, "application/json", json);
 }
 
 static void handleFavicon() {
@@ -2070,7 +2126,8 @@ static void handleNotFound() {
     }
     bool publicAsset = path == "/leaflet.js" || path == "/leaflet.css"
         || path == "/basemap.json" || path == "/images/marker-icon.png"
-        || path == "/images/marker-icon-2x.png" || path == "/images/marker-shadow.png";
+        || path == "/images/marker-icon-2x.png" || path == "/images/marker-shadow.png"
+        || path == "/welcome.js";
     if (httpServer.method() == HTTP_GET && publicAsset && LittleFS.exists(path)) {
         File f = LittleFS.open(path, "r");
         // Determine MIME type from file extension
@@ -2081,6 +2138,7 @@ static void handleNotFound() {
         else if (path.endsWith(".json"))  contentType = "application/json";
         else if (path.endsWith(".png"))   contentType = "image/png";
         else if (path.endsWith(".ico"))   contentType = "image/x-icon";
+        if (path == "/welcome.js") httpServer.sendHeader("Cache-Control", "no-store");
         httpServer.streamFile(f, contentType);
         f.close();
         return;
@@ -2102,6 +2160,8 @@ static void initWebServer() {
     httpServer.collectHeaders(headers, 1);
     // Static file routes
     httpServer.on("/",             HTTP_GET,  handleRoot);     // Main page
+    httpServer.on("/welcome", HTTP_GET, handleWelcome);
+    httpServer.on("/api/welcome", HTTP_GET, handleApiWelcome);
     httpServer.on("/style.css",    HTTP_GET,  handleCSS);      // Stylesheet
     httpServer.on("/app.js",       HTTP_GET,  handleJS);       // JavaScript app
     httpServer.on("/favicon.svg", HTTP_GET, handleFavicon);
