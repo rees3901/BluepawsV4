@@ -551,8 +551,8 @@
                 logDeviceEvent(data.id, '[' + tsShort + '] ' + logLine + ' snr=' + data.snr + ' status=' + data.status + ' profile=' + data.profile, structured);
                 updateDevice(data);
             } catch (err) {
-                logEvent('ERR', 'SSE parse: ' + err.message);
-                console.error('SSE parse error:', err);
+                logEvent('ERR', 'SSE device update: ' + err.message);
+                console.error('SSE device update failed:', err);
             }
         });
 
@@ -1062,7 +1062,7 @@
                     '<div class="card-indicators">' +
                         '<span class="card-indicator-group">' + renderBatteryBars(data.batt) + '</span>' +
                         '<span class="card-indicator-group">' + renderSignalBars(data.rssi, data.snr) + '</span>' +
-                        (hubPortableMode && bleResults[id] ? '<span class="card-indicator-group">' + renderBleProximity(bleResults[id].rssi) + '</span>' : '') +
+                        (hubPortableMode && bleResults[dev.id] ? '<span class="card-indicator-group">' + renderBleProximity(bleResults[dev.id].rssi) + '</span>' : '') +
                     '</div>' +
                     '<div class="card-indicators card-indicators-row3">' +
                         '<span class="card-indicator-group card-dist-group" title="Distance from home">' +

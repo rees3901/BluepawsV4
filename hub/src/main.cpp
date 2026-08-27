@@ -1402,10 +1402,13 @@ static void sseBroadcast(const char *event, const char *data) {
     if (xSemaphoreTake(sseMutex, pdMS_TO_TICKS(50))) {
         // Iterate backwards so we can safely remove disconnected clients
         for (int i = sseClientCount - 1; i >= 0; i--) {
-            if (sseClients[i].connected()) {
-                // Send the SSE-formatted message
-                sseClients[i].printf("event: %s\ndata: %s\n\n", event, data);
-            } else {
+            // A reset socket can still report connected until a write fails.
+            // Drop failed/partial streams rather than retrying the same dead fd.
+            const size_t expected = strlen(event) + strlen(data) + 16;
+            const bool delivered = sseClients[i].connected()
+                && sseClients[i].printf("event: %s\ndata: %s\n\n", event, data) == expected;
+            if (!delivered) {
+                sseClients[i].stop();
                 // Client disconnected — shift remaining clients down to fill the gap
                 for (int j = i; j < sseClientCount - 1; j++) {
                     sseClients[j] = sseClients[j + 1];
@@ -1426,8 +1429,44 @@ static void sseBroadcast(const char *event, const char *data) {
 // SSE endpoint pushes real-time telemetry to the browser.
 // ═══════════════════════════════════════════════
 
+// Only AP-side HTTP requests belong to the captive portal. Never redirect
+// ordinary LAN API traffic or reflect an arbitrary Host header into Location.
+static bool isCaptivePortalClient() {
+    return hubApEnabled && httpServer.client().localIP() == WiFi.softAPIP();
+}
+
+static bool hasForeignPortalHost() {
+    String host = httpServer.hostHeader();
+    host.toLowerCase();
+    if (host.endsWith(":80")) host.remove(host.length() - 3);
+    return host.length() && host != WiFi.softAPIP().toString();
+}
+
+static void handleCaptiveProbe() {
+    if (!isCaptivePortalClient()) {
+        httpServer.send(404, "text/plain", "Not found");
+        return;
+    }
+    String target = "http://" + WiFi.softAPIP().toString() + "/";
+    httpServer.sendHeader("Cache-Control", "no-store");
+    httpServer.sendHeader("Location", target, true);
+    httpServer.send(302, "text/html", "<a href=\"" + target + "\">Open Bluepaws Home Hub</a>");
+}
+
+static void handleFavicon() {
+    File f = LittleFS.open("/favicon.svg", "r");
+    if (!f) { httpServer.send(204, "image/svg+xml", ""); return; }
+    httpServer.streamFile(f, "image/svg+xml");
+    f.close();
+}
+
 // Serve the main HTML page from flash
 static void handleRoot() {
+    if (isCaptivePortalClient() && hasForeignPortalHost()) {
+        handleCaptiveProbe();
+        return;
+    }
+    httpServer.sendHeader("Cache-Control", "no-store");
     File f = LittleFS.open("/index.html", "r");
     if (f) {
         httpServer.streamFile(f, "text/html");
@@ -1441,6 +1480,7 @@ static void handleRoot() {
 
 // Serve CSS stylesheet from flash
 static void handleCSS() {
+    httpServer.sendHeader("Cache-Control", "no-store");
     File f = LittleFS.open("/style.css", "r");
     if (f) {
         httpServer.streamFile(f, "text/css");
@@ -1452,6 +1492,7 @@ static void handleCSS() {
 
 // Serve JavaScript app from flash
 static void handleJS() {
+    httpServer.sendHeader("Cache-Control", "no-store");
     File f = LittleFS.open("/app.js", "r");
     if (f) {
         httpServer.streamFile(f, "application/javascript");
@@ -2044,6 +2085,14 @@ static void handleNotFound() {
         f.close();
         return;
     }
+    // Unknown navigation on a captured external hostname (including Windows'
+    // portal URL variants) must land on the IP, not stay on a probe origin.
+    // Canonical-IP missing assets/private files and API errors remain real 404s.
+    if (isCaptivePortalClient() && hasForeignPortalHost() && !path.startsWith("/api/")
+        && (httpServer.method() == HTTP_GET || httpServer.method() == HTTP_HEAD)) {
+        handleCaptiveProbe();
+        return;
+    }
     httpServer.send(404, "text/plain", "Not found");
 }
 
@@ -2055,6 +2104,8 @@ static void initWebServer() {
     httpServer.on("/",             HTTP_GET,  handleRoot);     // Main page
     httpServer.on("/style.css",    HTTP_GET,  handleCSS);      // Stylesheet
     httpServer.on("/app.js",       HTTP_GET,  handleJS);       // JavaScript app
+    httpServer.on("/favicon.svg", HTTP_GET, handleFavicon);
+    httpServer.on("/favicon.ico", HTTP_GET, handleFavicon); // older browser fallback
     // SSE real-time event stream
     httpServer.on("/events",       HTTP_GET,  handleEvents);
     // REST API endpoints
@@ -2072,12 +2123,14 @@ static void initWebServer() {
     httpServer.on("/api/security", HTTP_GET, handleApiSecurityStatus);
     httpServer.on("/api/security/pin", HTTP_POST, handleApiSecurityPin);
     httpServer.on("/api/security/unlock", HTTP_POST, handleApiSecurityUnlock);
-    httpServer.on("/generate_204", HTTP_ANY, handleRoot);
-    httpServer.on("/gen_204", HTTP_ANY, handleRoot);
-    httpServer.on("/hotspot-detect.html", HTTP_ANY, handleRoot);
-    httpServer.on("/library/test/success.html", HTTP_ANY, handleRoot);
-    httpServer.on("/ncsi.txt", HTTP_ANY, handleRoot);
-    httpServer.on("/connecttest.txt", HTTP_ANY, handleRoot);
+    httpServer.on("/generate_204", HTTP_GET, handleCaptiveProbe);
+    httpServer.on("/gen_204", HTTP_GET, handleCaptiveProbe);
+    httpServer.on("/hotspot-detect.html", HTTP_GET, handleCaptiveProbe);
+    httpServer.on("/library/test/success.html", HTTP_GET, handleCaptiveProbe);
+    httpServer.on("/ncsi.txt", HTTP_GET, handleCaptiveProbe);
+    httpServer.on("/connecttest.txt", HTTP_GET, handleCaptiveProbe);
+    httpServer.on("/redirect", HTTP_GET, handleCaptiveProbe); // Windows NCSI browser launch
+    httpServer.on("/fwlink", HTTP_GET, handleCaptiveProbe);   // older Windows portal launch
     httpServer.onNotFound(handleNotFound);                        // Serve other files from flash
     httpServer.begin();
     Serial.printf("[WEB] HTTP server on port %d\n", HTTP_PORT);

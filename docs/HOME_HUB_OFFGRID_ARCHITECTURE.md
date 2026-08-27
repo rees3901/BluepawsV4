@@ -146,7 +146,20 @@ configuration privacy and asynchronous mode API wiring.
 - `POST /api/hub-mode` — confirmed mode switch; collar state is unchanged.
 - `GET /tiles/{z}/{x}/{y}` — map-source abstraction. The first build returns the bundled vector skeleton rather than network tiles.
 
-Android, Apple and Windows connectivity-check paths serve the local dashboard. Wildcard DNS resolves to `192.168.4.1` while the Off-Grid AP is active.
+Android, Apple and Windows connectivity-check paths redirect AP-side HTTP clients
+to the absolute `http://192.168.4.1/` address. This includes Windows' `/redirect`
+and `/fwlink` browser-launch paths. Wildcard DNS resolves to `192.168.4.1` while
+the Off-Grid AP is active. A request for `/` on a captured foreign hostname also
+redirects to the IP, keeping assets, SSE and API requests on the hub origin.
+Missing canonical-IP files and APIs still return 404; no private file-serving
+permissions are added. LAN requests do not activate the captive redirect.
+
+The operating system decides whether to open a portal. Ethernet, VPNs, cellular
+fallback, cached public DNS or secure DNS can bypass the hub. The firmware cannot
+redirect traffic which never reaches it, or intercept HTTPS without certificate
+errors. Keep `http://192.168.4.1/` as the manual fallback; do not disable NCSI or
+change users' routing/security settings as a workaround. Microsoft documents
+the Windows probe/MSN behaviour [here](https://learn.microsoft.com/en-us/troubleshoot/windows-client/networking/internet-explorer-edge-open-connect-corporate-public-network).
 
 ## Offline replay
 
@@ -260,3 +273,33 @@ OS captive-portal popups, and extended LoRa/flash concurrency under load. No
 collar packets arrived during this short AP bench run; radio initialization
 remained active, but that alone does not establish loss-free concurrent reception.
 No cloud schema, Edge Function or Vercel deployment is required for this change.
+
+## Populated-card and captive redirect correction
+
+The earlier empty-page test missed a rendering error: Portable/Off-Grid cards
+looked up BLE proximity using an undefined `id`, rather than `dev.id`. Home mode
+short-circuited that expression. The correction is covered by executable Node
+tests of the actual renderer for Home, Portable, Off-Grid, no-GPS presence,
+timer refresh, per-device BLE values and expanded GPS cards.
+
+The hub now explicitly handles Windows portal launch routes and serves the same
+blue-paw favicon as the cloud dashboard. Main HTML/CSS/JS are sent with no-store
+headers so a refreshed browser uses newly flashed assets. Broken SSE sockets
+are removed after a failed/partial write instead of repeatedly retrying them.
+
+Verification commands:
+
+```powershell
+node --test tools/test_hub_device_cards.mjs
+py -3.11 tools/test_hub_public_assets.py
+```
+
+Five JavaScript renderer tests, eight Python regression checks and the hub
+firmware build pass. The original card crash was reproduced in the browser with
+a received device present, and the old `/redirect` response was confirmed as
+404. Hardware verification of the corrected assets requires flashing both the
+firmware and a filesystem image that preserves current private files/journals.
+Do not use an old filesystem backup over more recent received packets.
+
+The separately observed 49-byte LoRa command-reply structural failures are not
+fixed by this web change and still require protocol/ACK diagnostics.
