@@ -1356,6 +1356,9 @@
         fetch('/api/status')
             .then(function (r) { return r.json(); })
             .then(function (s) {
+                var provisioning = s.provisioning_mode === true && s.hubMode !== 'off_grid';
+                document.getElementById('provisioningFields').classList.toggle('hidden', !provisioning);
+                document.getElementById('btnSaveConfig').classList.toggle('hidden', !provisioning);
                 document.getElementById('hubStatus').innerHTML =
                     'Uptime: ' + formatAge(s.uptime) + '<br>' +
                     'Packets RX: ' + s.rxCount + '<br>' +
@@ -1397,7 +1400,8 @@
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: body
-        }).then(function () {
+        }).then(function (response) {
+            if (!response.ok) throw new Error('Configuration rejected');
             alert('Configuration saved. Hub will restart.');
         }).catch(function () {
             alert('Failed to save configuration.');

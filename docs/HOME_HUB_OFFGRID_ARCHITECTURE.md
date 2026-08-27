@@ -23,6 +23,11 @@ The Home Hub does not store collar HMAC keys. A newly received offline packet is
 
 The optional PIN protects commands, not locations. It is erased on reboot and whenever the hub leaves Off-Grid mode. Unlock tokens are random, RAM-only, tied to the browser IP address, and limited to eight sessions. Five failed attempts impose a one-minute delay.
 
+Only explicitly allowlisted public assets are served from LittleFS. Configuration,
+credentials and raw journal files are never downloadable by path. Wi-Fi/cloud
+configuration changes require locally enabled provisioning and are blocked in
+Off-Grid mode; the public settings modal omits those controls otherwise.
+
 ## Runtime separation
 
 - LoRa task: highest-priority radio reception and command transmission.
@@ -40,7 +45,7 @@ LittleFS stores fixed-size CRC32-protected records in one circular journal file 
 - `GET /api/history?device=<id>&limit=<1..100>` — bounded local history.
 - `GET /api/history.csv?device=<id>` — per-collar export.
 - `GET /events` — telemetry, command state and verification SSE.
-- `POST /api/command`, `/api/find`, `/api/status-request` — addressed TLV v1.2 commands.
+- `POST /api/command`, `/api/find`, `/api/device-status` — addressed TLV v1.2 commands.
 - `GET /api/security`, `POST /api/security/pin`, `POST /api/security/unlock` — local command guard.
 - `POST /api/hub-mode` — confirmed mode switch; collar state is unchanged.
 - `GET /tiles/{z}/{x}/{y}` — map-source abstraction. The first build returns the bundled vector skeleton rather than network tiles.
@@ -63,6 +68,15 @@ Database `received_at` remains the cloud upload time. `effective_seen_at` record
 
 `hub-snapshot` authenticates a gateway bearer token and returns only that gateway's Family. It supplies provisioned devices, emoji/colour metadata, current positions first, and observation history using bounded cursor pagination. Photograph objects are intentionally excluded from the initial hub cache.
 
+The current firmware imports appearance metadata only. It reconstructs positions
+and trails from packets it has received and journalled itself; importing the
+snapshot's cloud position/history pages is still pending. Do not assume a freshly
+flashed hub already has the cloud's complete recent history.
+
+`service_role` requires read-only grants on `observations` and `observation_paths`
+for this endpoint; no extra browser/public grants are needed. Snapshot failures
+include a safe stage/code and request ID, never credential values.
+
 ## Deployment
 
 After review and merge:
@@ -76,6 +90,12 @@ npx --yes supabase@latest functions deploy hub-snapshot --project-ref ykcdaonkvw
 
 Build and flash both the firmware and bundled filesystem:
 
+**Back up an existing hub first.** `uploadfs` replaces the entire LittleFS
+partition, including saved Wi-Fi/gateway credentials, metadata and journals.
+For an already configured hub, preserve those private files in a local, ignored
+staging image with the new public assets. Never commit that image or its secrets.
+The plain `uploadfs` command below is for a fresh/reprovisioned hub only.
+
 ```powershell
 py -3.11 -m platformio run -e hub
 py -3.11 -m platformio run -e hub -t upload --upload-port COM7
@@ -83,3 +103,29 @@ py -3.11 -m platformio run -e hub -t uploadfs --upload-port COM7
 ```
 
 Do not omit `uploadfs`: Leaflet, the application, styles and coarse basemap are served from LittleFS with no CDN dependency.
+
+## Bench verification — 27 August 2026
+
+COM7 firmware and local assets flashed with verified hashes after an 8 MB flash
+backup. Wi-Fi and gateway settings were retained. Verified on the physical hub:
+
+- Home Wi-Fi reconnect, NTP sync, snapshot HTTP 200 and five cached appearances.
+- Local dashboard/Leaflet/basemap HTTP 200; settings hide provisioning fields.
+- Private configuration/journal paths return 404; non-provisioning config POST
+  returns 403, including in Off-Grid mode.
+- Form-encoded Home/Off-Grid switching, AP enabled in Off-Grid, captive-check
+  routes returning the page, and explicit confirmation before leaving Off-Grid.
+- Optional PIN blocks unauthorised commands/disable requests, accepts a correct
+  unlock, and clears PIN/sessions when returning Home. Empty command bodies were
+  used so the access test did not queue any radio commands.
+- Eight SSE connections receive heartbeats; a ninth returns 503. About 95 KB
+  free heap remained during this short bench test. This is not a load soak.
+- Four local regression checks, Deno type check, live SQL permission assertions
+  and database lint pass. Existing search-party RPC/password-policy advisor
+  warnings remain separate from these changes.
+
+The hub was left in Home mode with its hotspot off. Phone OS captive discovery,
+eight separate Wi-Fi stations, long-running LoRa/flash concurrency, 101-packet
+retention/reboot, full replay validation, and cloud position/history import
+still need acceptance testing or implementation. COM23 was occupied by another
+program, so no forced collar transmission was attempted in this deployment.
