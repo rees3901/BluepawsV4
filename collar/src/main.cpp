@@ -54,6 +54,11 @@
 #if __has_include("collar_secrets.h")
 #include "collar_secrets.h"  // Local-only per-collar HMAC key; ignored by Git
 #endif
+#include "collar_routing.h"  // Explicitly provisioned affiliated Home Hub
+
+#ifndef BLUEPAWS_BUILD_UNIX_TIME
+#error "Build through PlatformIO with tools/firmware_build_time.py enabled"
+#endif
 
 // FreeRTOS (built into Adafruit nRF52 BSP — no separate install needed)
 #include <FreeRTOS.h>
@@ -258,7 +263,7 @@ static void     gnssEnable();              // Start GNSS receiver via AT command
 static void     gnssDisable();             // Stop GNSS receiver via AT command
 static uint32_t gnssGetUnixTime();         // Return last parsed GNSS Unix timestamp
 static bool     gnssSpoofAcquireFix();     // Testbed-only spoof GNSS fix
-static uint32_t compileTimeUnix();         // Approximate boot-time UTC from compiler macros
+static uint32_t compileTimeUnix();         // Approximate UTC from PlatformIO build epoch
 
 // Persistence helpers
 static void     collarStateDefaults();
@@ -331,6 +336,8 @@ void setup() {
     Serial.println("══════════════════════════════════");
     Serial.println("  Bluepaws V4 — Collar");
     Serial.printf("  Device: %s (0x%04X)\n", bp_device_name(MY_DEVICE_ID), MY_DEVICE_ID);
+    Serial.printf("  Affiliated Home Hub: %04X (%u)\n",
+                  (unsigned)MY_HOME_HUB_ID, (unsigned)MY_HOME_HUB_ID);
     Serial.printf("  Protocol v%d | Max %dB packet\n", BP_PROTOCOL_VERSION, BP_MAX_PACKET_SIZE);
     Serial.printf("  Hardware profile: %s\n", BLUEPAWS_COLLAR_HARDWARE_PROFILE);
 #if BLUEPAWS_TESTBED_BUILD
@@ -872,29 +879,10 @@ static bool gnssSpoofAcquireFix() {
 }
 
 static uint32_t compileTimeUnix() {
-    const char *date = __DATE__;  // "Mmm dd yyyy"
-    const char *time = __TIME__;  // "hh:mm:ss"
-    const char *months = "JanFebMarAprMayJunJulAugSepOctNovDec";
-    const char *monthPtr = strstr(months, date);
-    int month = monthPtr ? ((monthPtr - months) / 3) + 1 : 1;
-    int day = atoi(date + 4);
-    int year = atoi(date + 7);
-    int hour = atoi(time);
-    int minute = atoi(time + 3);
-    int second = atoi(time + 6);
-
-    if (month <= 2) {
-        year -= 1;
-        month += 12;
-    }
-
-    const int era = year / 400;
-    const unsigned yoe = (unsigned)(year - era * 400);
-    const unsigned doy = (unsigned)((153 * (month - 3) + 2) / 5 + day - 1);
-    const unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    const int days = era * 146097 + (int)doe - 719468;
-    return (uint32_t)((uint64_t)days * 86400ULL + (uint32_t)hour * 3600UL +
-                      (uint32_t)minute * 60UL + (uint32_t)second);
+    // UTC epoch avoids the old whole-date/month lookup bug (always January)
+    // and the compiler's local-time/DST offset. Only a bench/fallback anchor;
+    // a reboot long after building still requires an authoritative time source.
+    return (uint32_t)BLUEPAWS_BUILD_UNIX_TIME;
 }
 
 // ═══════════════════════════════════════════════
@@ -1148,7 +1136,7 @@ static void sendTelemetryWithReason(uint8_t txReason) {
 
     // ── Build the packet ──
     uint8_t buf[BP_MAX_PACKET_SIZE];
-    pkt_init(buf, MY_DEVICE_ID, (uint16_t)(messageSeq & 0xFFFF), unixTime,
+    pkt_init(buf, MY_DEVICE_ID, MY_HOME_HUB_ID, (uint16_t)(messageSeq & 0xFFFF), unixTime,
              status, currentProfile, flags, txReason);
 
     if (flags & FLAG_HAS_GPS) {
@@ -1222,7 +1210,7 @@ static void sendBootReport(bool atHome, bool haveFix) {
     uint32_t unixTime = locValid ? gnssGetUnixTime() : (compileTimeUnix() + millis() / 1000UL);
 
     uint8_t buf[BP_MAX_PACKET_SIZE];
-    pkt_init(buf, MY_DEVICE_ID, (uint16_t)(messageSeq & 0xFFFF), unixTime,
+    pkt_init(buf, MY_DEVICE_ID, MY_HOME_HUB_ID, (uint16_t)(messageSeq & 0xFFFF), unixTime,
              status, currentProfile, flags, TX_BOOT);
 
     uint16_t batt_mV = 3700;  // TODO: Read actual battery voltage via ADC
@@ -1274,7 +1262,7 @@ static void sendWakeCheckin() {
     uint8_t flags = FLAG_HOME_BEACON_SEEN;
     if (lastError != BP_ERROR_NONE) flags |= FLAG_ERROR_PRESENT;
 
-    pkt_init(buf, MY_DEVICE_ID, (uint16_t)(messageSeq & 0xFFFF), 0,
+    pkt_init(buf, MY_DEVICE_ID, MY_HOME_HUB_ID, (uint16_t)(messageSeq & 0xFFFF), 0,
              STATUS_HOME, currentProfile, flags, TX_WAKE_CHECKIN);
 
     uint16_t batt_mV = 3700;  // TODO: Read actual battery voltage via ADC
@@ -1361,7 +1349,8 @@ static void sendFindAck(uint32_t cmdMsgSeq, uint16_t destinationId) {
 static void sendLostModeAlert() {
     messageSeq++;
     uint8_t buf[BP_MAX_PACKET_SIZE];
-    pkt_init(buf, MY_DEVICE_ID, messageSeq, 0, STATUS_LOST_TIMEOUT, PKT_ALERT);
+    pkt_init(buf, MY_DEVICE_ID, MY_HOME_HUB_ID, (uint16_t)(messageSeq & 0xFFFF), 0,
+             STATUS_LOST_TIMEOUT, currentProfile, 0, PKT_ALERT);
 
     uint32_t duration = (millis() - lostModeStartMs) / 1000;
     pkt_add_tlv_u32(buf, TLV_DURATION_S, duration);

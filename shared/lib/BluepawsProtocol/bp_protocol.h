@@ -237,9 +237,9 @@ static inline void pkt_init(uint8_t *buf, uint16_t source_id, uint16_t destinati
     buf[13] = tx_reason;
 }
 
-/* Compatibility overload. Existing collar call sites remain cloud-bound.
-   New hub command code must call the canonical initializer with an explicit
-   hub source ID and collar destination ID. */
+/* Legacy compatibility overload: destination 0000.
+   New collar uplinks must explicitly address their affiliated Home Hub.
+   Commands and replies must explicitly address the intended participant. */
 static inline void pkt_init(uint8_t *buf, uint16_t source_id,
                             uint16_t msg_seq, uint32_t time_unix,
                             uint8_t status, uint8_t power_profile,

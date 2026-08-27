@@ -1,7 +1,7 @@
 # Bluepaws Cat Tracker TLV Telemetry Protocol v1.2
 
 Status: locked packet-header, addressing, TLV set and authentication decisions
-Last updated: 2026-08-26
+Last updated: 2026-08-27
 Scope: collar telemetry, hub commands/ACKs, LoRa collar-to-hub path, LTE-M direct path, hub relay path, Supabase ingestion
 
 ## 1. Purpose
@@ -109,25 +109,48 @@ Backend/storage fields called `device_id`, `device_uid`, or historical `device_g
 
 ## 8. Destination identity
 
-`destination_id16` identifies the logical end recipient, not necessarily the immediate radio/network next hop.
+`destination_id16` identifies the intended participant. New collar reports
+(telemetry, BOOT, WAKE_CHECKIN, user reports and alerts) address the collar's
+**provisioned affiliated Home Hub**, e.g. decimal 16 / `0x0010`.
+It is a 16-bit device identity, not an IP address.
 
-This distinction preserves multipath packet identity.
-
-A cloud-bound observation can travel either path:
+An observation can travel either path:
 
 ```text
 Collar -> LTE -> Cloud
 Collar -> LoRa -> Hub -> HTTPS -> Cloud
 ```
 
-In both cases the logical destination is the cloud/backend. The hub relays the authenticated inner packet unchanged and must not rewrite `destination_id16`.
+The same observation retains the same hub destination, sequence, timestamp,
+payload and HMAC on **both** paths. The LTE copy must not be retargeted to
+`0000`: doing so would create a different signed packet and break multipath
+identity. The backend accepts the hub-addressed LTE copy after authenticating
+the collar and confirming that the enabled destination hub belongs to its Family.
+This does not mean the LTE request is forwarded back to the physical hub.
 
-For local/off-grid traffic, commands and ACKs, the destination can be a specific hub or collar.
+The receiving Home Hub accepts packets addressed to itself. In Home/Portable
+mode it relays the authenticated inner packet unchanged when connectivity is
+available. In Off-Grid it caches locally and defers cloud replay; the collar
+does not need to discover the hub's current connectivity or change its address.
+For hub-addressed relay ingestion, the wrapper gateway must match the signed
+destination, and the existing gateway bearer / Family / collar HMAC checks apply.
+
+Command ACKs and status replies still address the originating command sender,
+not unconditionally the provisioned hub. Commands address the target collar.
+
+Compatibility: `0000` cloud-addressed observations remain accepted for older
+firmware, simulators and cached traffic. They are no longer the new collar
+firmware default. This is a routing-policy revision, **not** a packet-layout or
+on-wire version change. Never rewrite destinations in a relay.
+
+Affiliation is explicitly provisioned; neither the role rule below, the generic
+BLE beacon name, nor the last received command determines ownership. Firmware
+configuration and backend Family provisioning must agree.
 
 ## 9. Reserved destination values
 
 ```text
-0x0000 = CLOUD / backend logical destination
+0x0000 = CLOUD / backend logical destination (legacy uplink compatibility)
 0xFFFF = BROADCAST
 ```
 
@@ -386,7 +409,7 @@ store observation and transport path
 ```text
 ver              = 2
 source_id16      = 0x04A7
-destination_id16 = 0x0000
+destination_id16 = 0x0010
 msg_seq_id       = 10542
 time_unix        = 1786537810
 state            = 0x11
@@ -407,7 +430,7 @@ Bytes:
 ```text
 02
 A7 04
-00 00
+10 00
 2E 29
 D2 F8 7C 6A
 11
@@ -449,7 +472,8 @@ Maximum packet            64 bytes
 source_id16               2 bytes
 destination_id16          2 bytes
 remaining header reserve  2 bytes
-cloud destination         0x0000
+collar report destination provisioned Home Hub (e.g. 0x0010)
+legacy cloud destination  0x0000
 broadcast destination     0xFFFF
 hub rule                  physical ID % 16 == 0
 on-wire version           2

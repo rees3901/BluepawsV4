@@ -147,8 +147,10 @@ export function parseTlvRequest(value: unknown): ParsedTlvRequest {
   if (!isCollarId16(packet.sourceId16)) {
     fail("invalid_source_role", "ingestion accepts collar source IDs only");
   }
-  if (normalizedIngestPath === "cellular_direct" && packet.destinationId16 !== CLOUD_DESTINATION_ID) {
-    fail("invalid_destination", "cellular_direct packets must target the cloud destination 0000");
+  if (normalizedIngestPath === "cellular_direct"
+      && packet.destinationId16 !== CLOUD_DESTINATION_ID
+      && !isHubId16(packet.destinationId16)) {
+    fail("invalid_destination", "cellular_direct packets must target an affiliated hub or legacy cloud destination 0000");
   }
   if (normalizedIngestPath === "lora_hub"
       && packet.destinationId16 !== CLOUD_DESTINATION_ID
