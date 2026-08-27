@@ -92,11 +92,13 @@ test("decodes the v1.2 profile command and ACK TLV", () => {
 });
 
 test("enforces v1.2 source roles and destination routing", () => {
-  assertDecodeError(() => parseTlvRequest({
-    ingest_path: "cellular_direct",
-    link_type: "lte",
-    payload_b64: bytesToBase64(buildPacket(selectedTlvs(), 0x0010)),
-  }), "invalid_destination");
+  for (const destination of [0x03e9, 0xffff]) {
+    assertDecodeError(() => parseTlvRequest({
+      ingest_path: "cellular_direct",
+      link_type: "lte",
+      payload_b64: bytesToBase64(buildPacket(selectedTlvs(), destination)),
+    }), "invalid_destination");
+  }
 
   assertDecodeError(() => parseTlvRequest({
     ingest_path: "lora_hub",
@@ -120,6 +122,23 @@ test("enforces v1.2 source roles and destination routing", () => {
     payload_b64: bytesToBase64(buildPacket(selectedTlvs(), 0x0010)),
   });
   assert.equal(hubAck.packet.destinationId16, 0x0010);
+});
+
+test("LoRa and LTE preserve the same hub-addressed payload, HMAC and dedup hash", async () => {
+  const raw = buildPacket(selectedTlvs(), 0x0010);
+  const payload_b64 = bytesToBase64(raw);
+  const radio = parseTlvRequest({
+    ingest_path: "lora_hub", link_type: "lora", gateway_guid16: "0010",
+    gateway_rx_time_unix: 1_786_537_811, payload_b64,
+  }).packet;
+  const direct = parseTlvRequest({
+    ingest_path: "cellular_direct", link_type: "lte", payload_b64,
+  }).packet;
+  assert.equal(direct.destinationId16, 0x0010);
+  assert.deepEqual(direct.rawBytes, radio.rawBytes);
+  assert.equal(await sha256Hex(direct.rawBytes), await sha256Hex(radio.rawBytes));
+  assert.deepEqual(direct.authenticationTag,
+    new Uint8Array(createHmac("sha256", KEY).update(direct.authenticatedBytes).digest().subarray(0, 8)));
 });
 
 test("decodes every v1.2 status, power profile, and TX reason code from the header", () => {

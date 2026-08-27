@@ -160,6 +160,22 @@ async function handleTlv(
       return lookupFailure(requestId, credentialResult.error?.code, deviceResult.error?.code);
     }
     if (!credentialResult.data || !deviceResult.data?.household_id) return unauthorized(requestId);
+    // LTE fallback carries the exact same signed, hub-addressed observation
+    // as LoRa. The collar bearer authenticates the sender; the destination must
+    // additionally be an enabled hub in that collar's Family.
+    if (parsed.packet.destinationId16 !== 0) {
+      const gatewayResult = await supabase
+        .from("gateways")
+        .select("household_id")
+        .eq("gateway_guid16", parsed.packet.destinationId16)
+        .eq("enabled", true)
+        .maybeSingle();
+      if (gatewayResult.error) return lookupFailure(requestId, gatewayResult.error.code);
+      if (!gatewayResult.data?.household_id
+          || gatewayResult.data.household_id !== deviceResult.data.household_id) {
+        return unauthorized(requestId);
+      }
+    }
   } else {
     const gatewayGuid16 = parsed.metadata.gatewayGuid16;
     if (gatewayGuid16 === null) return unauthorized(requestId);
