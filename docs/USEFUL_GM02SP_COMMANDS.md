@@ -714,6 +714,16 @@ For subsequent fixes, the GM02SP can use its last successful fix as the approxim
 
 ## 14.2 UTC time hint
 
+For the read-only UART clock foundation, its limits, tests and future collar
+integration, see [GM02SP time foundation](GM02SP_TIME_FOUNDATION.md).
+
+Read the GNSS subsystem clock with `AT+LPGNSSUTCTIME?`. A valid response contains
+`+LPGNSSUTCTIME: "<ISO UTC>"` followed by `OK`; an unset clock may return
+`"NO_CLOCK_DEFINED"`. Readback can reflect a software-seeded clock, not necessarily
+a fresh satellite fix. For a fresh fix's time, validate the full
+`+LPGNSSFIXREADY` event and its timestamp. Never confuse the setter below with
+retrieving time from satellites.
+
 Set GNSS UTC time:
 
 ```text
