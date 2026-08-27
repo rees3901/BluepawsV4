@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Welcome to Bluepaws Home Hub</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #081521; color: #eef6ff; font: 16px/1.55 system-ui, sans-serif; }
+    main { max-width: 620px; margin: 0 auto; padding: 32px 20px; }
+    header { display: flex; align-items: center; gap: 12px; margin-bottom: 28px; }
+    header img { width: 48px; height: 48px; }
+    .brand { font-weight: 750; letter-spacing: .04em; }
+    .eyebrow { color: #78caff; font-size: 12px; letter-spacing: .12em; text-transform: uppercase; }
+    h1 { font-size: clamp(26px, 6vw, 36px); line-height: 1.2; margin: 0 0 16px; }
+    h2 { font-size: 17px; margin: 0 0 8px; }
+    p { margin: 10px 0; }
+    .muted, small { color: #b1c5d7; }
+    .panel { background: #102738; border: 1px solid #28475e; border-radius: 16px; padding: 22px; }
+    .button { display: block; margin: 24px 0 12px; padding: 15px 12px; text-align: center; background: #36b3ff; color: #041724; font-weight: 750; border-radius: 10px; text-decoration: none; }
+    a { color: #78caff; text-underline-offset: 3px; overflow-wrap: anywhere; }
+    a:focus-visible { outline: 3px solid #fff; outline-offset: 4px; }
+    .address { text-align: center; font-size: 14px; }
+    .help { margin: 24px 0; padding-left: 16px; border-left: 3px solid #36b3ff; }
+    ol { padding-left: 22px; margin: 8px 0; }
+    li { margin: 8px 0; }
+    dl { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 16px 0 0; }
+    dl div { padding: 12px; background: #091c2a; border-radius: 8px; }
+    dt { color: #b1c5d7; font-size: 13px; }
+    dd { margin: 5px 0 0; font-size: 18px; font-weight: 700; }
+    #connection { margin-top: 14px; font-size: 13px; }
+    footer { text-align: center; font-size: 13px; margin-top: 22px; color: #b1c5d7; }
+    @media (max-width: 350px) { main { padding: 20px 14px; } .panel { padding: 16px; } dl { grid-template-columns: 1fr; } }
+  </style>
+  <script src="/welcome.js" defer></script>
+</head>
+<body>
+  <main>
+    <header><img src="/favicon.svg" alt="Blue paw prints"><div><div class="brand">BLUEPAWS</div><div class="eyebrow">Your local Home Hub</div></div></header>
+    <section class="panel" aria-labelledby="welcome-title">
+      <h1 id="welcome-title">A little closer to finding them.</h1>
+      <p>Welcome to your Bluepaws Home Hub.</p>
+      <p class="muted">Connected locally. Internet is not required to use the tracking dashboard.</p>
+      <a class="button" href="http://192.168.4.1/">Open tracking dashboard</a>
+      <p class="address"><a href="http://192.168.4.1/">http://192.168.4.1/</a></p>
+      <p class="address muted">Or try <a href="http://bluepaws.local/">http://bluepaws.local/</a><br><small>If the name does not work, use the IP address above.</small></p>
+      <div class="help">
+        <h2>If this sign-in window closes</h2>
+        <ol>
+          <li>Choose <strong>Use this network as is</strong> or <strong>Stay connected</strong> if your phone asks.</li>
+          <li>Remain connected to the <strong>Bluepaws Hub</strong> Wi-Fi network.</li>
+          <li>Open Chrome, Safari or your usual browser and enter <strong>http://192.168.4.1/</strong>. You can bookmark it for next time.</li>
+        </ol>
+        <p class="muted">The button may stay inside this temporary window. Your phone decides whether it can open a separate browser.</p>
+      </div>
+      <h2>Hub at a glance</h2>
+      <dl>
+        <div><dt>Hub ID</dt><dd id="hub-id">—</dd></div>
+        <div><dt>Collars heard in 10 minutes</dt><dd id="recent-collars">—</dd></div>
+        <div><dt>Last available report</dt><dd id="last-report">—</dd></div>
+        <div><dt>Clock</dt><dd id="clock-state">—</dd></div>
+      </dl>
+      <p id="connection" role="status">Checking the hub…</p>
+      <small>Reports may be cached or awaiting cloud verification. Open the dashboard for each collar’s status.</small>
+      <noscript><p>Live hub information needs JavaScript. The dashboard links above still work.</p></noscript>
+    </section>
+    <footer>No sign-in needed. This hotspot may have no internet access.</footer>
+  </main>
+</body>
+</html>
