@@ -9,6 +9,8 @@ import { GuidedTour } from "@/components/GuidedTour";
 import { AccountMenu } from "@/components/AccountMenu";
 import { defaultDeviceAvatar } from "@/lib/defaultDeviceAvatar";
 import { queuePowerProfileCommand } from "@/lib/deviceCommands";
+import { useCollarFeedback } from "@/lib/useCollarFeedback";
+import { commandMessage } from "@/lib/collarFeedback";
 import { CUSTOMER_POWER_PROFILES, powerProfileLabel, type CustomerPowerProfile } from "@/lib/powerProfiles";
 import { deviceCardOrderStorageKey, moveDeviceBefore, orderDeviceIds, pinDeviceFirst } from "@/lib/deviceCardOrder";
 import { buildCurrentDeviceReport, deviceReportsToCsv, loadDeviceReports, type DeviceReport } from "@/lib/deviceReports";
@@ -97,6 +99,8 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
   const familyHydrating = familyContextMissing && (!preferencesReady || familyRetryCount < FAMILY_HYDRATION_RETRY_DELAYS_MS.length);
 
   const orderedDeviceIds = useMemo(() => orderDeviceIds(devices.map((device) => device.id), cardOrder), [cardOrder, devices]);
+  const reportVersion = devices.map(device => `${device.id}:${device.lastUpdate}:${device.seq}`).join(",");
+  const { feedback, refresh: refreshFeedback } = useCollarFeedback(hasFamilyContext ? householdId : null, reportVersion);
 
   const handlePowerProfileCommand = useCallback(async (profile: CustomerPowerProfile) => {
     if (!commandDevice || commandSending) return;
@@ -109,6 +113,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
     setCommandSending(true);
     try {
       const command = await queuePowerProfileCommand(commandDevice.id, profile);
+      refreshFeedback();
       setCommandDevice(null);
       const expiry = new Date(command.expires_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
       setToast(`${powerProfileLabel(profile)} queued until ${expiry}`);
@@ -117,7 +122,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
     } finally {
       setCommandSending(false);
     }
-  }, [commandDevice, commandSending, tutorialMode]);
+  }, [commandDevice, commandSending, tutorialMode, refreshFeedback]);
   const orderedDevices = useMemo(() => {
     const devicesById = new Map(devices.map((device) => [device.id, device]));
     return orderedDeviceIds.flatMap((deviceId) => {
@@ -548,6 +553,9 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
               portableMode={portableMode}
               distance={formatDistance(haversine(HOME.lat, HOME.lon, device.lat, device.lon))}
               ageSeconds={Math.max(0, Math.floor((now - device.lastUpdate) / 1000))}
+              awakeSeconds={now ? Math.max(0, Math.ceil(((feedback[device.id]?.rxWindowUntil ?? 0) - now) / 1000)) : 0}
+              commandFeedback={commandMessage(feedback[device.id]?.command, now)}
+              reportedFlags={feedback[device.id]?.flags}
               onExpand={() => setExpandedIds((current) => nextExpandedDeviceCards(current, device.id))}
               onAction={(action) => handleAction(device, action)}
               onAvatarEdit={tutorialMode ? undefined : () => setAvatarDevice(device)}
@@ -709,7 +717,7 @@ function CommandModal({ device, sending, onClose, onSend }: { device: SelectedDe
       <div className="modal-content">
         <h2 id="command-title">Send Command</h2><p>Device: <strong>{device.name}</strong></p>
         <div className="form-group"><label htmlFor="cmdMode">Change Power Profile</label><select id="cmdMode" value={mode} disabled={sending} onChange={(event) => setMode(event.target.value as CustomerPowerProfile)}>{CUSTOMER_POWER_PROFILES.map((profile) => <option key={profile.value} value={profile.value}>{profile.label}</option>)}</select></div>
-        <p className="form-hint">Bluepaws attempts delivery on the collar&apos;s next check-in. The command remains pending for up to one hour.</p>
+        <p className="form-hint">Bluepaws attempts delivery on the collar&apos;s next check-in. The command expires after ten minutes without an acknowledgement.</p>
         <div className="modal-actions"><button className="btn-primary" disabled={sending} onClick={() => onSend(mode)}>{sending ? "Queueing…" : "Send command"}</button><button className="btn-secondary" disabled={sending} onClick={onClose}>Cancel</button></div>
       </div>
     </div>

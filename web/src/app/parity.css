@@ -1518,3 +1518,11 @@ body.light .leaflet-control-scale-line {
     padding: 3px 8px;
     letter-spacing: 0.5px;
 }
+/* Shared presentation, separate cloud/local sources of truth. */
+.collar-awake { color: #c89b25; white-space: nowrap; font-size: 12px; }
+.command-feedback { margin: 7px 0; font-size: 12px; line-height: 1.5; color: var(--text-muted); overflow-wrap: anywhere; }
+.command-feedback.pending { color: var(--accent); animation: command-wait 4s ease-in-out infinite; }
+.command-feedback.acked { color: #239f61; }
+.command-feedback.expired, .command-feedback.failed, .command-feedback.cancelled { color: var(--text-muted); }
+@keyframes command-wait { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
+@media (prefers-reduced-motion: reduce) { .command-feedback.pending { animation: none; } }

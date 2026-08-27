@@ -171,18 +171,19 @@ static const uint8_t aesKey[16] = LORA_AES_KEY;
 static uint32_t rxCount = 0;         // Total valid packets received
 static uint32_t crcFailCount = 0;    // Packets that failed TLV structure/auth checks
 static uint32_t txCount = 0;         // Total commands transmitted
-static uint32_t cmdSeqCounter = 0;   // Incrementing sequence for outgoing commands
+static std::atomic<uint32_t> cmdSeqCounter{0}; // Web, console and cloud tasks
 
 // ── Pending Command ACK Tracking ──
 // When we send a command to a collar, we track it here and wait for
 // an ACK packet back. If no ACK within CMD_ACK_TIMEOUT_MS, we retry
-// up to CMD_MAX_RETRIES times before marking it expired.
+// up to CMD_MAX_RETRIES times, then wait for another RX opportunity until expiry.
 struct pending_cmd_t {
     uint32_t cmdSeq;        // msg_seq we assigned to this command
     uint16_t targetId;      // device_id of the target collar
     bp_pkt_type_t type;     // command type (PKT_CMD_MODE, PKT_CMD_FIND, etc.)
     uint32_t sentAtMs;      // millis() timestamp when last sent; 0 = queued but not TX-confirmed yet
-    uint32_t createdAtMs;   // command expires one hour after creation
+    uint32_t createdAtMs;   // local delivery expires ten minutes after creation
+    const char *state;     // RAM-only feedback, retained up to fifteen minutes
     uint8_t  retries;       // how many retransmissions so far
     uint8_t  buf[BP_MAX_PACKET_SIZE];  // original packet (for retransmission)
     uint8_t  len;           // packet length
@@ -191,7 +192,8 @@ struct pending_cmd_t {
 };
 
 #define MAX_PENDING_CMDS 16                         // One useful pending command per collar
-#define LOCAL_COMMAND_TTL_MS 3600000UL
+#define LOCAL_COMMAND_TTL_MS 600000UL
+#define COMMAND_FEEDBACK_TTL_MS 900000UL
 static pending_cmd_t pendingCmds[MAX_PENDING_CMDS];
 static SemaphoreHandle_t pendingMutex = NULL;       // Protects pendingCmds array
 static volatile TickType_t commandRxOpportunityUntil = 0;
@@ -281,7 +283,9 @@ struct device_state_t {
     uint16_t fix_age_s;      // How old the GPS fix is, in seconds
     uint8_t  status;         // bp_status_t — OK, OUT_AND_ABOUT, LOST, etc.
     uint8_t  profile;        // bp_profile_t — NORMAL, POWERSAVE, ACTIVE, LOST
-    uint8_t  error;          // bp_error_t — active subsystem fault (0 = none)
+    bool     error_present; // Header ERROR_PRESENT, never inferred from reset_reason
+    uint8_t  reset_reason;
+    bool     heard_this_boot; // Journal restoration is NOT a live RX opportunity
     int16_t  rssi;           // LoRa RSSI when hub received the packet (dBm)
     float    snr;            // LoRa SNR when hub received the packet (dB)
     uint32_t local_millis;   // millis() on the hub when this packet arrived
@@ -347,7 +351,7 @@ static void handlePacket(const uint8_t *buf, uint8_t len, int16_t rssi, float sn
 static void buildDeviceJson(const uint8_t *buf, int16_t rssi, float snr,
                              uint32_t localId, uint32_t gatewayRxTime,
                              uint8_t syncState, char *out, size_t outLen);
-static void updateDeviceStateFromRecord(const bp_journal_record_t &record);
+static void updateDeviceStateFromRecord(const bp_journal_record_t &record, bool live = false);
 static void sseBroadcast(const char *event, const char *data);
 static String base64Encode(const uint8_t *data, uint8_t len);
 static String buildCloudWrapperJson(const cloud_entry_t &entry);
@@ -364,13 +368,17 @@ static const char *deviceEmoji(uint16_t id);
 static const char *deviceColour(uint16_t id);
 
 // Command building & ACK tracking
-static void sendCommand(uint16_t target_id, bp_pkt_type_t type, bp_profile_t mode);
-static void sendCommandFind(uint16_t target_id, bp_pkt_type_t type,
+static uint16_t sendCommand(uint16_t target_id, bp_pkt_type_t type, bp_profile_t mode);
+static uint16_t sendCommandFind(uint16_t target_id, bp_pkt_type_t type,
                               bp_profile_t mode, uint8_t ledFlash,
                               bp_buzzer_pattern_t buzzerPattern,
-                              uint16_t sequenceOverride = 0);
+                              uint16_t sequenceOverride = 0, uint32_t initialAgeMs = 0);
 static bool queueCloudCommandResponse(const String &response, uint16_t expectedDeviceId);
-static void sendStatusCommand(uint16_t target_id);
+static uint16_t sendStatusCommand(uint16_t target_id);
+static void broadcastCommand(const pending_cmd_t &cmd);
+static void handleApiCommands();
+static bool commandStillPending(const cmd_entry_t &cmd);
+static uint32_t deviceRxWindowMs(const device_state_t &device);
 static void checkPendingAcks();
 static void handleAck(const uint8_t *buf);
 static void noteCommandSent(const cmd_entry_t &cmd);
@@ -1005,6 +1013,8 @@ static void loraTask(void *param) {
                                    (int32_t)(commandRxOpportunityUntil - now) > 0;
         if ((now - lastCmdTx) >= pdMS_TO_TICKS(CMD_QUEUE_INTERVAL_MS) || collarRxOpportunity) {
             if (xQueueReceive(cmdQueue, &cmd, 0) == pdTRUE) {
+                // Superseded/ACKed/expired queue entries must never transmit later.
+                if (!commandStillPending(cmd)) continue;
                 // Take SPI mutex, transmit, then go back to RX mode
                 if (xSemaphoreTake(loraMutex, pdMS_TO_TICKS(200))) {
                     femSetTx();
@@ -1061,19 +1071,16 @@ static void handleAck(const uint8_t *buf) {
 
     if (xSemaphoreTake(pendingMutex, pdMS_TO_TICKS(50))) {
         for (int i = 0; i < MAX_PENDING_CMDS; i++) {
-            if (pendingCmds[i].active && pendingCmds[i].cmdSeq == ackedSeq) {
+            if (pendingCmds[i].active && pendingCmds[i].cmdSeq == ackedSeq
+                && pendingCmds[i].targetId == pkt_device_id(buf)
+                && millis() - pendingCmds[i].createdAtMs < LOCAL_COMMAND_TTL_MS) {
                 // Found the matching command — calculate round-trip time
                 uint32_t rtt = millis() - pendingCmds[i].sentAtMs;
                 Serial.printf("[ACK] Cmd seq %lu ACK'd by %s (RTT %lums)\n",
                               ackedSeq, bp_device_name(pkt_device_id(buf)), rtt);
-                pendingCmds[i].active = false;  // Free this slot
-
-                // Notify the web GUI that the command was acknowledged
-                char json[128];
-                snprintf(json, sizeof(json),
-                    "{\"cmdSeq\":%u,\"device\":%u,\"rtt\":%u,\"status\":\"acked\"}",
-                    ackedSeq, pkt_device_id(buf), rtt);
-                sseBroadcast("cmd_ack", json);
+                pendingCmds[i].active = false;  // Retain bounded feedback, stop delivery
+                pendingCmds[i].state = "acked";
+                broadcastCommand(pendingCmds[i]);
                 break;
             }
         }
@@ -1084,18 +1091,69 @@ static void handleAck(const uint8_t *buf) {
 static void noteCommandSent(const cmd_entry_t &cmd) {
     if (xSemaphoreTake(pendingMutex, pdMS_TO_TICKS(20))) {
         for (int i = 0; i < MAX_PENDING_CMDS; i++) {
-            if (pendingCmds[i].active && pendingCmds[i].cmdSeq == cmd.cmdSeq) {
+            if (pendingCmds[i].active && pendingCmds[i].cmdSeq == cmd.cmdSeq
+                && pendingCmds[i].targetId == cmd.targetId) {
                 pendingCmds[i].sentAtMs = millis();
+                pendingCmds[i].state = "transmitted";
+                broadcastCommand(pendingCmds[i]);
                 break;
             }
         }
         xSemaphoreGive(pendingMutex);
     }
-    char json[144];
-    snprintf(json, sizeof(json),
-             "{\"cmdSeq\":%u,\"device\":%u,\"status\":\"transmitted\"}",
-             cmd.cmdSeq, cmd.targetId);
+}
+
+// All readers/writers of command feedback take pendingMutex. Do not expose
+// packet bytes or credentials. Age is monotonic, independent of NTP changes.
+static void commandJson(const pending_cmd_t &cmd, char *out, size_t size) {
+    uint8_t profile = PROFILE_UNKNOWN;
+    pkt_tlv_get_u8(cmd.buf, TLV_PROFILE, &profile);
+    uint32_t age = millis() - cmd.createdAtMs;
+    const char *state = cmd.active && age >= LOCAL_COMMAND_TTL_MS ? "expired" : cmd.state;
+    snprintf(out, size,
+        "{\"device\":%u,\"cmdSeq\":%lu,\"status\":\"%s\",\"type\":\"%s\","
+        "\"profile\":\"%s\",\"age_ms\":%lu,\"expires_in_seconds\":%lu}",
+        cmd.targetId, (unsigned long)cmd.cmdSeq, state ? state : "queued",
+        cmd.type == PKT_CMD_MODE ? "profile" : cmd.type == PKT_CMD_FIND ? "find" : "status",
+        bp_profile_name((bp_profile_t)profile), (unsigned long)age,
+        (unsigned long)(age < LOCAL_COMMAND_TTL_MS ? (LOCAL_COMMAND_TTL_MS - age) / 1000 : 0));
+}
+
+static void broadcastCommand(const pending_cmd_t &cmd) {
+    char json[256];
+    commandJson(cmd, json, sizeof(json));
     sseBroadcast("cmd_ack", json);
+}
+
+static bool commandStillPending(const cmd_entry_t &cmd) {
+    bool valid = false;
+    if (xSemaphoreTake(pendingMutex, pdMS_TO_TICKS(20))) {
+        for (const auto &p : pendingCmds) {
+            if (p.active && p.cmdSeq == cmd.cmdSeq && p.targetId == cmd.targetId
+                && millis() - p.createdAtMs < LOCAL_COMMAND_TTL_MS) valid = true;
+        }
+        xSemaphoreGive(pendingMutex);
+    }
+    return valid;
+}
+
+static void handleApiCommands() {
+    if (!xSemaphoreTake(pendingMutex, pdMS_TO_TICKS(50))) {
+        httpServer.send(503, "application/json", "{\"error\":\"busy\"}");
+        return;
+    }
+    String json = "[";
+    for (const auto &cmd : pendingCmds) {
+        if (!cmd.state || millis() - cmd.createdAtMs >= COMMAND_FEEDBACK_TTL_MS) continue;
+        char item[256];
+        commandJson(cmd, item, sizeof(item));
+        if (json.length() > 1) json += ',';
+        json += item;
+    }
+    xSemaphoreGive(pendingMutex);
+    json += ']';
+    httpServer.sendHeader("Cache-Control", "no-store");
+    httpServer.send(200, "application/json", json);
 }
 
 static void queuePendingCommandForDevice(uint16_t targetId) {
@@ -1104,6 +1162,7 @@ static void queuePendingCommandForDevice(uint16_t targetId) {
     if (xSemaphoreTake(pendingMutex, pdMS_TO_TICKS(20))) {
         for (int i = 0; i < MAX_PENDING_CMDS; i++) {
             if (!pendingCmds[i].active || pendingCmds[i].targetId != targetId) continue;
+            if (millis() - pendingCmds[i].createdAtMs >= LOCAL_COMMAND_TTL_MS) continue;
 
             pendingCmds[i].retries = 0;
             pendingCmds[i].sentAtMs = 0;
@@ -1132,19 +1191,16 @@ static void queuePendingCommandForDevice(uint16_t targetId) {
 
 // Called every loop iteration by loraTask.
 // Checks if any pending commands have timed out waiting for ACK.
-// If so, retransmit up to CMD_MAX_RETRIES times, then expire.
+// Retry up to CMD_MAX_RETRIES times, then wait for the next RX opportunity.
 static void checkPendingAcks() {
     if (xSemaphoreTake(pendingMutex, pdMS_TO_TICKS(20))) {
         uint32_t now = millis();
         for (int i = 0; i < MAX_PENDING_CMDS; i++) {
             if (!pendingCmds[i].active) continue;                      // Skip unused slots
             if (now - pendingCmds[i].createdAtMs >= LOCAL_COMMAND_TTL_MS) {
-                char json[144];
-                snprintf(json, sizeof(json),
-                    "{\"cmdSeq\":%u,\"device\":%u,\"status\":\"expired\"}",
-                    pendingCmds[i].cmdSeq, pendingCmds[i].targetId);
-                sseBroadcast("cmd_ack", json);
                 pendingCmds[i].active = false;
+                pendingCmds[i].state = "expired";
+                broadcastCommand(pendingCmds[i]);
                 continue;
             }
             if (pendingCmds[i].waitingOpportunity) continue;
@@ -1162,7 +1218,12 @@ static void checkPendingAcks() {
                 cmd.targetId = pendingCmds[i].targetId;
                 cmd.cmdSeq = (uint16_t)(pendingCmds[i].cmdSeq & 0xFFFF);
                 cmd.type = pendingCmds[i].type;
-                xQueueSend(cmdQueue, &cmd, 0);  // Put back in TX queue
+                if (xQueueSend(cmdQueue, &cmd, 0) != pdTRUE) {
+                    pendingCmds[i].waitingOpportunity = true;
+                    pendingCmds[i].state = "waiting";
+                    broadcastCommand(pendingCmds[i]);
+                    continue;
+                }
 
                 Serial.printf("[ACK] Retry %d/%d for seq %lu → %s\n",
                               pendingCmds[i].retries, CMD_MAX_RETRIES,
@@ -1170,17 +1231,13 @@ static void checkPendingAcks() {
                               bp_device_name(pendingCmds[i].targetId));
             } else {
                 // Blind retries exhausted. Retain until the collar's next RX
-                // opportunity or the one-hour local command TTL.
+                // opportunity or the ten-minute local command TTL.
                 Serial.printf("[ACK] Waiting for next RX opportunity seq %lu → %s\n",
                               pendingCmds[i].cmdSeq,
                               bp_device_name(pendingCmds[i].targetId));
 
-                // Tell the web GUI the command failed
-                char json[128];
-                snprintf(json, sizeof(json),
-                    "{\"cmdSeq\":%u,\"device\":%u,\"status\":\"failed\",\"retry\":\"next_rx_window\"}",
-                    pendingCmds[i].cmdSeq, pendingCmds[i].targetId);
-                sseBroadcast("cmd_ack", json);
+                pendingCmds[i].state = "waiting";
+                broadcastCommand(pendingCmds[i]);
                 pendingCmds[i].waitingOpportunity = true;
             }
         }
@@ -1250,7 +1307,7 @@ static void handlePacket(const uint8_t *buf, uint8_t len, int16_t rssi, float sn
     record.sync_state = BP_JOURNAL_PENDING;
     memcpy(record.packet, buf, len);
     OfflineJournal::seal(record);
-    updateDeviceStateFromRecord(record);
+    updateDeviceStateFromRecord(record, true);
 
     if (xQueueSend(storageQueue, &record, 0) != pdTRUE) {
         Serial.printf("[FS] Journal queue full; local packet %lu remains RAM-only\n",
@@ -1283,12 +1340,12 @@ static void buildDeviceJson(const uint8_t *buf, int16_t rssi, float snr,
     double lat        = hasGps ? pkt_lat_e7(buf) / 1e7 : 0.0;  // Convert from integer×10^7 to degrees
     double lon        = hasGps ? pkt_lon_e7(buf) / 1e7 : 0.0;
     uint8_t profile   = pkt_power_profile(buf);
-    uint8_t error     = 0;
-    pkt_tlv_get_u8(buf, TLV_RESET_REASON, &error);
+    uint8_t resetReason = 0;
+    pkt_tlv_get_u8(buf, TLV_RESET_REASON, &resetReason);
 
     snprintf(out, outLen,
         "{\"id\":%u,\"name\":\"%s\",\"emoji\":\"%s\",\"colour\":\"%s\",\"seq\":%u,\"time\":%u,"
-        "\"status\":\"%s\",\"profile\":\"%s\",\"error\":\"%s\","
+        "\"status\":\"%s\",\"profile\":\"%s\",\"errorPresent\":%s,\"resetReason\":%u,\"rxWindowMs\":10000,"
         "\"lat\":%.7f,\"lon\":%.7f,\"hasGps\":%s,"
         "\"batt\":%u,\"acc\":%u,\"fixAge\":%u,"
         "\"rssi\":%d,\"snr\":%.1f,"
@@ -1298,7 +1355,7 @@ static void buildDeviceJson(const uint8_t *buf, int16_t rssi, float snr,
         pkt_msg_seq(buf), pkt_time_unix(buf),
         bp_status_display((bp_status_t)pkt_status(buf)),
         bp_profile_name((bp_profile_t)profile),
-        bp_error_display((bp_error_t)error),
+        (flags & FLAG_ERROR_PRESENT) ? "true" : "false", resetReason,
         lat, lon, hasGps ? "true" : "false",
         pkt_batt_mV(buf), pkt_acc_m(buf), pkt_fix_age_s(buf),
         rssi, snr,
@@ -1311,7 +1368,7 @@ static void buildDeviceJson(const uint8_t *buf, int16_t rssi, float snr,
 
 // Update our in-memory device state table with the latest packet data.
 // This is what the web GUI reads when a new browser connects.
-static void updateDeviceStateFromRecord(const bp_journal_record_t &record) {
+static void updateDeviceStateFromRecord(const bp_journal_record_t &record, bool live) {
     const uint8_t *buf = record.packet;
     uint16_t devId = pkt_device_id(buf);
     uint16_t flags = pkt_flags(buf);
@@ -1334,6 +1391,7 @@ static void updateDeviceStateFromRecord(const bp_journal_record_t &record) {
             dev->rssi        = record.rssi_dbm;
             dev->snr         = record.snr_x10 / 10.0f;
             dev->local_millis = millis();  // Record when WE received it (for "last seen" age)
+            dev->heard_this_boot = live;
             dev->gateway_rx_time_unix = record.gateway_rx_time_unix;
             dev->local_id = record.local_id;
             dev->sync_state = record.sync_state;
@@ -1343,8 +1401,9 @@ static void updateDeviceStateFromRecord(const bp_journal_record_t &record) {
                 dev->lon_e7 = pkt_lon_e7(buf);
             }
             dev->profile = pkt_power_profile(buf);
-            dev->error = 0;
-            pkt_tlv_get_u8(buf, TLV_RESET_REASON, &dev->error);
+            dev->error_present = (flags & FLAG_ERROR_PRESENT) != 0;
+            dev->reset_reason = 0;
+            pkt_tlv_get_u8(buf, TLV_RESET_REASON, &dev->reset_reason);
         }
         xSemaphoreGive(deviceMutex);
     }
@@ -1458,10 +1517,6 @@ static void handleCaptiveProbe() {
 // A small entry page for OS sign-in windows; the full dashboard stays at /.
 // Do not fake Internet validation or attempt to force another application open.
 static void handleWelcome() {
-    if (!isCaptivePortalClient()) {
-        httpServer.send(404, "text/plain", "Not found");
-        return;
-    }
     if (hasForeignPortalHost()) { handleCaptiveProbe(); return; }
     httpServer.sendHeader("Cache-Control", "no-store");
     File file = LittleFS.open("/welcome.html", "r");
@@ -1597,7 +1652,7 @@ static void handleEvents() {
             char json[640];
             snprintf(json, sizeof(json),
                 "{\"id\":%u,\"name\":\"%s\",\"emoji\":\"%s\",\"colour\":\"%s\",\"seq\":%u,\"time\":%u,"
-                "\"status\":\"%s\",\"profile\":\"%s\","
+                "\"status\":\"%s\",\"profile\":\"%s\",\"errorPresent\":%s,\"resetReason\":%u,\"rxWindowMs\":%lu,"
                 "\"lat\":%.7f,\"lon\":%.7f,\"hasGps\":%s,"
                 "\"batt\":%u,\"acc\":%u,\"fixAge\":%u,"
                 "\"rssi\":%d,\"snr\":%.1f,\"bleHome\":false,\"cellular\":false,"
@@ -1608,6 +1663,8 @@ static void handleEvents() {
                 d->last_seq, d->last_time,
                 bp_status_display((bp_status_t)d->status),
                 bp_profile_name((bp_profile_t)d->profile),
+                d->error_present ? "true" : "false", d->reset_reason,
+                (unsigned long)deviceRxWindowMs(*d),
                 d->has_gps ? d->lat_e7 / 1e7 : 0.0,
                 d->has_gps ? d->lon_e7 / 1e7 : 0.0,
                 d->has_gps ? "true" : "false",
@@ -1637,7 +1694,7 @@ static void handleApiDevices() {
             char buf[640];
             snprintf(buf, sizeof(buf),
                 "{\"id\":%u,\"name\":\"%s\",\"emoji\":\"%s\",\"colour\":\"%s\",\"seq\":%u,\"time\":%u,"
-                "\"status\":\"%s\",\"profile\":\"%s\","
+                "\"status\":\"%s\",\"profile\":\"%s\",\"errorPresent\":%s,\"resetReason\":%u,\"rxWindowMs\":%lu,"
                 "\"lat\":%.7f,\"lon\":%.7f,\"hasGps\":%s,"
                 "\"batt\":%u,\"acc\":%u,\"fixAge\":%u,"
                 "\"rssi\":%d,\"snr\":%.1f,\"age\":%lu,\"stale\":%s,"
@@ -1647,6 +1704,8 @@ static void handleApiDevices() {
                 d->last_seq, d->last_time,
                 bp_status_display((bp_status_t)d->status),
                 bp_profile_name((bp_profile_t)d->profile),
+                d->error_present ? "true" : "false", d->reset_reason,
+                (unsigned long)deviceRxWindowMs(*d),
                 d->has_gps ? d->lat_e7 / 1e7 : 0.0,
                 d->has_gps ? d->lon_e7 / 1e7 : 0.0,
                 d->has_gps ? "true" : "false",
@@ -1679,6 +1738,11 @@ static uint32_t deviceAgeSeconds(const device_state_t &device) {
         return (uint32_t)now - device.gateway_rx_time_unix;
     }
     return (millis() - device.local_millis) / 1000;
+}
+
+static uint32_t deviceRxWindowMs(const device_state_t &device) {
+    uint32_t age = millis() - device.local_millis;
+    return device.heard_this_boot && age < 10000 ? 10000 - age : 0;
 }
 
 static void appendHistoryJson(String &json, const bp_journal_record_t &record) {
@@ -1959,8 +2023,11 @@ static void handleApiCommand() {
     }
 
     // Build the command packet and queue it for LoRa TX
-    sendCommand(targetId, PKT_CMD_MODE, mode);
-    httpServer.send(200, "application/json", "{\"ok\":true}");
+    uint16_t seq = sendCommand(targetId, PKT_CMD_MODE, mode);
+    char response[128];
+    snprintf(response, sizeof(response), "{\"ok\":%s,\"device\":%u,\"cmdSeq\":%u}",
+             seq ? "true" : "false", targetId, seq);
+    httpServer.send(seq ? 202 : 503, "application/json", response);
 }
 
 // ── API: POST /api/find ──
@@ -2011,13 +2078,13 @@ static void handleApiFind() {
     }
 
     // Build and queue the find command for LoRa TX
-    sendCommandFind(targetId, PKT_CMD_FIND, PROFILE_UNKNOWN, flashCount, pattern);
+    uint16_t seq = sendCommandFind(targetId, PKT_CMD_FIND, PROFILE_UNKNOWN, flashCount, pattern);
 
     char resp[128];
     snprintf(resp, sizeof(resp),
-        "{\"ok\":true,\"device\":%u,\"pattern\":%u,\"flash\":%u}",
-        targetId, pattern, flashCount);
-    httpServer.send(200, "application/json", resp);
+        "{\"ok\":%s,\"device\":%u,\"cmdSeq\":%u,\"pattern\":%u,\"flash\":%u}",
+        seq ? "true" : "false", targetId, seq, pattern, flashCount);
+    httpServer.send(seq ? 202 : 503, "application/json", resp);
 }
 
 // ── API: POST /api/device-status ──
@@ -2045,13 +2112,13 @@ static void handleApiDeviceStatusCommand() {
         return;
     }
 
-    sendStatusCommand(targetId);
+    uint16_t seq = sendStatusCommand(targetId);
 
     char resp[128];
     snprintf(resp, sizeof(resp),
-        "{\"ok\":true,\"device\":%u,\"command\":\"status\"}",
-        targetId);
-    httpServer.send(200, "application/json", resp);
+        "{\"ok\":%s,\"device\":%u,\"cmdSeq\":%u,\"command\":\"status\"}",
+        seq ? "true" : "false", targetId, seq);
+    httpServer.send(seq ? 202 : 503, "application/json", resp);
 }
 
 // ── API: POST /api/config ──
@@ -2127,7 +2194,7 @@ static void handleNotFound() {
     bool publicAsset = path == "/leaflet.js" || path == "/leaflet.css"
         || path == "/basemap.json" || path == "/images/marker-icon.png"
         || path == "/images/marker-icon-2x.png" || path == "/images/marker-shadow.png"
-        || path == "/welcome.js";
+        || path == "/welcome.js" || path == "/feedback.js";
     if (httpServer.method() == HTTP_GET && publicAsset && LittleFS.exists(path)) {
         File f = LittleFS.open(path, "r");
         // Determine MIME type from file extension
@@ -2161,6 +2228,12 @@ static void initWebServer() {
     // Static file routes
     httpServer.on("/",             HTTP_GET,  handleRoot);     // Main page
     httpServer.on("/welcome", HTTP_GET, handleWelcome);
+    httpServer.on("/bluepaws-hub.url", HTTP_GET, []() {
+        httpServer.sendHeader("Content-Disposition", "attachment; filename=\"Bluepaws Hub.url\"");
+        httpServer.sendHeader("Cache-Control", "no-store");
+        httpServer.send(200, "application/octet-stream",
+            "[InternetShortcut]\r\nURL=http://192.168.4.1/\r\n");
+    });
     httpServer.on("/api/welcome", HTTP_GET, handleApiWelcome);
     httpServer.on("/style.css",    HTTP_GET,  handleCSS);      // Stylesheet
     httpServer.on("/app.js",       HTTP_GET,  handleJS);       // JavaScript app
@@ -2175,6 +2248,7 @@ static void initWebServer() {
     httpServer.on("/api/status",   HTTP_GET,  handleApiStatus);   // Get hub diagnostics
     httpServer.on("/api/device-meta", HTTP_POST, handleApiDeviceMetadata);
     httpServer.on("/api/command",  HTTP_POST, handleApiCommand);  // Send mode command
+    httpServer.on("/api/commands", HTTP_GET, handleApiCommands);
     httpServer.on("/api/device-status", HTTP_POST, handleApiDeviceStatusCommand); // Request collar status
     httpServer.on("/api/find",     HTTP_POST, handleApiFind);     // Trigger find (buzzer+LED)
     httpServer.on("/api/config",   HTTP_POST, handleApiConfig);   // Save WiFi/cloud config
@@ -3074,20 +3148,21 @@ static void cloudTask(void *param) {
 // ═══════════════════════════════════════════════
 
 // Convenience wrapper for mode commands (no buzzer/LED parameters)
-static void sendCommand(uint16_t target_id, bp_pkt_type_t type, bp_profile_t mode) {
-    sendCommandFind(target_id, type, mode, 0, BUZZER_OFF);
+static uint16_t sendCommand(uint16_t target_id, bp_pkt_type_t type, bp_profile_t mode) {
+    return sendCommandFind(target_id, type, mode, 0, BUZZER_OFF);
 }
 
 // Convenience wrapper for status request commands.
-static void sendStatusCommand(uint16_t target_id) {
-    sendCommandFind(target_id, PKT_CMD_STATUS, PROFILE_UNKNOWN, 0, BUZZER_OFF);
+static uint16_t sendStatusCommand(uint16_t target_id) {
+    return sendCommandFind(target_id, PKT_CMD_STATUS, PROFILE_UNKNOWN, 0, BUZZER_OFF);
 }
 
 // Full command builder — handles both mode commands and find commands.
-static void sendCommandFind(uint16_t target_id, bp_pkt_type_t type,
+static uint16_t sendCommandFind(uint16_t target_id, bp_pkt_type_t type,
                               bp_profile_t mode, uint8_t ledFlash,
                               bp_buzzer_pattern_t buzzerPattern,
-                              uint16_t sequenceOverride) {
+                              uint16_t sequenceOverride, uint32_t initialAgeMs) {
+    if (initialAgeMs >= LOCAL_COMMAND_TTL_MS) return 0;
     cmd_entry_t cmd;
     uint8_t txReason = (uint8_t)type;      // Temporary downlink compatibility mapping
     uint16_t seq = sequenceOverride;
@@ -3122,36 +3197,51 @@ static void sendCommandFind(uint16_t target_id, bp_pkt_type_t type,
 
     bool pendingRegistered = false;
     if (xSemaphoreTake(pendingMutex, pdMS_TO_TICKS(50))) {
+        // Cloud retries must not reset the expiry/ACK state or reuse an active
+        // identity for different bytes. Local sequence collisions fail safely.
+        for (const auto &p : pendingCmds) {
+            if (p.state && p.cmdSeq == seq && p.targetId == target_id
+                && millis() - p.createdAtMs < COMMAND_FEEDBACK_TTL_MS) {
+                bool same = p.len == cmd.len && memcmp(p.buf, cmd.buf, cmd.len) == 0;
+                bool stillActive = p.active && millis() - p.createdAtMs < LOCAL_COMMAND_TTL_MS;
+                xSemaphoreGive(pendingMutex);
+                return same && sequenceOverride && stillActive ? seq : 0;
+            }
+        }
         // A newer profile command supersedes an older unacknowledged profile
         // command for the same collar.
         if (type == PKT_CMD_MODE) {
             for (int i = 0; i < MAX_PENDING_CMDS; ++i) {
                 if (pendingCmds[i].active && pendingCmds[i].targetId == target_id
                     && pendingCmds[i].type == PKT_CMD_MODE) {
-                    char json[144];
-                    snprintf(json, sizeof(json),
-                        "{\"cmdSeq\":%u,\"device\":%u,\"status\":\"superseded\"}",
-                        pendingCmds[i].cmdSeq, pendingCmds[i].targetId);
-                    sseBroadcast("cmd_ack", json);
                     pendingCmds[i].active = false;
+                    pendingCmds[i].state = "superseded";
+                    broadcastCommand(pendingCmds[i]);
                 }
             }
         }
-        for (int i = 0; i < MAX_PENDING_CMDS; i++) {
-            if (!pendingCmds[i].active) {
+        // Prefer unused slots, then the oldest completed slot. Retain recent
+        // feedback across browser reconnects within this bounded RAM cache.
+        int slot = -1;
+        for (int i = 0; i < MAX_PENDING_CMDS; ++i) {
+            if (pendingCmds[i].active) continue;
+            if (!pendingCmds[i].state) { slot = i; break; }
+            if (slot < 0 || millis() - pendingCmds[i].createdAtMs > millis() - pendingCmds[slot].createdAtMs) slot = i;
+        }
+        if (slot >= 0) {
+                int i = slot;
                 pendingCmds[i].cmdSeq   = seq;
                 pendingCmds[i].targetId = target_id;
                 pendingCmds[i].type     = type;
                 pendingCmds[i].sentAtMs = 0;
-                pendingCmds[i].createdAtMs = millis();
+                pendingCmds[i].createdAtMs = millis() - initialAgeMs;
+                pendingCmds[i].state = "queued";
                 pendingCmds[i].retries  = 0;
                 memcpy(pendingCmds[i].buf, cmd.buf, cmd.len);
                 pendingCmds[i].len      = cmd.len;
                 pendingCmds[i].active   = true;
                 pendingCmds[i].waitingOpportunity = false;
                 pendingRegistered = true;
-                break;
-            }
         }
         xSemaphoreGive(pendingMutex);
     }
@@ -3159,23 +3249,27 @@ static void sendCommandFind(uint16_t target_id, bp_pkt_type_t type,
     if (!pendingRegistered) {
         Serial.printf("[CMD] No pending ACK slot available for %s\n",
                       bp_device_name(target_id));
-        return;
+        return 0;
     }
 
     // Queue the packet for the loraTask to transmit.
     if (xQueueSend(cmdQueue, &cmd, pdMS_TO_TICKS(100)) == pdTRUE) {
         Serial.printf("[CMD] Queued type=0x%02X for %s (seq %u)\n",
                       type, bp_device_name(target_id), seq);
-        char json[144];
-        snprintf(json, sizeof(json),
-                 "{\"cmdSeq\":%u,\"device\":%u,\"status\":\"queued\",\"expires_in_seconds\":3600}",
-                 seq, target_id);
-        sseBroadcast("cmd_ack", json);
+        if (xSemaphoreTake(pendingMutex, pdMS_TO_TICKS(50))) {
+            for (const auto &p : pendingCmds) {
+                if (p.cmdSeq == seq && p.targetId == target_id) broadcastCommand(p);
+            }
+            xSemaphoreGive(pendingMutex);
+        }
+        return seq;
     } else {
         if (xSemaphoreTake(pendingMutex, pdMS_TO_TICKS(50))) {
             for (int i = 0; i < MAX_PENDING_CMDS; i++) {
-                if (pendingCmds[i].active && pendingCmds[i].cmdSeq == seq) {
+                if (pendingCmds[i].active && pendingCmds[i].cmdSeq == seq && pendingCmds[i].targetId == target_id) {
                     pendingCmds[i].active = false;
+                    pendingCmds[i].state = "failed";
+                    broadcastCommand(pendingCmds[i]);
                     break;
                 }
             }
@@ -3184,6 +3278,7 @@ static void sendCommandFind(uint16_t target_id, bp_pkt_type_t type,
         Serial.printf("[CMD] Queue full; dropped command seq %u for %s\n",
                       seq, bp_device_name(target_id));
     }
+    return 0;
 }
 
 // Convert the authenticated cloud queue response into the existing LoRa
@@ -3218,7 +3313,20 @@ static bool queueCloudCommandResponse(const String &response, uint16_t expectedD
         return false;
     }
 
-    sendCommandFind(expectedDeviceId, PKT_CMD_MODE, profile, 0, BUZZER_OFF, sequence);
+    // Respect the cloud's original deadline, not ten new minutes after relay.
+    const char *expires = command["expires_at"] | "";
+    struct tm expiryTm = {};
+    time_t now = time(nullptr);
+    if (!hubTimeSynced || !strptime(expires, "%Y-%m-%dT%H:%M:%S", &expiryTm)) {
+        Serial.println("[CLOUD CMD] Waiting for an accurate clock and valid command expiry");
+        return false;
+    }
+    // The hub's configTime uses UTC (zero timezone/DST offsets).
+    time_t expiry = mktime(&expiryTm);
+    if (expiry <= now) return false;
+    uint32_t remaining = (uint32_t)std::min<time_t>(600, expiry - now) * 1000;
+    if (!sendCommandFind(expectedDeviceId, PKT_CMD_MODE, profile, 0, BUZZER_OFF,
+                         sequence, LOCAL_COMMAND_TTL_MS - remaining)) return false;
     Serial.printf("[CLOUD CMD] Queued %s seq=%u for device %u\n",
                   bp_profile_name(profile), sequence, expectedDeviceId);
     return true;

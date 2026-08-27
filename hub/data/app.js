@@ -537,6 +537,11 @@
         if (evtSource) evtSource.close();  // Close any existing connection
 
         evtSource = new EventSource('/events');
+        evtSource.addEventListener('cmd_ack', function (e) {
+            resetHeartbeatWatchdog();
+            try { acceptCommandFeedback(JSON.parse(e.data)); }
+            catch (err) { logEvent('ERR', 'Command feedback unavailable: ' + err.message); }
+        });
 
         // "telemetry" events carry device data as JSON
         evtSource.addEventListener('telemetry', function (e) {
@@ -545,7 +550,7 @@
                 var data = JSON.parse(e.data);
                 var ts = new Date().toISOString();
                 var tsShort = new Date().toLocaleTimeString();
-                var structured = { ts: ts, id: data.id, name: data.name, lat: (data.lat||0).toFixed(5), lon: (data.lon||0).toFixed(5), rssi: data.rssi, snr: data.snr, batt: data.batt, status: data.status, profile: data.profile, error: data.error || 'None' };
+                var structured = { ts: ts, id: data.id, name: data.name, lat: (data.lat||0).toFixed(5), lon: (data.lon||0).toFixed(5), rssi: data.rssi, snr: data.snr, batt: data.batt, status: data.status, profile: data.profile, error: data.errorPresent ? 'Reported fault' : 'None' };
                 var logLine = data.name + ' id=' + data.id + ' lat=' + structured.lat + ' lon=' + structured.lon + ' rssi=' + data.rssi + ' batt=' + data.batt + 'mV';
                 logEvent('RX', logLine, structured);
                 logDeviceEvent(data.id, '[' + tsShort + '] ' + logLine + ' snr=' + data.snr + ' status=' + data.status + ' profile=' + data.profile, structured);
@@ -586,6 +591,8 @@
                 dev.data.name = appearance.name;
                 dev.data.emoji = appearance.emoji;
                 dev.data.colour = appearance.colour;
+                dev.data.age = Math.max(0, (Date.now() - dev.lastUpdate) / 1000);
+                dev.data.rxWindowMs = Math.max(0, (dev.rxUntil || 0) - performance.now());
                 updateDevice(dev.data);
             } catch (err) {
                 logEvent('ERR', 'Appearance update: ' + err.message);
@@ -593,6 +600,8 @@
         });
 
         evtSource.onopen = function () {
+            resetCommandFeedback();
+            fetchCommandFeedback();
             if (fallbackPollingTimer) {
                 clearInterval(fallbackPollingTimer);
                 fallbackPollingTimer = null;
@@ -602,6 +611,7 @@
         };
 
         evtSource.onerror = function () {
+            resetCommandFeedback();
             logEvent('SYS', 'SSE disconnected');
             clearTimeout(heartbeatTimer);
             setStatus('disconnected', 'Disconnected');
@@ -613,6 +623,7 @@
 
     function fetchDeviceSnapshot() {
         refreshHubStatus(); // also recover mode state for clients using polling
+        fetchCommandFeedback();
         return fetch('/api/devices').then(function (r) { return r.json(); })
             .then(function (items) { items.forEach(updateDevice); });
     }
@@ -741,6 +752,7 @@
 
         dev.data = data;               // Store latest telemetry payload
         dev.lastUpdate = Date.now() - Math.max(0, Number(data.age || 0)) * 1000;
+        HubFeedback.receiveWindow(dev, data, performance.now());
 
         // Only update map if we have valid GPS coordinates
         if (data.hasGps && data.lat !== 0 && data.lon !== 0) {
@@ -812,7 +824,7 @@
                 markerEl.className = 'bp-marker';
                 markerEl.style.borderColor = dev.avatar.color;
                 if (data.status === 'Home') markerEl.classList.add('status-home');
-                if (data.status === 'LostTimeout') markerEl.classList.add('status-lost');
+                if (data.status === 'Lost' || data.status === 'LostTimeout' || data.status === 'LostAlert') markerEl.classList.add('status-lost');
             }
 
             // ── Trail breadcrumb line ──
@@ -888,9 +900,10 @@
 
     function getCollarStatus(dev) {
         var age = Date.now() - dev.lastUpdate;
-        if (age > OFFLINE_THRESHOLD_MS) return STATUS_OFFLINE;
+        if (age >= OFFLINE_THRESHOLD_MS) return STATUS_OFFLINE;
         var key = (dev.data.status || '').toLowerCase();
-        return STATUS_MAP[key] || STATUS_MAP['error'];
+        if (key === 'losttimeout' || key === 'lost alert' || key === 'lost_alert') key = 'lost';
+        return STATUS_MAP[key] || { emoji: '?', label: 'Unknown', css: 'status-unknown' };
     }
 
     // Format elapsed time compactly for the stopwatch: 23s, 1m 10s, 2h 5m
@@ -1022,7 +1035,7 @@
 
         // Calculate time since last update — cards older than 10 minutes get dimmed
         var age = Math.floor((Date.now() - dev.lastUpdate) / 1000);
-        var stale = age > 600;  // 10 minutes
+        var stale = age >= 600;  // 10 minutes
         var isExpanded = (expandedCardId === dev.id);
         card.className = 'device-card' + (stale ? ' stale' : '') + (isExpanded ? ' expanded' : '');
 
@@ -1037,9 +1050,9 @@
         var lastSeenStr = formatLastSeen(age);
 
         // Profile badge — colour-coded with optional emoji prefix
-        var profileLower = data.profile.toLowerCase();
-        var profileClass = 'profile-' + profileLower.replace('save', '');
-        var profileLabel = data.profile;
+        var profileLabel = HubFeedback.profileLabel(data.profile);
+        var profileLower = profileLabel.toLowerCase().replace(/ /g, '');
+        var profileClass = 'profile-' + (profileLower === 'lostalert' ? 'lost' : profileLower.replace('save', ''));
         if (profileLower === 'powersave') profileLabel = '\u{1F4A4} PowerSave';
         if (profileLower === 'debug') profileLabel = '\u{1F9EA} Debug';
 
@@ -1057,7 +1070,7 @@
                         '<span class="card-profile ' + profileClass + '">' + profileLabel + '</span>' +
                         (data.verification === 'pending' ? '<span class="verification-badge pending">Locally received — verification pending</span>' : '') +
                         (data.verification === 'rejected' ? '<span class="verification-badge rejected">Rejected by cloud</span>' : '') +
-                        (data.error && data.error !== 'None' ? '<span class="error-badge">' + data.error + '</span>' : '') +
+                        (data.errorPresent === true ? '<span class="error-badge" title="The collar set its ERROR_PRESENT flag. Lost Alert alone is not a fault.">Collar reported a fault</span>' : '') +
                     '</div>' +
                     '<div class="card-indicators">' +
                         '<span class="card-indicator-group">' + renderBatteryBars(data.batt) + '</span>' +
@@ -1073,6 +1086,7 @@
                             ICON_STOPWATCH +
                             '<span class="card-lastseen-value">' + lastSeenStr + '</span>' +
                         '</span>' +
+                        '<span class="collar-awake" data-awake="' + dev.id + '" hidden></span>' +
                     '</div>' +
                 '</div>' +
                 '<span class="card-chevron">' + (isExpanded ? '&#9650;' : '&#9660;') + '</span>' +
@@ -1098,12 +1112,13 @@
                         '<span class="label">Coordinates</span><span class="value">' + coordHtml + '</span>' +
                         '<span class="label">Power Profile</span><span class="value">' + data.profile + '</span>' +
                         '<span class="label">Dist From Hub</span><span class="value">' + distStr + '</span>' +
-                        '<span class="label">Last seen</span><span class="value">' + formatAge(age) + '</span>' +
+                        '<span class="label">Last seen</span><span class="value" data-detail-age>' + formatAge(age) + '</span>' +
                     '</div>' +
 
                     '<div class="card-actions">' +
                         buildActionButtons(dev, isFollowed) +
                     '</div>' +
+                    '<div class="command-feedback" data-command-feedback="' + dev.id + '" role="status" hidden></div>' +
 
                     '<div class="log-btn-row">' +
                         '<button class="btn-device-log btn-secondary" data-logid="' + dev.id + '">Message Log</button>' +
@@ -1117,6 +1132,7 @@
         }
 
         card.innerHTML = html;
+        updateCardFeedback(dev);
 
         // Wire up action buttons and message log toggle (only present when expanded)
         if (isExpanded) {
@@ -1169,6 +1185,55 @@
         }
     }
 
+    // Feedback changes in place; timers must not rebuild controls or animations.
+    var commandFeedback = HubFeedback.createStore();
+    var commandFetchPending = false;
+    var commandFetchAgain = false;
+    var commandFeedbackGeneration = 0;
+    function resetCommandFeedback() {
+        commandFeedbackGeneration++;
+        commandFeedback.reset();
+        for (var id in devices) updateCardFeedback(devices[id]);
+    }
+    function acceptCommandFeedback(item) {
+        if (commandFeedback.accept(item) && devices[item.device]) updateCardFeedback(devices[item.device]);
+    }
+    function fetchCommandFeedback() {
+        if (commandFetchPending) { commandFetchAgain = true; return; }
+        commandFetchPending = true;
+        var generation = commandFeedbackGeneration;
+        return fetch('/api/commands', {cache:'no-store'})
+            .then(function (r) { if (!r.ok) throw new Error('Command snapshot unavailable'); return r.json(); })
+            .then(function (items) {
+                if (generation === commandFeedbackGeneration && Array.isArray(items)) items.forEach(acceptCommandFeedback);
+            })
+            .catch(function () { /* SSE or next recovery poll retries; never claim an ACK. */ })
+            .finally(function () {
+                commandFetchPending = false;
+                if (commandFetchAgain) { commandFetchAgain = false; fetchCommandFeedback(); }
+            });
+    }
+    function updateCardFeedback(dev) {
+        var card = document.getElementById('card-' + dev.id);
+        if (!card) return;
+        var awake = card.querySelector('[data-awake]');
+        if (awake) {
+            var seconds = Math.max(0, Math.ceil(((dev.rxUntil || 0) - performance.now()) / 1000));
+            awake.hidden = seconds === 0;
+            awake.textContent = seconds ? '💡 ' + seconds + 's' : '';
+            awake.title = 'Recently heard — expected command receive window, not a guarantee of delivery';
+            awake.setAttribute('aria-label', 'Recently heard; expected receive window ' + seconds + ' seconds');
+        }
+        var line = card.querySelector('[data-command-feedback]');
+        if (line) {
+            var feedback = commandFeedback.latest(dev.id);
+            line.hidden = !feedback;
+            line.textContent = feedback ? feedback.text : '';
+            var className = 'command-feedback' + (feedback ? ' ' + (feedback.pending ? 'pending' : feedback.status) : '');
+            if (line.className !== className) line.className = className;
+        }
+    }
+
     // Human-friendly time display (e.g. "just now", "5s ago", "3m ago", "2h ago")
     function formatAge(seconds) {
         if (seconds < 5) return 'just now';
@@ -1177,14 +1242,26 @@
         return Math.floor(seconds / 3600) + 'h ago';
     }
 
-    // Re-render all cards every 5 seconds to update "last seen" ages
-    // (the actual telemetry data only changes on SSE events, but the
-    //  age counter needs to tick every few seconds)
+    // Update text in place; no radio/network polling and no form reset.
     setInterval(function () {
         for (var id in devices) {
-            renderDeviceCard(devices[id]);
+            var dev = devices[id], card = document.getElementById('card-' + dev.id);
+            if (!card) continue;
+            var age = Math.max(0, Math.floor((Date.now() - dev.lastUpdate) / 1000));
+            card.classList.toggle('stale', age >= 600);
+            var seen = card.querySelector('.card-lastseen-value');
+            if (seen) seen.textContent = formatLastSeen(age);
+            var detailAge = card.querySelector('[data-detail-age]');
+            if (detailAge) detailAge.textContent = formatAge(age);
+            var status = card.querySelector('.card-status');
+            if (status) {
+                var st = getCollarStatus(dev);
+                status.className = 'card-status ' + st.css;
+                status.textContent = st.emoji + ' ' + st.label;
+            }
+            updateCardFeedback(dev);
         }
-    }, 5000);
+    }, 250);
 
     // ═══════════════════════════════════════════════
     // Follow Mode
@@ -1581,6 +1658,7 @@
         }).then(function (r) { return r.json(); })
           .then(function (d) {
               if (d.ok) {
+                  fetchCommandFeedback();
                   closeCommand();
               } else {
                   alert('Command failed');
@@ -1653,6 +1731,7 @@
         }).then(function (r) { return r.json(); })
           .then(function (d) {
               if (d.ok) {
+                  fetchCommandFeedback();
                   closeFind();
               } else {
                   alert('Find command failed');

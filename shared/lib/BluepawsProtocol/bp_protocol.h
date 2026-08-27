@@ -130,7 +130,6 @@ enum bp_tlv_type_t : uint8_t {
     TLV_CMD_MSG_ID        = TLV_ACKED_MSG_SEQ_ID,
     TLV_LED_FLASH         = 0xF8,
     TLV_BUZZER_PATTERN    = 0xF9,
-    TLV_ERROR_TYPE        = TLV_RESET_REASON,
 };
 
 static char _bp_dev_name_buf[16];

@@ -156,6 +156,10 @@ export function createRealtimeTelemetrySource(
           .on("broadcast", { event: "INSERT" }, handlePositionBroadcast)
           .on("broadcast", { event: "UPDATE" }, handlePositionBroadcast)
           .on("broadcast", { event: "DEVICE_PRESENCE" }, handlePresenceBroadcast)
+          .on("broadcast", { event: "COMMAND_CHANGED" }, () => {
+            // Notify only; the card reloads authoritative, RLS-scoped rows.
+            if (active) window.dispatchEvent(new CustomEvent("bluepaws:command-changed", { detail: householdId }));
+          })
           .on("broadcast", { event: "ACCESS_CHANGED" }, handleAccessChange)
           .subscribe((status: "SUBSCRIBED" | "TIMED_OUT" | "CLOSED" | "CHANNEL_ERROR", error?: Error) => {
             if (!active || channel !== nextChannel) return;
