@@ -348,7 +348,18 @@ python -m platformio run -e hub
 Ten executable JavaScript checks, eleven Python regression checks and the hub
 build pass. Browser verification of the actual welcome assets used a local
 read-only preview with synthetic hub statistics; no console errors occurred.
-Hardware flashing was attempted but COM7 was occupied, so the new welcome
-routes, mDNS host handling and device OS captive behaviour still require an
-on-hub check. Both firmware and updated filesystem assets must be uploaded,
-preserving a fresh backup of credentials, local appearances and the journal.
+Hardware follow-up on 27 August: the hub on COM7 was backed up in full, then
+flashed with the firmware and updated filesystem; both write hashes verified.
+The saved configuration, appearances and journal were preserved byte-for-byte
+in the replacement image. Automatic Off-Grid fallback and incoming LoRa
+telemetry were observed after reboot.
+
+On-device HTTP checks passed for Windows/Android/Apple redirects to `/welcome`,
+direct-IP and mDNS dashboard/welcome requests (including Host case, port and
+trailing-dot variants), private-path/API 404s, favicon assets and the small
+welcome snapshot. A real `http://bluepaws.local/` request from Windows returned
+the dashboard with HTTP 200 and no redirect. The snapshot reported one recent
+collar and approximate clock state; it consumed no SSE slots. The in-app
+browser blocked the post-upload reload by URL policy, so the actual on-device
+visual/OS captive-window handoff still needs checking on the user's phone.
+Future uploads must likewise preserve a fresh copy of private files/history.
