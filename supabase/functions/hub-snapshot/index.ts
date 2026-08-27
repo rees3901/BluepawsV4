@@ -50,7 +50,11 @@ Deno.serve(async (request: Request) => {
       .eq("gateway_guid16", gatewayId).eq("enabled", true).maybeSingle(),
   ]);
   if (credential.error || gateway.error) {
-    return json({ error: "service_unavailable", request_id: requestId }, 503);
+    return unavailable(
+      requestId,
+      "gateway_lookup",
+      credential.error ?? gateway.error,
+    );
   }
   if (!credential.data || !gateway.data?.household_id) {
     return json({ error: "unauthorized", request_id: requestId }, 401);
@@ -84,11 +88,14 @@ Deno.serve(async (request: Request) => {
   const firstError = devices.error ?? appearances.error ?? latest.error ??
     history.error;
   if (firstError) {
-    console.error("Hub snapshot query failed", {
-      requestId,
-      code: firstError.code,
-    });
-    return json({ error: "service_unavailable", request_id: requestId }, 503);
+    const stage = devices.error
+      ? "devices"
+      : appearances.error
+      ? "appearances"
+      : latest.error
+      ? "latest"
+      : "history";
+    return unavailable(requestId, stage, firstError);
   }
   const rows = history.data ?? [];
   const hasMore = rows.length > limit;
@@ -106,6 +113,22 @@ Deno.serve(async (request: Request) => {
     request_id: requestId,
   }, 200);
 });
+
+function unavailable(
+  requestId: string,
+  stage: string,
+  error: { code: string } | null,
+) {
+  // Codes and stage names diagnose failures without exposing credentials or rows.
+  const code = error?.code ?? "unknown";
+  console.error("Hub snapshot query failed", { requestId, stage, code });
+  return json({
+    error: "service_unavailable",
+    stage,
+    code,
+    request_id: requestId,
+  }, 503);
+}
 
 async function sha256Hex(bytes: Uint8Array) {
   const digest = await crypto.subtle.digest(

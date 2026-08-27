@@ -32,6 +32,7 @@
 #include <BLEServer.h>
 #include <BLEAdvertising.h>
 #include <HTTPClient.h>      // HTTP client for cloud POST relay
+#include <esp_system.h>
 #include <ArduinoJson.h>     // Parse pending commands returned by the Edge Function
 #include <time.h>
 
@@ -116,6 +117,7 @@ static OfflineAccess offlineAccess;
 // the server pushes "event: <type>\ndata: <json>\n\n" lines.
 // We support up to 8 simultaneous SSE clients; further browsers poll slowly.
 static constexpr uint8_t MAX_SSE_CLIENTS = 8;
+static int snapshotLastHttpCode = 0;
 static WiFiClient sseClients[MAX_SSE_CLIENTS];
 static uint8_t sseClientCount = 0;        // How many SSE clients are connected
 static SemaphoreHandle_t sseMutex = NULL;  // Protects the sseClients array
@@ -1563,7 +1565,7 @@ static void handleApiStatus() {
     size_t fsTotal = LittleFS.totalBytes();
     size_t fsUsed = LittleFS.usedBytes();
 
-    char buf[768];
+    char buf[1024];
     snprintf(buf, sizeof(buf),
         "{\"uptime\":%u,\"rxCount\":%u,\"txCount\":%u,"
         "\"crcFails\":%u,\"devices\":%u,\"logEntries\":%u,"
@@ -1575,7 +1577,8 @@ static void handleApiStatus() {
         "\"last_cloud_success_ms\":%u,\"lora_rx_active\":%s,"
         "\"littlefs_total_bytes\":%u,\"littlefs_used_bytes\":%u,"
         "\"littlefs_free_bytes\":%u,\"sse_clients\":%u,"
-        "\"sse_capacity\":%u,\"replay_backlog\":%u}",
+        "\"sse_capacity\":%u,\"replay_backlog\":%u,"
+        "\"reset_reason\":%u,\"snapshot_http\":%d,\"cached_appearances\":%u}",
         millis() / 1000, rxCount, txCount,
         crcFailCount, deviceCount, (unsigned)offlineJournal.totalValidRecords(),
         staConnected ? "true" : "false",
@@ -1594,7 +1597,8 @@ static void handleApiStatus() {
         hubConnectivity.last_cloud_success_ms,
         hubConnectivity.lora_rx_active ? "true" : "false",
         (unsigned)fsTotal, (unsigned)fsUsed, (unsigned)(fsTotal - fsUsed),
-        connectedSse, MAX_SSE_CLIENTS, offlineJournal.pendingCount()
+        connectedSse, MAX_SSE_CLIENTS, offlineJournal.pendingCount(),
+        (unsigned)esp_reset_reason(), snapshotLastHttpCode, deviceMetaCount
     );
     httpServer.send(200, "application/json", buf);
 }
@@ -1830,6 +1834,13 @@ static void handleApiConfig() {
         return;
     }
 
+    // An open search-party hotspot is not permission to change cloud routing
+    // or Wi-Fi credentials. Provisioning must be enabled locally on the hub.
+    if (!hubProvisioningMode || hubCommProfile == HUB_COMM_OFF_GRID) {
+        httpServer.send(403, "application/json", "{\"error\":\"provisioning_required\"}");
+        return;
+    }
+
     String body = httpServer.arg("plain");
 
     // Helper lambda to extract a URL-encoded parameter value
@@ -1873,7 +1884,8 @@ static void handleApiConfig() {
 }
 
 // Catch-all handler for any URL not matched by explicit routes.
-// Tries to serve the file from LittleFS (e.g. favicon.ico, images).
+// Public assets only: configuration and journals share this filesystem but
+// must never be downloadable through a guessed path on the open hotspot.
 static void handleNotFound() {
     String path = httpServer.uri();
     if (path.startsWith("/tiles/")) {
@@ -1882,7 +1894,10 @@ static void handleNotFound() {
         httpServer.send(204, "image/png", "");
         return;
     }
-    if (LittleFS.exists(path)) {
+    bool publicAsset = path == "/leaflet.js" || path == "/leaflet.css"
+        || path == "/basemap.json" || path == "/images/marker-icon.png"
+        || path == "/images/marker-icon-2x.png" || path == "/images/marker-shadow.png";
+    if (httpServer.method() == HTTP_GET && publicAsset && LittleFS.exists(path)) {
         File f = LittleFS.open(path, "r");
         // Determine MIME type from file extension
         String contentType = "text/plain";
@@ -2372,20 +2387,27 @@ static void handleApiHubMode() {
     }
 
     String body = httpServer.arg("plain");
+    // WebServer parses form-urlencoded bodies into named arguments; "plain"
+    // is empty for the browser's normal form POSTs.
+    String requestedMode = getPostField(body, "mode");
+    if (requestedMode != "home" && requestedMode != "portable"
+        && requestedMode != "off_grid" && requestedMode != "off-grid") {
+        httpServer.send(400, "text/plain", "Bad request: mode=home|portable|off_grid");
+        return;
+    }
     bool leavingOffGrid = hubCommProfile == HUB_COMM_OFF_GRID
-        && body.indexOf("mode=off_grid") < 0
-        && body.indexOf("mode=off-grid") < 0;
+        && requestedMode != "off_grid" && requestedMode != "off-grid";
     if (leavingOffGrid && getPostField(body, "confirm") != "true") {
         httpServer.send(409, "application/json",
                         "{\"error\":\"confirmation_required\",\"detail\":\"Confirm leaving Off-Grid mode\"}");
         return;
     }
     if (leavingOffGrid && !requireCommandAccess()) return;
-    if (body.indexOf("mode=portable") >= 0) {
+    if (requestedMode == "portable") {
         enterPortableMode();
-    } else if (body.indexOf("mode=off_grid") >= 0 || body.indexOf("mode=off-grid") >= 0) {
+    } else if (requestedMode == "off_grid" || requestedMode == "off-grid") {
         enterOffGridMode();
-    } else if (body.indexOf("mode=home") >= 0) {
+    } else if (requestedMode == "home") {
         enterHomeMode();
     } else {
         httpServer.send(400, "text/plain", "Bad request: mode=home|portable|off_grid");
@@ -2578,6 +2600,7 @@ static void syncCloudSnapshotMetadata() {
     http.begin(endpoint);
     http.addHeader("Authorization", "Bearer " + cloudToken);
     int code = http.GET();
+    snapshotLastHttpCode = code;
     String response = code == 200 ? http.getString() : String();
     http.end();
     if (code != 200) {

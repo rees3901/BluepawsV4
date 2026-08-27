@@ -66,6 +66,7 @@
     <div id="settingsModal" class="modal hidden">
         <div class="modal-content">
             <h2>Hub Settings</h2>
+            <div id="provisioningFields" class="hidden">
             <div class="form-group">
                 <label>WiFi SSID</label>
                 <input type="text" id="cfgSSID" placeholder="Home network name">
@@ -77,6 +78,7 @@
             <div class="form-group">
                 <label>Cloud Endpoint</label>
                 <input type="url" id="cfgCloud" placeholder="https://...">
+            </div>
             </div>
             <div class="form-group">
                 <label>Hub Mode</label>
@@ -110,7 +112,7 @@
                 </div>
             </div>
             <div class="modal-actions">
-                <button id="btnSaveConfig" class="btn-primary" disabled>Save &amp; Restart</button>
+                <button id="btnSaveConfig" class="btn-primary hidden" disabled>Save &amp; Restart</button>
                 <button id="btnCloseSettings" class="btn-secondary">Close</button>
             </div>
         </div>
