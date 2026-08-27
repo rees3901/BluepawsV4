@@ -7,6 +7,27 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class PublicAssetTests(unittest.TestCase):
+    def test_captive_routes_redirect_to_absolute_ap_ip_only_for_ap_clients(self):
+        source = (ROOT / 'hub/src/main.cpp').read_text(encoding='utf-8')
+        portal = source.split('static bool isCaptivePortalClient() {', 1)[1].split(
+            'static void handleFavicon()', 1)[0]
+        self.assertIn('httpServer.client().localIP() == WiFi.softAPIP()', portal)
+        self.assertIn('if (!isCaptivePortalClient())', portal)
+        self.assertIn('"http://" + WiFi.softAPIP().toString() + "/"', portal)
+        self.assertIn('sendHeader("Location", target, true)', portal)
+        self.assertIn('send(302,', portal)
+        for path in ['/redirect', '/fwlink', '/connecttest.txt', '/ncsi.txt', '/generate_204', '/hotspot-detect.html']:
+            self.assertIn(f'httpServer.on("{path}", HTTP_GET, handleCaptiveProbe)', source)
+        catchall = source.split('static void handleNotFound() {', 1)[1].split('// Register all HTTP routes', 1)[0]
+        self.assertIn('hasForeignPortalHost()', catchall)
+        self.assertIn('!path.startsWith("/api/")', catchall)
+        self.assertIn('httpServer.send(404,', catchall)
+
+    def test_local_favicon_matches_cloud_brand_asset(self):
+        self.assertEqual((ROOT / 'hub/data/favicon.svg').read_text(),
+                         (ROOT / 'web/src/app/icon.svg').read_text())
+        self.assertIn('href="/favicon.svg"', (ROOT / 'hub/data/index.html').read_text())
+
     def test_fallback_serves_only_named_public_assets(self):
         source = (ROOT / 'hub/src/main.cpp').read_text(encoding='utf-8')
         handler = source.split('static void handleNotFound() {', 1)[1].split(
