@@ -141,3 +141,42 @@ New customer power-profile commands expire ten minutes after creation. The local
 - Test/debug commands must remain restricted; `debug_cadence`, `reboot`, and `set_profile` to `debug` are owner-only in the first queue implementation.
 - LTE response delivery is protected by the collar's existing bearer token and packet HMAC.
 - LoRa downlink command authentication is still a separate protocol decision and must not be treated as production-secure until formally solved.
+
+## Cloud queue permission regression (2026-08-27)
+
+`permission denied for function bluepaws_queue_device_command` can occur before
+anything reaches the hub or collar. The browser calls a public SECURITY INVOKER
+wrapper, which calls the guarded private SECURITY DEFINER implementation. The
+authenticated role needs EXECUTE on both functions. Local/off-grid hub commands
+do not use this database path, so their success does not verify cloud permissions.
+
+Migration `20260827213901_fix_cloud_command_queue_permissions.sql` restores only
+those queue permissions. It also explicitly rejects NULL/missing Family membership
+before enabling the private entry point, and rejects NULL expiry. Anonymous access,
+direct table writes and delivery/ACK helper access remain restricted. The public
+wrapper stays SECURITY INVOKER; do not solve this error by giving browser clients a
+service-role key, disabling RLS or granting broad table permissions.
+
+Run the isolated regression test from the repository root:
+
+```powershell
+npm install --prefix .pio/feedback-tests --no-package-lock --ignore-scripts @electric-sql/pglite
+node tools/test_command_queue_permissions_db.mjs
+```
+
+The test reproduces the pre-fix permission failure, then checks owner/member success,
+missing/revoked/guest/cross-Family denial, privileged-command restrictions, expiry,
+supersession and least-privilege grants using real PostgreSQL roles in PGlite.
+
+Deployment: apply the migration with the normal reviewed database migration process.
+No Edge Function, Vercel or firmware deployment is required for this permission fix.
+It was applied to the linked project on 2026-08-27 and verified through the public RPC
+as an authenticated owner; a missing-member call was rejected. All live test writes
+were rolled back, so no test command was delivered. Hardware delivery/ACK still needs
+the normal end-to-end test after a user submits a command.
+
+The post-deployment security advisor also flags unrelated items for separate review:
+the [search-party snapshot's public definer access](https://supabase.com/docs/guides/database/database-linter?lint=0028_anon_security_definer_function_executable),
+[leaked-password protection](https://supabase.com/docs/guides/auth/password-security#password-strength-and-leaked-password-protection),
+and [RLS tables without client policies](https://supabase.com/docs/guides/database/database-linter?lint=0008_rls_enabled_no_policy).
+This change does not alter those features or open credential-table access.
