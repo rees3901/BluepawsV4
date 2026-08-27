@@ -8,3 +8,25 @@ verify_jwt = true
 
 [functions.send-search-party-link]
 verify_jwt = true
+
+[functions.ingest-position-batch]
+enabled = true
+verify_jwt = false
+import_map = "./functions/ingest-position-batch/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/ingest-position-batch/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/ingest-position-batch/*.html" ]
+
+[functions.hub-snapshot]
+enabled = true
+verify_jwt = false
+import_map = "./functions/hub-snapshot/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/hub-snapshot/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/hub-snapshot/*.html" ]

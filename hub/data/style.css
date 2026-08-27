@@ -84,6 +84,35 @@ body {
     flex-direction: row;
 }
 
+.connection-prompt {
+    position: fixed;
+    z-index: 1600;
+    right: 16px;
+    bottom: 16px;
+    max-width: 360px;
+    display: grid;
+    gap: 4px;
+    padding: 13px 16px;
+    border: 1px solid var(--accent, #209cee);
+    border-radius: 10px;
+    color: #dceeff;
+    background: #102638;
+    box-shadow: 0 10px 30px rgba(0,0,0,.32);
+}
+
+.connection-prompt span { font-size: 12px; color: #9fc3dc; }
+.connection-prompt.hidden { display: none; }
+
+.verification-badge {
+    font-size: 9px;
+    font-weight: 700;
+    padding: 2px 5px;
+    border-radius: 5px;
+    white-space: nowrap;
+}
+.verification-badge.pending { color: #ffd77a; background: rgba(173,112,0,.25); }
+.verification-badge.rejected { color: #ff9da8; background: rgba(180,35,55,.25); }
+
 #map {
     flex: 1;
     min-width: 0;

@@ -45,11 +45,7 @@
 #endif
 
 #ifndef WIFI_AP_SSID
-#define WIFI_AP_SSID "BluePaws-Hub"
-#endif
-
-#ifndef WIFI_AP_PASS
-#define WIFI_AP_PASS "bluepaws4"
+#define WIFI_AP_SSID "Bluepaws Hub 0010"
 #endif
 
 #ifndef WIFI_AP_CHANNEL

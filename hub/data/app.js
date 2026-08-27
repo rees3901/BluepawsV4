@@ -34,7 +34,10 @@
     let measureMarkers = [];       // Circle markers at each measure point
     let darkMode = true;           // Current theme (persisted to localStorage)
     let followedDeviceId = null;   // Device ID being auto-followed on map (null = none)
-    var hubPortableMode = false;   // true when hub is in portable (BLE scanner) mode
+    var hubMode = 'home';          // home | portable | off_grid
+    var hubPortableMode = false;   // true when hub scans for BLE find beacons
+    var fallbackPollingTimer = null;
+    var localSessionToken = sessionStorage.getItem('bluepawsLocalSession') || '';
     var bleResults = {};           // Map of device_id → { rssi, age_ms }
     var blePollingTimer = null;    // Interval ID for BLE result polling
     var consoleLog = [];           // Ring buffer of display strings (max 200)
@@ -356,53 +359,41 @@
     // ═══════════════════════════════════════════════
     function initMap() {
         map = L.map('map', {
-            center: [51.505, -0.09],  // Default center (overridden on first device)
-            zoom: 13,
+            center: [54.5, -3.2],  // UK overview until cached/live collars are available
+            zoom: 6,
             zoomControl: false        // We add our own zoom control below
         });
 
-        // Base tile layers — user can switch between them via the layer control.
-        var street = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '&copy; OpenStreetMap',
-            maxZoom: 19
+        // Local map-source abstraction. The first implementation is a bundled
+        // vector skeleton and coordinate grid; a future SD source can replace
+        // it without changing marker/trail code.
+        var SkeletonGrid = L.GridLayer.extend({
+            createTile: function () {
+                var tile = document.createElement('canvas');
+                tile.width = tile.height = 256;
+                var ctx = tile.getContext('2d');
+                ctx.fillStyle = document.body.classList.contains('dark') ? '#071522' : '#dcecf3';
+                ctx.fillRect(0, 0, 256, 256);
+                ctx.strokeStyle = document.body.classList.contains('dark') ? '#173a52' : '#bad3df';
+                ctx.lineWidth = 1;
+                for (var p = 0; p <= 256; p += 64) {
+                    ctx.beginPath(); ctx.moveTo(p, 0); ctx.lineTo(p, 256); ctx.stroke();
+                    ctx.beginPath(); ctx.moveTo(0, p); ctx.lineTo(256, p); ctx.stroke();
+                }
+                return tile;
+            }
         });
-
-        var satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-            attribution: '&copy; Esri World Imagery',
-            maxZoom: 19
-        });
-
-        var esriClarity = L.tileLayer('https://clarity.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-            attribution: '&copy; Esri Clarity',
-            maxZoom: 19
-        });
-
-        var topo = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
-            attribution: '&copy; OpenTopoMap',
-            maxZoom: 17
-        });
-
-        var humanitarian = L.tileLayer('https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png', {
-            attribution: '&copy; OpenStreetMap, Tiles: HOT',
-            maxZoom: 19
-        });
-
-        var esriTopo = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', {
-            attribution: '&copy; Esri',
-            maxZoom: 19
-        });
-
-        street.addTo(map);  // Street map is the default
-
-        // Layer switcher control (top-right corner)
-        L.control.layers({
-            'Street': street,
-            'Satellite': satellite,
-            'Satellite HD': esriClarity,
-            'Topographic': topo,
-            'Humanitarian': humanitarian,
-            'Esri Topo': esriTopo
-        }, null, { position: 'topright', collapsed: true }).addTo(map);
+        var mapSources = {
+            skeleton: new SkeletonGrid({ attribution: 'Bluepaws offline map', maxZoom: 19 })
+        };
+        mapSources.skeleton.addTo(map);
+        fetch('/basemap.json').then(function (response) { return response.json(); }).then(function (data) {
+            L.geoJSON(data, {
+                style: function () {
+                    return { color: '#5f8498', weight: 2, fillColor: '#b8cfad', fillOpacity: 0.52 };
+                }
+            }).addTo(map);
+        }).catch(function () { addConsoleLog('Offline coastline unavailable'); });
 
         // Zoom control (bottom-left to avoid hamburger overlap)
         L.control.zoom({ position: 'bottomleft' }).addTo(map);
@@ -570,7 +561,40 @@
             resetHeartbeatWatchdog();
         });
 
+        evtSource.addEventListener('verification', function (e) {
+            resetHeartbeatWatchdog();
+            try {
+                var result = JSON.parse(e.data);
+                var dev = devices[result.device_id];
+                if (dev && dev.data.localId === result.local_id) {
+                    dev.data.verification = result.verification;
+                    renderDeviceCard(dev);
+                }
+            } catch (err) {
+                logEvent('ERR', 'Verification update: ' + err.message);
+            }
+        });
+
+        evtSource.addEventListener('appearance', function (e) {
+            resetHeartbeatWatchdog();
+            try {
+                var appearance = JSON.parse(e.data);
+                var dev = devices[appearance.id];
+                if (!dev) return;
+                dev.data.name = appearance.name;
+                dev.data.emoji = appearance.emoji;
+                dev.data.colour = appearance.colour;
+                updateDevice(dev.data);
+            } catch (err) {
+                logEvent('ERR', 'Appearance update: ' + err.message);
+            }
+        });
+
         evtSource.onopen = function () {
+            if (fallbackPollingTimer) {
+                clearInterval(fallbackPollingTimer);
+                fallbackPollingTimer = null;
+            }
             logEvent('SYS', 'SSE connected');
             resetHeartbeatWatchdog();
         };
@@ -579,7 +603,72 @@
             logEvent('SYS', 'SSE disconnected');
             clearTimeout(heartbeatTimer);
             setStatus('disconnected', 'Disconnected');
+            if (!fallbackPollingTimer) {
+                fallbackPollingTimer = setInterval(fetchDeviceSnapshot, 10000);
+            }
         };
+    }
+
+    function fetchDeviceSnapshot() {
+        return fetch('/api/devices').then(function (r) { return r.json(); })
+            .then(function (items) { items.forEach(updateDevice); });
+    }
+
+    function protectedFetch(url, options) {
+        options = options || {};
+        options.headers = options.headers || {};
+        if (localSessionToken) options.headers['X-Bluepaws-Local-Session'] = localSessionToken;
+        return fetch(url, options).then(function (response) {
+            if (response.status !== 403) return response;
+            var pin = window.prompt('Enter the four-digit Off-Grid command PIN');
+            if (!pin) return response;
+            return fetch('/api/security/unlock', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: 'pin=' + encodeURIComponent(pin)
+            }).then(function (unlockResponse) {
+                if (!unlockResponse.ok) throw new Error('PIN unlock failed');
+                return unlockResponse.json();
+            }).then(function (data) {
+                localSessionToken = data.session_token;
+                sessionStorage.setItem('bluepawsLocalSession', localSessionToken);
+                options.headers['X-Bluepaws-Local-Session'] = localSessionToken;
+                return fetch(url, options);
+            });
+        });
+    }
+
+    function editLocalAppearance(deviceId) {
+        var dev = devices[deviceId];
+        if (!dev) return;
+        var name = window.prompt('Local collar name (stored only on this Home Hub)', dev.data.name || ('Device ' + deviceId));
+        if (!name) return;
+        var emoji = window.prompt('Emoji or short symbol', dev.avatar.emoji || '🐾');
+        if (!emoji) return;
+        var colour = window.prompt('Marker colour as a hex value', dev.avatar.color || '#1d9bf0');
+        if (!colour) return;
+
+        var body = new URLSearchParams({
+            device: String(deviceId),
+            name: name,
+            emoji: emoji,
+            colour: colour
+        }).toString();
+        protectedFetch('/api/device-meta', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: body
+        }).then(function (response) {
+            if (!response.ok) throw new Error('Appearance was not saved (' + response.status + ')');
+            return response.json();
+        }).then(function (appearance) {
+            dev.data.name = appearance.name;
+            dev.data.emoji = appearance.emoji;
+            dev.data.colour = appearance.colour;
+            updateDevice(dev.data);
+        }).catch(function (error) {
+            window.alert(error.message);
+        });
     }
 
     // Update the connection status indicator (in sidebar header).
@@ -623,6 +712,8 @@
         // an assigned avatar emoji and trail color
         if (!dev) {
             var av = AVATARS[avatarIndex % AVATARS.length];
+            if (data.emoji) av = { emoji: data.emoji, color: data.colour || av.color, label: 'Local' };
+            else if (data.colour) av = { emoji: av.emoji, color: data.colour, label: av.label };
             var tc = TRAIL_COLORS[avatarIndex % TRAIL_COLORS.length];
             dev = {
                 id: id,
@@ -638,8 +729,15 @@
             devices[id] = dev;
         }
 
+        dev.name = data.name || dev.name;
+        if (data.emoji) dev.avatar.emoji = data.emoji;
+        if (data.colour) {
+            dev.avatar.color = data.colour;
+            dev.trailColor = data.colour;
+        }
+
         dev.data = data;               // Store latest telemetry payload
-        dev.lastUpdate = Date.now();    // Timestamp for "last seen" calculation
+        dev.lastUpdate = Date.now() - Math.max(0, Number(data.age || 0)) * 1000;
 
         // Only update map if we have valid GPS coordinates
         if (data.hasGps && data.lat !== 0 && data.lon !== 0) {
@@ -715,11 +813,12 @@
             }
 
             // ── Trail breadcrumb line ──
-            // Each GPS update adds a point. Max 4 points to keep it clean.
+            // Each GPS update adds a point. The local journal retains at most
+            // 100 points per collar, matching the off-grid history contract.
             // Renders as a dashed polyline in the device's trail color.
             if (dev.showTrail) {
                 dev.trail.push(latlng);
-                while (dev.trail.length > 4) dev.trail.shift();
+                while (dev.trail.length > 100) dev.trail.shift();
                 if (dev.trailLine) {
                     dev.trailLine.setLatLngs(dev.trail);  // Update existing polyline
                 } else {
@@ -744,6 +843,34 @@
         renderDeviceCard(dev);
     }
 
+    function loadDeviceHistory(deviceId) {
+        return fetch('/api/history?device=' + encodeURIComponent(deviceId) + '&limit=100')
+            .then(function (response) { return response.json(); })
+            .then(function (payload) {
+                var items = payload.items || [];
+                deviceLogs[deviceId] = items.map(function (item) {
+                    var time = item.gateway_rx_time_unix
+                        ? new Date(item.gateway_rx_time_unix * 1000).toLocaleString()
+                        : 'Time unavailable';
+                    return '[' + time + '] ' + item.tx_reason + ' · ' + item.status +
+                        ' · ' + item.profile + ' · ' + item.battery_mv + 'mV · ' +
+                        item.rssi_dbm + 'dBm · ' + item.verification;
+                });
+                deviceLogData[deviceId] = items;
+
+                var dev = devices[deviceId];
+                if (!dev) return;
+                dev.trail = items.filter(function (item) {
+                    return item.has_gps && item.verification !== 'rejected';
+                }).map(function (item) { return [item.latitude, item.longitude]; });
+                if (dev.trailLine) map.removeLayer(dev.trailLine);
+                dev.trailLine = dev.trail.length ? L.polyline(dev.trail, {
+                    color: dev.trailColor, weight: 2, opacity: 0.6, dashArray: '4 4'
+                }).addTo(map) : null;
+                updateDeviceLogDisplay(deviceId);
+            });
+    }
+
     // ═══════════════════════════════════════════════
     // Collar Status — emoji + label + offline detection
     // ═══════════════════════════════════════════════
@@ -754,7 +881,7 @@
         'lost':  { emoji: '\u2757\u2757', label: 'Lost', css: 'status-lost'  }
     };
     var STATUS_OFFLINE = { emoji: '\u26AB', label: 'Offline', css: 'status-offline' };
-    var OFFLINE_THRESHOLD_MS = 3600000;  // 1 hour
+    var OFFLINE_THRESHOLD_MS = 600000;  // Fixed 10-minute local stale threshold
 
     function getCollarStatus(dev) {
         var age = Date.now() - dev.lastUpdate;
@@ -925,6 +1052,8 @@
                         '<span class="card-name">' + data.name + '</span>' +
                         '<span class="card-status ' + st.css + '">' + st.emoji + ' ' + st.label + '</span>' +
                         '<span class="card-profile ' + profileClass + '">' + profileLabel + '</span>' +
+                        (data.verification === 'pending' ? '<span class="verification-badge pending">Locally received — verification pending</span>' : '') +
+                        (data.verification === 'rejected' ? '<span class="verification-badge rejected">Rejected by cloud</span>' : '') +
                         (data.error && data.error !== 'None' ? '<span class="error-badge">' + data.error + '</span>' : '') +
                     '</div>' +
                     '<div class="card-indicators">' +
@@ -975,6 +1104,7 @@
 
                     '<div class="log-btn-row">' +
                         '<button class="btn-device-log btn-secondary" data-logid="' + dev.id + '">Message Log</button>' +
+                        '<button class="btn-device-appearance btn-secondary" data-deviceid="' + dev.id + '">Local appearance</button>' +
                         '<button class="btn-log-export btn-export-device" data-logid="' + dev.id + '" data-name="' + data.name + '" title="Export log as CSV"><svg class="icon-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M12 4v12m0 0l-4-4m4 4l4-4"/><path d="M5 20h14"/></svg></button>' +
                     '</div>' +
                     '<div id="deviceLogPanel-' + dev.id + '" class="device-log-panel hidden">' +
@@ -996,7 +1126,9 @@
                     var panel = document.getElementById('deviceLogPanel-' + did);
                     panel.classList.toggle('hidden');
                     if (!panel.classList.contains('hidden')) {
-                        updateDeviceLogDisplay(parseInt(did, 10));
+                        loadDeviceHistory(parseInt(did, 10)).catch(function () {
+                            updateDeviceLogDisplay(parseInt(did, 10));
+                        });
                     }
                 });
             }
@@ -1005,8 +1137,14 @@
                 exportBtn.addEventListener('click', function (e) {
                     e.stopPropagation();
                     var did = parseInt(exportBtn.getAttribute('data-logid'), 10);
-                    var dname = exportBtn.getAttribute('data-name') || 'device';
-                    exportLogCsv(deviceLogData[did] || [], 'bluepaws_' + dname + '_' + new Date().toISOString().slice(0, 10) + '.csv');
+                    window.location.href = '/api/history.csv?device=' + encodeURIComponent(did);
+                });
+            }
+            var appearanceBtn = card.querySelector('.btn-device-appearance');
+            if (appearanceBtn) {
+                appearanceBtn.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    editLocalAppearance(dev.id);
                 });
             }
         }
@@ -1229,9 +1367,12 @@
                     'WiFi STA: ' + (s.staConnected ? s.staIP : 'Not connected') + '<br>' +
                     'AP IP: ' + s.apIP;
                 // Sync hub mode state from server
-                hubPortableMode = (s.hubMode === 'portable');
+                hubMode = s.hubMode || 'home';
+                hubPortableMode = (hubMode === 'portable' || hubMode === 'off_grid');
                 updateHubModeUI();
                 if (hubPortableMode && !blePollingTimer) startBlePolling();
+                document.getElementById('connectionAvailable').classList.toggle(
+                    'hidden', !(hubMode === 'off_grid' && s.wifi_connected));
             })
             .catch(function () {
                 document.getElementById('hubStatus').textContent = 'Failed to load status';
@@ -1271,13 +1412,21 @@
     // 2 seconds to get RSSI proximity data for the device cards.
     // ═══════════════════════════════════════════════
     function setHubMode(mode) {
-        fetch('/api/hub-mode', {
+        var leavingOffGrid = hubMode === 'off_grid' && mode !== 'off_grid';
+        if (leavingOffGrid && !window.confirm('Leave Off-Grid mode? Collar states, including Lost Alert, will not be changed.')) return;
+        protectedFetch('/api/hub-mode', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: 'mode=' + mode
+            body: 'mode=' + mode + (leavingOffGrid ? '&confirm=true' : '')
         }).then(function (r) { return r.json(); })
           .then(function (d) {
-              hubPortableMode = (d.mode === 'portable');
+              if (!d.mode) throw new Error(d.error || 'Mode change failed');
+              hubMode = d.mode;
+              hubPortableMode = (hubMode === 'portable' || hubMode === 'off_grid');
+              if (hubMode !== 'off_grid') {
+                  localSessionToken = '';
+                  sessionStorage.removeItem('bluepawsLocalSession');
+              }
               updateHubModeUI();
               if (hubPortableMode) {
                   startBlePolling();
@@ -1293,9 +1442,11 @@
     function updateHubModeUI() {
         var btnHome = document.getElementById('btnHomeMode');
         var btnPortable = document.getElementById('btnPortableMode');
-        if (btnHome && btnPortable) {
-            btnHome.classList.toggle('active', !hubPortableMode);
-            btnPortable.classList.toggle('active', hubPortableMode);
+        var btnOffGrid = document.getElementById('btnOffGridMode');
+        if (btnHome && btnPortable && btnOffGrid) {
+            btnHome.classList.toggle('active', hubMode === 'home');
+            btnPortable.classList.toggle('active', hubMode === 'portable');
+            btnOffGrid.classList.toggle('active', hubMode === 'off_grid');
         }
 
         // Show/hide portable banner in sidebar header
@@ -1304,13 +1455,30 @@
             banner = document.createElement('div');
             banner.id = 'portableBanner';
             banner.className = 'portable-banner';
-            banner.textContent = 'PORTABLE MODE';
+            banner.textContent = hubMode === 'off_grid' ? 'OFF-GRID MODE' : 'PORTABLE MODE';
             var panel = document.getElementById('panelHeader');
             if (panel) panel.after(banner);
         }
         if (banner) {
             banner.style.display = hubPortableMode ? '' : 'none';
+            banner.textContent = hubMode === 'off_grid' ? 'OFF-GRID MODE' : 'PORTABLE MODE';
         }
+    }
+
+    function setLocalPin(enabled) {
+        var pin = document.getElementById('localCommandPin').value.trim();
+        var body = enabled ? 'pin=' + encodeURIComponent(pin) : 'enabled=false';
+        protectedFetch('/api/security/pin', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: body
+        }).then(function (r) {
+            if (!r.ok) return r.json().then(function (d) { throw new Error(d.error); });
+            return r.json();
+        }).then(function (d) {
+            alert(d.pin_enabled ? 'Command PIN enabled for this Off-Grid session.' : 'Command PIN disabled.');
+            document.getElementById('localCommandPin').value = '';
+        }).catch(function (error) { alert('PIN change failed: ' + error.message); });
     }
 
     function startBlePolling() {
@@ -1369,7 +1537,7 @@
         var body = 'device=' + cmdTargetId.toString(16).padStart(4, '0') +
                    '&mode=' + mode;
 
-        fetch('/api/command', {
+        protectedFetch('/api/command', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: body
@@ -1441,7 +1609,7 @@
                    '&buzzer=' + (buzzerOn ? '1' : '0') +
                    '&led=' + (ledOn ? '1' : '0');
 
-        fetch('/api/find', {
+        protectedFetch('/api/find', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: body
@@ -1489,7 +1657,10 @@
         fetch('/api/devices')
             .then(function (r) { return r.json(); })
             .then(function (devs) {
-                devs.forEach(function (d) { updateDevice(d); });
+                devs.forEach(function (d) {
+                    updateDevice(d);
+                    loadDeviceHistory(d.id).catch(function () {});
+                });
                 if (devs.length > 0) fitAllMarkers();  // Zoom to show all devices
             })
             .catch(function () { /* SSE will catch up — ignore fetch errors */ });
@@ -1506,6 +1677,9 @@
         });
         document.getElementById('btnHomeMode').addEventListener('click', function () { setHubMode('home'); });
         document.getElementById('btnPortableMode').addEventListener('click', function () { setHubMode('portable'); });
+        document.getElementById('btnOffGridMode').addEventListener('click', function () { setHubMode('off_grid'); });
+        document.getElementById('btnSetLocalPin').addEventListener('click', function () { setLocalPin(true); });
+        document.getElementById('btnDisableLocalPin').addEventListener('click', function () { setLocalPin(false); });
         document.getElementById('cfgSSID').addEventListener('input', validateConfigForm);
         document.getElementById('cfgPass').addEventListener('input', validateConfigForm);
         document.getElementById('btnSendCmd').addEventListener('click', sendCommand);

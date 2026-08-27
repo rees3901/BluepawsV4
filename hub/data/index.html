@@ -5,10 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Bluepaws V4</title>
 
-    <!-- Leaflet CSS — mapping library (loaded from CDN) -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
-          crossorigin="">
+    <!-- Leaflet is bundled into LittleFS so Off-Grid never needs a CDN. -->
+    <link rel="stylesheet" href="leaflet.css">
 
     <!-- Our custom styles (served from hub's LittleFS flash) -->
     <link rel="stylesheet" href="style.css">
@@ -85,8 +83,18 @@
                 <div class="toggle-row">
                     <button id="btnHomeMode" class="mode-btn active">Home</button>
                     <button id="btnPortableMode" class="mode-btn">Portable Locator</button>
+                    <button id="btnOffGridMode" class="mode-btn">Off-Grid</button>
                 </div>
                 <small class="form-hint">Portable mode stops the home beacon and scans for collar BLE signals.</small>
+            </div>
+            <div class="form-group" id="localPinGroup">
+                <label>Optional Off-Grid command PIN</label>
+                <div class="toggle-row">
+                    <input type="password" id="localCommandPin" inputmode="numeric" maxlength="4" placeholder="4 digits">
+                    <button id="btnSetLocalPin" class="btn-secondary">Enable PIN</button>
+                    <button id="btnDisableLocalPin" class="btn-secondary">Disable</button>
+                </div>
+                <small class="form-hint">Viewing remains open. The PIN protects collar commands and is erased on reboot or when Off-Grid ends.</small>
             </div>
             <div class="form-group">
                 <label>Hub Status</label>
@@ -193,10 +201,13 @@
         </div>
     </div>
 
-    <!-- Leaflet JS — mapping library (loaded from CDN, must load before app.js) -->
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
-            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
-            crossorigin=""></script>
+    <div id="connectionAvailable" class="connection-prompt hidden">
+        <strong>Connection available</strong>
+        <span>A known Wi-Fi network is reachable. Off-Grid remains active until you choose to leave it.</span>
+    </div>
+
+    <!-- Locally bundled mapping library. -->
+    <script src="leaflet.js"></script>
 
     <!-- Our app — served from hub's LittleFS flash -->
     <script src="app.js"></script>
