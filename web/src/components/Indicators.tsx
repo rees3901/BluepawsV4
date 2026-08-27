@@ -56,6 +56,13 @@ export function SignalIndicator({ rssi, snr, ingestPath }: { rssi: number | null
   );
 }
 
+// Wi-Fi is not LoRa: show its reported RSSI without inventing an SNR or RF badge.
+export function WifiIndicator({ rssi }: { rssi: number | null }) {
+  return <span className="signal-indicator" title="Home Hub Wi-Fi uplink signal">
+    <AntennaIcon /><span className="sig-label">Wi-Fi {rssi == null ? "not connected" : `${rssi} dBm`}</span>
+  </span>;
+}
+
 function TransportBadge({ ingestPath }: { ingestPath: IngestPath | null }) {
   const transport = transportPresentation(ingestPath);
   return (

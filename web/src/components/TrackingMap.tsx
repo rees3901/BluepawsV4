@@ -329,7 +329,10 @@ export default function TrackingMap(props: TrackingMapProps) {
     const map = mapRef.current;
     if (!map) return;
 
-    const activeDeviceIds = new Set(devices.map((device) => device.id));
+    // Collar coordinates already come from last-position history. Hub rows may
+    // exist before their first fix, so their numeric adapter placeholders aren't locations.
+    const locatedDevices = devices.filter(device => (device.entity !== "hub" || device.hasGps) && Number.isFinite(device.lat) && Number.isFinite(device.lon));
+    const activeDeviceIds = new Set(locatedDevices.map((device) => device.id));
     markersRef.current.forEach((marker, deviceId) => {
       if (activeDeviceIds.has(deviceId)) return;
       cancelMarkerAnimation(markerAnimationsRef.current, deviceId);
@@ -343,7 +346,7 @@ export default function TrackingMap(props: TrackingMapProps) {
       trailPointsRef.current.delete(deviceId);
     });
 
-    devices.forEach((device) => {
+    locatedDevices.forEach((device) => {
       const avatar = avatars[device.id];
       const markerColor = normalizeMarkerColor(avatar.color);
       const latLng: TrailLatLng = [device.lat, device.lon];
@@ -393,7 +396,7 @@ export default function TrackingMap(props: TrackingMapProps) {
     const map = mapRef.current;
     if (!map || followedId === null) return;
     const followed = devices.find((device) => device.id === followedId);
-    if (followed) map.panTo([followed.lat, followed.lon]);
+    if (followed && (followed.entity !== "hub" || followed.hasGps)) map.panTo([followed.lat, followed.lon]);
   }, [devices, followedId]);
 
   useEffect(() => {
@@ -404,7 +407,7 @@ export default function TrackingMap(props: TrackingMapProps) {
       const deviceId = Number(deviceIdValue);
       const device = devicesRef.current.find((item) => item.id === deviceId);
       const avatar = avatarsRef.current[deviceId];
-      if (!device || !avatar || historicalPoints.length === 0) return;
+      if (!device || (device.entity === "hub" && !device.hasGps) || !avatar || historicalPoints.length === 0) return;
 
       const points: TrailLatLng[] = historicalPoints
         .slice(-VISIBLE_TRAIL_POINT_LIMIT)
@@ -445,18 +448,16 @@ export default function TrackingMap(props: TrackingMapProps) {
 
 function popupHtml(device: TelemetryDevice, avatar: DeviceAvatar, readOnly = false) {
   const name = escapeHtml(device.name);
-  if (device.entity === "hub") {
-    return `<div class="popup-content"><div class="popup-header">${avatarHtml(avatar, "popup-avatar")}<strong>${name}</strong></div><p>Home Hub · ${escapeHtml(device.hubMode ?? "home")}</p><a href="${googleMapsUrl(device.lat, device.lon)}" target="_blank" rel="noopener noreferrer">${formatMapCoordinates(device.lat, device.lon)}</a><p>${escapeHtml(device.source ?? "")}</p><p>Wi-Fi: ${device.rssi ?? "—"} dBm</p></div>`;
-  }
+  const isHub = device.entity === "hub";
   const transport = transportPresentation(device.ingestPath);
   const signalMeasurements = device.rssi === null || device.snr === null ? "Not reported" : `${device.rssi} dBm / ${device.snr} dB`;
-  const signal = `${signalMeasurements} · ${transport.badge}`;
+  const signal = isHub ? `Wi-Fi ${device.rssi == null ? "not connected" : `${device.rssi} dBm`}` : `${signalMeasurements} · ${transport.badge}`;
   const battery = device.batteryPercent === undefined || device.batteryPercent === null ? `${(device.batt / 1000).toFixed(2)} V` : `${device.batteryPercent}%`;
   const source = device.source ? `<span class="label">Source</span><span class="value">${escapeHtml(device.source)}</span>` : "";
   const coordinates = formatMapCoordinates(device.lat, device.lon);
   const mapsUrl = googleMapsUrl(device.lat, device.lon);
-  const actions = readOnly ? "" : `<div class="card-actions popup-actions"><button class="btn-action btn-jump" data-map-action="jump" data-device-id="${device.id}">↗ Jump To</button><button class="btn-action btn-follow" data-map-action="follow" data-device-id="${device.id}">● Follow</button><button class="btn-action btn-trail" data-map-action="trail" data-device-id="${device.id}">⌁ Trail</button><button class="btn-action btn-find" data-map-action="find" data-device-id="${device.id}">♟ Find Alert</button><button class="btn-action btn-cmd" data-map-action="command" data-device-id="${device.id}">⌘ Cmd</button></div>`;
-  return `<div class="popup-content"><div class="popup-header">${avatarHtml(avatar, "popup-avatar")}<strong>${name}</strong><span class="card-status status-${device.status.toLowerCase()}" style="margin-left:6px;font-size:10px">${device.status}</span></div><div class="popup-grid"><span class="label">Coordinates</span><span class="value"><a class="card-coords card-coords-link" href="${mapsUrl}" target="_blank" rel="noopener noreferrer" title="Open this location in Google Maps">${coordinates}</a></span><span class="label">Signal</span><span class="value">${signal}</span><span class="label">Battery</span><span class="value">${battery}</span><span class="label">Profile</span><span class="value">${escapeHtml(device.profile)}</span>${source}</div>${actions}</div>`;
+  const actions = readOnly ? "" : `<div class="card-actions popup-actions"><button class="btn-action btn-jump" data-map-action="jump" data-device-id="${device.id}">↗ Jump To</button><button class="btn-action btn-follow" data-map-action="follow" data-device-id="${device.id}">● Follow</button><button class="btn-action btn-trail" data-map-action="trail" data-device-id="${device.id}">⌁ Trail</button>${isHub ? "" : `<button class="btn-action btn-find" data-map-action="find" data-device-id="${device.id}">♟ Find Alert</button><button class="btn-action btn-cmd" data-map-action="command" data-device-id="${device.id}">⌘ Cmd</button>`}</div>`;
+  return `<div class="popup-content"><div class="popup-header">${avatarHtml(avatar, "popup-avatar")}<strong>${name}</strong><span class="card-status status-${device.status.toLowerCase()}" style="margin-left:6px;font-size:10px">${isHub ? (device.hubMode === "home" ? "Home" : device.hubMode === "portable" ? "Portable" : "Off-Grid") : device.status}</span></div><div class="popup-grid"><span class="label">Coordinates</span><span class="value"><a class="card-coords card-coords-link" href="${mapsUrl}" target="_blank" rel="noopener noreferrer" title="Open this location in Google Maps">${coordinates}</a></span><span class="label">Signal</span><span class="value">${signal}</span>${isHub ? "" : `<span class="label">Battery</span><span class="value">${battery}</span><span class="label">Profile</span><span class="value">${escapeHtml(device.profile)}</span>`}${source}</div>${actions}</div>`;
 }
 
 function contextMenuHtml(point: L.LatLng) {

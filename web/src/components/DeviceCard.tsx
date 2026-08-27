@@ -1,5 +1,6 @@
 /* eslint-disable @next/next/no-img-element -- Tiny pre-sized emoji artwork is intentionally served directly from the picker CDN. */
-import { BatteryIndicator, BleProximity, HomeDistance, LastSeen, SignalIndicator } from "@/components/Indicators";
+import type { ReactNode } from "react";
+import { BatteryIndicator, BleProximity, HomeDistance, LastSeen, SignalIndicator, WifiIndicator } from "@/components/Indicators";
 import { emojiImageUrl } from "@/lib/emoji";
 import { formatMapCoordinates, googleMapsUrl } from "@/lib/mapLocation";
 import type { DeviceAction, DeviceAvatar, TelemetryDevice } from "@/types/telemetry";
@@ -12,7 +13,7 @@ const STATUS = {
   error: { emoji: "❓", label: "Error", css: "status-error" },
 };
 
-interface DeviceCardProps {
+export interface DeviceCardProps {
   device: TelemetryDevice;
   avatar: DeviceAvatar;
   expanded: boolean;
@@ -36,11 +37,18 @@ interface DeviceCardProps {
   onReportLog: () => void;
   onReportExport: () => void;
   onAvatarEdit?: () => void;
+  hubDetails?: ReactNode;
+  hubActions?: ReactNode;
+  hubFooter?: ReactNode;
 }
 
 export function DeviceCard(props: DeviceCardProps) {
   const { device, avatar, expanded, dragging, dragOver, followed, trailVisible, portableMode, distance, ageSeconds, onExpand, onAction, onDragStart, onDragOver, onDrop, onDragEnd, onPinTop, onReportLog, onReportExport, onAvatarEdit } = props;
-  const status = STATUS[device.status.toLowerCase() as keyof typeof STATUS] ?? STATUS.error;
+  const isHub = device.entity === "hub";
+  const hasGps = !isHub || device.hasGps;
+  const status = isHub
+    ? { emoji: device.hubMode === "home" ? "🏡" : "📱", label: device.hubMode === "home" ? "Home" : device.hubMode === "portable" ? "Portable" : "Off-Grid", css: device.hubMode === "home" ? "status-home" : "status-out" }
+    : STATUS[device.status.toLowerCase() as keyof typeof STATUS] ?? STATUS.error;
   const profileLower = device.profile.toLowerCase();
   const profileClass = `profile-${profileLower.replace("save", "").replaceAll(" ", "-")}`;
   const profileLabel = profileLower === "powersave" ? "💤 PowerSave" : profileLower === "debug" ? "🧪 Debug" : device.profile;
@@ -120,17 +128,17 @@ export function DeviceCard(props: DeviceCardProps) {
           <div className="card-name-row">
             <span className="card-name">{device.name}</span>
             <span className={`card-status ${status.css}`}>{status.emoji} {status.label}</span>
-            <span className={`card-profile ${profileClass}`}>{profileLabel}</span>
-            {reportedFault && <span className="error-badge" title="A fault is indicated in the collar's latest available report. This is separate from Lost Alert.">Reported fault</span>}
+            {!isHub && <span className={`card-profile ${profileClass}`}>{profileLabel}</span>}
+            {!isHub && reportedFault && <span className="error-badge" title="A fault is indicated in the collar's latest available report. This is separate from Lost Alert.">Reported fault</span>}
           </div>
           <div className="card-indicators">
-            <span className="card-indicator-group"><BatteryIndicator millivolts={device.batt} percent={device.batteryPercent} /></span>
-            <span className="card-indicator-group"><SignalIndicator rssi={device.rssi} snr={device.snr} ingestPath={device.ingestPath} /></span>
-            {(props.awakeSeconds ?? 0) > 0 && <span className="collar-awake" title="Fresh packet received — expected ten-second command receive window, not guaranteed delivery" aria-label={`Collar recently heard; ${props.awakeSeconds} seconds remaining`}>💡</span>}
-            {portableMode && <span className="card-indicator-group"><BleProximity rssi={device.rssi === null ? null : device.rssi + 28} /></span>}
+            {!isHub && <span className="card-indicator-group"><BatteryIndicator millivolts={device.batt} percent={device.batteryPercent} /></span>}
+            <span className="card-indicator-group">{isHub ? <WifiIndicator rssi={device.rssi} /> : <SignalIndicator rssi={device.rssi} snr={device.snr} ingestPath={device.ingestPath} />}</span>
+            {!isHub && (props.awakeSeconds ?? 0) > 0 && <span className="collar-awake" title="Fresh packet received — expected ten-second command receive window, not guaranteed delivery" aria-label={`Collar recently heard; ${props.awakeSeconds} seconds remaining`}>💡</span>}
+            {!isHub && portableMode && <span className="card-indicator-group"><BleProximity rssi={device.rssi === null ? null : device.rssi + 28} /></span>}
           </div>
           <div className="card-indicators card-indicators-row3">
-            <HomeDistance>{distance}</HomeDistance>
+            {!isHub && <HomeDistance>{distance}</HomeDistance>}
             <LastSeen>{lastSeen}</LastSeen>
           </div>
         </div>
@@ -143,22 +151,24 @@ export function DeviceCard(props: DeviceCardProps) {
             <div className="card-grid">
               <span className="label">Coordinates</span>
               <span className="value">
-                <a className="card-coords card-coords-link" href={googleMapsUrl(device.lat, device.lon)} target="_blank" rel="noopener noreferrer">
+                {hasGps ? <a className="card-coords card-coords-link" href={googleMapsUrl(device.lat, device.lon)} target="_blank" rel="noopener noreferrer">
                   {formatMapCoordinates(device.lat, device.lon)}
-                </a>
+                </a> : "Waiting for GPS fix"}
               </span>
-              <span className="label">Power Profile</span><span className="value">{device.profile}</span>
-              <span className="label">Dist From Hub</span><span className="value">{distance}</span>
+              {!isHub && <><span className="label">Power Profile</span><span className="value">{device.profile}</span>
+              <span className="label">Dist From Hub</span><span className="value">{distance}</span></>}
+              {isHub && props.hubDetails}
               <span className="label">Last seen</span><span className="value">{formatAge(ageSeconds)}</span>
             </div>
-            <ActionButtons followed={followed} trailVisible={trailVisible} onAction={onAction} />
-            {props.commandFeedback && <div role="status" className={`command-feedback ${props.commandFeedback.pending ? "pending" : props.commandFeedback.status}`}>{props.commandFeedback.text}</div>}
-            <div className="log-btn-row">
+            <ActionButtons followed={followed} trailVisible={trailVisible} onAction={onAction} collarControls={!isHub} hasGps={hasGps} extra={props.hubActions} />
+            {!isHub && props.commandFeedback && <div role="status" className={`command-feedback ${props.commandFeedback.pending ? "pending" : props.commandFeedback.status}`}>{props.commandFeedback.text}</div>}
+            {!isHub && <div className="log-btn-row">
               <button className="btn-device-log btn-secondary" type="button" onClick={onReportLog}>Message Log</button>
               <button className="btn-log-export" type="button" title="Export report log as CSV" aria-label="Export report log" onClick={onReportExport}>
                 <DownloadIcon />
               </button>
-            </div>
+            </div>}
+            {isHub && props.hubFooter}
           </div>
         </div>
       </div>
@@ -166,14 +176,15 @@ export function DeviceCard(props: DeviceCardProps) {
   );
 }
 
-export function ActionButtons({ followed, trailVisible, onAction }: { followed: boolean; trailVisible: boolean; onAction: (action: DeviceAction) => void }) {
+export function ActionButtons({ followed, trailVisible, onAction, collarControls = true, hasGps = true, extra }: { followed: boolean; trailVisible: boolean; onAction: (action: DeviceAction) => void; collarControls?: boolean; hasGps?: boolean; extra?: ReactNode }) {
   return (
     <div className="card-actions" onClick={(event) => event.stopPropagation()}>
-      <button className="btn-action btn-jump" onClick={() => onAction("jump")} title="Jump to location">↗ Jump To</button>
+      <button className="btn-action btn-jump" disabled={!hasGps} onClick={() => onAction("jump")} title="Jump to location">↗ Jump To</button>
       <button className={`btn-action btn-follow${followed ? " active" : ""}`} onClick={() => onAction("follow")} title="Auto-follow on map">● {followed ? "Following" : "Follow"}</button>
       <button className={`btn-action btn-trail${trailVisible ? " active" : ""}`} onClick={() => onAction("trail")} title="Toggle breadcrumb trail">⌁ Trail</button>
-      <button className="btn-action btn-find" onClick={() => onAction("find")} title="Find Alert — trigger buzzer + LED">♟ Find Alert</button>
-      <button className="btn-action btn-cmd" onClick={() => onAction("command")} title="Command & Control">⌘ Cmd</button>
+      {collarControls && <><button className="btn-action btn-find" onClick={() => onAction("find")} title="Find Alert — trigger buzzer + LED">♟ Find Alert</button>
+      <button className="btn-action btn-cmd" onClick={() => onAction("command")} title="Command & Control">⌘ Cmd</button></>}
+      {extra}
     </div>
   );
 }

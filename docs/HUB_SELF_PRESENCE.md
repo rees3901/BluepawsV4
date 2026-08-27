@@ -2,7 +2,8 @@
 
 ## Behaviour
 
-- Cloud and local dashboards show a separate Home Hub card and map marker.
+- Cloud and local dashboards include the Home Hub in the same device-card and
+  map-marker renderers as collars, with capability-specific fields/actions.
 - Defaults: 🏡 Home; 📱 Portable and Off-Grid. Users can edit the name, each
   mode's emoji, and border colour. Hub appearance is separate from collar IDs.
 - Cloud edits are Family owner/member-only. Local edits use the hub's existing
@@ -17,8 +18,33 @@
   of collar traffic, in the existing cloud task. Network failure/busy HTTP work
   can delay it; it is not a real-time deadline.
 - The cloud UI polls hub status every ten seconds; local UI polls every five.
-  The hub card dims after three minutes without cloud reports (15 seconds without
-  local API responses). Collar stale rules are unchanged.
+  Hub and collar cards share the ten-minute stale/dimmed styling. Hub age uses
+  the last cloud self-report or successful local API response; failed polls do
+  not refresh it. GPS fix age remains separate from contact age.
+
+## Shared device presentation
+
+The cloud `HubCard` is a settings/data adapter around `DeviceCard`, not a separate
+card layout. Hubs participate in the same drag ordering, pin-to-top, four-card
+expansion limit, avatar expansion, Jump, Follow and Trail controls. The local
+dashboard likewise routes hub data through its existing `updateDevice`,
+`renderDeviceCard` and marker/popup functions.
+
+Hub cards show their communications mode, Wi-Fi signal, last contact, coordinates,
+GPS fix age/time and Home beacon state. Collar-only power profile, battery,
+command receive indicator and collar commands are omitted. Bluetooth preference
+and editable name/mode emojis/colour retain the hub-specific persistence path.
+Collar message-log endpoints are not queried for hubs; hub trails currently build
+from observed live fixes in the browser session, not collar history.
+
+Negative browser-only hub keys avoid collisions with collar IDs. They never
+change the actual gateway ID or enter collar command/history APIs. A hub without
+its own GPS fix keeps its card but has no map marker and a disabled Jump control;
+adapter placeholder coordinates must never place it at 0,0.
+
+The shared-card refactor requires the web deployment and updated hub public
+assets only, with no new database migration or ingestion deployment. Preserve
+existing hub journals/config when updating those assets.
 
 ## Position integrity
 
