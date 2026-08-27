@@ -6,7 +6,7 @@ This document locks the first production-shaped command-routing model for collar
 
 Collars are not directly addressable servers. They sleep, they do not have stable public IP addresses, and they may sit behind carrier NAT. Commands are therefore routed by `device_id`, not by IP address.
 
-The backend stores pending commands for a collar for up to one hour. A command can only be delivered when the collar creates a delivery opportunity by waking and checking in. Queueing is therefore immediate, while radio delivery is opportunistic and retryable.
+New dashboard power-profile commands expire after ten minutes. The generic database queue retains its existing one-hour default for other callers; the dashboard explicitly requests ten minutes. A command can only be delivered when the collar creates a delivery opportunity by waking and checking in. Queueing is therefore immediate, while radio delivery is opportunistic and retryable.
 
 ```text
 User or system queues command for device 1001
@@ -132,7 +132,7 @@ sent
 failed
 ```
 
-Customer power-profile commands expire one hour after creation. Queueing a newer profile command for the same collar cancels any older unacknowledged profile command so a stale selection cannot be applied later.
+New customer power-profile commands expire ten minutes after creation. The local Home Hub also expires its commands after ten minutes and respects an earlier cloud expiry. Queueing a newer profile command for the same collar cancels any older unacknowledged profile command so a stale selection cannot be applied later. Per-card feedback disappears fifteen minutes after submission, not fifteen minutes after expiry. See [Collar UI feedback](COLLAR_UI_FEEDBACK.md) for source and freshness rules.
 
 ## Security notes
 

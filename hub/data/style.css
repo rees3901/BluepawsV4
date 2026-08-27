@@ -109,7 +109,7 @@ body {
     font-weight: 700;
     padding: 2px 5px;
     border-radius: 5px;
-    white-space: nowrap;
+    white-space: normal;
 }
 .verification-badge.pending { color: #ffd77a; background: rgba(173,112,0,.25); }
 .verification-badge.rejected { color: #ff9da8; background: rgba(180,35,55,.25); }
@@ -332,6 +332,8 @@ body.panel-open .hamburger-btn {
 }
 
 .card-name {
+    flex: 1 0 100%;
+    max-width: 100%;
     font-weight: 600;
     font-size: 0.95rem;
     white-space: nowrap;
@@ -341,6 +343,7 @@ body.panel-open .hamburger-btn {
 
 .card-name-row {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 6px;
 }
@@ -437,6 +440,14 @@ body.panel-open .hamburger-btn {
 .card-profile.profile-power     { background: var(--accent);   color: #fff; }
 .card-profile.profile-active    { background: var(--warning);  color: #000; }
 .card-profile.profile-lost      { background: var(--danger);   color: #fff; }
+.collar-awake { color: #f5d87b; white-space: nowrap; font-size: 12px; }
+.collar-awake[hidden], .command-feedback[hidden] { display: none !important; }
+.command-feedback { margin: 7px 0; font-size: 12px; line-height: 1.5; color: var(--text-muted); overflow-wrap: anywhere; }
+.command-feedback.pending { color: #78caff; animation: command-wait 4s ease-in-out infinite; }
+.command-feedback.acked { color: #65db9b; }
+.command-feedback.expired, .command-feedback.failed, .command-feedback.superseded { color: #91a3b3; }
+@keyframes command-wait { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
+@media (prefers-reduced-motion: reduce) { .command-feedback.pending { animation: none; } }
 .card-profile.profile-debug     { background: #7c3aed;         color: #fff; }
 
 .card-coords {

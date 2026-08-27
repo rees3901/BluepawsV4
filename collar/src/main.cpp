@@ -1171,9 +1171,7 @@ static void sendTelemetryWithReason(uint8_t txReason) {
     // Keep embedded optional TLVs sparse until the production telemetry set is
     // finalized. Header fields carry status/profile/location/battery.
     pkt_add_tlv_u32(buf, TLV_UPTIME_S, millis() / 1000);
-    if (lastError != BP_ERROR_NONE) {
-        pkt_add_tlv_u8(buf, TLV_RESET_REASON, lastError);
-    }
+    // ERROR_PRESENT reports a fault. TLV 0x06 describes a reset, not a fault.
 
     uint8_t pktLen = finalizeAuthenticatedPacket(buf);
 
@@ -1284,9 +1282,7 @@ static void sendWakeCheckin() {
     pkt_set_sat_count(buf, 255);
 
     pkt_add_tlv_u32(buf, TLV_UPTIME_S, millis() / 1000);
-    if (lastError != BP_ERROR_NONE) {
-        pkt_add_tlv_u8(buf, TLV_RESET_REASON, lastError);
-    }
+    // Do not encode a runtime fault as a reset-reason TLV.
 
     uint8_t pktLen = finalizeAuthenticatedPacket(buf);
 

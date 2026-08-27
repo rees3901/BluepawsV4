@@ -3,6 +3,7 @@ import { BatteryIndicator, BleProximity, HomeDistance, LastSeen, SignalIndicator
 import { emojiImageUrl } from "@/lib/emoji";
 import { formatMapCoordinates, googleMapsUrl } from "@/lib/mapLocation";
 import type { DeviceAction, DeviceAvatar, TelemetryDevice } from "@/types/telemetry";
+import type { commandMessage } from "@/lib/collarFeedback";
 
 const STATUS = {
   home: { emoji: "🏠", label: "Home", css: "status-home" },
@@ -22,6 +23,9 @@ interface DeviceCardProps {
   portableMode: boolean;
   distance: string;
   ageSeconds: number;
+  awakeSeconds?: number;
+  commandFeedback?: ReturnType<typeof commandMessage>;
+  reportedFlags?: number | null;
   onExpand: () => void;
   onAction: (action: DeviceAction) => void;
   onDragStart: () => void;
@@ -41,6 +45,9 @@ export function DeviceCard(props: DeviceCardProps) {
   const profileClass = `profile-${profileLower.replace("save", "").replaceAll(" ", "-")}`;
   const profileLabel = profileLower === "powersave" ? "💤 PowerSave" : profileLower === "debug" ? "🧪 Debug" : device.profile;
   const lastSeen = formatLastSeen(ageSeconds);
+  // A recent no-GNSS report may supersede the flags on the last GPS position.
+  // Neither Lost status nor Lost Alert profile constitutes a hardware fault.
+  const reportedFault = props.reportedFlags == null ? device.error !== "None" : (props.reportedFlags & 0x80) !== 0;
 
   return (
     <article
@@ -114,7 +121,7 @@ export function DeviceCard(props: DeviceCardProps) {
             <span className="card-name">{device.name}</span>
             <span className={`card-status ${status.css}`}>{status.emoji} {status.label}</span>
             <span className={`card-profile ${profileClass}`}>{profileLabel}</span>
-            {device.error !== "None" && <span className="error-badge">{device.error}</span>}
+            {reportedFault && <span className="error-badge" title="A fault is indicated in the collar's latest available report. This is separate from Lost Alert.">Reported fault</span>}
           </div>
           <div className="card-indicators">
             <span className="card-indicator-group"><BatteryIndicator millivolts={device.batt} percent={device.batteryPercent} /></span>
@@ -124,6 +131,7 @@ export function DeviceCard(props: DeviceCardProps) {
           <div className="card-indicators card-indicators-row3">
             <HomeDistance>{distance}</HomeDistance>
             <LastSeen>{lastSeen}</LastSeen>
+            {(props.awakeSeconds ?? 0) > 0 && <span className="collar-awake" title="Recently heard — expected receive window, not a guarantee of connectivity" aria-label={`Recently heard; expected receive window ${props.awakeSeconds} seconds`}>💡 {props.awakeSeconds}s</span>}
           </div>
         </div>
         <span className="card-chevron">{expanded ? "▲" : "▼"}</span>
@@ -144,6 +152,7 @@ export function DeviceCard(props: DeviceCardProps) {
               <span className="label">Last seen</span><span className="value">{formatAge(ageSeconds)}</span>
             </div>
             <ActionButtons followed={followed} trailVisible={trailVisible} onAction={onAction} />
+            {props.commandFeedback && <div role="status" className={`command-feedback ${props.commandFeedback.pending ? "pending" : props.commandFeedback.status}`}>{props.commandFeedback.text}</div>}
             <div className="log-btn-row">
               <button className="btn-device-log btn-secondary" type="button" onClick={onReportLog}>Message Log</button>
               <button className="btn-log-export" type="button" title="Export report log as CSV" aria-label="Export report log" onClick={onReportExport}>

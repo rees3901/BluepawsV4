@@ -21,7 +21,7 @@ export async function queuePowerProfileCommand(deviceId: number, profile: Custom
     requested_device_id: deviceId,
     requested_command_type: "set_profile",
     requested_payload: { profile },
-    requested_expires_in: "01:00:00",
+    requested_expires_in: "00:10:00",
   });
 
   if (error) throw new Error(error.message || "Unable to queue collar command");
