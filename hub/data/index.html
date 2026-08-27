@@ -69,11 +69,20 @@
             <div id="provisioningFields" class="hidden">
             <div class="form-group">
                 <label>WiFi SSID</label>
-                <input type="text" id="cfgSSID" placeholder="Home network name">
+                <input type="text" id="cfgSSID" placeholder="Home network name (blank keeps existing)">
             </div>
             <div class="form-group">
                 <label>WiFi Password</label>
                 <input type="password" id="cfgPass" placeholder="Password">
+            </div>
+            <div class="form-group">
+                <label for="cfgSecondarySSID">Secondary WiFi SSID (phone hotspot)</label>
+                <input type="text" id="cfgSecondarySSID" maxlength="32" placeholder="Blank keeps existing secondary network">
+            </div>
+            <div class="form-group">
+                <label for="cfgSecondaryPass">Secondary WiFi Password</label>
+                <input type="password" id="cfgSecondaryPass" maxlength="63" placeholder="Blank for an open network">
+                <label><input type="checkbox" id="cfgClearSecondary"> Remove saved secondary network</label>
             </div>
             <div class="form-group">
                 <label>Cloud Endpoint</label>
@@ -87,7 +96,7 @@
                     <button id="btnPortableMode" class="mode-btn">Portable Locator</button>
                     <button id="btnOffGridMode" class="mode-btn">Off-Grid</button>
                 </div>
-                <small class="form-hint">Portable mode stops the home beacon and scans for collar BLE signals.</small>
+                <small class="form-hint">If WiFi drops, the hub tries primary and secondary networks for 30 seconds total, then opens its Off-Grid hotspot. Leaving Off-Grid requires confirmation. Portable uses the secondary network and scans for collar BLE signals.</small>
             </div>
             <div class="form-group" id="localPinGroup">
                 <label>Optional Off-Grid command PIN</label>

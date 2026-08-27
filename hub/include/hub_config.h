@@ -22,6 +22,14 @@
 #define WIFI_STA_PASS ""
 #endif
 
+// Optional phone hotspot / secondary uplink. Never commit real passwords.
+#ifndef WIFI_SECONDARY_SSID
+#define WIFI_SECONDARY_SSID ""
+#endif
+#ifndef WIFI_SECONDARY_PASS
+#define WIFI_SECONDARY_PASS ""
+#endif
+
 // Supabase Edge Function endpoint. This URL is public; device/gateway bearer
 // credentials remain secret and should be configured locally or via the hub UI.
 #ifndef CLOUD_ENDPOINT

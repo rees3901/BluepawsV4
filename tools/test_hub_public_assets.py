@@ -27,7 +27,7 @@ class PublicAssetTests(unittest.TestCase):
             '// Catch-all handler', 1)[0]
         guard = '!hubProvisioningMode || hubCommProfile == HUB_COMM_OFF_GRID'
         self.assertIn(guard, handler)
-        self.assertLess(handler.index(guard), handler.index('LittleFS.open'))
+        self.assertLess(handler.index(guard), handler.index('saveHubConfigToFlash'))
         self.assertIn('httpServer.send(403', handler)
 
     def test_settings_start_hidden_and_hidden_class_actually_hides(self):
@@ -44,6 +44,37 @@ class PublicAssetTests(unittest.TestCase):
         self.assertIn('getPostField(body, "mode")', handler)
         self.assertNotIn('body.indexOf("mode=', handler)
         self.assertIn('getPostField(body, "confirm") != "true"', handler)
+        self.assertIn('requestHubMode(', handler)
+        self.assertNotIn('WiFi.', handler)
+        self.assertIn('httpServer.send(202', handler)
+
+    def test_network_task_owns_reconnect_and_dns(self):
+        source = (ROOT / 'hub/src/main.cpp').read_text(encoding='utf-8')
+        web = source.split('static void webTask(void *param) {', 1)[1].split(
+            'static void consoleTask(void *param) {', 1)[0]
+        self.assertNotIn('WiFi.begin', web)
+        self.assertNotIn('captiveDns.processNextRequest', web)
+        self.assertLess(web.index('while (!networkStackReady)'), web.index('initWebServer()'))
+        network = source.split('static void networkTask(void *param) {', 1)[1].split(
+            'static void initBLE()', 1)[0]
+        self.assertIn('WiFi.setAutoReconnect(false)', network)
+        self.assertIn('WiFi.softAPgetStationNum() > 0', network)
+        self.assertIn('!busy && now - lastScan >= 60000', network)
+        self.assertIn('pending.confirmed', network)
+        self.assertIn('captiveDns.processNextRequest()', network)
+        self.assertNotIn('syncHubClock(', network)
+        self.assertIn('false, MAX_SSE_CLIENTS', source)
+        self.assertNotIn('WiFi.setSleep(false)', source)
+        self.assertIn('WiFi.setSleep(true)', network)
+
+    def test_secondary_credentials_persist_without_public_exposure(self):
+        source = (ROOT / 'hub/src/main.cpp').read_text(encoding='utf-8')
+        self.assertIn('key == "secondary_ssid"', source)
+        self.assertIn('key == "secondary_pass"', source)
+        self.assertIn('f.printf("secondary_pass=', source)
+        status = source.split('static void handleApiStatus() {', 1)[1].split('static String getPostField', 1)[0]
+        self.assertNotIn('secondaryPass', status)
+        self.assertNotIn('staPass', status)
 
 
 if __name__ == '__main__':
