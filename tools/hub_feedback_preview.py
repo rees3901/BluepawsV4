@@ -12,6 +12,10 @@ import time
 ASSETS = Path(__file__).resolve().parents[1] / 'hub' / 'data'
 START = time.monotonic()
 COMMANDS = []
+HUB = dict(format='hub_status',ingest_path='hub_self',gateway_guid16='0010',mode='home',
+           latitude=51.907,longitude=-2.240,fix_age_s=3,uptime_s=1000,free_heap=150000,
+           wifi_rssi_dbm=-40,ble_enabled=True,ble_advertising=True,
+           display_name='Home Hub · UI test',home_emoji='🏡',portable_emoji='📱',marker_colour='#38bdf8')
 
 
 def device():
@@ -68,6 +72,7 @@ class Handler(BaseHTTPRequestHandler):
                     time.sleep(1)
             except (BrokenPipeError,ConnectionResetError):
                 pass
+        elif path == '/api/hub-presence': self.send(HUB)
         elif path == '/api/devices': self.send([device()])
         elif path == '/api/commands': self.send(commands())
         elif path == '/api/status': self.send(dict(mode='off_grid',hubMode='off_grid',staConnected=False,apEnabled=True,apIP='192.168.4.1',freeHeap=150000,uptime=10,devices=1,rxCount=2,txCount=1))
@@ -81,6 +86,11 @@ class Handler(BaseHTTPRequestHandler):
             self.send(file.read_bytes(),(mimetypes.guess_type(str(file))[0] or 'text/plain')+'; charset=utf-8')
 
     def do_POST(self):
+        if self.path == '/api/hub-preferences':
+            HUB.update(json.loads(self.rfile.read(int(self.headers['Content-Length']))))
+            HUB['ble_advertising']=HUB['ble_enabled']
+            self.send(dict(accepted=True))
+            return
         if self.path != '/api/command': self.send_error(404); return
         form=parse_qs(self.rfile.read(int(self.headers['Content-Length'])).decode())
         COMMANDS.append(dict(device=1001, seq=len(COMMANDS)+1,

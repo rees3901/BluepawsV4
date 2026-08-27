@@ -445,6 +445,9 @@ export default function TrackingMap(props: TrackingMapProps) {
 
 function popupHtml(device: TelemetryDevice, avatar: DeviceAvatar, readOnly = false) {
   const name = escapeHtml(device.name);
+  if (device.entity === "hub") {
+    return `<div class="popup-content"><div class="popup-header">${avatarHtml(avatar, "popup-avatar")}<strong>${name}</strong></div><p>Home Hub · ${escapeHtml(device.hubMode ?? "home")}</p><a href="${googleMapsUrl(device.lat, device.lon)}" target="_blank" rel="noopener noreferrer">${formatMapCoordinates(device.lat, device.lon)}</a><p>${escapeHtml(device.source ?? "")}</p><p>Wi-Fi: ${device.rssi ?? "—"} dBm</p></div>`;
+  }
   const transport = transportPresentation(device.ingestPath);
   const signalMeasurements = device.rssi === null || device.snr === null ? "Not reported" : `${device.rssi} dBm / ${device.snr} dB`;
   const signal = `${signalMeasurements} · ${transport.badge}`;

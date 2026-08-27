@@ -126,12 +126,12 @@ export function DeviceCard(props: DeviceCardProps) {
           <div className="card-indicators">
             <span className="card-indicator-group"><BatteryIndicator millivolts={device.batt} percent={device.batteryPercent} /></span>
             <span className="card-indicator-group"><SignalIndicator rssi={device.rssi} snr={device.snr} ingestPath={device.ingestPath} /></span>
+            {(props.awakeSeconds ?? 0) > 0 && <span className="collar-awake" title="Fresh packet received — expected ten-second command receive window, not guaranteed delivery" aria-label={`Collar recently heard; ${props.awakeSeconds} seconds remaining`}>💡</span>}
             {portableMode && <span className="card-indicator-group"><BleProximity rssi={device.rssi === null ? null : device.rssi + 28} /></span>}
           </div>
           <div className="card-indicators card-indicators-row3">
             <HomeDistance>{distance}</HomeDistance>
             <LastSeen>{lastSeen}</LastSeen>
-            {(props.awakeSeconds ?? 0) > 0 && <span className="collar-awake" title="Recently heard — expected receive window, not a guarantee of connectivity" aria-label={`Recently heard; expected receive window ${props.awakeSeconds} seconds`}>💡 {props.awakeSeconds}s</span>}
           </div>
         </div>
         <span className="card-chevron">{expanded ? "▲" : "▼"}</span>

@@ -4,6 +4,8 @@ export type TelemetryError = "None" | "GPS" | "RF" | "Cellular" | "Module";
 export type IngestPath = "cellular_direct" | "lora_hub";
 
 export interface TelemetryDevice {
+  entity?: "hub";
+  hubMode?: "home" | "portable" | "off_grid";
   id: number;
   name: string;
   seq: number;
