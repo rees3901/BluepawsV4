@@ -556,9 +556,11 @@
             }
         });
 
-        // "heartbeat" events are empty — just prove the connection is alive
-        evtSource.addEventListener('heartbeat', function () {
+        // Heartbeats also carry automatic Wi-Fi/mode transitions.
+        evtSource.addEventListener('heartbeat', function (e) {
             resetHeartbeatWatchdog();
+            try { syncHubModeState(JSON.parse(e.data)); } catch (err) { /* older firmware */ }
+            if (!document.getElementById('settingsModal').classList.contains('hidden')) refreshHubStatus();
         });
 
         evtSource.addEventListener('verification', function (e) {
@@ -610,6 +612,7 @@
     }
 
     function fetchDeviceSnapshot() {
+        refreshHubStatus(); // also recover mode state for clients using polling
         return fetch('/api/devices').then(function (r) { return r.json(); })
             .then(function (items) { items.forEach(updateDevice); });
     }
@@ -1343,17 +1346,38 @@
         var pass = document.getElementById('cfgPass').value;
         var btn = document.getElementById('btnSaveConfig');
         // SSID: 1-32 chars, printable ASCII. Password: 8-63 chars (WPA2 spec) or empty (open network).
-        var ssidValid = ssid.length >= 1 && ssid.length <= 32 && /^[\x20-\x7E]+$/.test(ssid);
+        var ssidValid = !ssid.length || (ssid.length <= 32 && /^[\x20-\x7E]+$/.test(ssid));
         var passValid = pass.length === 0 || (pass.length >= 8 && pass.length <= 63);
-        btn.disabled = !(ssidValid && passValid);
+        var secondary = document.getElementById('cfgSecondarySSID').value;
+        var secondaryPass = document.getElementById('cfgSecondaryPass').value;
+        var secondaryValid = secondary.length <= 32 && (!secondaryPass.length || (secondaryPass.length >= 8 && secondaryPass.length <= 63));
+        btn.disabled = !(ssidValid && passValid && secondaryValid);
     }
 
     function openSettings() {
         document.getElementById('settingsModal').classList.remove('hidden');
         validateConfigForm();  // Set initial button state
+        refreshHubStatus();
+    }
 
+    function syncHubModeState(s) {
+        if (['home', 'portable', 'off_grid'].indexOf(s.hubMode) === -1) return;
+        if (hubMode === 'off_grid' && s.hubMode !== 'off_grid') {
+            localSessionToken = '';
+            sessionStorage.removeItem('bluepawsLocalSession');
+        }
+        hubMode = s.hubMode;
+        hubPortableMode = hubMode !== 'home';
+        updateHubModeUI();
+        if (hubPortableMode && !blePollingTimer) startBlePolling();
+        if (!hubPortableMode && blePollingTimer) stopBlePolling();
+        document.getElementById('connectionAvailable').classList.toggle(
+            'hidden', !(hubMode === 'off_grid' && s.known_wifi_available));
+    }
+
+    function refreshHubStatus() {
         // Fetch hub status to display diagnostics in the modal
-        fetch('/api/status')
+        return fetch('/api/status')
             .then(function (r) { return r.json(); })
             .then(function (s) {
                 var provisioning = s.provisioning_mode === true && s.hubMode !== 'off_grid';
@@ -1368,14 +1392,14 @@
                     'Log entries: ' + s.logEntries + '<br>' +
                     'Free heap: ' + (s.freeHeap / 1024).toFixed(1) + ' KB<br>' +
                     'WiFi STA: ' + (s.staConnected ? s.staIP : 'Not connected') + '<br>' +
-                    'AP IP: ' + s.apIP;
+                    'Network: ' + (s.network_phase || 'Unknown') + '<br>' +
+                    'Recovery remaining: ' + Math.ceil((s.recovery_remaining_ms || 0) / 1000) + ' s<br>' +
+                    'AP IP: ' + s.apIP + '<br>' +
+                    'AP clients: ' + (s.ap_clients || 0) + ' / 8 · channel ' + (s.ap_channel || '—') + '<br>' +
+                    'AP start failures: ' + (s.ap_start_failures || 0) + '<br>' +
+                    'Network / web stack spare: ' + (s.network_stack_free || 0) + ' / ' + (s.web_stack_free || 0) + ' bytes';
                 // Sync hub mode state from server
-                hubMode = s.hubMode || 'home';
-                hubPortableMode = (hubMode === 'portable' || hubMode === 'off_grid');
-                updateHubModeUI();
-                if (hubPortableMode && !blePollingTimer) startBlePolling();
-                document.getElementById('connectionAvailable').classList.toggle(
-                    'hidden', !(hubMode === 'off_grid' && s.wifi_connected));
+                syncHubModeState(s);
             })
             .catch(function () {
                 document.getElementById('hubStatus').textContent = 'Failed to load status';
@@ -1394,6 +1418,9 @@
 
         var body = 'ssid=' + encodeURIComponent(ssid) +
                    '&pass=' + encodeURIComponent(pass) +
+                   '&secondary_ssid=' + encodeURIComponent(document.getElementById('cfgSecondarySSID').value) +
+                   '&secondary_pass=' + encodeURIComponent(document.getElementById('cfgSecondaryPass').value) +
+                   '&clear_secondary=' + document.getElementById('cfgClearSecondary').checked +
                    '&cloud_url=' + encodeURIComponent(cloud);
 
         fetch('/api/config', {
@@ -1424,6 +1451,12 @@
             body: 'mode=' + mode + (leavingOffGrid ? '&confirm=true' : '')
         }).then(function (r) { return r.json(); })
           .then(function (d) {
+              if (d.pending) {
+                  document.getElementById('hubStatus').textContent =
+                      'Switching network. Leaving Off-Grid disconnects this hotspot; join the selected Wi-Fi. If neither network connects, the hotspot returns after 30 seconds.';
+                  setTimeout(refreshHubStatus, 1000);
+                  return;
+              }
               if (!d.mode) throw new Error(d.error || 'Mode change failed');
               hubMode = d.mode;
               hubPortableMode = (hubMode === 'portable' || hubMode === 'off_grid');
@@ -1646,6 +1679,7 @@
     // fetches initial device list, and wires up all button handlers.
     // ═══════════════════════════════════════════════
     function init() {
+        refreshHubStatus();
         loadTheme();     // Restore dark/light preference from localStorage
         loadHubHome();   // Restore hub home position from localStorage
         initMap();       // Create Leaflet map with tile layers
@@ -1686,6 +1720,8 @@
         document.getElementById('btnDisableLocalPin').addEventListener('click', function () { setLocalPin(false); });
         document.getElementById('cfgSSID').addEventListener('input', validateConfigForm);
         document.getElementById('cfgPass').addEventListener('input', validateConfigForm);
+        document.getElementById('cfgSecondarySSID').addEventListener('input', validateConfigForm);
+        document.getElementById('cfgSecondaryPass').addEventListener('input', validateConfigForm);
         document.getElementById('btnSendCmd').addEventListener('click', sendCommand);
         document.getElementById('btnCloseCmd').addEventListener('click', closeCommand);
         document.getElementById('btnSendFind').addEventListener('click', sendFind);

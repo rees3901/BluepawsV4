@@ -12,9 +12,10 @@
   │                                                             │
   │  FreeRTOS Tasks (pinned to cores):                          │
   │    loraTask  (core 1, prio 3) — RX/TX LoRa packets         │
-  │    webTask   (core 0, prio 2) — HTTP server + SSE push      │
+  │    webTask   (core 1, prio 2) — HTTP server + SSE push      │
+  │    network   (core 0, prio 2) — Wi-Fi policy + captive DNS  │
   │    bleTask   (core 0, prio 1) — BLE home beacon advertising │
-  │    cloudTask (core 0, prio 2) — REST POST relay to cloud    │
+  │    cloudTask (core 0, prio 1) — REST POST relay to cloud    │
   │  Main loop() yields to scheduler (does nothing).            │
   └─────────────────────────────────────────────────────────────┘
 */
@@ -33,6 +34,8 @@
 #include <BLEAdvertising.h>
 #include <HTTPClient.h>      // HTTP client for cloud POST relay
 #include <esp_system.h>
+#include <esp_wifi.h>
+#include <atomic>
 #include <ArduinoJson.h>     // Parse pending commands returned by the Edge Function
 #include <time.h>
 
@@ -50,6 +53,7 @@
 #include "hub_pins.h"        // GPIO pin assignments for this board
 #include "offline_journal.h" // Crash-tolerant per-collar offline history
 #include "offline_access.h"  // RAM-only optional command PIN and sessions
+#include "wifi_failover.h"
 
 // ═══════════════════════════════════════════════
 // Configuration
@@ -81,13 +85,15 @@
 #define STACK_CLOUD  16384  // Cloud relay — HTTPS/TLS + HTTPClient need generous stack
 #define STACK_STORAGE 6144  // Asynchronous LittleFS journal writes
 #define STACK_CONSOLE 4096  // USB serial bench console
+#define STACK_NETWORK 6144  // Sole Wi-Fi/DNS owner; no TLS, flash or web handlers
 
 #define PRIO_LORA    3      // Highest — LoRa packets are time-sensitive
 #define PRIO_WEB     2      // Medium — serves the GUI
-#define PRIO_CLOUD   2      // Medium — cloud relay not urgent
+#define PRIO_CLOUD   1      // TLS/replay must yield to connectivity and radio work
 #define PRIO_STORAGE 2      // Medium — never block LoRa reception on flash
 #define PRIO_BLE     1      // Lowest — BLE beacon just needs to stay alive
 #define PRIO_CONSOLE 1      // Low — bench/debug command parser
+#define PRIO_NETWORK 2     // Well below ESP-IDF Wi-Fi/system task priorities
 
 #define LORA_RX_POLL_TIMEOUT_MS 250  // Short timed RX window; avoids relying solely on DIO1 ISR
 
@@ -191,39 +197,50 @@ static SemaphoreHandle_t pendingMutex = NULL;       // Protects pendingCmds arra
 static volatile TickType_t commandRxOpportunityUntil = 0;
 
 // ── WiFi / Cloud State ──
-static bool staConnected = false;             // true if connected to home router
+static std::atomic<bool> staConnected{false};
 static String staSSID = WIFI_STA_SSID;        // Current STA SSID (may be loaded from config file)
 static String staPass = WIFI_STA_PASS;        // Current STA password
+static String secondarySSID = WIFI_SECONDARY_SSID;
+static String secondaryPass = WIFI_SECONDARY_PASS;
 static String cloudEndpoint = CLOUD_ENDPOINT; // Cloud POST URL
 static String cloudToken = CLOUD_BEARER_TOKEN; // Gateway bearer token for Supabase Edge Function
 static bool hubProvisioningMode = HUB_PROVISIONING_MODE_DEFAULT;
-static bool hubApEnabled = false;
+static std::atomic<bool> hubApEnabled{false};
+static std::atomic<bool> homeBeaconAllowed{false};
+static std::atomic<bool> clearOfflineSessions{false};
+static std::atomic<bool> knownWifiAvailable{false};
+static std::atomic<bool> modeChangePending{false};
+static std::atomic<bool> networkStackReady{false};
+static std::atomic<WifiFailover::Phase> wifiPhase{WifiFailover::Phase::Idle};
+static std::atomic<uint32_t> wifiRecoveryRemainingMs{0};
+static std::atomic<uint32_t> apStartFailures{0};
+static bool captiveDnsRunning = false; // network task only
 static bool hubTimeSynced = false;
 static uint32_t lastNtpSyncMs = 0;
 
 // ── Hub Communications Profile ──
-// This is the user-selected operating profile. It must not flap merely because
-// WiFi, phone hotspot, or cloud reachability changes temporarily.
+// Connectivity selects Home/Portable, then latches Off-Grid after 30 seconds
+// without either configured uplink. Only a confirmed request leaves Off-Grid.
 enum hub_comm_profile_t : uint8_t {
     HUB_COMM_HOME = 0,       // Fixed at home, normal household WiFi/cloud path.
     HUB_COMM_PORTABLE = 1,   // User deliberately took the hub roaming; cloud is best-effort.
     HUB_COMM_OFF_GRID = 2,   // Local-only roaming/search mode; cloud relay intentionally disabled.
 };
 
-static hub_comm_profile_t hubCommProfile = HUB_COMM_HOME;
+static std::atomic<hub_comm_profile_t> hubCommProfile{HUB_COMM_HOME};
+struct network_request_t { hub_comm_profile_t profile; bool confirmed; uint32_t requestedAt; };
+static QueueHandle_t networkQueue = nullptr;
 
 struct hub_connectivity_t {
-    bool wifi_connected;
-    bool internet_reachable;       // Placeholder for future active internet probe.
-    bool cloud_reachable;
-    bool lora_rx_active;
-    uint32_t last_cloud_success_ms;
-    uint8_t cloud_failures;
+    std::atomic<bool> wifi_connected{false};
+    std::atomic<bool> internet_reachable{false}; // promoted by a successful cloud response
+    std::atomic<bool> cloud_reachable{false};
+    std::atomic<bool> lora_rx_active{false};
+    std::atomic<uint32_t> last_cloud_success_ms{0};
+    std::atomic<uint8_t> cloud_failures{0};
 };
 
-static hub_connectivity_t hubConnectivity = {
-    false, false, false, false, 0, 0
-};
+static hub_connectivity_t hubConnectivity;
 
 // ── BLE Scan Results (Portable Mode) ──
 #define MAX_BLE_DEVICES 8
@@ -247,6 +264,7 @@ static TaskHandle_t bleTaskHandle   = NULL;
 static TaskHandle_t cloudTaskHandle = NULL;
 static TaskHandle_t storageTaskHandle = NULL;
 static TaskHandle_t consoleTaskHandle = NULL;
+static TaskHandle_t networkTaskHandle = NULL;
 
 // ── Device State Table ──
 // Stores the latest telemetry from each collar so the web GUI can
@@ -299,13 +317,14 @@ static void bleTask(void *param);
 static void cloudTask(void *param);
 static void storageTask(void *param);
 static void consoleTask(void *param);
+static void networkTask(void *param);
+static bool requestHubMode(hub_comm_profile_t profile, bool confirmed);
 
 // Hardware initialisation
 static void initLoRa();
 static void femInit();
 static void femSetRx();
 static void femSetTx();
-static void initWiFi();
 static void initBLE();
 static void initStorage();
 static void initWebServer();
@@ -359,14 +378,11 @@ static void queuePendingCommandForDevice(uint16_t targetId);
 static void handleSerialCommand(String line);
 static void printSerialHelp();
 static void printHubSerialStatus();
-static bool saveHubConfigToFlash();
+static bool saveHubConfigToFlash(bool resetMode = false);
 static bool extractSerialArg(const String &line, const char *key, String &out);
 static uint16_t parseSerialDeviceId(String value);
 
 // Portable mode (BLE scanning for collar find beacons)
-static void enterPortableMode();
-static void enterHomeMode();
-static void enterOffGridMode();
 static void handleApiBle();
 static void handleApiHubMode();
 static void handleApiSecurityStatus();
@@ -407,6 +423,12 @@ void setup() {
     cmdQueue     = xQueueCreate(CMD_QUEUE_SIZE,   sizeof(cmd_entry_t));   // Web→LoRa command pipe
     cloudQueue   = xQueueCreate(CLOUD_QUEUE_SIZE, sizeof(cloud_entry_t)); // LoRa→Cloud relay pipe
     storageQueue = xQueueCreate(STORAGE_QUEUE_SIZE, sizeof(bp_journal_record_t));
+    networkQueue = xQueueCreate(1, sizeof(network_request_t));
+    if (!networkQueue) {
+        Serial.println("[FATAL] Cannot allocate network control queue");
+        delay(1000);
+        ESP.restart();
+    }
 
     // Zero out the pending command tracking slots
     memset(pendingCmds, 0, sizeof(pendingCmds));
@@ -414,14 +436,19 @@ void setup() {
     // Initialise hardware subsystems (order matters: storage first to load config)
     initStorage();  // Mount LittleFS, load saved WiFi/cloud config
     initLoRa();     // SPI + SX1262 radio setup, start listening
-    initWiFi();     // AP + STA + mDNS
     initBLE();      // BLE home beacon advertising
 
     // Create FreeRTOS tasks, each pinned to a specific core.
     // ESP32-S3 has 2 cores: core 0 handles WiFi/BLE, core 1 is free for LoRa.
     // Pinning LoRa to core 1 avoids WiFi interrupt contention.
     xTaskCreatePinnedToCore(loraTask,  "lora",  STACK_LORA,  NULL, PRIO_LORA,  &loraTaskHandle,  1);  // Core 1
-    xTaskCreatePinnedToCore(webTask,   "web",   STACK_WEB,   NULL, PRIO_WEB,   &webTaskHandle,   0);  // Core 0
+    xTaskCreatePinnedToCore(webTask,   "web",   STACK_WEB,   NULL, PRIO_WEB,   &webTaskHandle,   1);  // Below LoRa on core 1
+    if (xTaskCreatePinnedToCore(networkTask, "network", STACK_NETWORK, NULL,
+                               PRIO_NETWORK, &networkTaskHandle, 0) != pdPASS) {
+        Serial.println("[FATAL] Cannot start Wi-Fi/captive DNS task");
+        delay(1000);
+        ESP.restart();
+    }
     xTaskCreatePinnedToCore(bleTask,   "ble",   STACK_BLE,   NULL, PRIO_BLE,   &bleTaskHandle,   0);  // Core 0
     xTaskCreatePinnedToCore(cloudTask, "cloud", STACK_CLOUD, NULL, PRIO_CLOUD, &cloudTaskHandle, 0);  // Core 0
     xTaskCreatePinnedToCore(storageTask, "storage", STACK_STORAGE, NULL, PRIO_STORAGE, &storageTaskHandle, 0);
@@ -440,9 +467,9 @@ void loop() {
 // ═══════════════════════════════════════════════
 // Hub Communications Profile / Connectivity Health
 //
-// The selected profile is intentional user state. Connectivity is passive
-// health state. Do not switch HOME/PORTABLE/OFF_GRID just because WiFi or cloud
-// goes up/down.
+// Loss of STA starts a bounded recovery, then automatic Off-Grid entry.
+// Leaving Off-Grid always requires confirmation. Cloud failure alone is not
+// Wi-Fi loss. Only networkTask changes radio roles; BLE has its own owner.
 // ═══════════════════════════════════════════════
 
 static const char *hubCommProfileName(hub_comm_profile_t profile) {
@@ -490,11 +517,9 @@ static void setHubCommunicationsProfile(hub_comm_profile_t profile) {
     hub_comm_profile_t previous = hubCommProfile;
     hubCommProfile = profile;
     if (previous == HUB_COMM_OFF_GRID && profile != HUB_COMM_OFF_GRID) {
-        offlineAccess.disable();
+        clearOfflineSessions = true; // web task owns OfflineAccess
     }
     Serial.printf("[HUB] Communications profile → %s\n", hubCommProfileName(hubCommProfile));
-    applyWifiRoleForCurrentProfile();
-    applyBleRoleForCurrentProfile();
 }
 
 static void applyWifiRoleForCurrentProfile() {
@@ -506,17 +531,29 @@ static void applyWifiRoleForCurrentProfile() {
     }
 
     if (shouldEnableAp && !hubApEnabled) {
-        WiFi.softAP(WIFI_AP_SSID, nullptr, WIFI_AP_CHANNEL);
-        hubApEnabled = true;
-        captiveDns.start(CAPTIVE_DNS_PORT, "*", WiFi.softAPIP());
-        Serial.printf("[WIFI] AP enabled: %s @ %s\n",
-                      WIFI_AP_SSID, WiFi.softAPIP().toString().c_str());
+        // Eight AP associations as well as eight SSE slots. Always-on hub:
+        // retain Bluetooth-compatible modem sleep and never restart a healthy AP.
+        hubApEnabled = WiFi.softAP(WIFI_AP_SSID, nullptr, WIFI_AP_CHANNEL, false, MAX_SSE_CLIENTS);
+        WiFi.setSleep(true); // WIFI_PS_MIN_MODEM: required for Wi-Fi/BLE coexistence
+        if (hubApEnabled) {
+            Serial.printf("[WIFI] AP enabled: %s @ %s (channel %u, max clients %u)\n",
+                          WIFI_AP_SSID, WiFi.softAPIP().toString().c_str(),
+                          WIFI_AP_CHANNEL, MAX_SSE_CLIENTS);
+        } else {
+            ++apStartFailures;
+            Serial.println("[WIFI] AP start failed; retry in 5 seconds");
+        }
     } else if (!shouldEnableAp && hubApEnabled) {
         captiveDns.stop();
+        captiveDnsRunning = false;
         WiFi.softAPdisconnect(true);
         hubApEnabled = false;
         WiFi.mode(WIFI_STA);
         Serial.println("[WIFI] AP disabled for normal Home/Portable STA mode");
+    }
+    if (hubApEnabled && !captiveDnsRunning) {
+        captiveDnsRunning = captiveDns.start(CAPTIVE_DNS_PORT, "*", WiFi.softAPIP());
+        if (!captiveDnsRunning) Serial.println("[WIFI] Captive DNS start failed; will retry");
     }
 }
 
@@ -645,38 +682,130 @@ static void femSetTx() {
     digitalWrite(PIN_FEM_CTX, HIGH);
 }
 
-static void initWiFi() {
-    // Intentional Wi-Fi roles:
-    //   Home/Portable: STA for uplink/local LAN; AP off unless provisioning.
-    //   Off-Grid: AP/local GUI is primary; cloud relay is disabled.
-    WiFi.mode(hubProfileNeedsLocalAp() ? WIFI_AP_STA : WIFI_STA);
-    applyWifiRoleForCurrentProfile();
-
-    // If we have saved STA credentials, try to connect to home router.
-    // This gives us internet access for cloud relay.
-    // Timeout after 10 seconds — don't block forever.
-    if (staSSID.length() > 0) {
-        Serial.printf("[WIFI] Connecting to '%s'...\n", staSSID.c_str());
-        WiFi.begin(staSSID.c_str(), staPass.c_str());
-        unsigned long start = millis();
-        while (WiFi.status() != WL_CONNECTED && millis() - start < 10000) {
-            delay(250);
-        }
-        if (WiFi.status() == WL_CONNECTED) {
-            staConnected = true;
-            hubConnectivity.wifi_connected = true;
-            Serial.printf("[WIFI] STA connected: %s\n", WiFi.localIP().toString().c_str());
-            syncHubClock(true);
-        } else {
-            updateConnectivityState();
-            Serial.println("[WIFI] STA connection failed — LoRa RX remains active");
-        }
+static bool requestHubMode(hub_comm_profile_t profile, bool confirmed) {
+    if (modeChangePending.exchange(true)) return false;
+    network_request_t request{profile, confirmed, millis()};
+    if (xQueueSend(networkQueue, &request, 0) != pdTRUE) {
+        modeChangePending = false;
+        return false;
     }
+    return true;
+}
 
-    // Register mDNS so the hub is reachable at http://bluepaws.local
-    if (MDNS.begin(MDNS_HOSTNAME)) {
-        MDNS.addService("http", "tcp", HTTP_PORT);
-        Serial.printf("[MDNS] http://%s.local\n", MDNS_HOSTNAME);
+// All application Wi-Fi mutations and captive DNS belong to this task.
+// Keep HTTP handlers, NTP waits, TLS, filesystem writes and BLE scans elsewhere.
+static void networkTask(void *param) {
+    (void)param;
+    // Config changes save and reboot; private copies avoid String races while saving.
+    const String primaryName = staSSID, primaryPassword = staPass;
+    const String secondaryName = secondarySSID, secondaryPassword = secondaryPass;
+    const bool hasSecondary = secondaryName.length() && secondaryName != primaryName;
+    WifiFailover policy(primaryName.length() > 0, hasSecondary);
+    WiFi.persistent(false);
+    WiFi.setAutoReconnect(false); // the policy owns retries and their deadline
+    WiFi.mode(WIFI_STA);
+    WiFi.setSleep(true); // minimum modem sleep is required while Bluetooth is enabled
+    networkStackReady = true; // lwIP must exist before webTask binds its socket
+    bool scanActive = false;
+    uint32_t lastScan = millis(), lastMaintenance = millis();
+    bool mdnsStarted = false;
+    network_request_t pending{};
+    bool hasRequest = false;
+
+    auto perform = [&](WifiFailover::Action action) {
+        using A = WifiFailover::Action;
+        if (action == A::None) return;
+        if (action == A::ConnectPrimary || action == A::ConnectSecondary || action == A::StartOffGrid) {
+            homeBeaconAllowed = false;
+            if (scanActive) {
+                esp_wifi_scan_stop();
+                scanActive = false;
+            }
+            WiFi.scanDelete();
+            WiFi.disconnect(false, false); // never erase saved config or shut down AP
+            knownWifiAvailable = false;
+        }
+        if (action == A::StartOffGrid) {
+            setHubCommunicationsProfile(HUB_COMM_OFF_GRID);
+            applyWifiRoleForCurrentProfile();
+            lastScan = millis(); // let the hotspot settle before any idle discovery
+            Serial.println("[WIFI] Off-Grid: local hotspot active; automatic reconnect stopped");
+        } else if (action == A::ConnectPrimary || action == A::ConnectSecondary) {
+            applyWifiRoleForCurrentProfile();
+            const bool primary = action == A::ConnectPrimary;
+            Serial.printf("[WIFI] Searching %s uplink (30-second total recovery budget)\n",
+                          primary ? "primary" : "secondary");
+            WiFi.begin(primary ? primaryName.c_str() : secondaryName.c_str(),
+                       primary ? primaryPassword.c_str() : secondaryPassword.c_str());
+        } else {
+            const bool primary = action == A::ConnectedPrimary;
+            setHubCommunicationsProfile(primary ? HUB_COMM_HOME : HUB_COMM_PORTABLE);
+            homeBeaconAllowed = primary;
+            applyWifiRoleForCurrentProfile();
+            Serial.printf("[WIFI] %s connected at %s\n", primary ? "Primary/Home" : "Secondary/Portable",
+                          WiFi.localIP().toString().c_str());
+        }
+    };
+    perform(hubCommProfile == HUB_COMM_OFF_GRID ? policy.offGrid()
+        : policy.begin(millis(), hubCommProfile == HUB_COMM_PORTABLE));
+
+    for (;;) {
+        const uint32_t now = millis();
+        if (!hasRequest && xQueueReceive(networkQueue, &pending, 0) == pdTRUE) hasRequest = true;
+        // Let the HTTP response leave before intentionally disconnecting its AP.
+        if (hasRequest && now - pending.requestedAt >= 500) {
+            if (hubCommProfile != HUB_COMM_OFF_GRID || pending.profile == HUB_COMM_OFF_GRID || pending.confirmed) {
+                setHubCommunicationsProfile(pending.profile);
+                perform(pending.profile == HUB_COMM_OFF_GRID ? policy.offGrid()
+                    : policy.begin(now, pending.profile == HUB_COMM_PORTABLE));
+            } else {
+                Serial.println("[WIFI] Rejected unconfirmed Off-Grid exit");
+            }
+            hasRequest = false;
+            modeChangePending = false;
+        }
+        perform(policy.tick(now, WiFi.status() == WL_CONNECTED));
+        wifiPhase = policy.phase();
+        wifiRecoveryRemainingMs = policy.remaining(now);
+        updateConnectivityState();
+        if (!staConnected) homeBeaconAllowed = false;
+
+        // AP+STA shares one radio. Never associate or scan while local clients
+        // are connected: channel hops disrupt captive portal, HTTP and SSE.
+        // Idle-only discovery provides a hint, NEVER an automatic mode change.
+        if (policy.phase() == WifiFailover::Phase::OffGrid && hubApEnabled) {
+            const bool busy = WiFi.softAPgetStationNum() > 0;
+            if (scanActive && busy) esp_wifi_scan_stop();
+            if (scanActive) {
+                int count = WiFi.scanComplete();
+                if (count != WIFI_SCAN_RUNNING) {
+                    if (!busy) {
+                        bool found = false;
+                        for (int i = 0; i < count; ++i) {
+                            const String name = WiFi.SSID(i);
+                            if (name == primaryName || (hasSecondary && name == secondaryName)) found = true;
+                        }
+                        knownWifiAvailable = found;
+                    }
+                    WiFi.scanDelete();
+                    scanActive = false;
+                }
+            } else if (!busy && now - lastScan >= 60000 && (primaryName.length() || hasSecondary)) {
+                lastScan = now;
+                scanActive = WiFi.scanNetworks(true, false, false, 120) == WIFI_SCAN_RUNNING;
+            }
+        }
+        if (hubApEnabled && captiveDnsRunning) captiveDns.processNextRequest();
+        if (now - lastMaintenance >= 5000) {
+            lastMaintenance = now;
+            // Retry only failed AP/DNS starts. Healthy interfaces are left alone.
+            if (hubProfileNeedsLocalAp() && (!hubApEnabled || !captiveDnsRunning)) applyWifiRoleForCurrentProfile();
+            if (!mdnsStarted && (hubApEnabled || staConnected)) {
+                mdnsStarted = MDNS.begin(MDNS_HOSTNAME);
+                if (mdnsStarted) MDNS.addService("http", "tcp", HTTP_PORT);
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
 
@@ -693,15 +822,8 @@ static void initBLE() {
     advData.setName(BLE_HOME_BEACON_NAME);  // This is what the collar scans for
     pAdv->setAdvertisementData(advData);
 
-    if (hubProfileUsesBleScanning()) {
-        // Portable/Off-Grid was persisted — start scanning instead of advertising.
-        Serial.printf("[BLE] %s profile restored from config\n",
-                      hubCommProfileName(hubCommProfile));
-        applyBleRoleForCurrentProfile();
-    } else {
-        pAdv->start();  // Begin broadcasting — runs autonomously in background
-        Serial.printf("[BLE] Beacon advertising: %s\n", BLE_HOME_BEACON_NAME);
-    }
+    // bleTask starts/stops advertising only after primary Wi-Fi is confirmed.
+    // A roaming hub must not convince collars that they are still at home.
 }
 
 static device_meta_t *findDeviceMetadata(uint16_t id, bool create) {
@@ -817,6 +939,8 @@ static void initStorage() {
                 String val = line.substring(eq + 1);
                 if (key == "sta_ssid")  staSSID = val;        // Home WiFi name
                 if (key == "sta_pass")  staPass = val;        // Home WiFi password
+                if (key == "secondary_ssid") secondarySSID = val;
+                if (key == "secondary_pass") secondaryPass = val;
                 if (key == "cloud_url")   cloudEndpoint = val;  // Cloud POST endpoint
                 if (key == "cloud_token") cloudToken = val;     // Gateway bearer token
                 if (key == "hub_mode")    hubCommProfile = hubCommProfileFromString(val);
@@ -1565,7 +1689,7 @@ static void handleApiStatus() {
     size_t fsTotal = LittleFS.totalBytes();
     size_t fsUsed = LittleFS.usedBytes();
 
-    char buf[1024];
+    char buf[1536];
     snprintf(buf, sizeof(buf),
         "{\"uptime\":%u,\"rxCount\":%u,\"txCount\":%u,"
         "\"crcFails\":%u,\"devices\":%u,\"logEntries\":%u,"
@@ -1578,7 +1702,10 @@ static void handleApiStatus() {
         "\"littlefs_total_bytes\":%u,\"littlefs_used_bytes\":%u,"
         "\"littlefs_free_bytes\":%u,\"sse_clients\":%u,"
         "\"sse_capacity\":%u,\"replay_backlog\":%u,"
-        "\"reset_reason\":%u,\"snapshot_http\":%d,\"cached_appearances\":%u}",
+        "\"reset_reason\":%u,\"snapshot_http\":%d,\"cached_appearances\":%u,"
+        "\"network_phase\":\"%s\",\"recovery_remaining_ms\":%u,\"known_wifi_available\":%s,"
+        "\"ap_clients\":%u,\"ap_channel\":%u,\"ap_start_failures\":%u,"
+        "\"network_stack_free\":%u,\"web_stack_free\":%u,\"mode_change_pending\":%s}",
         millis() / 1000, rxCount, txCount,
         crcFailCount, deviceCount, (unsigned)offlineJournal.totalValidRecords(),
         staConnected ? "true" : "false",
@@ -1594,11 +1721,17 @@ static void handleApiStatus() {
         hubConnectivity.wifi_connected ? "true" : "false",
         hubConnectivity.internet_reachable ? "true" : "false",
         hubConnectivity.cloud_reachable ? "true" : "false",
-        hubConnectivity.last_cloud_success_ms,
+        hubConnectivity.last_cloud_success_ms.load(),
         hubConnectivity.lora_rx_active ? "true" : "false",
         (unsigned)fsTotal, (unsigned)fsUsed, (unsigned)(fsTotal - fsUsed),
         connectedSse, MAX_SSE_CLIENTS, offlineJournal.pendingCount(),
-        (unsigned)esp_reset_reason(), snapshotLastHttpCode, deviceMetaCount
+        (unsigned)esp_reset_reason(), snapshotLastHttpCode, deviceMetaCount,
+        WifiFailover::name(wifiPhase.load()), (unsigned)wifiRecoveryRemainingMs.load(),
+        knownWifiAvailable ? "true" : "false", (unsigned)WiFi.softAPgetStationNum(),
+        hubApEnabled ? (unsigned)WiFi.channel() : 0, (unsigned)apStartFailures.load(),
+        networkTaskHandle ? (unsigned)uxTaskGetStackHighWaterMark(networkTaskHandle) : 0,
+        webTaskHandle ? (unsigned)uxTaskGetStackHighWaterMark(webTaskHandle) : 0,
+        modeChangePending ? "true" : "false"
     );
     httpServer.send(200, "application/json", buf);
 }
@@ -1828,6 +1961,15 @@ static void handleApiDeviceStatusCommand() {
 // Saves WiFi and cloud settings to flash, then restarts the ESP32
 // so the new WiFi credentials take effect.
 // Body format: ssid=MyNetwork&pass=MyPassword&cloud_url=https://...
+static bool validWifiCredentials(const String &ssid, const String &pass) {
+    if (!ssid.length() || ssid.length() > 32 || ssid.indexOf('\n') >= 0 || ssid.indexOf('\r') >= 0) return false;
+    if (pass.indexOf('\n') >= 0 || pass.indexOf('\r') >= 0) return false;
+    if (!pass.length() || (pass.length() >= 8 && pass.length() <= 63)) return true;
+    if (pass.length() != 64) return false;
+    for (size_t i = 0; i < pass.length(); ++i) if (!isxdigit(pass[i])) return false;
+    return true;
+}
+
 static void handleApiConfig() {
     if (httpServer.method() != HTTP_POST) {
         httpServer.send(405, "text/plain", "POST only");
@@ -1843,39 +1985,30 @@ static void handleApiConfig() {
 
     String body = httpServer.arg("plain");
 
-    // Helper lambda to extract a URL-encoded parameter value
-    auto parseParam = [&](const char *key) -> String {
-        String k = String(key) + "=";
-        int idx = body.indexOf(k);
-        if (idx < 0) return "";
-        String val = body.substring(idx + k.length());
-        int amp = val.indexOf('&');
-        if (amp >= 0) val = val.substring(0, amp);
-        return val;
-    };
-
-    String newSSID  = parseParam("ssid");
-    String newPass  = parseParam("pass");
-    String newCloud = parseParam("cloud_url");
-    String newToken = parseParam("cloud_token");
-
-    // Write config to flash as simple key=value text file
-    File f = LittleFS.open(CONFIG_FILE_PATH, "w");
-    if (f) {
-        if (newSSID.length() > 0)  f.printf("sta_ssid=%s\n", newSSID.c_str());
-        if (newPass.length() > 0)  f.printf("sta_pass=%s\n", newPass.c_str());
-        if (newCloud.length() > 0) f.printf("cloud_url=%s\n", newCloud.c_str());
-        if (newToken.length() > 0) f.printf("cloud_token=%s\n", newToken.c_str());
-        f.printf("hub_mode=%s\n", hubCommProfileName(hubCommProfile));
-        f.close();
+    // WebServer already URL-decodes form fields. Omitted network fields and
+    // cloud credentials are preserved rather than silently erased on save.
+    String newSSID = getPostField(body, "ssid");
+    String newPass = getPostField(body, "pass");
+    String newSecondary = getPostField(body, "secondary_ssid");
+    String newSecondaryPass = getPostField(body, "secondary_pass");
+    String newCloud = getPostField(body, "cloud_url");
+    String newToken = getPostField(body, "cloud_token");
+    if ((newSSID.length() && !validWifiCredentials(newSSID, newPass))
+        || (newSecondary.length() && !validWifiCredentials(newSecondary, newSecondaryPass))
+        || newCloud.indexOf('\n') >= 0 || newCloud.indexOf('\r') >= 0
+        || newToken.indexOf('\n') >= 0 || newToken.indexOf('\r') >= 0) {
+        httpServer.send(400, "application/json", "{\"error\":\"invalid_configuration\"}");
+        return;
     }
-
-    // Update in-memory state
-    staSSID = newSSID;
-    staPass = newPass;
+    if (newSSID.length()) { staSSID = newSSID; staPass = newPass; }
+    if (getPostField(body, "clear_secondary") == "true") { secondarySSID = ""; secondaryPass = ""; }
+    else if (newSecondary.length()) { secondarySSID = newSecondary; secondaryPass = newSecondaryPass; }
     if (newCloud.length() > 0) cloudEndpoint = newCloud;
     if (newToken.length() > 0) cloudToken = newToken;
-
+    if (!saveHubConfigToFlash(true)) {
+        httpServer.send(500, "application/json", "{\"error\":\"config_save_failed\"}");
+        return;
+    }
     httpServer.send(200, "application/json", "{\"ok\":true,\"restart\":true}");
 
     // Restart the ESP32 so WiFi reconnects with new credentials
@@ -1950,41 +2083,31 @@ static void initWebServer() {
     Serial.printf("[WEB] HTTP server on port %d\n", HTTP_PORT);
 }
 
-// Web task — runs on core 0. Handles incoming HTTP requests and
+// Web task — core 1, below LoRa priority. Handles incoming HTTP requests and
 // sends periodic SSE heartbeats so the browser knows the connection is alive.
 static void webTask(void *param) {
     (void)param;
+    while (!networkStackReady) vTaskDelay(pdMS_TO_TICKS(10));
     initWebServer();
 
     TickType_t lastHeartbeat = 0;
-    TickType_t lastConnectivityCheck = 0;
 
     for (;;) {
         // Process any pending HTTP requests (non-blocking)
+        if (clearOfflineSessions.exchange(false)) offlineAccess.disable();
         httpServer.handleClient();
-        if (hubApEnabled) captiveDns.processNextRequest();
 
         // Send a heartbeat event every 5 seconds. The browser uses this
         // to detect if the SSE connection has dropped (10s watchdog).
         TickType_t now = xTaskGetTickCount();
         if (now - lastHeartbeat >= pdMS_TO_TICKS(5000)) {
             lastHeartbeat = now;
-            sseBroadcast("heartbeat", "{}");
-        }
-
-        // Keep connectivity health fresh without ever disturbing LoRa RX or
-        // the local AP. Home and Portable may try to reconnect STA; Off-Grid
-        // remains local-only by design.
-        if (now - lastConnectivityCheck >= pdMS_TO_TICKS(10000)) {
-            lastConnectivityCheck = now;
-            updateConnectivityState();
-            if (hubProfileAllowsCloudRelay()
-                && !hubConnectivity.wifi_connected
-                && staSSID.length() > 0) {
-                Serial.printf("[WIFI] STA reconnect attempt in %s profile\n",
-                              hubCommProfileName(hubCommProfile));
-                WiFi.begin(staSSID.c_str(), staPass.c_str());
-            }
+            char health[200];
+            snprintf(health, sizeof(health),
+                "{\"hubMode\":\"%s\",\"network_phase\":\"%s\",\"known_wifi_available\":%s}",
+                hubCommProfileName(hubCommProfile), WifiFailover::name(wifiPhase.load()),
+                knownWifiAvailable ? "true" : "false");
+            sseBroadcast("heartbeat", health);
         }
 
         // 5ms sleep — fast enough for responsive web UI
@@ -2080,20 +2203,25 @@ static uint16_t parseSerialDeviceId(String value) {
     return (uint16_t)strtoul(value.c_str(), NULL, containsHexAlpha ? 16 : 10);
 }
 
-static bool saveHubConfigToFlash() {
-    File f = LittleFS.open(CONFIG_FILE_PATH, "w");
+static bool saveHubConfigToFlash(bool resetMode) {
+    // Commit complete config via rename; a reset must not leave half a file.
+    File f = LittleFS.open("/config.tmp", "w");
     if (!f) {
         return false;
     }
 
     if (staSSID.length() > 0) f.printf("sta_ssid=%s\n", staSSID.c_str());
     f.printf("sta_pass=%s\n", staPass.c_str());
+    f.printf("secondary_ssid=%s\n", secondarySSID.c_str());
+    f.printf("secondary_pass=%s\n", secondaryPass.c_str());
     if (cloudEndpoint.length() > 0) f.printf("cloud_url=%s\n", cloudEndpoint.c_str());
     if (cloudToken.length() > 0) f.printf("cloud_token=%s\n", cloudToken.c_str());
-    f.printf("hub_mode=%s\n", hubCommProfileName(hubCommProfile));
+    f.printf("hub_mode=%s\n", hubCommProfileName(resetMode ? HUB_COMM_HOME : hubCommProfile.load()));
     f.printf("provisioning=%s\n", hubProvisioningMode ? "true" : "false");
+    f.flush();
+    bool ok = !f.getWriteError();
     f.close();
-    return true;
+    return ok && LittleFS.rename("/config.tmp", CONFIG_FILE_PATH);
 }
 
 static void printSerialHelp() {
@@ -2104,6 +2232,9 @@ static void printSerialHelp() {
     Serial.println("      reboot");
     Serial.println("      wifi ssid=\"Your SSID\" pass=\"Your password\"");
     Serial.println("      wifi ssid=\"Open network\"");
+    Serial.println("      wifi secondary ssid=\"Phone hotspot\" pass=\"Your password\"");
+    Serial.println("      wifi secondary clear");
+    Serial.println("      mode off_grid | mode home confirm | mode portable confirm");
     Serial.println("      cloud token=\"gateway-bearer-token\"");
     Serial.println("      cloud url=\"https://project.supabase.co/functions/v1/ingest-position\"");
     Serial.println("      cmd mode 1001 active");
@@ -2119,11 +2250,18 @@ static void printHubSerialStatus() {
     Serial.printf("      Profile   : %s\n", hubCommProfileName(hubCommProfile));
     Serial.printf("      Wi-Fi SSID: %s\n", staSSID.length() ? staSSID.c_str() : "<not set>");
     Serial.printf("      Wi-Fi pass: %s\n", staPass.length() ? "<stored>" : "<not set>");
+    Serial.printf("      Secondary : %s\n", secondarySSID.length() ? secondarySSID.c_str() : "<not configured>");
+    Serial.printf("      Network   : %s, recovery remaining %lu ms\n", WifiFailover::name(wifiPhase.load()),
+                  (unsigned long)wifiRecoveryRemainingMs.load());
     Serial.printf("      STA       : %s\n", WiFi.status() == WL_CONNECTED ? "connected" : "not connected");
     Serial.printf("      STA IP    : %s\n", WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString().c_str() : "<none>");
     Serial.printf("      RSSI      : %d\n", WiFi.status() == WL_CONNECTED ? WiFi.RSSI() : 0);
     Serial.printf("      AP        : %s\n", hubApEnabled ? "enabled" : "disabled");
     Serial.printf("      AP IP     : %s\n", WiFi.softAPIP().toString().c_str());
+    Serial.printf("      AP clients: %u; start failures: %lu; network/web stack free: %u/%u\n",
+                  WiFi.softAPgetStationNum(), (unsigned long)apStartFailures.load(),
+                  networkTaskHandle ? (unsigned)uxTaskGetStackHighWaterMark(networkTaskHandle) : 0,
+                  webTaskHandle ? (unsigned)uxTaskGetStackHighWaterMark(webTaskHandle) : 0);
     Serial.printf("      Cloud URL : %s\n", cloudEndpoint.c_str());
     Serial.printf("      Token     : %s\n", cloudToken.length() ? "<stored>" : "<not set>");
     Serial.printf("      Gateway   : %04X\n", GATEWAY_GUID16);
@@ -2152,6 +2290,30 @@ static void handleSerialCommand(String line) {
         return;
     }
 
+    if (lower.startsWith("mode ")) {
+        String mode = lower.substring(5);
+        bool confirmed = mode.endsWith(" confirm");
+        if (confirmed) mode.remove(mode.length() - 8);
+        if (mode != "home" && mode != "portable" && mode != "off_grid") {
+            Serial.println("[CMD] Usage: mode off_grid | mode home confirm | mode portable confirm");
+        } else if (hubCommProfile == HUB_COMM_OFF_GRID && mode != "off_grid" && !confirmed) {
+            Serial.println("[CMD] Add confirm to leave Off-Grid; local users will disconnect");
+        } else {
+            Serial.println(requestHubMode(hubCommProfileFromString(mode), confirmed)
+                ? "[CMD] Network mode change queued" : "[CMD] Another mode change is pending");
+        }
+        return;
+    }
+
+    if (lower == "wifi secondary clear") {
+        secondarySSID = "";
+        secondaryPass = "";
+        if (!saveHubConfigToFlash(true)) { Serial.println("[CMD] Config save failed"); return; }
+        Serial.println("[CMD] Secondary Wi-Fi cleared; restarting");
+        delay(500);
+        ESP.restart();
+        return;
+    }
     if (lower.startsWith("wifi ")) {
         String ssid;
         String pass;
@@ -2160,18 +2322,21 @@ static void handleSerialCommand(String line) {
             return;
         }
         extractSerialArg(line, "pass", pass);
-
-        staSSID = ssid;
-        staPass = pass;
-        hubCommProfile = HUB_COMM_HOME;
+        if (!validWifiCredentials(ssid, pass)) {
+            Serial.println("[CMD] Invalid Wi-Fi SSID/password length or characters");
+            return;
+        }
+        const bool secondary = lower.startsWith("wifi secondary ");
+        if (secondary) { secondarySSID = ssid; secondaryPass = pass; }
+        else { staSSID = ssid; staPass = pass; }
         hubProvisioningMode = false;
 
-        if (!saveHubConfigToFlash()) {
+        if (!saveHubConfigToFlash(true)) {
             Serial.println("[CMD] Failed to save Wi-Fi config to LittleFS.");
             return;
         }
 
-        Serial.printf("[CMD] Saved Wi-Fi SSID '%s'. Rebooting to reconnect...\n", staSSID.c_str());
+        Serial.printf("[CMD] Saved %s Wi-Fi. Rebooting to reconnect...\n", secondary ? "secondary" : "primary");
         delay(500);
         ESP.restart();
         return;
@@ -2313,9 +2478,9 @@ static void applyBleRoleForCurrentProfile() {
         // Start BLE scanning for collar find beacons
         pBLEScan = BLEDevice::getScan();
         pBLEScan->setAdvertisedDeviceCallbacks(&findBeaconCb, true);
-        pBLEScan->setActiveScan(true);
-        pBLEScan->setInterval(160);   // 100ms in 0.625ms units
-        pBLEScan->setWindow(128);     // 80ms in 0.625ms units
+        pBLEScan->setActiveScan(false); // find beacon identity is in advertisements
+        pBLEScan->setInterval(160);
+        pBLEScan->setWindow(32);      // 20% scan duty; leave airtime for Wi-Fi AP
 
         Serial.printf("[HUB] %s profile — BLE scanning for collars\n",
                       hubCommProfileName(hubCommProfile));
@@ -2333,21 +2498,13 @@ static void applyBleRoleForCurrentProfile() {
         xSemaphoreGive(bleMutex);
     }
 
-    // Restart home beacon
-    BLEDevice::getAdvertising()->start();
-    Serial.println("[HUB] HOME profile — beacon advertising");
-}
-
-static void enterPortableMode() {
-    setHubCommunicationsProfile(HUB_COMM_PORTABLE);
-}
-
-static void enterHomeMode() {
-    setHubCommunicationsProfile(HUB_COMM_HOME);
-}
-
-static void enterOffGridMode() {
-    setHubCommunicationsProfile(HUB_COMM_OFF_GRID);
+    if (homeBeaconAllowed) {
+        BLEDevice::getAdvertising()->start();
+        Serial.println("[BLE] Primary Wi-Fi connected: home beacon advertising");
+    } else {
+        BLEDevice::getAdvertising()->stop();
+        Serial.println("[BLE] Home beacon paused until primary Wi-Fi is connected");
+    }
 }
 
 // ═══════════════════════════════════════════════
@@ -2403,23 +2560,15 @@ static void handleApiHubMode() {
         return;
     }
     if (leavingOffGrid && !requireCommandAccess()) return;
-    if (requestedMode == "portable") {
-        enterPortableMode();
-    } else if (requestedMode == "off_grid" || requestedMode == "off-grid") {
-        enterOffGridMode();
-    } else if (requestedMode == "home") {
-        enterHomeMode();
-    } else {
-        httpServer.send(400, "text/plain", "Bad request: mode=home|portable|off_grid");
+    if (!requestHubMode(hubCommProfileFromString(requestedMode), getPostField(body, "confirm") == "true")) {
+        httpServer.send(409, "application/json", "{\"error\":\"mode_change_pending\"}");
         return;
     }
-
-    char resp[40];
-    snprintf(resp, sizeof(resp), "{\"mode\":\"%s\"}", hubCommProfileName(hubCommProfile));
-    httpServer.send(200, "application/json", resp);
+    httpServer.send(202, "application/json", "{\"pending\":true}");
 }
 
 static bool requireCommandAccess() {
+    if (clearOfflineSessions.exchange(false)) offlineAccess.disable();
     if (hubCommProfile != HUB_COMM_OFF_GRID || !offlineAccess.enabled()) return true;
     String token = httpServer.header("X-Bluepaws-Local-Session");
     if (offlineAccess.authorize(token, httpServer.client().remoteIP())) return true;
@@ -2483,11 +2632,17 @@ static void handleApiSecurityUnlock() {
 
 static void bleTask(void *param) {
     (void)param;
+    int previousRole = -1;
     for (;;) {
+        int role = hubProfileUsesBleScanning() ? 2 : (homeBeaconAllowed ? 1 : 0);
+        if (role != previousRole) {
+            applyBleRoleForCurrentProfile(); // BLE operations never called by web/network tasks
+            previousRole = role;
+        }
         if (hubProfileUsesBleScanning()) {
-            // Run a 5-second scan cycle
+            // Short passive scans avoid monopolising the shared 2.4 GHz radio.
             if (pBLEScan) {
-                pBLEScan->start(5, false);
+                pBLEScan->start(1, false);
                 pBLEScan->clearResults();  // Free BLE memory after each cycle
             }
 
@@ -2506,10 +2661,8 @@ static void bleTask(void *param) {
 
             vTaskDelay(pdMS_TO_TICKS(1000));
         } else {
-            // Home mode — just keep beacon alive
-            BLEAdvertising *pAdv = BLEDevice::getAdvertising();
-            if (pAdv) pAdv->start();
-            vTaskDelay(pdMS_TO_TICKS(30000));
+            // React quickly to loss of primary Wi-Fi. Advertising runs in the stack.
+            vTaskDelay(pdMS_TO_TICKS(100));
         }
     }
 }
