@@ -23,6 +23,7 @@
 #include <Arduino.h>
 #include <RadioLib.h>        // SX1262 LoRa radio driver
 #include <WiFi.h>            // WiFi AP+STA dual mode
+#include <DNSServer.h>       // Captive portal wildcard DNS in Off-Grid mode
 #include <WebServer.h>       // Lightweight HTTP server (port 80)
 #include <LittleFS.h>        // On-chip flash filesystem (stores web files + logs)
 #include <ESPmDNS.h>         // mDNS so you can browse to http://bluepaws.local
@@ -46,6 +47,8 @@
 #include <bp_crypto.h>       // Legacy AES helper retained for downlink experiments
 #include "hub_config.h"      // Bench-safe defaults + local-only secret overrides
 #include "hub_pins.h"        // GPIO pin assignments for this board
+#include "offline_journal.h" // Crash-tolerant per-collar offline history
+#include "offline_access.h"  // RAM-only optional command PIN and sessions
 
 // ═══════════════════════════════════════════════
 // Configuration
@@ -64,9 +67,8 @@
 #define HTTP_PORT        80   // Web GUI + API endpoints
 
 // On-chip storage paths (LittleFS flash filesystem)
-#define LOG_FILE_PATH    "/log.csv"       // CSV telemetry log
-#define MAX_LOG_ENTRIES  5000             // Rotate log after this many rows
 #define CONFIG_FILE_PATH "/config.json"   // Saved WiFi/cloud credentials
+#define DEVICE_META_PATH "/devices.meta"  // Hub-local name/emoji/colour overrides
 
 // ═══════════════════════════════════════════════
 // FreeRTOS Task Configuration
@@ -76,11 +78,13 @@
 #define STACK_WEB    8192   // Web server — large stack (JSON building, string ops)
 #define STACK_BLE    4096   // BLE beacon + scanning in portable mode
 #define STACK_CLOUD  16384  // Cloud relay — HTTPS/TLS + HTTPClient need generous stack
+#define STACK_STORAGE 6144  // Asynchronous LittleFS journal writes
 #define STACK_CONSOLE 4096  // USB serial bench console
 
 #define PRIO_LORA    3      // Highest — LoRa packets are time-sensitive
 #define PRIO_WEB     2      // Medium — serves the GUI
 #define PRIO_CLOUD   2      // Medium — cloud relay not urgent
+#define PRIO_STORAGE 2      // Medium — never block LoRa reception on flash
 #define PRIO_BLE     1      // Lowest — BLE beacon just needs to stay alive
 #define PRIO_CONSOLE 1      // Low — bench/debug command parser
 
@@ -101,14 +105,18 @@ static SemaphoreHandle_t loraMutex = NULL;        // Protects SPI bus access
 
 // ── Web Server ──
 static WebServer httpServer(HTTP_PORT);
+static DNSServer captiveDns;
+static constexpr uint8_t CAPTIVE_DNS_PORT = 53;
+static OfflineAccess offlineAccess;
 
 // ── SSE (Server-Sent Events) ──
 // Instead of WebSocket, we use SSE for real-time push to the browser.
 // SSE is simpler (no extra library), uni-directional (server→client),
 // and works in all modern browsers. The client opens GET /events and
 // the server pushes "event: <type>\ndata: <json>\n\n" lines.
-// We support up to 4 simultaneous SSE clients.
-static WiFiClient sseClients[4];          // Connected SSE client sockets
+// We support up to 8 simultaneous SSE clients; further browsers poll slowly.
+static constexpr uint8_t MAX_SSE_CLIENTS = 8;
+static WiFiClient sseClients[MAX_SSE_CLIENTS];
 static uint8_t sseClientCount = 0;        // How many SSE clients are connected
 static SemaphoreHandle_t sseMutex = NULL;  // Protects the sseClients array
 
@@ -138,7 +146,13 @@ struct cloud_entry_t {
     int16_t  rssi;                     // Signal strength when received
     float    snr;                      // Signal-to-noise ratio when received
     uint32_t gateway_rx_time_unix;      // Hub receive time used in cloud wrapper
+    uint32_t local_id;                  // Journal record updated after cloud result
+    uint16_t source_id;
 };
+
+#define STORAGE_QUEUE_SIZE 24
+static QueueHandle_t storageQueue = NULL;
+static OfflineJournal offlineJournal;
 
 // ── Legacy AES-128 key ──
 // TLV v1.2 uplink packets are raw authenticated TLV over private LoRa. Keep
@@ -160,13 +174,16 @@ struct pending_cmd_t {
     uint16_t targetId;      // device_id of the target collar
     bp_pkt_type_t type;     // command type (PKT_CMD_MODE, PKT_CMD_FIND, etc.)
     uint32_t sentAtMs;      // millis() timestamp when last sent; 0 = queued but not TX-confirmed yet
+    uint32_t createdAtMs;   // command expires one hour after creation
     uint8_t  retries;       // how many retransmissions so far
     uint8_t  buf[BP_MAX_PACKET_SIZE];  // original packet (for retransmission)
     uint8_t  len;           // packet length
     bool     active;        // true = this slot is tracking a pending command
+    bool     waitingOpportunity; // blind retries exhausted; wait for next collar uplink
 };
 
-#define MAX_PENDING_CMDS 4                          // Up to 4 commands in-flight at once
+#define MAX_PENDING_CMDS 16                         // One useful pending command per collar
+#define LOCAL_COMMAND_TTL_MS 3600000UL
 static pending_cmd_t pendingCmds[MAX_PENDING_CMDS];
 static SemaphoreHandle_t pendingMutex = NULL;       // Protects pendingCmds array
 static volatile TickType_t commandRxOpportunityUntil = 0;
@@ -221,13 +238,12 @@ static SemaphoreHandle_t bleMutex = NULL;
 static BLEScan *pBLEScan = nullptr;
 
 // ── Storage ──
-static uint32_t logEntryCount = 0;  // Number of CSV rows in the log file
-
 // ── FreeRTOS Task Handles ──
 static TaskHandle_t loraTaskHandle  = NULL;
 static TaskHandle_t webTaskHandle   = NULL;
 static TaskHandle_t bleTaskHandle   = NULL;
 static TaskHandle_t cloudTaskHandle = NULL;
+static TaskHandle_t storageTaskHandle = NULL;
 static TaskHandle_t consoleTaskHandle = NULL;
 
 // ── Device State Table ──
@@ -249,12 +265,26 @@ struct device_state_t {
     int16_t  rssi;           // LoRa RSSI when hub received the packet (dBm)
     float    snr;            // LoRa SNR when hub received the packet (dB)
     uint32_t local_millis;   // millis() on the hub when this packet arrived
+    uint32_t gateway_rx_time_unix;
+    uint32_t local_id;
+    uint8_t sync_state;
     bool     has_gps;        // true if collar had a valid GPS fix
 };
 
 static device_state_t devices[MAX_DEVICES];    // Device state table
 static uint8_t deviceCount = 0;                // How many unique collars we've seen
 static SemaphoreHandle_t deviceMutex = NULL;   // Protects devices[] array
+
+struct device_meta_t {
+    uint16_t device_id;
+    char name[33];
+    char emoji[17];
+    char colour[8];
+    bool local_override;
+};
+
+static device_meta_t deviceMeta[MAX_DEVICES];
+static uint8_t deviceMetaCount = 0;
 
 // ═══════════════════════════════════════════════
 // Forward Declarations
@@ -265,6 +295,7 @@ static void loraTask(void *param);
 static void webTask(void *param);
 static void bleTask(void *param);
 static void cloudTask(void *param);
+static void storageTask(void *param);
 static void consoleTask(void *param);
 
 // Hardware initialisation
@@ -293,13 +324,23 @@ static void syncHubClock(bool force);
 // Packet handling pipeline
 static void handlePacket(const uint8_t *buf, uint8_t len, int16_t rssi, float snr);
 static void buildDeviceJson(const uint8_t *buf, int16_t rssi, float snr,
-                             char *out, size_t outLen);
-static void updateDeviceState(const uint8_t *buf, int16_t rssi, float snr);
-static void logToStorage(const uint8_t *buf, uint8_t len, int16_t rssi, float snr);
+                             uint32_t localId, uint32_t gatewayRxTime,
+                             uint8_t syncState, char *out, size_t outLen);
+static void updateDeviceStateFromRecord(const bp_journal_record_t &record);
 static void sseBroadcast(const char *event, const char *data);
 static String base64Encode(const uint8_t *data, uint8_t len);
 static String buildCloudWrapperJson(const cloud_entry_t &entry);
+static void replayPendingJournal();
+static void syncCloudSnapshotMetadata();
 static device_state_t *findDevice(uint16_t id);
+static const char *journalSyncName(uint8_t state);
+static uint32_t deviceAgeSeconds(const device_state_t &device);
+static void loadDeviceMetadata();
+static bool saveDeviceMetadata();
+static device_meta_t *findDeviceMetadata(uint16_t id, bool create = false);
+static const char *deviceDisplayName(uint16_t id);
+static const char *deviceEmoji(uint16_t id);
+static const char *deviceColour(uint16_t id);
 
 // Command building & ACK tracking
 static void sendCommand(uint16_t target_id, bp_pkt_type_t type, bp_profile_t mode);
@@ -326,6 +367,12 @@ static void enterHomeMode();
 static void enterOffGridMode();
 static void handleApiBle();
 static void handleApiHubMode();
+static void handleApiSecurityStatus();
+static void handleApiSecurityPin();
+static void handleApiSecurityUnlock();
+static bool requireCommandAccess();
+static void handleApiHistory();
+static void handleApiHistoryCsv();
 
 // ── DIO1 Interrupt Service Routine ──
 // The SX1262 fires DIO1 when a packet is fully received.
@@ -357,6 +404,7 @@ void setup() {
     bleMutex     = xSemaphoreCreateMutex();   // Guards BLE scan results (portable mode)
     cmdQueue     = xQueueCreate(CMD_QUEUE_SIZE,   sizeof(cmd_entry_t));   // Web→LoRa command pipe
     cloudQueue   = xQueueCreate(CLOUD_QUEUE_SIZE, sizeof(cloud_entry_t)); // LoRa→Cloud relay pipe
+    storageQueue = xQueueCreate(STORAGE_QUEUE_SIZE, sizeof(bp_journal_record_t));
 
     // Zero out the pending command tracking slots
     memset(pendingCmds, 0, sizeof(pendingCmds));
@@ -374,6 +422,7 @@ void setup() {
     xTaskCreatePinnedToCore(webTask,   "web",   STACK_WEB,   NULL, PRIO_WEB,   &webTaskHandle,   0);  // Core 0
     xTaskCreatePinnedToCore(bleTask,   "ble",   STACK_BLE,   NULL, PRIO_BLE,   &bleTaskHandle,   0);  // Core 0
     xTaskCreatePinnedToCore(cloudTask, "cloud", STACK_CLOUD, NULL, PRIO_CLOUD, &cloudTaskHandle, 0);  // Core 0
+    xTaskCreatePinnedToCore(storageTask, "storage", STACK_STORAGE, NULL, PRIO_STORAGE, &storageTaskHandle, 0);
     xTaskCreatePinnedToCore(consoleTask, "console", STACK_CONSOLE, NULL, PRIO_CONSOLE, &consoleTaskHandle, 0); // Core 0
 
     Serial.println("[INIT] All tasks started");
@@ -436,7 +485,11 @@ static bool hubProfileNeedsLocalAp() {
 static void setHubCommunicationsProfile(hub_comm_profile_t profile) {
     if (hubCommProfile == profile) return;
 
+    hub_comm_profile_t previous = hubCommProfile;
     hubCommProfile = profile;
+    if (previous == HUB_COMM_OFF_GRID && profile != HUB_COMM_OFF_GRID) {
+        offlineAccess.disable();
+    }
     Serial.printf("[HUB] Communications profile → %s\n", hubCommProfileName(hubCommProfile));
     applyWifiRoleForCurrentProfile();
     applyBleRoleForCurrentProfile();
@@ -451,11 +504,13 @@ static void applyWifiRoleForCurrentProfile() {
     }
 
     if (shouldEnableAp && !hubApEnabled) {
-        WiFi.softAP(WIFI_AP_SSID, WIFI_AP_PASS, WIFI_AP_CHANNEL);
+        WiFi.softAP(WIFI_AP_SSID, nullptr, WIFI_AP_CHANNEL);
         hubApEnabled = true;
+        captiveDns.start(CAPTIVE_DNS_PORT, "*", WiFi.softAPIP());
         Serial.printf("[WIFI] AP enabled: %s @ %s\n",
                       WIFI_AP_SSID, WiFi.softAPIP().toString().c_str());
     } else if (!shouldEnableAp && hubApEnabled) {
+        captiveDns.stop();
         WiFi.softAPdisconnect(true);
         hubApEnabled = false;
         WiFi.mode(WIFI_STA);
@@ -647,6 +702,77 @@ static void initBLE() {
     }
 }
 
+static device_meta_t *findDeviceMetadata(uint16_t id, bool create) {
+    for (uint8_t i = 0; i < deviceMetaCount; ++i) {
+        if (deviceMeta[i].device_id == id) return &deviceMeta[i];
+    }
+    if (!create || id == 0 || deviceMetaCount >= MAX_DEVICES) return nullptr;
+    device_meta_t *meta = &deviceMeta[deviceMetaCount++];
+    memset(meta, 0, sizeof(*meta));
+    meta->device_id = id;
+    strlcpy(meta->name, bp_device_name(id), sizeof(meta->name));
+    strlcpy(meta->emoji, "🐾", sizeof(meta->emoji));
+    strlcpy(meta->colour, "#1d9bf0", sizeof(meta->colour));
+    meta->local_override = false;
+    return meta;
+}
+
+static const char *deviceDisplayName(uint16_t id) {
+    device_meta_t *meta = findDeviceMetadata(id);
+    return meta && meta->name[0] ? meta->name : bp_device_name(id);
+}
+
+static const char *deviceEmoji(uint16_t id) {
+    device_meta_t *meta = findDeviceMetadata(id);
+    return meta && meta->emoji[0] ? meta->emoji : "";
+}
+
+static const char *deviceColour(uint16_t id) {
+    device_meta_t *meta = findDeviceMetadata(id);
+    return meta && meta->colour[0] ? meta->colour : "";
+}
+
+static void loadDeviceMetadata() {
+    if (!LittleFS.exists(DEVICE_META_PATH)) return;
+    File file = LittleFS.open(DEVICE_META_PATH, "r");
+    if (!file) return;
+
+    JsonDocument doc;
+    if (deserializeJson(doc, file) == DeserializationError::Ok) {
+        for (JsonObject item : doc.as<JsonArray>()) {
+            uint16_t id = item["device_id"] | 0;
+            device_meta_t *meta = findDeviceMetadata(id, true);
+            if (!meta) continue;
+            strlcpy(meta->name, item["name"] | bp_device_name(id), sizeof(meta->name));
+            strlcpy(meta->emoji, item["emoji"] | "🐾", sizeof(meta->emoji));
+            strlcpy(meta->colour, item["colour"] | "#1d9bf0", sizeof(meta->colour));
+            meta->local_override = item["local_override"] | false;
+        }
+        Serial.printf("[FS] Loaded %u local collar appearances\n", deviceMetaCount);
+    } else {
+        Serial.println("[FS] Ignoring invalid devices.meta cache");
+    }
+    file.close();
+}
+
+static bool saveDeviceMetadata() {
+    JsonDocument doc;
+    JsonArray items = doc.to<JsonArray>();
+    for (uint8_t i = 0; i < deviceMetaCount; ++i) {
+        JsonObject item = items.add<JsonObject>();
+        item["device_id"] = deviceMeta[i].device_id;
+        item["name"] = deviceMeta[i].name;
+        item["emoji"] = deviceMeta[i].emoji;
+        item["colour"] = deviceMeta[i].colour;
+        item["local_override"] = deviceMeta[i].local_override;
+    }
+    File file = LittleFS.open(DEVICE_META_PATH, "w");
+    if (!file) return false;
+    bool ok = serializeJson(doc, file) > 0;
+    file.close();
+    return ok;
+}
+
 static void initStorage() {
     // Mount LittleFS (on-chip flash filesystem). The 'true' parameter
     // auto-formats the partition if it's not already formatted.
@@ -655,18 +781,23 @@ static void initStorage() {
         return;
     }
     Serial.println("[FS] LittleFS mounted");
+    loadDeviceMetadata();
 
-    // Count existing log entries so we know when to rotate.
-    // We just count newline characters (one per CSV row).
-    if (LittleFS.exists(LOG_FILE_PATH)) {
-        File f = LittleFS.open(LOG_FILE_PATH, "r");
-        if (f) {
-            while (f.available()) {
-                if (f.read() == '\n') logEntryCount++;
+    if (!offlineJournal.begin(LittleFS)) {
+        Serial.println("[FS] Offline journal unavailable");
+    } else {
+        Serial.printf("[FS] Offline journal: %lu valid, %u pending\n",
+                      (unsigned long)offlineJournal.totalValidRecords(),
+                      offlineJournal.pendingCount());
+
+        uint16_t ids[BP_JOURNAL_MAX_DEVICES] = {};
+        uint16_t idCount = offlineJournal.collectIds(ids, BP_JOURNAL_MAX_DEVICES);
+        for (uint16_t i = 0; i < idCount; ++i) {
+            bp_journal_record_t latest{};
+            if (offlineJournal.latest(ids[i], latest)) {
+                updateDeviceStateFromRecord(latest);
             }
-            f.close();
         }
-        Serial.printf("[FS] Existing log: %u entries\n", logEntryCount);
     }
 
     // Load saved WiFi/cloud config from a simple key=value text file.
@@ -834,6 +965,11 @@ static void noteCommandSent(const cmd_entry_t &cmd) {
         }
         xSemaphoreGive(pendingMutex);
     }
+    char json[144];
+    snprintf(json, sizeof(json),
+             "{\"cmdSeq\":%u,\"device\":%u,\"status\":\"transmitted\"}",
+             cmd.cmdSeq, cmd.targetId);
+    sseBroadcast("cmd_ack", json);
 }
 
 static void queuePendingCommandForDevice(uint16_t targetId) {
@@ -842,6 +978,10 @@ static void queuePendingCommandForDevice(uint16_t targetId) {
     if (xSemaphoreTake(pendingMutex, pdMS_TO_TICKS(20))) {
         for (int i = 0; i < MAX_PENDING_CMDS; i++) {
             if (!pendingCmds[i].active || pendingCmds[i].targetId != targetId) continue;
+
+            pendingCmds[i].retries = 0;
+            pendingCmds[i].sentAtMs = 0;
+            pendingCmds[i].waitingOpportunity = false;
 
             cmd_entry_t cmd;
             memcpy(cmd.buf, pendingCmds[i].buf, pendingCmds[i].len);
@@ -872,6 +1012,16 @@ static void checkPendingAcks() {
         uint32_t now = millis();
         for (int i = 0; i < MAX_PENDING_CMDS; i++) {
             if (!pendingCmds[i].active) continue;                      // Skip unused slots
+            if (now - pendingCmds[i].createdAtMs >= LOCAL_COMMAND_TTL_MS) {
+                char json[144];
+                snprintf(json, sizeof(json),
+                    "{\"cmdSeq\":%u,\"device\":%u,\"status\":\"expired\"}",
+                    pendingCmds[i].cmdSeq, pendingCmds[i].targetId);
+                sseBroadcast("cmd_ack", json);
+                pendingCmds[i].active = false;
+                continue;
+            }
+            if (pendingCmds[i].waitingOpportunity) continue;
             if (pendingCmds[i].sentAtMs == 0) continue;                 // Queued but not TX-confirmed yet
             if (now - pendingCmds[i].sentAtMs < CMD_ACK_TIMEOUT_MS) continue;  // Not timed out yet
 
@@ -893,20 +1043,19 @@ static void checkPendingAcks() {
                               pendingCmds[i].cmdSeq,
                               bp_device_name(pendingCmds[i].targetId));
             } else {
-                // All retries exhausted — give up on this command
-                Serial.printf("[ACK] EXPIRED seq %lu → %s (no ACK after %d retries)\n",
+                // Blind retries exhausted. Retain until the collar's next RX
+                // opportunity or the one-hour local command TTL.
+                Serial.printf("[ACK] Waiting for next RX opportunity seq %lu → %s\n",
                               pendingCmds[i].cmdSeq,
-                              bp_device_name(pendingCmds[i].targetId),
-                              CMD_MAX_RETRIES);
+                              bp_device_name(pendingCmds[i].targetId));
 
                 // Tell the web GUI the command failed
                 char json[128];
                 snprintf(json, sizeof(json),
-                    "{\"cmdSeq\":%u,\"device\":%u,\"status\":\"expired\"}",
+                    "{\"cmdSeq\":%u,\"device\":%u,\"status\":\"failed\",\"retry\":\"next_rx_window\"}",
                     pendingCmds[i].cmdSeq, pendingCmds[i].targetId);
                 sseBroadcast("cmd_ack", json);
-
-                pendingCmds[i].active = false;  // Free this slot
+                pendingCmds[i].waitingOpportunity = true;
             }
         }
         xSemaphoreGive(pendingMutex);
@@ -959,28 +1108,33 @@ static void handlePacket(const uint8_t *buf, uint8_t len, int16_t rssi, float sn
         handleAck(buf);
     }
 
-    // Step 4: Store/update the device's latest telemetry in our state table
-    updateDeviceState(buf, rssi, snr);
-
-    // Step 5: Append a CSV row to the on-chip log file
-    logToStorage(buf, len, rssi, snr);
-
-    // Step 6: Queue the raw packet for the cloudTask to POST to the server.
-    // If the queue is full, we silently drop — cloud relay is best-effort.
-    cloud_entry_t ce;
-    memcpy(ce.buf, buf, len);
-    ce.len  = len;
-    ce.rssi = rssi;
-    ce.snr  = snr;
+    // Step 4: Assign a monotonic local journal identity and update RAM now.
+    // Flash writes happen on storageTask, never on the time-sensitive LoRa task.
     time_t rxTime = time(nullptr);
-    ce.gateway_rx_time_unix = unixTimeLooksValid(rxTime)
+    uint32_t gatewayRxTime = unixTimeLooksValid(rxTime)
         ? (uint32_t)rxTime
         : pkt_time_unix(buf);
-    xQueueSend(cloudQueue, &ce, 0);
+    bp_journal_record_t record{};
+    record.local_id = offlineJournal.nextLocalId();
+    record.source_id = devId;
+    record.gateway_rx_time_unix = gatewayRxTime;
+    record.rssi_dbm = rssi;
+    record.snr_x10 = (int16_t)roundf(snr * 10.0f);
+    record.packet_len = len;
+    record.sync_state = BP_JOURNAL_PENDING;
+    memcpy(record.packet, buf, len);
+    OfflineJournal::seal(record);
+    updateDeviceStateFromRecord(record);
+
+    if (xQueueSend(storageQueue, &record, 0) != pdTRUE) {
+        Serial.printf("[FS] Journal queue full; local packet %lu remains RAM-only\n",
+                      (unsigned long)record.local_id);
+    }
 
     // Step 7: Push the telemetry as JSON to all connected web browsers via SSE
-    char jsonBuf[384];
-    buildDeviceJson(buf, rssi, snr, jsonBuf, sizeof(jsonBuf));
+    char jsonBuf[640];
+    buildDeviceJson(buf, rssi, snr, record.local_id, record.gateway_rx_time_unix,
+                    record.sync_state, jsonBuf, sizeof(jsonBuf));
     sseBroadcast("telemetry", jsonBuf);
 
     // Step 8: A valid uplink means the collar should now be in its short RX
@@ -995,7 +1149,8 @@ static void handlePacket(const uint8_t *buf, uint8_t len, int16_t rssi, float sn
 // in the /api/devices endpoint. The browser parses it to update
 // the device card and map marker.
 static void buildDeviceJson(const uint8_t *buf, int16_t rssi, float snr,
-                             char *out, size_t outLen) {
+                             uint32_t localId, uint32_t gatewayRxTime,
+                             uint8_t syncState, char *out, size_t outLen) {
     uint16_t devId    = pkt_device_id(buf);
     uint16_t flags    = pkt_flags(buf);
     bool hasGps       = (flags & FLAG_HAS_GPS) != 0;
@@ -1006,13 +1161,15 @@ static void buildDeviceJson(const uint8_t *buf, int16_t rssi, float snr,
     pkt_tlv_get_u8(buf, TLV_RESET_REASON, &error);
 
     snprintf(out, outLen,
-        "{\"id\":%u,\"name\":\"%s\",\"seq\":%u,\"time\":%u,"
+        "{\"id\":%u,\"name\":\"%s\",\"emoji\":\"%s\",\"colour\":\"%s\",\"seq\":%u,\"time\":%u,"
         "\"status\":\"%s\",\"profile\":\"%s\",\"error\":\"%s\","
         "\"lat\":%.7f,\"lon\":%.7f,\"hasGps\":%s,"
         "\"batt\":%u,\"acc\":%u,\"fixAge\":%u,"
         "\"rssi\":%d,\"snr\":%.1f,"
-        "\"bleHome\":%s,\"cellular\":false,\"txReason\":\"%s\"}",
-        devId, bp_device_name(devId), pkt_msg_seq(buf), pkt_time_unix(buf),
+        "\"bleHome\":%s,\"cellular\":false,\"txReason\":\"%s\","
+        "\"localId\":%lu,\"gatewayRxTime\":%lu,\"verification\":\"%s\"}",
+        devId, deviceDisplayName(devId), deviceEmoji(devId), deviceColour(devId),
+        pkt_msg_seq(buf), pkt_time_unix(buf),
         bp_status_display((bp_status_t)pkt_status(buf)),
         bp_profile_name((bp_profile_t)profile),
         bp_error_display((bp_error_t)error),
@@ -1020,13 +1177,16 @@ static void buildDeviceJson(const uint8_t *buf, int16_t rssi, float snr,
         pkt_batt_mV(buf), pkt_acc_m(buf), pkt_fix_age_s(buf),
         rssi, snr,
         (flags & FLAG_HOME_BEACON_SEEN) ? "true" : "false",
-        bp_tx_reason_display(pkt_tx_reason(buf))
+        bp_tx_reason_display(pkt_tx_reason(buf)),
+        (unsigned long)localId, (unsigned long)gatewayRxTime,
+        journalSyncName(syncState)
     );
 }
 
 // Update our in-memory device state table with the latest packet data.
 // This is what the web GUI reads when a new browser connects.
-static void updateDeviceState(const uint8_t *buf, int16_t rssi, float snr) {
+static void updateDeviceStateFromRecord(const bp_journal_record_t &record) {
+    const uint8_t *buf = record.packet;
     uint16_t devId = pkt_device_id(buf);
     uint16_t flags = pkt_flags(buf);
 
@@ -1045,9 +1205,12 @@ static void updateDeviceState(const uint8_t *buf, int16_t rssi, float snr) {
             dev->batt_mV     = pkt_batt_mV(buf);
             dev->acc_m       = pkt_acc_m(buf);
             dev->fix_age_s   = pkt_fix_age_s(buf);
-            dev->rssi        = rssi;
-            dev->snr         = snr;
+            dev->rssi        = record.rssi_dbm;
+            dev->snr         = record.snr_x10 / 10.0f;
             dev->local_millis = millis();  // Record when WE received it (for "last seen" age)
+            dev->gateway_rx_time_unix = record.gateway_rx_time_unix;
+            dev->local_id = record.local_id;
+            dev->sync_state = record.sync_state;
             dev->has_gps     = (flags & FLAG_HAS_GPS) != 0;
             if (dev->has_gps) {
                 dev->lat_e7 = pkt_lat_e7(buf);
@@ -1069,48 +1232,30 @@ static device_state_t *findDevice(uint16_t id) {
     return NULL;
 }
 
-// ═══════════════════════════════════════════════
-// Storage — CSV Log
-//
-// Every received telemetry packet is appended as one CSV row to
-// /log.csv on the ESP32's flash. This provides a local history
-// even without cloud connectivity. The log auto-rotates (deletes
-// and restarts) after MAX_LOG_ENTRIES rows to avoid filling flash.
-// ═══════════════════════════════════════════════
+// Storage task owns LittleFS journal writes. Once durable, a packet may enter
+// the live cloud queue; Off-Grid packets remain pending for batch replay.
+static void storageTask(void *param) {
+    (void)param;
+    bp_journal_record_t record{};
+    for (;;) {
+        if (xQueueReceive(storageQueue, &record, portMAX_DELAY) != pdTRUE) continue;
+        if (!offlineJournal.append(record)) {
+            Serial.printf("[FS] Failed journal append local_id=%lu\n",
+                          (unsigned long)record.local_id);
+            continue;
+        }
 
-static void logToStorage(const uint8_t *buf, uint8_t len, int16_t rssi, float snr) {
-    File f = LittleFS.open(LOG_FILE_PATH, "a");  // Open for append
-    if (!f) return;
-
-    uint16_t devId = pkt_device_id(buf);
-    uint16_t flags = pkt_flags(buf);
-    bool hasGps    = (flags & FLAG_HAS_GPS) != 0;
-
-    uint8_t profile = pkt_power_profile(buf);
-
-    // CSV columns: timestamp, device_id, msg_seq, status, lat, lon, batt_mV, rssi, snr, profile
-    f.printf("%u,%u,%u,%u,%.7f,%.7f,%u,%d,%.1f,%u\n",
-        pkt_time_unix(buf),
-        devId,
-        pkt_msg_seq(buf),
-        pkt_status(buf),
-        hasGps ? pkt_lat_e7(buf) / 1e7 : 0.0,
-        hasGps ? pkt_lon_e7(buf) / 1e7 : 0.0,
-        pkt_batt_mV(buf),
-        rssi,
-        snr,
-        profile
-    );
-    f.close();
-
-    logEntryCount++;
-
-    // Simple log rotation: delete the entire file once it hits the limit.
-    // A circular buffer would be more elegant but this is fine for flash wear.
-    if (logEntryCount > MAX_LOG_ENTRIES) {
-        LittleFS.remove(LOG_FILE_PATH);
-        logEntryCount = 0;
-        Serial.println("[FS] Log rotated");
+        if (hubProfileAllowsCloudRelay()) {
+            cloud_entry_t ce{};
+            memcpy(ce.buf, record.packet, record.packet_len);
+            ce.len = record.packet_len;
+            ce.rssi = record.rssi_dbm;
+            ce.snr = record.snr_x10 / 10.0f;
+            ce.gateway_rx_time_unix = record.gateway_rx_time_unix;
+            ce.local_id = record.local_id;
+            ce.source_id = record.source_id;
+            xQueueSend(cloudQueue, &ce, 0);
+        }
     }
 }
 
@@ -1198,9 +1343,9 @@ static void handleJS() {
 static void handleEvents() {
     WiFiClient client = httpServer.client();
 
-    // Register this client in our SSE client list (max 4 simultaneous)
+    // Register this client; additional browsers use slow polling.
     if (xSemaphoreTake(sseMutex, pdMS_TO_TICKS(100))) {
-        if (sseClientCount < 4) {
+        if (sseClientCount < MAX_SSE_CLIENTS) {
             sseClients[sseClientCount++] = client;
             xSemaphoreGive(sseMutex);
         } else {
@@ -1226,14 +1371,17 @@ static void handleEvents() {
     if (xSemaphoreTake(deviceMutex, pdMS_TO_TICKS(100))) {
         for (uint8_t i = 0; i < deviceCount; i++) {
             device_state_t *d = &devices[i];
-            char json[384];
+            char json[640];
             snprintf(json, sizeof(json),
-                "{\"id\":%u,\"name\":\"%s\",\"seq\":%u,\"time\":%u,"
+                "{\"id\":%u,\"name\":\"%s\",\"emoji\":\"%s\",\"colour\":\"%s\",\"seq\":%u,\"time\":%u,"
                 "\"status\":\"%s\",\"profile\":\"%s\","
                 "\"lat\":%.7f,\"lon\":%.7f,\"hasGps\":%s,"
                 "\"batt\":%u,\"acc\":%u,\"fixAge\":%u,"
-                "\"rssi\":%d,\"snr\":%.1f,\"bleHome\":false,\"cellular\":false}",
-                d->device_id, bp_device_name(d->device_id),
+                "\"rssi\":%d,\"snr\":%.1f,\"bleHome\":false,\"cellular\":false,"
+                "\"age\":%lu,\"stale\":%s,\"localId\":%lu,"
+                "\"gatewayRxTime\":%lu,\"verification\":\"%s\"}",
+                d->device_id, deviceDisplayName(d->device_id),
+                deviceEmoji(d->device_id), deviceColour(d->device_id),
                 d->last_seq, d->last_time,
                 bp_status_display((bp_status_t)d->status),
                 bp_profile_name((bp_profile_t)d->profile),
@@ -1241,7 +1389,12 @@ static void handleEvents() {
                 d->has_gps ? d->lon_e7 / 1e7 : 0.0,
                 d->has_gps ? "true" : "false",
                 d->batt_mV, d->acc_m, d->fix_age_s,
-                d->rssi, d->snr
+                d->rssi, d->snr,
+                (unsigned long)deviceAgeSeconds(*d),
+                deviceAgeSeconds(*d) >= 600 ? "true" : "false",
+                (unsigned long)d->local_id,
+                (unsigned long)d->gateway_rx_time_unix,
+                journalSyncName(d->sync_state)
             );
             client.printf("event: telemetry\ndata: %s\n\n", json);
         }
@@ -1258,14 +1411,16 @@ static void handleApiDevices() {
         for (uint8_t i = 0; i < deviceCount; i++) {
             device_state_t *d = &devices[i];
             if (i > 0) json += ",";
-            char buf[384];
+            char buf[640];
             snprintf(buf, sizeof(buf),
-                "{\"id\":%u,\"name\":\"%s\",\"seq\":%u,\"time\":%u,"
+                "{\"id\":%u,\"name\":\"%s\",\"emoji\":\"%s\",\"colour\":\"%s\",\"seq\":%u,\"time\":%u,"
                 "\"status\":\"%s\",\"profile\":\"%s\","
                 "\"lat\":%.7f,\"lon\":%.7f,\"hasGps\":%s,"
                 "\"batt\":%u,\"acc\":%u,\"fixAge\":%u,"
-                "\"rssi\":%d,\"snr\":%.1f,\"age\":%u}",
-                d->device_id, bp_device_name(d->device_id),
+                "\"rssi\":%d,\"snr\":%.1f,\"age\":%lu,\"stale\":%s,"
+                "\"localId\":%lu,\"gatewayRxTime\":%lu,\"verification\":\"%s\"}",
+                d->device_id, deviceDisplayName(d->device_id),
+                deviceEmoji(d->device_id), deviceColour(d->device_id),
                 d->last_seq, d->last_time,
                 bp_status_display((bp_status_t)d->status),
                 bp_profile_name((bp_profile_t)d->profile),
@@ -1274,7 +1429,11 @@ static void handleApiDevices() {
                 d->has_gps ? "true" : "false",
                 d->batt_mV, d->acc_m, d->fix_age_s,
                 d->rssi, d->snr,
-                (millis() - d->local_millis) / 1000
+                (unsigned long)deviceAgeSeconds(*d),
+                deviceAgeSeconds(*d) >= 600 ? "true" : "false",
+                (unsigned long)d->local_id,
+                (unsigned long)d->gateway_rx_time_unix,
+                journalSyncName(d->sync_state)
             );
             json += buf;
         }
@@ -1284,13 +1443,127 @@ static void handleApiDevices() {
     httpServer.send(200, "application/json", json);
 }
 
+static const char *journalSyncName(uint8_t state) {
+    if (state == BP_JOURNAL_VALIDATED) return "validated";
+    if (state == BP_JOURNAL_REJECTED) return "rejected";
+    return "pending";
+}
+
+static uint32_t deviceAgeSeconds(const device_state_t &device) {
+    time_t now = time(nullptr);
+    if (unixTimeLooksValid(now) && unixTimeLooksValid(device.gateway_rx_time_unix)
+        && (uint32_t)now >= device.gateway_rx_time_unix) {
+        return (uint32_t)now - device.gateway_rx_time_unix;
+    }
+    return (millis() - device.local_millis) / 1000;
+}
+
+static void appendHistoryJson(String &json, const bp_journal_record_t &record) {
+    const uint8_t *packet = record.packet;
+    uint16_t flags = pkt_flags(packet);
+    bool hasGps = (flags & FLAG_HAS_GPS) != 0;
+    char item[640];
+    snprintf(item, sizeof(item),
+        "{\"local_id\":%lu,\"device_id\":%u,\"sequence\":%u,"
+        "\"gateway_rx_time_unix\":%lu,\"collar_time_unix\":%u,"
+        "\"status\":\"%s\",\"profile\":\"%s\",\"tx_reason\":\"%s\","
+        "\"has_gps\":%s,\"latitude\":%.7f,\"longitude\":%.7f,"
+        "\"battery_mv\":%u,\"accuracy_m\":%u,\"fix_age_s\":%u,"
+        "\"rssi_dbm\":%d,\"snr_db\":%.1f,\"verification\":\"%s\","
+        "\"payload_b64\":\"%s\"}",
+        (unsigned long)record.local_id, record.source_id, pkt_msg_seq(packet),
+        (unsigned long)record.gateway_rx_time_unix, pkt_time_unix(packet),
+        bp_status_display((bp_status_t)pkt_status(packet)),
+        bp_profile_name((bp_profile_t)pkt_power_profile(packet)),
+        bp_tx_reason_display(pkt_tx_reason(packet)),
+        hasGps ? "true" : "false",
+        hasGps ? pkt_lat_e7(packet) / 1e7 : 0.0,
+        hasGps ? pkt_lon_e7(packet) / 1e7 : 0.0,
+        pkt_batt_mV(packet), pkt_acc_m(packet), pkt_fix_age_s(packet),
+        record.rssi_dbm, record.snr_x10 / 10.0f,
+        journalSyncName(record.sync_state),
+        base64Encode(packet, record.packet_len).c_str());
+    json += item;
+}
+
+static void handleApiHistory() {
+    uint16_t sourceId = parseSerialDeviceId(httpServer.arg("device"));
+    uint16_t limit = (uint16_t)constrain(httpServer.arg("limit").toInt(), 1, 100);
+    if (httpServer.arg("limit").length() == 0) limit = 100;
+    if (sourceId == 0) {
+        httpServer.send(400, "application/json", "{\"error\":\"device_required\"}");
+        return;
+    }
+
+    uint32_t ids[BP_JOURNAL_PER_DEVICE] = {};
+    uint16_t count = offlineJournal.collectLocalIds(sourceId, ids, BP_JOURNAL_PER_DEVICE);
+    uint16_t start = count > limit ? count - limit : 0;
+    String json;
+    json.reserve((count - start) * 420 + 64);
+    json = "{\"device_id\":" + String(sourceId) + ",\"items\":[";
+    bool first = true;
+    for (uint16_t i = start; i < count; ++i) {
+        bp_journal_record_t record{};
+        if (!offlineJournal.find(ids[i], sourceId, record)) continue;
+        if (!first) json += ',';
+        appendHistoryJson(json, record);
+        first = false;
+    }
+    json += "]}";
+    httpServer.send(200, "application/json", json);
+}
+
+static void handleApiHistoryCsv() {
+    uint16_t sourceId = parseSerialDeviceId(httpServer.arg("device"));
+    if (sourceId == 0) {
+        httpServer.send(400, "application/json", "{\"error\":\"device_required\"}");
+        return;
+    }
+    uint32_t ids[BP_JOURNAL_PER_DEVICE] = {};
+    uint16_t count = offlineJournal.collectLocalIds(sourceId, ids, BP_JOURNAL_PER_DEVICE);
+    String csv;
+    csv.reserve(count * 150 + 180);
+    csv = "local_id,gateway_rx_time_unix,collar_time_unix,device_id,sequence,status,profile,tx_reason,latitude,longitude,battery_mv,accuracy_m,fix_age_s,rssi_dbm,snr_db,verification\r\n";
+    for (uint16_t i = 0; i < count; ++i) {
+        bp_journal_record_t record{};
+        if (!offlineJournal.find(ids[i], sourceId, record)) continue;
+        const uint8_t *packet = record.packet;
+        bool hasGps = (pkt_flags(packet) & FLAG_HAS_GPS) != 0;
+        char row[320];
+        snprintf(row, sizeof(row),
+            "%lu,%lu,%u,%u,%u,%s,%s,%s,%.7f,%.7f,%u,%u,%u,%d,%.1f,%s\r\n",
+            (unsigned long)record.local_id, (unsigned long)record.gateway_rx_time_unix,
+            pkt_time_unix(packet), record.source_id, pkt_msg_seq(packet),
+            bp_status_display((bp_status_t)pkt_status(packet)),
+            bp_profile_name((bp_profile_t)pkt_power_profile(packet)),
+            bp_tx_reason_display(pkt_tx_reason(packet)),
+            hasGps ? pkt_lat_e7(packet) / 1e7 : 0.0,
+            hasGps ? pkt_lon_e7(packet) / 1e7 : 0.0,
+            pkt_batt_mV(packet), pkt_acc_m(packet), pkt_fix_age_s(packet),
+            record.rssi_dbm, record.snr_x10 / 10.0f,
+            journalSyncName(record.sync_state));
+        csv += row;
+    }
+    httpServer.sendHeader("Content-Disposition",
+                          "attachment; filename=bluepaws-device-" + String(sourceId) + ".csv");
+    httpServer.send(200, "text/csv", csv);
+}
+
 // ── API: GET /api/status ──
 // Returns hub diagnostic info: uptime, packet counts, memory, WiFi state.
 // Displayed in the Settings modal in the web GUI.
 static void handleApiStatus() {
     updateConnectivityState();
 
-    char buf[512];
+    uint8_t connectedSse = 0;
+    if (xSemaphoreTake(sseMutex, pdMS_TO_TICKS(25))) {
+        connectedSse = sseClientCount;
+        xSemaphoreGive(sseMutex);
+    }
+    size_t fsTotal = LittleFS.totalBytes();
+    size_t fsUsed = LittleFS.usedBytes();
+
+    char buf[768];
     snprintf(buf, sizeof(buf),
         "{\"uptime\":%u,\"rxCount\":%u,\"txCount\":%u,"
         "\"crcFails\":%u,\"devices\":%u,\"logEntries\":%u,"
@@ -1299,9 +1572,12 @@ static void handleApiStatus() {
         "\"provisioning_mode\":%s,\"time_synced\":%s,\"hub_time_unix\":%u,"
         "\"mode\":\"%s\",\"wifi_connected\":%s,"
         "\"internet_reachable\":%s,\"cloud_reachable\":%s,"
-        "\"last_cloud_success_ms\":%u,\"lora_rx_active\":%s}",
+        "\"last_cloud_success_ms\":%u,\"lora_rx_active\":%s,"
+        "\"littlefs_total_bytes\":%u,\"littlefs_used_bytes\":%u,"
+        "\"littlefs_free_bytes\":%u,\"sse_clients\":%u,"
+        "\"sse_capacity\":%u,\"replay_backlog\":%u}",
         millis() / 1000, rxCount, txCount,
-        crcFailCount, deviceCount, logEntryCount,
+        crcFailCount, deviceCount, (unsigned)offlineJournal.totalValidRecords(),
         staConnected ? "true" : "false",
         staConnected ? WiFi.localIP().toString().c_str() : "",
         hubApEnabled ? "true" : "false",
@@ -1316,7 +1592,9 @@ static void handleApiStatus() {
         hubConnectivity.internet_reachable ? "true" : "false",
         hubConnectivity.cloud_reachable ? "true" : "false",
         hubConnectivity.last_cloud_success_ms,
-        hubConnectivity.lora_rx_active ? "true" : "false"
+        hubConnectivity.lora_rx_active ? "true" : "false",
+        (unsigned)fsTotal, (unsigned)fsUsed, (unsigned)(fsTotal - fsUsed),
+        connectedSse, MAX_SSE_CLIENTS, offlineJournal.pendingCount()
     );
     httpServer.send(200, "application/json", buf);
 }
@@ -1340,6 +1618,79 @@ static String getPostField(const String &body, const char *name) {
     return value;
 }
 
+static bool validLocalName(const String &value) {
+    if (value.length() == 0 || value.length() > 32) return false;
+    for (size_t i = 0; i < value.length(); ++i) {
+        uint8_t c = (uint8_t)value[i];
+        if (c < 0x20 || c == '"' || c == '\\') return false;
+    }
+    return true;
+}
+
+static bool validMarkerColour(const String &value) {
+    if (value.length() != 7 || value[0] != '#') return false;
+    for (size_t i = 1; i < value.length(); ++i) {
+        if (!isxdigit((unsigned char)value[i])) return false;
+    }
+    return true;
+}
+
+static bool validLocalEmoji(const String &value) {
+    if (value.length() == 0 || value.length() > 16) return false;
+    for (size_t i = 0; i < value.length(); ++i) {
+        uint8_t c = (uint8_t)value[i];
+        if (c < 0x20 || c == '<' || c == '>' || c == '&' || c == '"'
+            || c == '\'' || c == '\\') return false;
+    }
+    return true;
+}
+
+// Hub-local appearance overrides never alter Supabase. They are deliberately
+// small and stored beside the journal so the Off-Grid UI stays recognisable.
+static void handleApiDeviceMetadata() {
+    if (httpServer.method() != HTTP_POST) {
+        httpServer.send(405, "text/plain", "POST only");
+        return;
+    }
+    if (!requireCommandAccess()) return;
+
+    String body = httpServer.arg("plain");
+    uint16_t id = parseSerialDeviceId(getPostField(body, "device"));
+    String name = getPostField(body, "name");
+    String emoji = getPostField(body, "emoji");
+    String colour = getPostField(body, "colour");
+    if (id == 0 || !validLocalName(name) || !validLocalEmoji(emoji)
+        || !validMarkerColour(colour)) {
+        httpServer.send(400, "application/json", "{\"error\":\"invalid_appearance\"}");
+        return;
+    }
+
+    device_meta_t *meta = findDeviceMetadata(id, true);
+    if (!meta) {
+        httpServer.send(409, "application/json", "{\"error\":\"device_limit\"}");
+        return;
+    }
+    strlcpy(meta->name, name.c_str(), sizeof(meta->name));
+    strlcpy(meta->emoji, emoji.c_str(), sizeof(meta->emoji));
+    strlcpy(meta->colour, colour.c_str(), sizeof(meta->colour));
+    meta->local_override = true;
+    if (!saveDeviceMetadata()) {
+        httpServer.send(500, "application/json", "{\"error\":\"storage_failed\"}");
+        return;
+    }
+
+    JsonDocument response;
+    response["ok"] = true;
+    response["id"] = id;
+    response["name"] = meta->name;
+    response["emoji"] = meta->emoji;
+    response["colour"] = meta->colour;
+    String json;
+    serializeJson(response, json);
+    sseBroadcast("appearance", json.c_str());
+    httpServer.send(200, "application/json", json);
+}
+
 // ── API: POST /api/command ──
 // Sends a mode-change command to a collar.
 // Body format: device=XXXX&mode=normal|active|lost|powersave
@@ -1349,6 +1700,7 @@ static void handleApiCommand() {
         httpServer.send(405, "text/plain", "POST only");
         return;
     }
+    if (!requireCommandAccess()) return;
 
     String body = httpServer.arg("plain");
 
@@ -1386,6 +1738,7 @@ static void handleApiFind() {
         httpServer.send(405, "text/plain", "POST only");
         return;
     }
+    if (!requireCommandAccess()) return;
 
     String body = httpServer.arg("plain");
 
@@ -1443,6 +1796,7 @@ static void handleApiDeviceStatusCommand() {
         httpServer.send(405, "text/plain", "POST only");
         return;
     }
+    if (!requireCommandAccess()) return;
 
     String body = httpServer.arg("plain");
 
@@ -1522,6 +1876,12 @@ static void handleApiConfig() {
 // Tries to serve the file from LittleFS (e.g. favicon.ico, images).
 static void handleNotFound() {
     String path = httpServer.uri();
+    if (path.startsWith("/tiles/")) {
+        // Reserved local tile API. The bundled vector skeleton is the current
+        // source; a future SD-backed provider can serve raster/vector bytes.
+        httpServer.send(204, "image/png", "");
+        return;
+    }
     if (LittleFS.exists(path)) {
         File f = LittleFS.open(path, "r");
         // Determine MIME type from file extension
@@ -1541,6 +1901,8 @@ static void handleNotFound() {
 
 // Register all HTTP routes and start the web server
 static void initWebServer() {
+    const char *headers[] = {"X-Bluepaws-Local-Session"};
+    httpServer.collectHeaders(headers, 1);
     // Static file routes
     httpServer.on("/",             HTTP_GET,  handleRoot);     // Main page
     httpServer.on("/style.css",    HTTP_GET,  handleCSS);      // Stylesheet
@@ -1549,13 +1911,25 @@ static void initWebServer() {
     httpServer.on("/events",       HTTP_GET,  handleEvents);
     // REST API endpoints
     httpServer.on("/api/devices",  HTTP_GET,  handleApiDevices);  // Get all device states
+    httpServer.on("/api/history", HTTP_GET, handleApiHistory);
+    httpServer.on("/api/history.csv", HTTP_GET, handleApiHistoryCsv);
     httpServer.on("/api/status",   HTTP_GET,  handleApiStatus);   // Get hub diagnostics
+    httpServer.on("/api/device-meta", HTTP_POST, handleApiDeviceMetadata);
     httpServer.on("/api/command",  HTTP_POST, handleApiCommand);  // Send mode command
     httpServer.on("/api/device-status", HTTP_POST, handleApiDeviceStatusCommand); // Request collar status
     httpServer.on("/api/find",     HTTP_POST, handleApiFind);     // Trigger find (buzzer+LED)
     httpServer.on("/api/config",   HTTP_POST, handleApiConfig);   // Save WiFi/cloud config
     httpServer.on("/api/ble",      HTTP_GET,  handleApiBle);       // BLE scan results (portable mode)
     httpServer.on("/api/hub-mode", HTTP_POST, handleApiHubMode);   // Toggle home/portable mode
+    httpServer.on("/api/security", HTTP_GET, handleApiSecurityStatus);
+    httpServer.on("/api/security/pin", HTTP_POST, handleApiSecurityPin);
+    httpServer.on("/api/security/unlock", HTTP_POST, handleApiSecurityUnlock);
+    httpServer.on("/generate_204", HTTP_ANY, handleRoot);
+    httpServer.on("/gen_204", HTTP_ANY, handleRoot);
+    httpServer.on("/hotspot-detect.html", HTTP_ANY, handleRoot);
+    httpServer.on("/library/test/success.html", HTTP_ANY, handleRoot);
+    httpServer.on("/ncsi.txt", HTTP_ANY, handleRoot);
+    httpServer.on("/connecttest.txt", HTTP_ANY, handleRoot);
     httpServer.onNotFound(handleNotFound);                        // Serve other files from flash
     httpServer.begin();
     Serial.printf("[WEB] HTTP server on port %d\n", HTTP_PORT);
@@ -1573,6 +1947,7 @@ static void webTask(void *param) {
     for (;;) {
         // Process any pending HTTP requests (non-blocking)
         httpServer.handleClient();
+        if (hubApEnabled) captiveDns.processNextRequest();
 
         // Send a heartbeat event every 5 seconds. The browser uses this
         // to detect if the SSE connection has dropped (10s watchdog).
@@ -1997,6 +2372,15 @@ static void handleApiHubMode() {
     }
 
     String body = httpServer.arg("plain");
+    bool leavingOffGrid = hubCommProfile == HUB_COMM_OFF_GRID
+        && body.indexOf("mode=off_grid") < 0
+        && body.indexOf("mode=off-grid") < 0;
+    if (leavingOffGrid && getPostField(body, "confirm") != "true") {
+        httpServer.send(409, "application/json",
+                        "{\"error\":\"confirmation_required\",\"detail\":\"Confirm leaving Off-Grid mode\"}");
+        return;
+    }
+    if (leavingOffGrid && !requireCommandAccess()) return;
     if (body.indexOf("mode=portable") >= 0) {
         enterPortableMode();
     } else if (body.indexOf("mode=off_grid") >= 0 || body.indexOf("mode=off-grid") >= 0) {
@@ -2011,6 +2395,61 @@ static void handleApiHubMode() {
     char resp[40];
     snprintf(resp, sizeof(resp), "{\"mode\":\"%s\"}", hubCommProfileName(hubCommProfile));
     httpServer.send(200, "application/json", resp);
+}
+
+static bool requireCommandAccess() {
+    if (hubCommProfile != HUB_COMM_OFF_GRID || !offlineAccess.enabled()) return true;
+    String token = httpServer.header("X-Bluepaws-Local-Session");
+    if (offlineAccess.authorize(token, httpServer.client().remoteIP())) return true;
+    httpServer.send(403, "application/json", "{\"error\":\"command_pin_required\"}");
+    return false;
+}
+
+static void handleApiSecurityStatus() {
+    char response[96];
+    snprintf(response, sizeof(response),
+             "{\"pin_enabled\":%s,\"unlocked_sessions\":%u}",
+             offlineAccess.enabled() ? "true" : "false",
+             offlineAccess.sessionCount());
+    httpServer.send(200, "application/json", response);
+}
+
+static void handleApiSecurityPin() {
+    if (hubCommProfile != HUB_COMM_OFF_GRID) {
+        httpServer.send(409, "application/json", "{\"error\":\"off_grid_only\"}");
+        return;
+    }
+    // Once a PIN exists, changing or disabling it requires an already
+    // unlocked browser. This prevents a nearby unauthenticated client from
+    // silently removing the command guard.
+    if (offlineAccess.enabled() && !requireCommandAccess()) return;
+    String body = httpServer.arg("plain");
+    if (getPostField(body, "enabled") == "false" || getPostField(body, "enabled") == "0") {
+        offlineAccess.disable();
+        httpServer.send(200, "application/json", "{\"ok\":true,\"pin_enabled\":false}");
+        return;
+    }
+    if (!offlineAccess.setPin(getPostField(body, "pin"))) {
+        httpServer.send(400, "application/json", "{\"error\":\"pin_must_be_four_digits\"}");
+        return;
+    }
+    httpServer.send(200, "application/json", "{\"ok\":true,\"pin_enabled\":true}");
+}
+
+static void handleApiSecurityUnlock() {
+    String token;
+    uint32_t retryAfter = 0;
+    if (!offlineAccess.unlock(getPostField(httpServer.arg("plain"), "pin"),
+                              httpServer.client().remoteIP(), token, retryAfter)) {
+        char response[96];
+        snprintf(response, sizeof(response),
+                 "{\"error\":\"invalid_pin\",\"retry_after_seconds\":%lu}",
+                 (unsigned long)retryAfter);
+        httpServer.send(retryAfter ? 429 : 403, "application/json", response);
+        return;
+    }
+    String response = "{\"ok\":true,\"session_token\":\"" + token + "\"}";
+    httpServer.send(200, "application/json", response);
 }
 
 // ═══════════════════════════════════════════════
@@ -2101,6 +2540,171 @@ static String buildCloudWrapperJson(const cloud_entry_t &entry) {
     return body;
 }
 
+static String batchReplayEndpoint() {
+    int slash = cloudEndpoint.lastIndexOf('/');
+    if (slash < 0) return String();
+    return cloudEndpoint.substring(0, slash + 1) + "ingest-position-batch";
+}
+
+static void applyJournalVerification(uint32_t localId, uint16_t sourceId,
+                                     bp_journal_sync_state_t state) {
+    offlineJournal.updateSyncState(localId, sourceId, state);
+    if (xSemaphoreTake(deviceMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+        device_state_t *device = findDevice(sourceId);
+        if (device && device->local_id == localId) device->sync_state = state;
+        xSemaphoreGive(deviceMutex);
+    }
+    char event[112];
+    snprintf(event, sizeof(event),
+             "{\"device_id\":%u,\"local_id\":%lu,\"verification\":\"%s\"}",
+             sourceId, (unsigned long)localId, journalSyncName(state));
+    sseBroadcast("verification", event);
+}
+
+static void syncCloudSnapshotMetadata() {
+    static uint32_t nextAttemptMs = 0;
+    if ((int32_t)(millis() - nextAttemptMs) < 0 || !hubProfileAllowsCloudRelay()
+        || !hubConnectivity.wifi_connected || cloudToken.length() == 0
+        || cloudEndpoint.length() == 0) return;
+
+    int slash = cloudEndpoint.lastIndexOf('/');
+    if (slash < 0) return;
+    char gateway[5];
+    snprintf(gateway, sizeof(gateway), "%04x", (uint16_t)GATEWAY_GUID16);
+    String endpoint = cloudEndpoint.substring(0, slash + 1) + "hub-snapshot";
+    endpoint += "?gateway_guid16=" + String(gateway) + "&limit=1";
+
+    HTTPClient http;
+    http.begin(endpoint);
+    http.addHeader("Authorization", "Bearer " + cloudToken);
+    int code = http.GET();
+    String response = code == 200 ? http.getString() : String();
+    http.end();
+    if (code != 200) {
+        Serial.printf("[SNAPSHOT] Metadata refresh failed HTTP %d\n", code);
+        nextAttemptMs = millis() + 300000;
+        return;
+    }
+
+    JsonDocument doc;
+    if (deserializeJson(doc, response) != DeserializationError::Ok) {
+        Serial.println("[SNAPSHOT] Invalid metadata response");
+        nextAttemptMs = millis() + 300000;
+        return;
+    }
+
+    bool changed = false;
+    for (JsonObject device : doc["devices"].as<JsonArray>()) {
+        uint16_t id = device["device_id"] | 0;
+        device_meta_t *meta = findDeviceMetadata(id, true);
+        if (!meta || meta->local_override) continue;
+
+        const char *name = device["display_name"] | bp_device_name(id);
+        const char *emoji = "🐾";
+        const char *colour = "#1d9bf0";
+        for (JsonObject appearance : doc["appearances"].as<JsonArray>()) {
+            if ((uint16_t)(appearance["device_id"] | 0) != id) continue;
+            if (strcmp(appearance["avatar_kind"] | "", "emoji") == 0) {
+                emoji = appearance["emoji_value"] | emoji;
+            }
+            colour = appearance["marker_colour"] | colour;
+            break;
+        }
+        String safeName(name);
+        String safeEmoji(emoji);
+        String safeColour(colour);
+        if (!validLocalName(safeName)) name = bp_device_name(id);
+        if (!validLocalEmoji(safeEmoji)) emoji = "🐾";
+        if (!validMarkerColour(safeColour)) colour = "#1d9bf0";
+        if (strcmp(meta->name, name) != 0 || strcmp(meta->emoji, emoji) != 0
+            || strcmp(meta->colour, colour) != 0) {
+            strlcpy(meta->name, name, sizeof(meta->name));
+            strlcpy(meta->emoji, emoji, sizeof(meta->emoji));
+            strlcpy(meta->colour, colour, sizeof(meta->colour));
+            changed = true;
+
+            JsonDocument eventDoc;
+            eventDoc["id"] = id;
+            eventDoc["name"] = meta->name;
+            eventDoc["emoji"] = meta->emoji;
+            eventDoc["colour"] = meta->colour;
+            String event;
+            serializeJson(eventDoc, event);
+            sseBroadcast("appearance", event.c_str());
+        }
+    }
+    if (changed) saveDeviceMetadata();
+    Serial.printf("[SNAPSHOT] Cached %u Family collar appearances\n", deviceMetaCount);
+    nextAttemptMs = millis() + 3600000;
+}
+
+static void replayPendingJournal() {
+    static uint32_t nextAttemptMs = 0;
+    static uint32_t backoffMs = 5000;
+    if ((int32_t)(millis() - nextAttemptMs) < 0 || !hubProfileAllowsCloudRelay()
+        || !hubConnectivity.wifi_connected || cloudToken.length() == 0) return;
+
+    bp_journal_record_t pending[10]{};
+    uint16_t count = offlineJournal.collectPending(pending, 10);
+    if (count == 0) { backoffMs = 5000; return; }
+
+    String body = "{\"items\":[";
+    for (uint16_t i = 0; i < count; ++i) {
+        cloud_entry_t entry{};
+        memcpy(entry.buf, pending[i].packet, pending[i].packet_len);
+        entry.len = pending[i].packet_len;
+        entry.rssi = pending[i].rssi_dbm;
+        entry.snr = pending[i].snr_x10 / 10.0f;
+        entry.gateway_rx_time_unix = pending[i].gateway_rx_time_unix;
+        if (i) body += ',';
+        body += "{\"local_id\":" + String(pending[i].local_id) + ",\"wrapper\":";
+        body += buildCloudWrapperJson(entry);
+        body += '}';
+    }
+    body += "]}";
+    if (body.length() > 16384) {
+        Serial.println("[REPLAY] Batch unexpectedly exceeds 16KB; retrying fewer records later");
+        nextAttemptMs = millis() + backoffMs;
+        return;
+    }
+
+    HTTPClient http;
+    http.begin(batchReplayEndpoint());
+    http.addHeader("Content-Type", "application/json");
+    http.addHeader("Authorization", "Bearer " + cloudToken);
+    int code = http.POST(body);
+    String response = code > 0 ? http.getString() : String();
+    if (code == 200) {
+        JsonDocument doc;
+        if (deserializeJson(doc, response) == DeserializationError::Ok) {
+            for (JsonObject result : doc["results"].as<JsonArray>()) {
+                uint32_t localId = result["local_id"] | 0;
+                const char *status = result["status"] | "retryable";
+                for (uint16_t i = 0; i < count; ++i) {
+                    if (pending[i].local_id != localId) continue;
+                    if (strcmp(status, "accepted") == 0 || strcmp(status, "duplicate") == 0) {
+                        applyJournalVerification(localId, pending[i].source_id, BP_JOURNAL_VALIDATED);
+                    } else if (strcmp(status, "rejected") == 0) {
+                        applyJournalVerification(localId, pending[i].source_id, BP_JOURNAL_REJECTED);
+                    }
+                    break;
+                }
+            }
+            backoffMs = 5000;
+            nextAttemptMs = millis() + 1000;
+            Serial.printf("[REPLAY] Processed batch of %u offline records\n", count);
+        } else {
+            nextAttemptMs = millis() + backoffMs;
+            backoffMs = backoffMs < 150000 ? backoffMs * 2 : 300000;
+        }
+    } else {
+        Serial.printf("[REPLAY] Batch POST failed HTTP %d\n", code);
+        nextAttemptMs = millis() + backoffMs;
+        backoffMs = backoffMs < 150000 ? backoffMs * 2 : 300000;
+    }
+    http.end();
+}
+
 // Relays raw TLV packets to a cloud server (e.g. Supabase Edge Function).
 // Blocks on the cloudQueue — wakes up when handlePacket() enqueues a packet.
 // Only sends if WiFi STA is connected AND a cloud endpoint is configured.
@@ -2151,13 +2755,22 @@ static void cloudTask(void *param) {
                     Serial.printf("[CLOUD] Response: %s\n", response.c_str());
                 }
                 if (code >= 200 && code < 300) {
+                    applyJournalVerification(entry.local_id, entry.source_id,
+                                             BP_JOURNAL_VALIDATED);
                     queueCloudCommandResponse(response, pkt_device_id(entry.buf));
+                } else if (code >= 400 && code < 500 && code != 408 && code != 429) {
+                    applyJournalVerification(entry.local_id, entry.source_id,
+                                             BP_JOURNAL_REJECTED);
                 }
             } else {
                 Serial.printf("[CLOUD] POST failed: %s\n", http.errorToString(code).c_str());
             }
             noteCloudPostResult(code);
             http.end();
+        } else {
+            updateConnectivityState();
+            syncCloudSnapshotMetadata();
+            replayPendingJournal();
         }
     }
 }
@@ -2220,16 +2833,33 @@ static void sendCommandFind(uint16_t target_id, bp_pkt_type_t type,
 
     bool pendingRegistered = false;
     if (xSemaphoreTake(pendingMutex, pdMS_TO_TICKS(50))) {
+        // A newer profile command supersedes an older unacknowledged profile
+        // command for the same collar.
+        if (type == PKT_CMD_MODE) {
+            for (int i = 0; i < MAX_PENDING_CMDS; ++i) {
+                if (pendingCmds[i].active && pendingCmds[i].targetId == target_id
+                    && pendingCmds[i].type == PKT_CMD_MODE) {
+                    char json[144];
+                    snprintf(json, sizeof(json),
+                        "{\"cmdSeq\":%u,\"device\":%u,\"status\":\"superseded\"}",
+                        pendingCmds[i].cmdSeq, pendingCmds[i].targetId);
+                    sseBroadcast("cmd_ack", json);
+                    pendingCmds[i].active = false;
+                }
+            }
+        }
         for (int i = 0; i < MAX_PENDING_CMDS; i++) {
             if (!pendingCmds[i].active) {
                 pendingCmds[i].cmdSeq   = seq;
                 pendingCmds[i].targetId = target_id;
                 pendingCmds[i].type     = type;
                 pendingCmds[i].sentAtMs = 0;
+                pendingCmds[i].createdAtMs = millis();
                 pendingCmds[i].retries  = 0;
                 memcpy(pendingCmds[i].buf, cmd.buf, cmd.len);
                 pendingCmds[i].len      = cmd.len;
                 pendingCmds[i].active   = true;
+                pendingCmds[i].waitingOpportunity = false;
                 pendingRegistered = true;
                 break;
             }
@@ -2247,6 +2877,11 @@ static void sendCommandFind(uint16_t target_id, bp_pkt_type_t type,
     if (xQueueSend(cmdQueue, &cmd, pdMS_TO_TICKS(100)) == pdTRUE) {
         Serial.printf("[CMD] Queued type=0x%02X for %s (seq %u)\n",
                       type, bp_device_name(target_id), seq);
+        char json[144];
+        snprintf(json, sizeof(json),
+                 "{\"cmdSeq\":%u,\"device\":%u,\"status\":\"queued\",\"expires_in_seconds\":3600}",
+                 seq, target_id);
+        sseBroadcast("cmd_ack", json);
     } else {
         if (xSemaphoreTake(pendingMutex, pdMS_TO_TICKS(50))) {
             for (int i = 0; i < MAX_PENDING_CMDS; i++) {
