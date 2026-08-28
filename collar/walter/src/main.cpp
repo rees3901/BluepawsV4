@@ -205,8 +205,12 @@ bool networkOn() {
         if (monotonicMs() >= deadline || !pauseMs(500)) {
             console.printf("[LTE] Registration incomplete; state=%u\n", unsigned(state));
             WalterModemRsp signal{};
-            if (!cancelRequested.load() && modem.getSignalQuality(&signal))
-                console.printf("[LTE] Signal RSRP=%ddBm RSRQ=%d/10dB\n", signal.data.signalQuality.rsrp, signal.data.signalQuality.rsrq);
+            if (!cancelRequested.load() && modem.getSignalQuality(&signal)) {
+                const auto& quality = signal.data.signalQuality;
+                if (walter::signalQualityAvailable(quality.rsrp, quality.rsrq))
+                    console.printf("[LTE] Signal RSRP=%ddBm RSRQ=%d/10dB (CESQ estimate)\n", quality.rsrp, quality.rsrq);
+                else console.println("[LTE] Signal unavailable (unknown/out-of-range CESQ result)");
+            }
             return false;
         }
     }

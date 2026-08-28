@@ -38,6 +38,13 @@ inline bool plausibleUtc(int64_t utc, uint32_t buildUtc) {
         utc <= int64_t(buildUtc) + 5LL * 366 * 86400;
 }
 
+// The pinned WalterModem CESQ parser converts raw values arithmetically,
+// including 255 (unknown) -> +115 dBm / +1080 tenths-dB. Reject anything
+// outside its conversion of the defined RSRP 0..97 and RSRQ 0..34 codes.
+inline bool signalQualityAvailable(int rsrp, int rsrqTenths) {
+    return rsrp >= -140 && rsrp <= -43 && rsrqTenths >= -195 && rsrqTenths <= -25;
+}
+
 struct Fix {
     bool valid = false;
     int32_t latE7 = 0;

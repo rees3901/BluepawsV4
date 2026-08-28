@@ -138,6 +138,16 @@ int main() {
     assert(walter::plausibleUtc(utc,utc));
     assert(!walter::plausibleUtc(3155760003LL,utc)); // Observed factory/default 2070 clock.
     assert(!walter::plausibleUtc(utc-86401,utc));
+    assert(walter::signalQualityAvailable(-132,-195));
+    assert(walter::signalQualityAvailable(-140,-195));
+    assert(walter::signalQualityAvailable(-43,-25));
+    assert(!walter::signalQualityAvailable(115,1080)); // Hardware CESQ unknown sentinel conversion.
+    assert(!walter::signalQualityAvailable(115,-100));
+    assert(!walter::signalQualityAvailable(-100,1080));
+    assert(!walter::signalQualityAvailable(-141,-100));
+    assert(!walter::signalQualityAvailable(-42,-100));
+    assert(!walter::signalQualityAvailable(-100,-196));
+    assert(!walter::signalQualityAvailable(-100,-24));
     uint16_t sequence;
     assert(nextSequence(sequence) && sequence==1 && sequenceStore.stored==257);
     assert(nextSequence(sequence) && sequence==2 && sequenceStore.stored==257);

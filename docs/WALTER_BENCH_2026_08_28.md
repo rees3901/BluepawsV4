@@ -131,3 +131,47 @@ All15 existing web-console tests pass. Physical LTE/GNSS was not retried here.
 Private evidence remains under `.pio/walter-bench-20260828/`:
 `offline-smoke.log`, `offline-packets.hex`, `offline-workbench-report.json`,
 `offline-toggle.log`, `offline-reboot-status.log`, `offline-reboot-send.log`.
+
+## Antenna-swap retest, 18:35-18:41 UTC
+
+The user swapped the LTE/GNSS antennas and requested another real test. No
+LoRa-over-air test was attempted. COM23/7/11 remained untouched.
+
+- A GNSS-only run with fresh PC UTC and LTE off returned an event after about
+  73 seconds: status0,12 satellite entries, estimated confidence20,000,000 metres.
+  This is not a usable position and was rejected. The satellite entry count alone
+  does not prove tracking quality or a navigation solution.
+- One explicit online `send` repeated GNSS with the same unusable result. The
+  ESP produced signed sequence770 with GNSS_VALID clear, ERROR_PRESENT set and
+  no valid coordinates. Local workbench/HMAC verification passed; this is not
+  evidence of LTE delivery.
+- SIM, PDP/APN, GNSS configuration, trusted CA and HTTPS profile setup succeeded.
+  LTE stayed in CFUN1, cycled through searching/registration denied, and did not
+  reach registered-home or registered-roaming during the180-second window.
+- At timeout, the pinned driver's CESQ conversion printed RSRP+115dBm and
+  RSRQ+1080 tenths-dB. These are invalid measurements, consistent with its
+  arithmetic conversion of raw255 (unknown). They cannot be compared with the
+  earlier weak-signal measurement to claim the antennas improved/worsened RF.
+- Supabase before and after: zero1010 observations, zero positions,
+  last_seen_at=null. No HTTP upload succeeded or simulator substitute was sent.
+- The cycle returned to idle after RF-off cleanup; `bench on` restored the safe
+  offline mode. Further feature implementation remains pending real GNSS/LTE
+  commissioning rather than assuming the antenna swap fixed it.
+
+Fixed the confirmed CESQ diagnostic issue: values outside the pinned driver's
+defined-code conversion ranges now display **Signal unavailable**. Host tests
+cover the observed sentinel, mixed valid/unknown fields and both range boundaries.
+No GNSS acceptance threshold was relaxed, and no modem/library firmware upgrade
+was performed. The antenna fault cause remains unconfirmed; clear sky/passive
+GNSS antenna and SIM/network registration checks are still needed.
+
+Evidence: `antennas-swapped-gnss.log`, `antennas-swapped-send.log`,
+`antennas-swapped-packet.json`, `antennas-swapped-final-status.log` under the same
+ignored bench directory. Packet770 SHA-256:
+`1df81838819492a7486270110980a523a6a0d4e9074c6b4935ff293d3052c1d6`.
+
+Diagnostic-fix build and host tests passed; the COM26 upload hash was verified.
+Final image uses64,188 bytes static RAM and413,813 bytes flash. Post-flash status
+confirmed Normal profile, offline=1, busy=0/running=0, UTC unset and counters zero;
+COM26 released. The new invalid-signal display is host-tested but was not used to
+justify another RF retry. Post-flash log: `antennas-swapped-postflash-status.log`.
