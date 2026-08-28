@@ -54,7 +54,10 @@ export function positionToTelemetryDevice(row: PositionRow): TelemetryDevice {
     snr: row.link_snr_db,
     bleHome: flags !== null && (flags & 0x08) !== 0,
     ingestPath: row.ingest_path,
-    lastUpdate: recordedAt,
+    // The collar clock can be ahead. Never let a future GNSS timestamp freeze
+    // contact age at zero. Presence below supplies authoritative receipt time;
+    // this conservative fallback also avoids making old replay look fresh.
+    lastUpdate: Math.min(recordedAt, Date.parse(row.received_at)),
     source: row.source,
   };
 }
@@ -106,7 +109,7 @@ export function isPositionRow(value: unknown): value is PositionRow {
     typeof row.recorded_at === "string" &&
     typeof row.received_at === "string" &&
     typeof row.schema_version === "number" &&
-    Number.isFinite(Date.parse(row.recorded_at))
+    Number.isFinite(Date.parse(row.recorded_at)) && Number.isFinite(Date.parse(row.received_at))
   );
 }
 

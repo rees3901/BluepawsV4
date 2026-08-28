@@ -936,6 +936,7 @@
 
     function hubDetailRows(data) {
         return '<span class="label">Hub ID</span><span class="value">' + escapeHtml(data.hub.gateway_guid16) + '</span>' +
+            '<span class="label">Reporting profile</span><span class="value">' + escapeHtml(({power_save:'Power Save',normal:'Normal',active:'Active'})[data.hub.reporting_profile] || 'Normal') + '</span>' +
             '<span class="label">GPS fix</span><span class="value">' +
             (data.hasGps ? escapeHtml(data.hub.fix_age_s) + 's old' : 'Not acquired') + '</span>' +
             '<span class="label">Home beacon</span><span class="value">' +
@@ -994,7 +995,9 @@
             '</button>';
         if (dev.data.entity === 'hub') return html +
             '<button class="btn-action" ' + ((HubPresencePanel.feedback() && HubPresencePanel.feedback().state === 'pending') || Date.now()-dev.lastUpdate>=15000 ? 'disabled ' : '') + 'data-action="bluetooth" data-id="' + dev.id + '" aria-pressed="' + !!dev.data.hub.ble_enabled +
-            '" title="Home beacon operates only on primary Home Wi-Fi">ᛒ Bluetooth ' + (dev.data.hub.ble_enabled ? 'On' : 'Off') + '</button>';
+            '" title="Home beacon operates only on primary Home Wi-Fi">ᛒ Bluetooth ' + (dev.data.hub.ble_enabled ? 'On' : 'Off') + '</button>' +
+            '<button class="btn-action btn-cmd" ' + ((HubPresencePanel.feedback() && HubPresencePanel.feedback().state === 'pending') || Date.now()-dev.lastUpdate>=15000 ? 'disabled ' : '') +
+            'data-action="hub-profile" data-id="' + dev.id + '" title="Hub reporting profile">⌘ Cmd</button>';
         return html + '<button class="btn-action btn-find" data-action="find" data-id="' + dev.id + '" title="Find Alert — trigger buzzer + LED">' +
                 '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a4 4 0 00-4 4c0 1.2.4 2 1 3l-2 5h10l-2-5c.6-1 1-1.8 1-3a4 4 0 00-4-4zm0 13a2 2 0 01-2-2h4a2 2 0 01-2 2z"/></svg>' +
                 ' Find Alert' +
@@ -1020,6 +1023,7 @@
                 if (action === 'trail') toggleTrail(devId);
                 if (dev.data.entity === 'hub') {
                     if (action === 'bluetooth') HubPresencePanel.toggleBluetooth();
+                    if (action === 'hub-profile') HubPresencePanel.configureProfile();
                     return;
                 }
                 if (action === 'find') openFindModal(devId, dev.data.name);
@@ -1246,10 +1250,10 @@
         var awake = card.querySelector('[data-awake]');
         if (awake) {
             var seconds = Math.max(0, Math.ceil(((dev.rxUntil || 0) - performance.now()) / 1000));
-            awake.hidden = seconds === 0;
-            awake.textContent = seconds ? '💡' : '';
-            awake.title = 'Recently heard — expected command receive window, not a guarantee of delivery';
-            awake.setAttribute('aria-label', 'Recently heard; expected receive window ' + seconds + ' seconds');
+            awake.hidden = false;
+            awake.textContent = seconds ? '💡' : '💤';
+            awake.title = seconds ? 'Recently heard — expected command receive window, not a guarantee of delivery' : 'Receive window ended — collar probably sleeping; sleep is not directly confirmed';
+            awake.setAttribute('aria-label', seconds ? 'Recently heard; expected receive window ' + seconds + ' seconds' : 'Collar probably sleeping');
         }
         var line = card.querySelector('[data-command-feedback]');
         if (line) {

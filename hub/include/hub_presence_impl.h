@@ -2,8 +2,10 @@
 // UC6580 UART is owned by one low-priority task; no GNSS/TLS/flash work in LoRa RX.
 #include <TinyGPS++.h>
 #include <Preferences.h>
+#include "hub_reporting.h"
 
 struct HubSelf {
+    HubReportingProfile reporting = HubReportingProfile::PowerSave;
     double lat = 0, lon = 0;
     bool hasFix = false;
     uint32_t fixMs = 0;
@@ -73,6 +75,7 @@ static void hubGnssTask(void *) {
             prefs.putString("name",s.name); prefs.putString("home",s.homeEmoji);
             prefs.putString("portable",s.portableEmoji); prefs.putString("colour",s.colour);
             prefs.putBool("beacon",hubBeaconEnabled.load()); prefs.putULong64("revision",s.revision);
+            prefs.putString("reporting",hubReportingName(s.reporting));
         }
         vTaskDelay(pdMS_TO_TICKS(20));
     }
@@ -88,6 +91,7 @@ static void initHubPresence() {
         strlcpy(hubSelf.portableEmoji,p.getString("portable","📱").c_str(),sizeof(hubSelf.portableEmoji));
         strlcpy(hubSelf.colour,p.getString("colour","#38bdf8").c_str(),sizeof(hubSelf.colour));
         hubSelf.revision = p.getULong64("revision",0);
+        parseHubReporting(p.getString("reporting","power_save").c_str(),hubSelf.reporting);
         hubBeaconEnabled = p.getBool("beacon",true); p.end();
     }
     if (xTaskCreatePinnedToCore(hubGnssTask,"hub-gnss",6144,nullptr,1,nullptr,0) != pdPASS)
@@ -104,6 +108,9 @@ static String hubPresenceJson(bool cloud) {
     if (staConnected) doc["wifi_rssi_dbm"]=WiFi.RSSI(); else doc["wifi_rssi_dbm"]=nullptr;
     doc["ble_enabled"]=hubBeaconEnabled.load(); doc["ble_advertising"]=hubBeaconAdvertising.load();
     doc["applied_revision"]=s.revision;
+    doc["reporting_profile"]=hubReportingName(s.reporting);
+    doc["report_interval_s"]=hubReportingIntervalMs(s.reporting)/1000;
+    doc["control_poll_s"]=5;
     uint32_t age=(millis()-s.fixMs)/1000;
     if (s.hasFix && age<=604800) {
         doc["latitude"]=s.lat; doc["longitude"]=s.lon; doc["fix_age_s"]=age;
@@ -128,6 +135,12 @@ static void handleHubPreferences() {
         httpServer.send(400,"application/json","{\"error\":\"invalid_preferences\"}"); return;
     }
     auto s=copyHubSelf();
+    HubReportingProfile reporting=s.reporting;
+    if (!doc["reporting_profile"].isUnbound() &&
+        (!doc["reporting_profile"].is<const char*>() ||
+         !parseHubReporting(doc["reporting_profile"].as<const char*>(),reporting))) {
+        httpServer.send(400,"application/json","{\"error\":\"invalid_reporting_profile\"}"); return;
+    }
     String name=doc["display_name"] | s.name;
     String home=doc["home_emoji"] | s.homeEmoji;
     String portable=doc["portable_emoji"] | s.portableEmoji;
@@ -142,6 +155,7 @@ static void handleHubPreferences() {
         strlcpy(hubSelf.portableEmoji,portable.c_str(),sizeof(hubSelf.portableEmoji));
         strlcpy(hubSelf.colour,colour.c_str(),sizeof(hubSelf.colour));
         if (doc["ble_enabled"].is<bool>()) hubBeaconEnabled=doc["ble_enabled"].as<bool>();
+        hubSelf.reporting=reporting;
         xSemaphoreGive(hubSelfMutex);
         hubSelfDirty=true;
         hubSelfReportRequested=true;
@@ -156,6 +170,9 @@ static void applyHubSettings(JsonObject settings) {
     String home=settings["home_emoji"] | "";
     String portable=settings["portable_emoji"] | "";
     String colour=settings["marker_colour"] | "";
+    HubReportingProfile reporting=copyHubSelf().reporting;
+    if (!settings["reporting_profile"].isUnbound() &&
+        !parseHubReporting(settings["reporting_profile"].as<const char*>(),reporting)) return;
     if (!validHubText(name) || !validHubText(home) || !validHubText(portable) || !validMarkerColour(colour)) return;
     if (xSemaphoreTake(hubSelfMutex,pdMS_TO_TICKS(50))) {
         strlcpy(hubSelf.name,name.c_str(),sizeof(hubSelf.name));
@@ -163,6 +180,7 @@ static void applyHubSettings(JsonObject settings) {
         strlcpy(hubSelf.portableEmoji,portable.c_str(),sizeof(hubSelf.portableEmoji));
         strlcpy(hubSelf.colour,colour.c_str(),sizeof(hubSelf.colour));
         hubSelf.revision=rev; hubBeaconEnabled=settings["ble_enabled"].as<bool>();
+        hubSelf.reporting=reporting;
         xSemaphoreGive(hubSelfMutex);
         hubSelfDirty=true; hubSelfReportRequested=true;
         Serial.printf("[HUB SETTINGS] revision %llu received; awaiting BLE task then status confirmation\n",
@@ -213,7 +231,7 @@ static void postHubPresence() {
     uint32_t now=millis();
     const bool requested=hubSelfReportRequested.load();
     if (requested && !hubBleSettled()) return; // BLE task owns radio changes; never acknowledge ahead of it.
-    if (selfPosted && now-lastSelfPostMs<(requested ? selfRetryDelayMs : 55000u)) return;
+    if (!hubSelfReportDue(now,lastSelfPostMs,selfPosted,requested,selfRetryDelayMs,copyHubSelf().reporting)) return;
     lastSelfPostMs=now; selfPosted=true;
     HTTPClient http;
     http.setConnectTimeout(2000); http.setTimeout(2000);

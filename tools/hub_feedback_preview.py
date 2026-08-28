@@ -15,6 +15,7 @@ COMMANDS = []
 HUB = dict(format='hub_status',ingest_path='hub_self',gateway_guid16='0010',mode='home',
            latitude=51.907,longitude=-2.240,fix_age_s=3,uptime_s=1000,free_heap=150000,
            wifi_rssi_dbm=-40,ble_enabled=True,ble_advertising=True,ble_settled=True,
+           reporting_profile='power_save',control_poll_s=5,
            display_name='Home Hub · UI test',home_emoji='🏡',portable_emoji='📱',marker_colour='#38bdf8')
 
 
@@ -70,7 +71,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.wfile.write(b'event: heartbeat\ndata: {}\n\n')
                     self.wfile.flush()
                     time.sleep(1)
-            except (BrokenPipeError,ConnectionResetError):
+            except (BrokenPipeError,ConnectionResetError,ConnectionAbortedError):
                 pass
         elif path == '/api/hub-presence': self.send(HUB)
         elif path == '/api/devices': self.send([device()])

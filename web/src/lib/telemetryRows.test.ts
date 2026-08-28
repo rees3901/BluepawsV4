@@ -2,6 +2,25 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { applyPresenceToTelemetryDevice, positionToTelemetryDevice, type DevicePresenceRow, type PositionRow } from "./telemetryRows.ts";
 
+test("future collar clock cannot freeze contact age; old replay cannot renew it", () => {
+  const received = Date.parse("2026-08-28T10:18:03Z");
+  const row = {device_uid:1001,recorded_at:"2026-08-28T10:23:01Z",
+    received_at:new Date(received).toISOString(),flags:1,latitude:51.9,longitude:-2.2,
+    battery:null,household_id:"family"} as PositionRow;
+  const device=positionToTelemetryDevice(row);
+  assert.equal(device.lastUpdate,received);
+  for (const elapsed of [0,1,9,10,11,59,60]) {
+    assert.equal(Math.max(0,Math.floor((received+elapsed*1000-device.lastUpdate)/1000)),elapsed);
+  }
+  const presence=applyPresenceToTelemetryDevice(device,{device_id:1001,household_id:"family",
+    last_seen_at:new Date(received+1000).toISOString(),last_seen_status_code:0,
+    last_seen_power_profile_code:1,last_seen_tx_reason:7,last_seen_battery_mv:3900});
+  assert.equal(presence.lastUpdate,received+1000);
+  assert.equal(presence.lat,device.lat); assert.equal(presence.lon,device.lon);
+  const old=positionToTelemetryDevice({...row,recorded_at:"2026-08-27T10:18:03Z"});
+  assert.equal(old.lastUpdate,received-86400000);
+});
+
 test("rename applies without new telemetry and does not fabricate activity or a new position", () => {
   const device = {id:1001,name:"Device 1001",lastUpdate:100,time:0,lat:51,lon:-2,seq:12} as ReturnType<typeof positionToTelemetryDevice>;
   const row = {device_id:1001,household_id:"family",display_name:"Mittens",last_seen_at:null} as DevicePresenceRow;

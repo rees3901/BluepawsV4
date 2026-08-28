@@ -66,7 +66,9 @@ test('saved is not applied; matching revision AND reported Bluetooth confirm the
   assert.equal(hubControlFeedback({...pending,applied_revision:2},a,2000).state,'pending');
   assert.equal(hubControlFeedback({...pending,ble_enabled:false},a,2000).state,'pending');
   assert.equal(hubControlFeedback({...pending,ble_enabled:false,applied_revision:2},a,2000).state,'confirmed');
-  assert.equal(hubControlFeedback(pending,a,31000).state,'failed');
+  assert.equal(hubControlFeedback(pending,a,31000).state,'pending');
+  assert.match(hubControlFeedback(pending,a,31000).text,/Still waiting/);
+  assert.equal(hubControlFeedback(pending,a,91000).state,'failed');
   // Late real acknowledgement replaces the timeout warning; never fake a rollback.
   assert.equal(hubControlFeedback({...pending,ble_enabled:false,applied_revision:2},a,60000).state,'confirmed');
   assert.equal(hubControlFeedback({...pending,settings_revision:3,desired_ble_enabled:true},a,2000).state,'failed');
@@ -82,6 +84,21 @@ test('cloud hub clears stale Wi-Fi bars at 90 seconds and displays reported, not
   const pending=renderHub({desired_ble_enabled:false,settings_revision:2});
   assert.match(pending,/Bluetooth On/);
   assert.match(pending,/not yet confirmed/);
+});
+
+test('hub profile confirmation needs reported profile and revision; Power Save changes contact grace',()=>{
+  const a={profile:'power_save',revision:3,startedAt:1000};
+  const h={...hub,reporting_profile:'normal',desired_reporting_profile:'power_save',settings_revision:3};
+  assert.equal(hubControlFeedback({...h,applied_revision:3},a,2000).state,'pending');
+  assert.equal(hubControlFeedback({...h,reporting_profile:'power_save'},a,2000).state,'pending');
+  assert.equal(hubControlFeedback({...h,reporting_profile:'power_save',applied_revision:3},a,2000).state,'confirmed');
+  for(const [profile,grace] of [['power_save',210],['normal',90],['active',60]]) {
+    assert.match(renderHub({reporting_profile:profile},{ageSeconds:grace-1}),/Wi-Fi -40 dBm/);
+    assert.match(renderHub({reporting_profile:profile},{ageSeconds:grace}),/No contact/);
+  }
+  const ble={enabled:false,revision:3,startedAt:1000};
+  assert.equal(hubControlFeedback({...h,reporting_profile:'power_save'},ble,180000).state,'pending');
+  assert.equal(hubControlFeedback({...h,reporting_profile:'power_save'},ble,211000).state,'failed');
 });
 
 function localHarness() {

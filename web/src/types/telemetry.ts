@@ -6,6 +6,7 @@ export type IngestPath = "cellular_direct" | "lora_hub";
 export interface TelemetryDevice {
   entity?: "hub";
   hubMode?: "home" | "portable" | "off_grid";
+  hubReportingProfile?: "normal" | "power_save" | "active";
   id: number;
   name: string;
   seq: number;
