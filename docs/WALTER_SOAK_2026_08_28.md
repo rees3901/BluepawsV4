@@ -206,3 +206,29 @@ Normal → Active → Normal application and both cloud ACKs are now verified.
 Multiple GNSS-bearing scheduled uploads, a completed Normal wait and a scheduled
 Normal LTE report are still outstanding. No live fault injection; keep the full
 baseline incomplete and PR #147 draft. Monitoring and capture continue unchanged.
+
+## Follow-up — 23:24 UTC: first Normal wait measured
+
+Cycle 11 started at **23:16:09.243611 UTC**, **600.005797 seconds** after the
+Normal sleep record at 23:06:09.237814. This completes the first measured
+600-second interval after command 7. GNSS returned a valid sample with 98.7 m
+reported uncertainty (encoded 99 m); packet **2317** preserved fix age 39 seconds
+and passed independent HMAC verification. Its SHA-256 is
+`4943cb996ca838d2034ff1790e2c709beacc4b1d1e9d08551b1723af4fd1a8cc`.
+It was a simulated LoRa transmission only, **not a cloud upload**: cycle 11 was
+not due for LTE. The worker selected another 600-second wait at 23:16:59.226560,
+with next wake 23:26:59 UTC.
+
+Supabase still shows observation 6531 / packet 2315 and ACK observation 6532 /
+packet 2316 as the latest 1010 reports, with the previously verified hashes.
+Commands 6 and 7 remain acked, one attempt each. No duplicate command, forced
+report or unexpected LTE upload was introduced. Thirteen captured stub packets
+across both sessions pass HMAC checks. At 23:24:27, capture was current, online
+Normal was running, uptime was 2,190 seconds and free heap remained 298,964 bytes;
+stderr was empty. Device 1001's last-seen remains 23:02:59 in PowerSave; this
+read-only control check does not establish its current serial/radio state.
+
+The Normal wait gate is now verified. Multiple GNSS-bearing scheduled LTE
+uploads, including one under Normal, remain outstanding; cycle 20 is the next
+expected LTE opportunity. Leave capture and monitoring running without fault
+injection, profile changes or hardware access.
