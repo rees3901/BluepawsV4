@@ -3,7 +3,7 @@
 // Do not copy credentials from collar 1001 or an existing simulator identity.
 #define WALTER_DEVICE_ID 1010
 #define WALTER_HOME_HUB_ID 0x0010
-#define WALTER_APN ""              // SIM provider's LTE-M/NB-IoT APN
+#define WALTER_APN ""              // Copy SIM portal value: 1NCE V2 sensor.net; legacy may use iot.1nce.net
 #define WALTER_APN_AUTH 0           // UE8.2.1.0 rejects empty PAP; none=0, PAP=1, CHAP=2
 #define WALTER_APN_USER ""
 #define WALTER_APN_PASSWORD ""

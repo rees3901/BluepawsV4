@@ -246,8 +246,11 @@ SIM initialization can lag a transition to RF-off mode. The firmware uses a
 ten-second polling window (plus any in-flight vendor AT timeout), stopping
 immediately if a PIN/PUK is requested; it never attempts
 to unlock the SIM. Setup diagnostics identify the failing stage without printing
-credentials. 1NCE's published APN is `iot.1nce.net`; LTE-M is selected for this
-bench. [1NCE APN guidance](https://help.1nce.com/dev-hub/docs/data-services-apn).
+credentials. Copy the APN from the actual SIM's portal, not a generic provider
+default. This bench's portal specifies `sensor.net` (1NCE Platform2); legacy SIMs
+may retain `iot.1nce.net`. LTE-M is selected for this bench.
+[Platform2 APN guidance](https://help.1nce.com/dev-hub/v200/docs/data-services-apn)
+and [migration compatibility](https://help.1nce.com/platform-migration/breaking-changes/).
 
 Empty PAP credentials are accepted by host validation, but this board's UE8.2.1.0
 firmware rejects both omitted and quoted-empty credential forms with CME50.
@@ -383,3 +386,13 @@ configuration. Original LTE-M selection and CFUN0 were restored and verified.
 Provider event logs and any existing Quectel IMEI binding are the next targeted
 checks; an RF-front-end defect or particular account restriction is not proven.
 No cloud upload was attempted in this comparison.
+
+Later portal evidence established that this account uses **sensor.net**, not the
+legacy APN used in those failed attempts. After correcting the local APN and
+moving the antenna outside the window, LTE-M registered and a real HTTPS packet
+was independently matched in Supabase (device1010, sequence1281). The modem
+reported HTTP201/response length0, so the firmware's strict receipt check still
+reported unconfirmed; fixing receipt-body handling remains outstanding. Separate
+GNSS acquisitions improved from553.2m to68.7m estimated confidence without changing
+the180-second timeout or validity thresholds. See the dated bench record; the
+successful LTE-only packet intentionally contained no position.

@@ -303,3 +303,78 @@ Private evidence under `.pio/walter-bench-20260828/`:
 `pap-registration-ltem-reset.log`, `pap-registration-ltem-optional.log`,
 `explicit-auth-registration-ltem.log`, `explicit-auth-registration-nbiot.log`,
 `explicit-auth-final-status.log`.
+
+## Outside-window GNSS and portal APN correction
+
+### GNSS, 19:56-19:58 UTC
+
+The user confirmed the module/antenna was now outside the window. Two GNSS-only
+acquisitions were performed with LTE off and no upload:
+
+- First: about69 seconds, status0,12 satellite entries, estimated confidence553.2m
+  (rounded up to554m). Accepted by the existing1000m ceiling, but very coarse.
+- Second, without a modem reset: about25 seconds, status0,6 satellite entries,
+  estimated confidence68.7m (rounded up to69m). Accepted without relaxing checks.
+
+These are receiver-estimated uncertainties, not independently measured positional
+errors. Both events passed the existing time/coordinate/satellite/confidence
+checks. No coordinates were fabricated or published. The host acquisition guard
+was already180 seconds; the modem completed each single-fix request before it.
+An additional acquisition, not a longer host timeout, supplied the improvement.
+
+### Correct APN established from the user's portal
+
+The user's portal screenshot specifies **sensor.net**, while this bench had used
+the legacy **iot.1nce.net** value. The screenshot also shows global IMEI lock
+disabled; it does not establish the individual SIM's lock setting. A user-supplied
+1NCE INFO/location-update event at19:30:38.328Z correlated with the earlier Three
+UK LTE-M test, but was not itself proof of a data session.
+
+The earlier investigation used the wrong documentation variant for this account.
+1NCE [Platform2 APN documentation](https://help.1nce.com/dev-hub/v200/docs/data-services-apn)
+specifies sensor.net; the [migration guide](https://help.1nce.com/platform-migration/breaking-changes/)
+retains legacy/custom APNs for existing SIMs. Always use the actual portal/SIM
+configuration rather than assuming one provider-wide APN.
+
+Changed only the local ignored Walter APN definition to sensor.net; bearer/HMAC,
+TLS verification, IPv4 and explicit no-authentication settings were preserved.
+Updated the example comment and commissioning guidance without committing secrets.
+Build passed:64,212 bytes static RAM,420,101 bytes application flash. COM26 upload
+hash verified. Walter host suite passed.
+
+The subsequent LTE-M registration-only test reached CEREG5 (roaming), CGATT1,
+and received a nonzero private IPv4 address. SQNMONI reported Vodafone UK/23415,
+band20, RSRP-106.4dBm/RSRQ-19.8dB. CFUN0 cleanup succeeded. This proves registration
+and packet attachment for this attempt, not HTTPS delivery. Because both physical
+placement and APN changed since the earlier failure, it is not a controlled
+single-variable RF/APN comparison; the APN mismatch itself is confirmed.
+
+### Real HTTPS delivery, 20:00 UTC
+
+Ran one explicit LTE-only upload after seeding current host UTC. No GNSS or LoRa
+stub was requested. SIM/APN/CA/HTTPS configuration succeeded; registration reached
+roaming. Signal estimate was RSRP-105dBm/RSRQ-17dB. TLS CA/hostname validation
+remained enabled; no insecure retry or simulator/PC upload was used.
+
+The modem returned HTTP201 with response_bytes=0. The current strict application
+receipt check rejected the empty advertised response and reported DELIVERY
+UNCONFIRMED; it did not automatically retry. The response-reading path remains
+unverified and needs a separate fix/test, rather than treating201 alone as a
+verified on-device receipt.
+
+Independent Supabase reads established actual delivery: one device1010 observation,
+sequence1281, path cellular_direct/link lte, matching the captured46 bytes exactly
+in base64 and SHA-256:
+`9927b93d0e1749de39baf4a1705097675de1621e25d07bc36fec4ad38de81210`.
+last_seen_at advanced to2026-08-28T20:00:54.720276Z. Positions remained zero because
+this explicit LTE diagnostic deliberately sent a no-fix packet; the earlier GNSS
+fix was not included or claimed as a cloud position.
+
+RF-off cleanup succeeded. Final status Normal/offline, busy=0/running=0,
+LoRa count0; COM26 released. No other bench ports, PCB files, SIM-portal settings,
+backend schema/functions or credentials were changed. PR142 remains draft for
+receipt handling, combined GNSS-to-cloud testing and further accuracy validation.
+
+Private logs: `outside-window-gnss.log`, `outside-window-gnss-repeat.log`,
+`sensor-apn-registration-ltem.log`, `sensor-apn-lte-upload.log`,
+`sensor-apn-cloud-comparison.json`, `sensor-apn-final-status.log`.
