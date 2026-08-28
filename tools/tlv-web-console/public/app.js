@@ -13,6 +13,12 @@ const state = {
 
 const $ = (id) => document.getElementById(id);
 
+// Navigation remains available even if simulator credentials/previews fail.
+document.querySelectorAll(".tab").forEach((button) => {
+  button.addEventListener("click", () => showTab(button.dataset.tab));
+});
+if (location.hash === "#workbench") showTab("workbench");
+
 await boot();
 
 async function boot() {
@@ -26,9 +32,6 @@ async function boot() {
 }
 
 function bindEvents() {
-  document.querySelectorAll(".tab").forEach((button) => {
-    button.addEventListener("click", () => showTab(button.dataset.tab));
-  });
   $("credential-file").addEventListener("change", importCredentialFile);
   $("save-bundle").addEventListener("click", saveBundle);
   $("add-device").addEventListener("click", addDevice);
@@ -697,6 +700,7 @@ function updateRecipeDescription() {
 function showTab(name) {
   document.querySelectorAll(".tab").forEach((button) => button.classList.toggle("active", button.dataset.tab === name));
   document.querySelectorAll(".tab-panel").forEach((panel) => panel.classList.toggle("active", panel.id === `tab-${name}`));
+  document.querySelector(".credentials").hidden = name === "workbench";
   if (name === "wrapper") schedulePreview();
 }
 

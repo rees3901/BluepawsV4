@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { buildWorkbenchPacket, parseWorkbenchPacket, workbenchDefaults } from "./lib/packet-workbench.mjs";
 import {
   DEFAULT_ENDPOINT,
   FLAG_MASKS,
@@ -51,11 +52,27 @@ const server = http.createServer(async (request, response) => {
 });
 
 server.listen(port, "127.0.0.1", () => {
-  console.log(`Bluepaws TLV web console: http://127.0.0.1:${port}`);
+  console.log(`Bluepaws TLV web console: http://127.0.0.1:${server.address().port}`);
   console.log(`Credential bundle: ${credentialPath}`);
 });
 
 async function handleApi(request, response, url) {
+  if (request.method === "GET" && url.pathname === "/api/workbench/meta") {
+    json(response, 200, { defaults: workbenchDefaults(), statuses: STATUS_CODES,
+      profiles: POWER_PROFILE_CODES, reasons: TX_REASON_CODES, flags: FLAG_MASKS });
+    return;
+  }
+  if (request.method === "POST" && ["/api/workbench/parse", "/api/workbench/build"].includes(url.pathname)) {
+    try {
+      const body = await readJson(request, 16384);
+      const operation = url.pathname.endsWith("/parse") ? parseWorkbenchPacket : buildWorkbenchPacket;
+      // Read-only access to source-key lookup. No fleet mutation, save, or send.
+      json(response, 200, operation(body, credentialBundle.devices));
+    } catch (error) {
+      json(response, 400, { error: error.message || "Invalid packet input" });
+    }
+    return;
+  }
   if (request.method === "GET" && url.pathname === "/api/meta") {
     json(response, 200, {
       endpoint: DEFAULT_ENDPOINT,
@@ -185,9 +202,14 @@ async function loadInitialBundle() {
   }
 }
 
-async function readJson(request) {
+async function readJson(request, maxBytes = Infinity) {
   const chunks = [];
-  for await (const chunk of request) chunks.push(chunk);
+  let bytes = 0;
+  for await (const chunk of request) {
+    bytes += chunk.length;
+    if (bytes > maxBytes) throw new Error("Request is too large; submit one packet at a time");
+    chunks.push(chunk);
+  }
   const text = Buffer.concat(chunks).toString("utf8");
   return text ? JSON.parse(text) : {};
 }
