@@ -21,6 +21,8 @@ std::atomic<bool> inspectRequested{false};
 std::atomic<bool> rawDiagnosticRequested{false};
 std::atomic<bool> gnssInspectionRequested{false};
 std::atomic<bool> lteInspectionRequested{false};
+std::atomic<bool> assistanceRequested{false};
+std::atomic<unsigned> assistanceEvents{0};
 std::atomic<int> registrationRatRequested{-1};
 std::atomic<bool> offlineBench{true}; // Safe default after every ESP reboot.
 std::atomic<uint32_t> loraTxCount{0}, lteSkippedCount{0};
@@ -78,6 +80,8 @@ bool credentialsReady() {
 }
 void onGnss(WMGNSSEventType event, const WMGNSSEventData* data, void*) {
     if (event == WALTER_MODEM_GNSS_EVENT_FIX) xQueueOverwrite(gnssEvents, &data->gnssfix);
+    if (event == WALTER_MODEM_GNSS_EVENT_ASSISTANCE && unsigned(data->assistance) < 3)
+        assistanceEvents.fetch_or(1u << unsigned(data->assistance));
 }
 void onHttp(WMHTTPEventType event, const WMHTTPEventData* data, void*) {
     if (event == WALTER_MODEM_HTTP_EVENT_RING && data->profile_id == WALTER_HTTP_PROFILE)
@@ -379,6 +383,40 @@ bool networkOn() {
     reportSignal();
     return !cancelRequested.load();
 }
+bool refreshGnssAssistance() {
+    if (cancelRequested.load() || !utcNow() || !prepareModem() || !radioOff()
+        || !modem.gnssSetUTCTime(utcNow()) || !modem.gnssConfig()) return false;
+    WalterModemRsp status{};
+    if (!modem.gnssGetAssistanceStatus(&status)
+        || status.type != WALTER_MODEM_RSP_DATA_TYPE_GNSS_ASSISTANCE_DATA) return false;
+    bool needs[2]{};
+    for (unsigned i = 0; i < 2; ++i) {
+        const auto& item = status.data.gnssAssistance[i];
+        needs[i] = !item.available || item.timeToUpdate <= 0;
+        console.printf("[ASSIST] type=%u available=%u update_in=%lds expires_in=%lds\n",
+            i, item.available, long(item.timeToUpdate), long(item.timeToExpire));
+    }
+    if ((needs[0] || needs[1]) && !networkOn()) return false;
+    for (unsigned i = 0; i < 2; ++i) {
+        if (!needs[i]) continue;
+        assistanceEvents.fetch_and(~(1u << i));
+        if (cancelRequested.load() || !modem.gnssUpdateAssistance(WMGNSSAssistanceType(i))) return false;
+        const auto deadline = monotonicMs() + 60000;
+        while (!(assistanceEvents.load() & (1u << i))) {
+            if (monotonicMs() >= deadline || !pauseMs(100)) return false;
+        }
+        console.printf("[ASSIST] Download event type=%u\n", i);
+    }
+    if (!modem.gnssGetAssistanceStatus(&status)
+        || status.type != WALTER_MODEM_RSP_DATA_TYPE_GNSS_ASSISTANCE_DATA) return false;
+    for (unsigned i = 0; i < 2; ++i) {
+        const auto& item = status.data.gnssAssistance[i];
+        console.printf("[ASSIST] Verified type=%u available=%u expires_in=%lds\n",
+            i, item.available, long(item.timeToExpire));
+        if (!item.available || item.timeToExpire <= 0) return false;
+    }
+    return !cancelRequested.load();
+}
 bool acquireFix() {
     // GNSS and LTE share the modem: never operate them concurrently.
     if (!radioOff() || cancelRequested.load()) return false;
@@ -620,11 +658,16 @@ void worker(void*) {
             const bool raw = rawDiagnosticRequested.exchange(false);
             const bool gnss = gnssInspectionRequested.exchange(false);
             const bool lte = lteInspectionRequested.exchange(false);
+            const bool assist = assistanceRequested.exchange(false);
             const int registrationRat = registrationRatRequested.exchange(-1);
             if (!cancelRequested.load()) {
                 if (registrationRat >= 0) registerOnly(uint8_t(registrationRat));
                 else if (raw) diagnoseRaw();
-                else if (gnss) {
+                else if (assist) {
+                    const bool updated = refreshGnssAssistance();
+                    console.printf("[ASSIST] Result=%s (no telemetry)\n", updated ? "READY" : "UNAVAILABLE");
+                    if (begun && !radioOff()) console.println("[ASSIST] Could not confirm RF off");
+                } else if (gnss) {
                     if (beginModem() && radioOff() && modem.gnssConfig()) {
                         const bool fixed = acquireFix();
                         console.printf("[GNSS] Inspection result=%s (no upload)\n", fixed ? "VALID FIX" : "NO FIX");
@@ -700,15 +743,16 @@ void command(const String& text) {
         setUtc(epoch);
         console.println("[CLOCK] Explicit host UTC seed accepted; no coordinates or GNSS validity fabricated"); return;
     }
-    if (text == "inspect" || text == "diagnose" || text == "gnss" || text == "lte") {
+    if (text == "inspect" || text == "diagnose" || text == "gnss" || text == "lte" || text == "assist") {
         if (text == "diagnose" && begun) { console.println("[DIAG] Requires a fresh ESP boot before inspect/start/send"); return; }
-        if (text == "gnss" && !utcNow()) { console.println("[GNSS] Seed actual UTC with clock <epoch> first"); return; }
+        if ((text == "gnss" || text == "assist") && !utcNow()) { console.println("[GNSS] Seed actual UTC with clock <epoch> first"); return; }
         if (text == "lte" && (!utcNow() || !credentialsReady())) {
             console.println("[LTE] Seed actual UTC with clock <epoch>; APN, bearer, CA and HMAC required"); return;
         }
         cancelRequested = false; rawDiagnosticRequested = text == "diagnose";
         registrationRatRequested = -1;
         gnssInspectionRequested = text == "gnss"; lteInspectionRequested = text == "lte";
+        assistanceRequested = text == "assist";
         inspectRequested = true; return;
     }
     if (text == "start" || text == "send") {
@@ -723,7 +767,7 @@ void command(const String& text) {
     } else if (text == "home on" || text == "home off") {
         simulatedHome = text == "home on";
         console.println("[WALTER] Home is an explicit simulation, not a received BLE beacon");
-    } else console.println("Commands: status | bench on/off | inspect | diagnose | register ltem/nbiot | clock <UTC epoch> | gnss | lte | start | stop | send | profile normal/powersave/active/lost/debug | home on/off");
+    } else console.println("Commands: status | bench on/off | inspect | diagnose | register ltem/nbiot | clock <UTC epoch> | gnss | assist | lte | start | stop | send | profile normal/powersave/active/lost/debug | home on/off");
 }
 } // namespace
 

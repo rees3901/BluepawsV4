@@ -265,6 +265,39 @@ void run(){
     const uint8_t invalid[]="oops";assert(!walter::parseHttpBody(r,invalid,sizeof(invalid),0));
 }
 }
+namespace assistanceTests {
+using WMGNSSAssistanceType=unsigned;
+constexpr int WALTER_MODEM_RSP_DATA_TYPE_GNSS_ASSISTANCE_DATA=9;
+struct Item {bool available=true;int timeToUpdate=3600,timeToExpire=7200;};
+struct WalterModemRsp {int type=9;struct {Item gnssAssistance[2];}data;};
+std::atomic<unsigned> assistanceEvents{0};
+unsigned networks=0;
+bool networkOk=true;
+bool prepareModem(){return true;}
+bool radioOff(){return true;}
+bool networkOn(){++networks;return networkOk;}
+struct Modem {
+    Item items[2];bool events=true,queryOk=true;unsigned updates=0;int type=9;
+    bool gnssSetUTCTime(uint32_t){return true;}
+    bool gnssConfig(){return true;}
+    bool gnssGetAssistanceStatus(WalterModemRsp* r){r->type=type;r->data.gnssAssistance[0]=items[0];r->data.gnssAssistance[1]=items[1];return queryOk;}
+    bool gnssUpdateAssistance(unsigned i){++updates;if(events){items[i]=Item{};assistanceEvents.fetch_or(1u<<i);}return true;}
+} modem;
+${firmwareFunction('refreshGnssAssistance')}
+void run(){
+    cancelRequested=false;cancelOnPause=false;nowUtc=utc;fakeMs=0;
+    assert(refreshGnssAssistance()&&networks==0&&modem.updates==0);
+    modem.items[0].available=false;modem.items[1].timeToUpdate=0;
+    assert(refreshGnssAssistance()&&networks==1&&modem.updates==2);
+    modem.items[0].available=false;modem.events=false;fakeMs=0;
+    assert(!refreshGnssAssistance()&&fakeMs==60000);
+    modem.events=true;networkOk=false;assert(!refreshGnssAssistance());networkOk=true;
+    modem.queryOk=false;assert(!refreshGnssAssistance());modem.queryOk=true;
+    modem.type=0;assert(!refreshGnssAssistance());modem.type=9;
+    cancelRequested=true;assert(!refreshGnssAssistance());cancelRequested=false;
+    nowUtc=0;assert(!refreshGnssAssistance());nowUtc=utc;
+}
+}
 int main() {
     modemSetupTests::run();
     assert(registrationState("+CEREG: 5,2")==2);
@@ -393,6 +426,7 @@ int main() {
     cycleTests();
     lteOnlyTests();
     commandWindowTests::run();
+    assistanceTests::run();
     const auto ackLength=walter::buildCommandAck(packet,1010,16,43,17,utc,PROFILE_ACTIVE,false,key);
     for(int i=0;i<ackLength;++i)printf("%02x",packet[i]);puts("");
 }
@@ -422,4 +456,4 @@ assert.equal(parsed.packet.deviceGuid16,1010);
 assert.deepEqual(Buffer.from(parsed.packet.rawBytes),packet);
 assert.equal(decoded.packet.sha256,createHash('sha256').update(packet).digest('hex'));
 writeFileSync(resolve(dir,'packet-fixture.json'),JSON.stringify({hex,wrapper,decoded},null,2));
-console.log('Walter PASS: ten-second LTE polling (including final-deadline command), expiry/type/identity rejection, duplicate ACK handling, stop and failed-poll gates, signed ACK decoded by backend, zero-content-length bounded HTTP read, explicit CGAUTH/PAP validation, CFUN0 RAT switching/reset/readback, CEREG parsing, actual offline/online cycle, isolated LTE-only diagnostic, TX completion, immutable fallback bytes, stop/no-clock gates, credential gates, NVS reservations/reboots/write failures, five-profile cadence, home/away, boot/forced LTE, GNSS validity/staleness, fault flags, strict receipts, C++ HMAC -> web workbench -> Supabase parser. No network or serial traffic.');
+console.log('Walter PASS: GNSS assistance cache/refresh/event timeout/cancellation gates, ten-second LTE polling (including final-deadline command), expiry/type/identity rejection, duplicate ACK handling, stop and failed-poll gates, signed ACK decoded by backend, zero-content-length bounded HTTP read, explicit CGAUTH/PAP validation, CFUN0 RAT switching/reset/readback, CEREG parsing, actual offline/online cycle, isolated LTE-only diagnostic, TX completion, immutable fallback bytes, stop/no-clock gates, credential gates, NVS reservations/reboots/write failures, five-profile cadence, home/away, boot/forced LTE, GNSS validity/staleness, fault flags, strict receipts, C++ HMAC -> web workbench -> Supabase parser. No network or serial traffic.');
