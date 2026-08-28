@@ -12,8 +12,8 @@ mkdirSync(dir,{recursive:true});
 const source=resolve(dir,'policy.cpp');
 const executable=resolve(dir,process.platform==='win32'?'policy.exe':'policy');
 const firmware=readFileSync('collar/walter/src/main.cpp','utf8').replaceAll('\r\n','\n');
-function firmwareFunction(name) {
-    const start=firmware.indexOf(`bool ${name}(`);
+function firmwareFunction(name, type='bool') {
+    const start=firmware.indexOf(`${type} ${name}(`);
     assert.notEqual(start,-1,`Missing firmware function ${name}`);
     return firmware.slice(start,firmware.indexOf('\n}',start)+2);
 }
@@ -23,6 +23,7 @@ writeFileSync(source,String.raw`
 #include <string>
 #include <atomic>
 #include <vector>
+#include <cstdarg>
 #include "walter_policy.h"
 #include "walter_http.h"
 constexpr uint32_t utc=1787911200;
@@ -44,14 +45,21 @@ const char* WALTER_BEARER_TOKEN="synthetic-token-for-offline-tests-only";
 const char* WALTER_TLS_CA_PEM="-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----";
 uint8_t hmacKey[32]={1};
 ${firmwareFunction('safeAtString')}
+${firmwareFunction('packetCredentialsReady')}
 ${firmwareFunction('credentialsReady')}
 constexpr unsigned WALTER_MODEM_SIM_STATE_READY=0, WALTER_MODEM_RSP_DATA_TYPE_CME_ERROR=1;
 struct WalterModemRsp {unsigned result=0,type=0;struct {unsigned simState=0,cmeError=0;} data;};
 std::atomic<bool> cancelRequested{false};
 uint64_t fakeMs=0;
 uint64_t monotonicMs(){return fakeMs;}
-bool pauseMs(uint32_t ms){fakeMs+=ms;return !cancelRequested.load();}
-struct QuietSerial {template<typename... T>void printf(const char*,T...) {}} Serial;
+bool cancelOnPause=false;
+bool pauseMs(uint32_t ms){fakeMs+=ms;if(cancelOnPause)cancelRequested=true;return !cancelRequested.load();}
+struct QuietSerial {
+    std::string log;
+    void printf(const char* format,...) {char b[1024];va_list a;va_start(a,format);vsnprintf(b,sizeof(b),format,a);va_end(a);log+=b;}
+    void println(const char* s="") {log+=s;log+='\n';}
+} console;
+unsigned modemCalls=0;
 struct SimModem {
     std::vector<int> states;size_t calls=0;
     bool getSIMState(WalterModemRsp* rsp) {
@@ -59,8 +67,69 @@ struct SimModem {
         if(state<0){rsp->result=1;rsp->type=1;rsp->data.cmeError=14;return false;}
         rsp->data.simState=state;return true;
     }
+    bool gnssConfig(){++modemCalls;return true;}
+    void httpClose(unsigned){++modemCalls;}
 } modem;
 ${firmwareFunction('waitForSimReady')}
+std::atomic<bool> offlineBench{true},simulatedHome{false},running{false};
+std::atomic<uint32_t> loraTxCount{0},lteSkippedCount{0};
+bool begun=false,cellularFailure=false,setupOk=true,uploadOk=false;
+uint32_t nowUtc=utc;
+uint32_t utcNow(){return nowUtc;}
+walter::Fix lastFix;
+constexpr unsigned WALTER_DEVICE_ID=1010,WALTER_HOME_HUB_ID=16,WALTER_HTTP_PROFILE=1;
+bool prepareModem(){++modemCalls;begun=true;return setupOk;}
+bool networkOn(){++modemCalls;return false;}
+bool beginModem(){++modemCalls;begun=true;return true;}
+bool radioOff(){++modemCalls;return true;}
+bool acquireFix(){++modemCalls;return false;}
+std::vector<uint8_t> sentPacket,uploadedPacket;
+// Capture the exact buffer supplied to the encoder; real base64 is checked on COM26.
+int mbedtls_base64_encode(unsigned char* dest,size_t,size_t* n,const uint8_t* data,size_t size){
+    sentPacket.assign(data,data+size);strcpy(reinterpret_cast<char*>(dest),"fixture");*n=7;return 0;
+}
+bool upload(const uint8_t* data,uint8_t size){++modemCalls;uploadedPacket.assign(data,data+size);return uploadOk;}
+${firmwareFunction('transmitLoraStub')}
+${firmwareFunction('cycle','void')}
+void cycleTests(){
+    sequenceReady=false;sequenceStore.fail=false;sequenceStore.stored=1;
+    fakeMs=1000;nowUtc=utc;cancelRequested=false;cancelOnPause=false;
+    uint64_t lastLte=0;
+    lastFix={true,519084900,-22587900,utc,8,9}; // Offline must not pass an old fix as current.
+    cycle(true,false,PROFILE_NORMAL,1,1,lastLte);
+    assert(loraTxCount==1 && lteSkippedCount==1 && modemCalls==0);
+    assert(lastLte==11000 && !cellularFailure && uploadedPacket.empty());
+    assert(pkt_tx_reason(sentPacket.data())==TX_BOOT && pkt_msg_seq(sentPacket.data())==1);
+    assert(!(pkt_flags(sentPacket.data())&FLAG_GNSS_VALID) && pkt_lat_e7(sentPacket.data())==0);
+    assert(console.log.find("TX_COMPLETE result=OK")!=std::string::npos);
+    assert(console.log.find("Fallback due")!=std::string::npos);
+    cycle(false,false,PROFILE_NORMAL,2,2,lastLte);
+    assert(loraTxCount==2 && lteSkippedCount==1 && lastLte==11000 && modemCalls==0);
+    nowUtc=0;running=true;cycle(false,true,PROFILE_DEBUG,1,1,lastLte);
+    assert(loraTxCount==2 && !running && modemCalls==0);nowUtc=utc;
+    cancelOnPause=true;cycle(false,true,PROFILE_DEBUG,1,1,lastLte);
+    assert(loraTxCount==3 && lteSkippedCount==1 && modemCalls==0);
+    cancelOnPause=false;cancelRequested=false;
+    simulatedHome=true;cycle(false,false,PROFILE_NORMAL,3,3,lastLte);
+    assert(pkt_tx_reason(sentPacket.data())==TX_WAKE_CHECKIN);
+    assert(pkt_flags(sentPacket.data())==FLAG_HOME_BEACON_SEEN);
+    simulatedHome=false;
+    const auto txBefore=loraTxCount.load();
+    sequenceNext=sequenceEnd;sequenceStore.fail=true;cycle(false,true,PROFILE_DEBUG,1,1,lastLte);
+    assert(loraTxCount==txBefore && modemCalls==0);sequenceStore.fail=false;
+    offlineBench=false;setupOk=false;
+    cycle(false,true,PROFILE_NORMAL,1,1,lastLte); // Host UTC permits TX even when modem/TLS setup fails.
+    assert(loraTxCount==txBefore+1 && cellularFailure && uploadedPacket.empty());
+    setupOk=true;uploadOk=false;
+    cycle(false,true,PROFILE_NORMAL,1,1,lastLte);
+    assert(loraTxCount==txBefore+2 && sentPacket==uploadedPacket && cellularFailure);
+    uploadOk=true;cycle(false,true,PROFILE_NORMAL,1,1,lastLte);
+    assert(sentPacket==uploadedPacket && !cellularFailure);
+    assert(!transmitLoraStub(nullptr,46));
+    assert(!transmitLoraStub(sentPacket.data(),1));
+    assert(!transmitLoraStub(sentPacket.data(),BP_MAX_PACKET_SIZE+1));
+    cancelRequested=true;assert(!transmitLoraStub(sentPacket.data(),46));cancelRequested=false;
+}
 int main() {
     modem.states={-1,-1,0};assert(waitForSimReady() && modem.calls==3);
     modem.calls=0;modem.states={1};assert(!waitForSimReady() && modem.calls==1); // PIN required: no guessing/retry.
@@ -80,7 +149,7 @@ int main() {
     sequenceNext=sequenceEnd;sequenceStore.fail=true;assert(!nextSequence(sequence));
     sequenceStore.fail=false;assert(nextSequence(sequence) && sequence==769);
     assert(credentialsReady());
-    WALTER_APN="";assert(!credentialsReady());WALTER_APN="test.apn";
+    WALTER_APN="";assert(!credentialsReady() && packetCredentialsReady());WALTER_APN="test.apn";
     hmacKey[0]=0;assert(!credentialsReady());hmacKey[0]=1;
     WALTER_APN_AUTH=1;assert(!credentialsReady());WALTER_APN_AUTH=0;
     WALTER_BEARER_TOKEN="bad\r\nAuthorization: injected-token-value";assert(!credentialsReady());
@@ -156,6 +225,7 @@ int main() {
     reset();receipt["duplicate"]=true;assert(accepted());
     JsonDocument request;walter::fillRequest(request,"fixture");
     std::string json;serializeJson(request,json);puts(json.c_str());
+    cycleTests();
 }
 `);
 const compiler=process.env.CXX||(process.platform==='win32'?'C:/ProgramData/mingw64/mingw64/bin/g++.exe':'g++');
@@ -180,4 +250,4 @@ assert.equal(parsed.packet.deviceGuid16,1010);
 assert.deepEqual(Buffer.from(parsed.packet.rawBytes),packet);
 assert.equal(decoded.packet.sha256,createHash('sha256').update(packet).digest('hex'));
 writeFileSync(resolve(dir,'packet-fixture.json'),JSON.stringify({hex,wrapper,decoded},null,2));
-console.log('Walter PASS: credential gates, NVS reservations/reboots/write failures, five-profile cadence, home/away, boot/forced LTE, GNSS validity/staleness, fault flags, strict receipts, C++ HMAC -> web workbench -> Supabase parser. No network or serial traffic.');
+console.log('Walter PASS: actual offline/online cycle, TX completion, immutable fallback bytes, stop/no-clock gates, credential gates, NVS reservations/reboots/write failures, five-profile cadence, home/away, boot/forced LTE, GNSS validity/staleness, fault flags, strict receipts, C++ HMAC -> web workbench -> Supabase parser. No network or serial traffic.');

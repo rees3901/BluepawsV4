@@ -55,23 +55,35 @@ not a reason to wire the two testbeds together.
 
 ### Cycle
 
-1. Boot idle. An explicit `start` or `send` is required after every ESP reboot.
-2. Validate separate credentials; initialize the modem and SIM without guessing
-   a SIM PIN. Configure the selected LTE-M/NB-IoT RAT and APN.
-3. If necessary, register once to acquire network UTC. A plausibility guard rejects
+1. Boot idle in **offline bench mode**. An explicit `start` or `send` is required
+   after every ESP reboot. Offline cycles use an explicitly seeded current host
+   UTC, require the packet HMAC key, and never initialize/query the modem. Missing
+   UTC blocks the packet instead of inventing a clock.
+2. For real RF commissioning, explicitly select `bench off` while idle. Online
+   mode requires separate APN, bearer, HMAC and CA credentials. Modem/APN/TLS
+   setup is deferred until network time or an LTE upload is needed; no SIM PIN
+   is guessed.
+3. Online only: if necessary, register once to acquire network UTC. A plausibility guard rejects
    the observed default modem date in 2070. Build time only bounds accepted dates
    (one day before compilation through five years afterward); rebuild an older
    test image before using it beyond that window. No compile timestamp or
    invented location is substituted. Without usable UTC, packets are blocked.
-4. Deregister/put LTE in minimum mode, then acquire GNSS. The modem cannot operate
+4. In online mode, deregister/put LTE in minimum mode, then acquire GNSS.
+   The modem cannot operate
    GNSS and LTE concurrently. A failed GNSS cancellation stops the session before
    starting LTE. Fix acceptance requires valid UTC, finite/in-range coordinates,
    at least four reported satellites and estimated accuracy in `(0, 1000]` metres.
-5. Build and sign **one immutable TLV v1.2 packet**. Log its hex as
-   `[LORA-STUB] SIMULATED TX only; no RF, no ACK`, then wait the shared 10-second
+   Offline mode skips GNSS and supplies no fix: no coordinates or GNSS-valid flag
+   are invented. GPS-bearing reports therefore retain the normal no-fix error.
+5. Build and sign **one immutable TLV v1.2 packet**. The LoRa transport stub
+   returns success to the ESP cycle and logs `TX_COMPLETE result=OK`, hex and
+   base64, then waits the shared 10-second
    command-listen window. No real radio reception, hub acknowledgement or cloud
    LoRa observation is fabricated.
-6. When the selected policy calls for LTE, reactivate LTE and POST the **same
+6. When the selected policy calls for LTE, offline mode logs **fallback due / skipped**
+   and advances the simulated LTE schedule. It does not set a cellular failure
+   merely because the test deliberately skipped RF, nor does it claim acceptance.
+   In online mode, configure/reactivate LTE and POST the **same
    packet bytes** to the project's `ingest-position` function, wrapped as
    `ingest_path=cellular_direct`, `link_type=lte`, `payload_b64=...`.
 7. Confirm a successful HTTP status and a JSON receipt with `accepted=true`,
@@ -79,7 +91,7 @@ not a reason to wire the two testbeds together.
    A modem `OK`, HTTP 200 alone, or a receipt for another packet is not acceptance.
    Duplicate acceptance is valid. There is no automatic retry in this first target;
    a timeout means delivery is **unconfirmed**, not proof the server rejected it.
-8. Close HTTP after an upload attempt, put the modem in minimum mode and wait
+8. Online: close HTTP after an upload attempt, put the modem in minimum mode and wait
    until the next cycle. Stop the session if radio-off cannot be confirmed.
 
 ### Shared profile policy
@@ -164,7 +176,8 @@ which must use a different spare identity.
    uses the standard 16 MB Arduino partition table, not the vendor's MOTA layout;
    modem OTA/BlueCherry/CoAP/MQTT/socket features are disabled. Modem firmware update
    or full-flash erase is a separate, explicitly planned operation.
-6. Start with `status`, `profile debug`, then `send`. Capture the serial hex and
+6. For online commissioning, start with `status`, `bench off`, `profile debug`,
+   then `send`. Capture the serial hex and
    acceptance hash. Paste **the hex portion after `hex=`** into the existing web
    console's Packet Workbench; select the new device's key explicitly (or parse
    without HMAC validation). No need to send a simulator report.
@@ -181,11 +194,12 @@ which must use a different spare identity.
 | Command | Effect |
 | --- | --- |
 | `status` | Identity, profile, busy/running, simulated home and configuration presence; no secrets |
+| `bench on` / `bench off` | Default on after reboot: offline cycles skip all modem access; off explicitly enables real GNSS/LTE in the next cycle |
 | `inspect` | Initialize modem, select RF-off mode and inspect SIM readiness, modem SVN, RAT and raw clock; no telemetry |
 | `diagnose` | Before any modem initialization after ESP boot: fixed read-only AT queries for version, operational state, registration, rejection history and bands |
 | `clock <UTC epoch>` | Explicitly seed actual host UTC while idle; no invented GNSS fix |
 | `gnss` | With a valid UTC seed, test real GNSS with LTE off; no packet or upload |
-| `send` | One forced LTE cycle, then idle |
+| `send` | One forced-report cycle, then idle; LTE is skipped in offline mode |
 | `start` | BOOT cycle, then recurring profile policy |
 | `stop` | Cancel pending work/interrupt waits and clean up modem state |
 | `profile normal`, `powersave`, `active`, `lost`, `debug` | Select profile while idle; include `profile ` before the name |
@@ -198,6 +212,28 @@ vendor command timeouts. A cleanup failure is printed, stops further scheduling,
 and requires checking the board; do not assume RF is off after such a failure.
 An ESP-only reset does not guarantee that an independently powered modem reset:
 boot-idle means no application-initiated traffic, not proof of modem RF state.
+
+### Work on the ESP without LTE/GNSS reception
+
+On COM26 at 115200, send `clock <current UTC epoch>` (from
+`[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()` on the PC), then `send`. The default
+`bench on` mode produces a real signed packet on the ESP without any modem calls.
+`start` exercises normal profile scheduling; `stop` cancels the listen/sleep wait.
+`status` shows `offline`, current UTC, completed stub TX count and skipped LTE count.
+No changes to the simulator's reports or sequence settings are required.
+
+The simulated transmit function returns success just as a completed local radio
+send would, but cannot prove reception. The ten-second listen window still runs;
+there is no fabricated hub ACK, downlink command or cloud receipt. Normal profile
+LTE ratios/heartbeats are preserved, using a simulated schedule when offline.
+An online cycle with host UTC can also build its LoRa packet after GNSS failure;
+APN/TLS preparation is deferred until LTE is actually due.
+
+Explicit diagnostic commands (`inspect`, `diagnose`, `gnss`) remain real modem
+operations even in bench mode. Offline only suppresses modem operations in the
+telemetry cycle. It does not forcibly switch off an independently running modem;
+check any prior RF-off failure before treating the physical board as RF-inactive.
+Online mode, clock and running state are not persisted across an ESP reboot.
 
 SIM initialization can lag a transition to RF-off mode. The firmware uses a
 ten-second polling window (plus any in-flight vendor AT timeout), stopping
@@ -217,6 +253,12 @@ old timestamp. This is an explicit bench clock source, not a GNSS fix or a test 
 network time acquisition. Serial diagnostics use a 4 KB USB transmit buffer;
 assert DTR in the host terminal for reliable logging. No unrestricted AT console
 or credential-reading command is exposed.
+
+COM26 testing also exposed dropped characters in rapid HWCDC writes. Application
+diagnostics now format whole records under a mutex and pace 32-byte chunks by
+5 ms, without concurrent `flush()` calls. This is a low-volume bench workaround,
+not a throughput guarantee; validate hex/base64 and HMAC before using a capture.
+Related upstream reports: [ESP32 HWCDC missing data](https://github.com/espressif/arduino-esp32/issues/9378).
 
 This is a transport/GNSS bench, **not production power validation**: the ESP uses
 interruptible FreeRTOS waits rather than deep sleep, and PSM/eDRX are not enabled.

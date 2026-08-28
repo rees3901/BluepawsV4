@@ -84,3 +84,50 @@ No existing device credentials were rotated. No backend function/schema was
 changed, and no PC/simulator telemetry was sent to make the hardware test appear
 successful. Hardware reception, GNSS result and final cloud observation counts
 must be checked before completing commissioning.
+
+## Follow-up: ESP offline LoRa transport bench
+
+The user asked to continue ESP development independently of reception. This does
+**not** establish an RF front-end fault: the command family is correct, but the
+cause of failed registration remains open (including coverage/roaming/SIM state).
+
+Added default-on offline bench mode. A current PC UTC seed permits real packet
+construction/signing on the ESP without modem access. The LoRa stub returns a
+successful local TX result, then the normal ten-second listen window runs. No hub
+ACK is fabricated. LTE due events are logged and skipped while offline. Online
+mode remains explicit (`bench off`), with real GNSS/LTE still uncommissioned.
+
+Verified on COM26 with the final build:
+
+- Reboot: idle, offline=1, UTC=0, counters zero; no automatic reporting.
+- Sending without a clock: blocked without a packet/modem operation.
+- With actual PC UTC: 46-byte signed packets, source1010, destination16.
+- Captured sequences513/514/515: Normal INTERRUPT, Debug BOOT, Debug TELEMETRY.
+  Each packet's hex/base64 matched; each HMAC verified with the private1010 key.
+- Live workbench parse API on localhost8788 decoded the identical bytes and
+  SHA-256 hashes. Only the parse endpoint was called; no credentials imported,
+  simulator settings changed or telemetry uploaded to cloud.
+- Debug repeat: approximately40 seconds between BOOT and next telemetry
+  (ten-second listen plus thirty-second profile wait, plus diagnostic overhead).
+- Stop during the third packet's listen window returned to idle in under3 seconds;
+  three completed local TXs, two skipped LTE events. The cancelled third fallback
+  did not run.
+- Idle `bench off`/`bench on` switching verified without starting a cycle.
+- ESP-only reboot returned to idle/offline/unset UTC. After reseeding the clock,
+  the next sequence was769, skipping the unused NVS-reserved range after515.
+- Final state: Normal profile, offline, idle; COM26 released. COM23/7/11 untouched.
+
+Early captures exposed dropped characters in USB hardware CDC output. Merely
+increasing the buffer or flushing each whole record was insufficient. A record
+mutex plus paced32-byte writes produced complete captures in the tests above.
+This is a bench logging workaround, not proof of unlimited USB reliability.
+
+Final build:64,188 bytes static RAM;413,709 bytes application flash. Upload hash
+verified. Expanded host tests execute the actual cycle/TX functions with fake
+modem hooks, covering no-modem offline behavior, clock/stop/NVS gates, scheduled
+fallback, and identical bytes passed to the online uploader after local TX.
+All15 existing web-console tests pass. Physical LTE/GNSS was not retried here.
+
+Private evidence remains under `.pio/walter-bench-20260828/`:
+`offline-smoke.log`, `offline-packets.hex`, `offline-workbench-report.json`,
+`offline-toggle.log`, `offline-reboot-status.log`, `offline-reboot-send.log`.
