@@ -130,6 +130,37 @@ try {
   assert.equal(hub.avatar_storage_path,null);
   await db.exec(`reset role; update gateways set household_id='${family}' where gateway_guid16=16; set role service_role`);
   await report(16);
+  await db.exec('reset role');
+  const beforeProfile=(await db.query('select settings_revision from hub_presence where gateway_guid16=16')).rows[0].settings_revision;
+  await db.exec(readFileSync(new URL('../supabase/migrations/20260828102745_hub_reporting_profiles.sql', import.meta.url),'utf8'));
+  hub=(await db.query('select * from hub_presence where gateway_guid16=16')).rows[0];
+  assert.equal(hub.reporting_profile,'normal'); assert.equal(hub.desired_reporting_profile,'power_save');
+  assert.equal(Number(hub.settings_revision),Number(beforeProfile)+1);
+  await db.exec('set role authenticated');
+  for(const profile of ['active','normal','power_save']) {
+    await db.query('update hub_presence set desired_reporting_profile=$1 where gateway_guid16=16',[profile]);
+  }
+  await assert.rejects(db.exec("update hub_presence set desired_reporting_profile='lost_alert'"),/check constraint/);
+  await assert.rejects(db.exec("update hub_presence set reporting_profile='active'"),/permission denied/);
+  await assert.rejects(db.exec("update hub_presence set control_poll_s=5"),/permission denied/);
+  assert.equal((await db.query("update hub_presence set desired_reporting_profile='active' where gateway_guid16=32 returning *")).rows.length,0);
+  const rev=Number((await db.query('select settings_revision from hub_presence')).rows[0].settings_revision);
+  await db.exec('reset role; set role service_role');
+  const profileReport=async(profile,poll=5)=>(await db.query(
+    "select * from bluepaws_record_hub_presence(16,'portable',null,null,null,456,-40,false,false,100000,$1,$2,$3)",
+    [rev,profile,poll])).rows[0];
+  hub=await profileReport('power_save');
+  assert.equal(hub.reporting_profile,'power_save'); assert.equal(hub.control_poll_s,5);
+  assert.equal(Number(hub.settings_revision),rev,'report never changes desired settings revision');
+  assert.equal(hub.applied_revision,rev); assert.equal(hub.mode,'portable');
+  assert.equal(hub.latitude,51.9,'profile report does not invent or erase GPS');
+  await assert.rejects(profileReport('lost_alert'),/check constraint/);
+  await assert.rejects(profileReport('normal',0),/check constraint/);
+  hub=await report(16);
+  assert.equal(hub.reporting_profile,'normal','old Edge signature still works');
+  assert.equal(hub.control_poll_s,null);
+  await db.exec('reset role; set role anon');
+  await assert.rejects(profileReport('active'),/permission denied/);
   await db.exec(`reset role; delete from household_members where user_id='${family}'; set role authenticated`);
   assert.equal((await db.query('select * from hub_presence')).rows.length,0,'revocation takes effect');
   assert.equal((await db.query('select * from storage.objects')).rows.length,0,'revocation hides photos');

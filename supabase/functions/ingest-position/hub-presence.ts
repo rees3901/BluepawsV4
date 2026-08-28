@@ -23,13 +23,14 @@ export async function handleHubSettings(db: SupabaseClient, payload: unknown, to
   if (gatewayError) return reply({ error: "service_unavailable" }, 503);
   if (!gateway?.household_id) return reply({ error: "unauthorized" }, 401);
   const { data: row, error } = await db.from("hub_presence")
-    .select("settings_revision,desired_ble_enabled,display_name,home_emoji,portable_emoji,marker_colour")
+    .select("settings_revision,desired_ble_enabled,desired_reporting_profile,display_name,home_emoji,portable_emoji,marker_colour")
     .eq("gateway_guid16", id).eq("household_id", gateway.household_id).maybeSingle();
   if (error) return reply({ error: "service_unavailable" }, 503);
   // First status report creates this row. No stale data from another Family.
   if (!row) return reply({ settings: null }, 200);
   return reply({ settings: {
     revision: row.settings_revision, ble_enabled: row.desired_ble_enabled,
+    reporting_profile: row.desired_reporting_profile,
     display_name: row.display_name, home_emoji: row.home_emoji,
     portable_emoji: row.portable_emoji, marker_colour: row.marker_colour,
   } }, 200);
@@ -47,6 +48,8 @@ export function parseHubPresence(value: unknown) {
   };
   const boolean = (k: string) => { if (typeof p[k] !== "boolean") throw new Error("invalid_" + k); return p[k] as boolean; };
   const lat = p.latitude ?? null, lon = p.longitude ?? null;
+  const reporting = p.reporting_profile === undefined ? "normal" : p.reporting_profile;
+  if (typeof reporting !== "string" || !["normal","power_save","active"].includes(reporting)) throw new Error("invalid_reporting_profile");
   if ((lat === null) !== (lon === null) || (lat !== null && (typeof lat !== "number" || !Number.isFinite(lat) || Math.abs(lat) > 90
       || typeof lon !== "number" || !Number.isFinite(lon) || Math.abs(lon) > 180))) throw new Error("invalid_position");
   return {
@@ -57,6 +60,8 @@ export function parseHubPresence(value: unknown) {
     p_ble: boolean("ble_enabled"), p_advertising: boolean("ble_advertising"),
     p_heap: integer("free_heap", 0, 2147483647),
     p_applied: integer("applied_revision", 0, Number.MAX_SAFE_INTEGER),
+    p_reporting_profile: reporting,
+    p_control_poll_s: p.control_poll_s == null ? null : integer("control_poll_s", 1, 60),
   };
 }
 
@@ -81,6 +86,7 @@ export async function handleHubPresence(db: SupabaseClient, payload: unknown, to
   return reply({ accepted: true, format: "hub_status", ingest_path: "hub_self",
     received_at: row.received_at, settings: {
       revision: row.settings_revision, ble_enabled: row.desired_ble_enabled,
+      reporting_profile: row.desired_reporting_profile,
       display_name: row.display_name, home_emoji: row.home_emoji,
       portable_emoji: row.portable_emoji, marker_colour: row.marker_colour,
     } }, 200);

@@ -8,10 +8,18 @@ const payload={format:'hub_status',ingest_path:'hub_self',gateway_guid16:'0010',
   ble_enabled:true,ble_advertising:true,free_heap:150000,applied_revision:0};
 test('hub report validates identity, position, bounds and separate transport',()=>{
   assert.equal(parseHubPresence(payload).p_gateway,16);
+  assert.equal(parseHubPresence(payload).p_reporting_profile,'normal','legacy cadence remains honest');
+  assert.equal(parseHubPresence(payload).p_control_poll_s,null);
+  for(const profile of ['normal','power_save','active']) {
+    const parsed=parseHubPresence({...payload,reporting_profile:profile,control_poll_s:5});
+    assert.equal(parsed.p_reporting_profile,profile); assert.equal(parsed.p_control_poll_s,5);
+  }
   assert.equal(parseHubPresence({...payload,latitude:null,longitude:null}).p_lat,null);
   for(const change of [{gateway_guid16:'03E9'},{gateway_guid16:'0000'},{ingest_path:'lora_hub'},
     {latitude:NaN},{latitude:null},{longitude:181},{fix_age_s:-1},{free_heap:-1},
-    {ble_enabled:'true'},{mode:'bad'},{applied_revision:Infinity}])
+    {ble_enabled:'true'},{mode:'bad'},{applied_revision:Infinity},
+    {reporting_profile:'lost_alert'},{reporting_profile:'debug'},{reporting_profile:null},
+    {control_poll_s:0},{control_poll_s:61},{control_poll_s:1.5}])
     assert.throws(()=>parseHubPresence({...payload,...change}));
 });
 function mock(credential,err=null) {

@@ -2,6 +2,7 @@
 import {createRequire} from 'node:module';
 import {readFileSync, existsSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
+import {posix} from 'node:path';
 import {createServer} from 'node:http';
 import vm from 'node:vm';
 const require = createRequire(new URL('../web/package.json', import.meta.url));
@@ -16,7 +17,9 @@ function load(name) {
   const path = ['.tsx','.ts'].map(ext => fileURLToPath(base) + ext).find(existsSync);
   const source = readFileSync(path,'utf8');
   const output = ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText;
-  const context = vm.createContext({exports:{},require:load});
+  const context = vm.createContext({exports:{},require(child) {
+    return load(child.startsWith('.') ? posix.join(posix.dirname(name),child).replace(/\.tsx?$/,'') : child);
+  }});
   vm.runInContext(output,context); modules.set(name,context.exports);
   return context.exports;
 }

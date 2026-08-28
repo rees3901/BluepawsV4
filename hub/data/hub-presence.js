@@ -2,6 +2,7 @@
 (function (root) {
     'use strict';
     var latest = null, saveRequest = null, feedback = null;
+    var profiles = {power_save: 'Power Save — every 180 seconds', normal: 'Normal — every 60 seconds', active: 'Active — every 30 seconds'};
     function timedFetch(send, url, options) {
         var controller = new AbortController();
         var timer = setTimeout(function () { controller.abort(); }, 4000);
@@ -13,6 +14,7 @@
             ['Report type','Hub local status','Read directly from this Home Hub; no cloud connection is needed.'],
             ['Hub ID',s.gateway_guid16,'The identity of this Home Hub.'],
             ['Mode',s.mode,'Home, Portable or Off-Grid communications mode.'],
+            ['Reporting profile',profiles[s.reporting_profile] || profiles.normal,'Self-report cadence only; LoRa reception and commands remain always on.'],
             ['Coordinates',Number.isFinite(s.latitude) && Number.isFinite(s.longitude) ? s.latitude.toFixed(5)+', '+s.longitude.toFixed(5) : 'Waiting for GPS fix','The hub’s own GPS position, never a collar’s position.'],
             ['GPS fix',s.fix_age_s == null ? 'Not acquired' : s.fix_age_s+' seconds old','Position age is separate from last contact.'],
             ['Battery','No data','Battery telemetry is not supplied yet; this does not mean the battery is empty.'],
@@ -65,6 +67,35 @@
         toggleBluetooth: function () {
             if (latest && saveRequest) saveRequest({ble_enabled: !latest.ble_enabled});
         },
+        configureProfile: function () {
+            if (!latest || !saveRequest || (feedback && feedback.state === 'pending')) return;
+            var old=document.getElementById('hub-profile-modal'); if(old) old.remove();
+            var modal=document.createElement('div'); modal.id='hub-profile-modal'; modal.className='modal';
+            modal.setAttribute('role','dialog'); modal.setAttribute('aria-modal','true');
+            modal.setAttribute('aria-label','Hub power profile');
+            var form=document.createElement('form'); form.className='modal-content'; modal.appendChild(form);
+            var title=document.createElement('h2'); title.textContent='Change Hub Power Profile'; form.appendChild(title);
+            var group=document.createElement('div'); group.className='form-group'; form.appendChild(group);
+            var label=document.createElement('label'); label.textContent='Reporting profile'; label.htmlFor='hub-reporting-profile'; group.appendChild(label);
+            var select=document.createElement('select'); select.id='hub-reporting-profile';
+            Object.keys(profiles).forEach(function(key) {var option=document.createElement('option');option.value=key;option.textContent=profiles[key];select.appendChild(option);});
+            select.value=latest.reporting_profile || 'normal'; group.appendChild(select);
+            var note=document.createElement('p'); note.textContent='Only this hub’s own reports change. LoRa reception, Bluetooth and command handling stay on.'; form.appendChild(note);
+            var actions=document.createElement('div'); actions.className='modal-actions'; form.appendChild(actions);
+            var apply=document.createElement('button'); apply.className='btn-primary'; apply.type='submit'; apply.textContent='Apply profile'; actions.appendChild(apply);
+            if (!latest.control_poll_s) {
+                apply.disabled=true;
+                note.textContent='Update this hub’s firmware before changing its reporting profile.';
+            }
+            var close=document.createElement('button'); close.className='btn-secondary'; close.type='button'; close.textContent='Close'; close.onclick=function(){modal.remove();}; actions.appendChild(close);
+            modal.onkeydown=function(e) {
+                if(e.key==='Escape'){e.preventDefault();modal.remove();}
+                if(e.key==='Tab' && e.shiftKey && document.activeElement===select){e.preventDefault();close.focus();}
+                else if(e.key==='Tab' && !e.shiftKey && document.activeElement===close){e.preventDefault();select.focus();}
+            };
+            form.onsubmit=function(e){e.preventDefault();saveRequest({reporting_profile:select.value});modal.remove();};
+            document.body.appendChild(modal); select.focus();
+        },
         edit: function () {
             if (!latest || !saveRequest) return;
             var name = window.prompt('Hub name (stored locally)', latest.display_name);
@@ -90,13 +121,13 @@
                     headers: {'Content-Type': 'application/json'}, body: JSON.stringify(values)})
                     .then(function (r) {
                         if (!r.ok) throw new Error('Could not save hub preferences');
-                        if (typeof values.ble_enabled !== 'boolean') {
+                        if (typeof values.ble_enabled !== 'boolean' && !values.reporting_profile) {
                             notify('confirmed', 'Settings saved on this hub.'); return load();
                         }
-                        pending = values.ble_enabled;
+                        pending = values;
                         confirmationTimer = setTimeout(function () {
                             pending = null;
-                            notify('failed', 'Bluetooth change not confirmed. Check your connection to the hub before retrying.');
+                            notify('failed', 'Hub setting not confirmed. Check your connection to the hub before retrying.');
                         }, 8000);
                         return load();
                     })
@@ -112,9 +143,12 @@
                     .then(function (r) { if (!r.ok) throw new Error('Hub disconnected'); return r.json(); })
                     .then(function (s) {
                         var device = view(s); latest = s; onUpdate(device);
-                        if (pending !== null && s.ble_enabled === pending && s.ble_settled === true) {
+                        if (pending !== null &&
+                            (typeof pending.ble_enabled !== 'boolean' || (s.ble_enabled === pending.ble_enabled && s.ble_settled === true)) &&
+                            (!pending.reporting_profile || s.reporting_profile === pending.reporting_profile)) {
                             clearTimeout(confirmationTimer);
-                            notify('confirmed', 'Bluetooth ' + (pending ? 'enabled' : 'disabled') + ' — confirmed by hub.');
+                            notify('confirmed', pending.reporting_profile ? 'Reporting profile: ' + profiles[pending.reporting_profile] + ' — confirmed by hub.' :
+                                'Bluetooth ' + (pending.ble_enabled ? 'enabled' : 'disabled') + ' — confirmed by hub.');
                             pending = null;
                         }
                     })

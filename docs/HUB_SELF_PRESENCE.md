@@ -10,18 +10,18 @@
   command-access boundary (optional Off-Grid PIN); no credentials reach browsers.
 - Cloud settings have a revision. A lightweight authenticated settings read
   checks for changes about every five seconds; after the BLE task applies them,
-  an immediate self-report confirms application. The minute heartbeat remains
+  an immediate self-report confirms application. The periodic heartbeat remains
   independent. Local overrides persist in NVS
   and are not uploaded as cloud edits. A subsequent explicit cloud edit wins.
 - The Bluetooth control enables/disables the **Home beacon preference**.
   Advertising still requires primary Home Wi-Fi; Portable/Off-Grid scanning is
   unchanged. The UI separately shows preference, pending delivery and actual advertising.
-- Hub telemetry is attempted about once per minute while online, independently
+- Hub telemetry is attempted at the selected reporting interval while online, independently
   of collar traffic, in the existing cloud task. Network failure/busy HTTP work
   can delay it; it is not a real-time deadline.
 - The cloud UI polls hub status every ten seconds, accelerating to two seconds
   while a settings revision awaits confirmation; local UI polls every five.
-  A cloud hub without a self-report for 90 seconds shows **No contact**, unfilled
+  A cloud hub without a self-report for its interval plus 30 seconds shows **No contact**, unfilled
   signal bars and a dimmed card. The local hub uses 15 seconds (three missed
   local polls); collars retain their ten-minute threshold. Hub age uses
   the last cloud self-report or successful local API response; failed polls do
@@ -43,7 +43,8 @@ Hub cards show their communications mode, Wi-Fi signal **bars and Wi-Fi badge**,
 last-contact stopwatch, coordinates, GPS fix age/time and Home beacon state. The
 same battery graphic shows **No data** until actual hub battery reporting is
 implemented; it must not display zero volts or an invented percentage. Collar-only
-power profile, command receive indicator and collar commands are omitted.
+command receive indicator and collar commands are omitted. Hub **Cmd** selects
+its independent reporting profile; it never sends a collar command to itself.
 Bluetooth preference and editable names retain the hub-specific persistence path.
 
 Message Log and Download use the same three-column report presentation, populated
@@ -109,7 +110,10 @@ a collar token/HMAC. This is a distinct JSON branch, not a TLV format change.
   "ble_enabled": true,
   "ble_advertising": true,
   "free_heap": 100000,
-  "applied_revision": 0
+  "applied_revision": 0,
+  "reporting_profile": "power_save",
+  "report_interval_s": 180,
+  "control_poll_s": 5
 }
 ```
 
@@ -119,11 +123,11 @@ Gateway identity is four hex digits, nonzero and a multiple of 16.
 The handler hashes the bearer, scopes it to that enabled gateway and resolves
 Family from the database. Browser roles cannot write telemetry or call ingestion RPCs.
 Successful response: HTTP 200, accepted, received_at and settings with revision,
-ble_enabled, display_name, home_emoji, portable_emoji, marker_colour.
+ble_enabled, reporting_profile, display_name, home_emoji, portable_emoji, marker_colour.
 Self reports do **not** claim collar commands or enter collar history.
 
 Local endpoints: GET /api/hub-presence; POST /api/hub-preferences
-(display_name, home_emoji, portable_emoji, marker_colour, ble_enabled).
+(display_name, home_emoji, portable_emoji, marker_colour, ble_enabled, reporting_profile).
 Names/emoji are bounded to 64 UTF-8 bytes in firmware/storage.
 Local status also includes `ble_settled`: the requested Home beacon preference
 has reached the BLE task's actual mode-dependent advertising state.
@@ -155,7 +159,9 @@ other cloud work mean five seconds is an aim, not a guaranteed delivery deadline
 
 The cloud button shows **reported** Bluetooth, not the desired database value.
 After saving: updating → hub-confirmed, or an actionable unconfirmed warning
-after 30 seconds. A saved but unconfirmed setting remains durable and may apply
+after a bounded confirmation window. At 30 seconds it remains a neutral
+“still waiting” message; a warning follows after at least 90 seconds, or the
+reported interval plus 30 seconds if longer. A saved but unconfirmed setting remains durable and may apply
 after reconnection; the UI explicitly says this, rather than pretending it was
 cancelled. A later matching acknowledgement clears that warning. Concurrent
 newer settings supersede the older request. No collar one-hour/ten-minute queue
@@ -167,19 +173,84 @@ Other local browsers see the updated preference on their next local poll.
 Neither setting enables Home advertising in Portable/Off-Grid mode; the existing
 primary-Home-Wi-Fi safety gate remains unchanged.
 
-## Collar 💡
+## Hub reporting power profiles (28 August 2026)
 
-Both dashboards show only 💡 beside signal quality during the remaining
-ten-second receive opportunity. Tooltip/accessible label explain the timer.
+| Profile | Self-report interval | Cloud contact overdue |
+| --- | --- | --- |
+| Power Save (new firmware/default preference) | 180 seconds | 210 seconds |
+| Normal | 60 seconds | 90 seconds |
+| Active | 30 seconds | 60 seconds |
+
+These are **reporting profiles**, independent of Home/Portable/Off-Grid. There
+is no Lost Alert or Debug hub profile. They do not sleep the hub or slow LoRa RX,
+GNSS reading, BLE, the captive portal, or five-second settings checks. Consequently
+Power Save reduces self-report traffic, not all hub power consumption.
+Local status remains available every five seconds; its contact timeout remains
+15 seconds regardless of cloud reporting cadence.
+
+Firmware persists the profile only on settings changes in NVS. A profile/BLE
+change requests a prompt confirmation report, bypassing the long periodic
+interval. Cloud settings store desired and reported profiles separately; the
+browser needs both a matching value and applied revision before confirming.
+Existing Family owner/member RLS restricts preference edits; browsers cannot
+write reported profiles, capability, telemetry or applied revisions.
+
+Old firmware without profile fields is treated as Normal, not falsely labelled
+Power Save. It reports no control capability, so the cloud profile dialog asks
+for a firmware update. The RPC keeps defaults for older Edge callers; the new
+Edge handler rejects unknown/Lost/Debug hub profiles. No TLV bytes or collar
+power-profile codes change.
+
+## Collar 💡 / 💤 and last-seen
+
+Both dashboards show 💡 beside signal quality during the remaining
+ten-second receive opportunity, then 💤 for “probably sleeping”, not confirmed
+sleep. Tooltip/accessible label explain the estimate. Hubs never show this indicator.
 Cloud timing uses original live reception, not the collar's GNSS clock.
 Historical replay, repeated snapshots and duplicate uploads do not renew it.
 Missing trustworthy LoRa reception time remains conservative. Internet latency
 can shorten or consume the indicator; it is not a promise of command delivery.
 Local timing remains monotonic and radio-driven.
 
+The last-seen counter starts immediately at receipt and continues through the
+bulb/sleep transition; it does not wait ten seconds or a minute. The 28 August
+investigation found collar timestamps almost five minutes ahead of cloud receipt,
+which caused the zero-clamped counter to look frozen. The position-only fallback
+now uses the earlier of recorded/received timestamps; authoritative device
+presence overlays newer contact. Historical replay retains its original age;
+upload time alone cannot make an old point fresh. GNSS coordinates are unchanged.
+
 ## Rollout and verification
 
-For the **prompt Bluetooth/card layout update**:
+For **reporting profiles, contact clock and sleep indicator** (this update):
+
+1. Review `npx --yes supabase@latest db push --linked --dry-run`, then apply
+   `npx --yes supabase@latest db push --linked`. The new migration is
+   `20260828102745_hub_reporting_profiles.sql`; review any other pending migrations.
+2. Deploy `ingest-position` from this branch/merged main using the command below.
+   Migration must precede this new Edge handler.
+3. Merge for Vercel and update Home Hub firmware plus public assets, **preserving
+   its existing journal/config**. No collar flash is needed.
+4. Confirm `/api/hub-presence` includes `reporting_profile`, `control_poll_s: 5`
+   and `ble_settled`. Test all three profiles, reboot persistence, BLE confirmation
+   and uninterrupted collar reception on real hardware.
+
+The connected hub inspected during development lacked `ble_settled`, indicating
+older firmware without the prompt-control path. Changing the website alone
+cannot speed up that image. WebSockets remain a possible later improvement:
+they reduce polling traffic/latency, but need gateway-scoped authorization,
+reconnect/token recovery and durable revision reconciliation. REST is retained
+here; its five-second polling cost should be revisited before a fleet rollout.
+
+Regression additions: `tools/test_hub_reporting.cpp` tests the real firmware
+cadence helper and millis rollover. `tools/test_collar_feedback_db.mjs` applies
+the real new migration in isolated PostgreSQL/WASM and checks legacy calls,
+profile validation, Family isolation and write privileges. Browser fixtures use
+synthetic data only: `tools/hub_controls_preview.mjs` (cloud React controls) and
+`tools/hub_feedback_preview.py` (offline web GUI). Neither connects to hardware
+or Supabase.
+
+For the **earlier prompt Bluetooth/card layout update only**:
 
 1. Deploy `ingest-position` from this branch or the merged updated main:
    `npx --yes supabase@latest functions deploy ingest-position --project-ref ykcdaonkvwemedotdpdr`.
@@ -240,6 +311,6 @@ pio run -e hub -t buildfs
 
 Database tests use isolated PGlite (see test header for installation), not live
 Supabase. tools/hub_feedback_preview.py is a loopback-only synthetic UI fixture.
-Hardware acceptance: confirm ~one-minute [HUB SELF] 200 responses, genuine GNSS
+Hardware acceptance: confirm profile-paced [HUB SELF] 200 responses, genuine GNSS
 fix/age, mode icons, reboot-persistent appearance, BLE gate, command priority, and
-💡 extinction without historical replay relighting it.
+💡 → 💤 without historical replay relighting it.

@@ -78,9 +78,19 @@ test('hub and collar share card shell, avatar, expansion and navigation',()=>{
   assert.match(html,/Wi-Fi -40 dBm/);
   assert.match(html,/Bluetooth On/);
   for (const part of ['battery-indicator','No data','sig-bar filled','>Wi-Fi</span>','icon-stopwatch','Message Log','btn-log-export']) assert.ok(html.includes(part),part);
-  assert.doesNotMatch(html,/Power Profile|Dist From Hub|btn-cmd|btn-find|Reported fault|hub-summary|Uptime|Free memory/);
+  assert.doesNotMatch(html,/Power Profile|Dist From Hub|btn-find|Reported fault|hub-summary|Uptime|Free memory/);
+  assert.match(html,/btn-cmd/); assert.match(html,/Reporting profile/);
   assert.match(renderCollar(),/Power Profile/);
   assert.match(renderCollar(),/btn-cmd/);
+});
+
+test('collar stopwatch advances through the ten-second bulb/sleep transition; hubs never sleep',()=>{
+  for (const age of [0,1,9,10,11,59,60]) {
+    const html=renderCollar({ageSeconds:age,awakeSeconds:Math.max(0,10-age)});
+    assert.ok(html.includes(age<10 ? '💡' : '💤'));
+    assert.ok(html.includes('class="card-lastseen-value">'+(age<60 ? age+'s' : '1m 0s')+'</span>'));
+  }
+  assert.doesNotMatch(renderHub(),/💡|💤/);
 });
 
 test('hub report and CSV use hub data, not invented collar fields',()=>{

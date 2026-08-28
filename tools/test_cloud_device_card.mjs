@@ -5,6 +5,7 @@ import vm from 'node:vm';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as hubControlFeedback from '../web/src/lib/hubControlFeedback.ts';
+import * as hubReporting from '../web/src/lib/hubReporting.ts';
 const require = createRequire(new URL('../web/package.json',import.meta.url));
 const ts = require('typescript');
 const React = require('react');
@@ -15,6 +16,7 @@ const icons=Object.fromEntries(['BatteryIndicator','BleProximity','HomeDistance'
 const context=vm.createContext({exports:{},require(name){
   if(name==='@/components/Indicators')return icons;
   if(name==='@/lib/hubControlFeedback')return hubControlFeedback;
+  if(name==='@/lib/hubReporting')return hubReporting;
   if(name==='@/lib/emoji')return {emojiImageUrl:()=>'/favicon.svg'};
   if(name==='@/lib/mapLocation')return {googleMapsUrl:()=> '#',formatMapCoordinates:()=> '51.9, -2.2'};
   return require(name);
@@ -33,5 +35,6 @@ test('fresh presence flags clear old position faults; real faults remain visible
   assert.doesNotMatch(render({device:{...device,error:'Module'},reportedFlags:0}),/class="error-badge"/);
   assert.match(render({reportedFlags:128}),/Reported fault/);
   assert.doesNotMatch(render({awakeSeconds:0}),/💡/);
+  assert.match(render({awakeSeconds:0}),/💤/);
   assert.doesNotMatch(render({commandFeedback:null}),/role="status"/);
 });

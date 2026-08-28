@@ -1,5 +1,8 @@
 import type { DeviceAvatar, TelemetryDevice } from "../types/telemetry";
+import type { HubReportingProfile } from "./hubReporting";
 export interface HubPresence {
+  reporting_profile?: HubReportingProfile; desired_reporting_profile?: HubReportingProfile;
+  control_poll_s?: number | null;
   avatar_kind?: "emoji" | "photo"; avatar_storage_path?: string | null;
   gateway_guid16: number; household_id: string; mode: "home" | "portable" | "off_grid";
   received_at: string; latitude: number | null; longitude: number | null; fix_at: string | null;
@@ -14,6 +17,7 @@ export function hubAvatar(hub: HubPresence, photoUrl?: string): DeviceAvatar {
 }
 export function hubMapDevice(hub: HubPresence): TelemetryDevice {
   return { id: -hub.gateway_guid16, name: hub.display_name, entity: "hub", hubMode: hub.mode,
+    hubReportingProfile: hub.reporting_profile,
     lat: hub.latitude ?? 0, lon: hub.longitude ?? 0, hasGps: hub.latitude !== null && hub.longitude !== null,
     lastUpdate: Date.parse(hub.received_at), seq: 0, time: 0, status: hub.mode === "home" ? "Home" : "Out",
     profile: "Normal", error: "None", batt: 0, rssi: hub.wifi_rssi_dbm, snr: null, bleHome: hub.ble_advertising,

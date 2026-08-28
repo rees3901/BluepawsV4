@@ -1,7 +1,7 @@
 /* eslint-disable @next/next/no-img-element -- Tiny pre-sized emoji artwork is intentionally served directly from the picker CDN. */
 import type { ReactNode } from "react";
 import { BatteryIndicator, BleProximity, HomeDistance, LastSeen, SignalIndicator, WifiIndicator } from "@/components/Indicators";
-import { HUB_CONTACT_GRACE_SECONDS } from "@/lib/hubControlFeedback";
+import { hubContactGrace } from "@/lib/hubReporting";
 import { emojiImageUrl } from "@/lib/emoji";
 import { formatMapCoordinates, googleMapsUrl } from "@/lib/mapLocation";
 import type { DeviceAction, DeviceAvatar, TelemetryDevice } from "@/types/telemetry";
@@ -60,7 +60,7 @@ export function DeviceCard(props: DeviceCardProps) {
 
   return (
     <article
-      className={`device-card${(isHub ? ageSeconds >= HUB_CONTACT_GRACE_SECONDS : ageSeconds > 600) ? " stale" : ""}${expanded ? " expanded" : ""}${dragging ? " dragging" : ""}${dragOver ? " drag-over" : ""}`}
+      className={`device-card${(isHub ? ageSeconds >= hubContactGrace(device.hubReportingProfile) : ageSeconds > 600) ? " stale" : ""}${expanded ? " expanded" : ""}${dragging ? " dragging" : ""}${dragOver ? " drag-over" : ""}`}
       onDragOver={(event) => {
         event.preventDefault();
         onDragOver();
@@ -134,8 +134,8 @@ export function DeviceCard(props: DeviceCardProps) {
           </div>
           <div className="card-indicators">
             <span className="card-indicator-group"><BatteryIndicator millivolts={isHub ? null : device.batt} percent={device.batteryPercent} /></span>
-            <span className="card-indicator-group">{isHub ? <WifiIndicator rssi={device.rssi} contactLost={ageSeconds >= HUB_CONTACT_GRACE_SECONDS} /> : <SignalIndicator rssi={device.rssi} snr={device.snr} ingestPath={device.ingestPath} />}</span>
-            {!isHub && (props.awakeSeconds ?? 0) > 0 && <span className="collar-awake" title="Fresh packet received — expected ten-second command receive window, not guaranteed delivery" aria-label={`Collar recently heard; ${props.awakeSeconds} seconds remaining`}>💡</span>}
+            <span className="card-indicator-group">{isHub ? <WifiIndicator rssi={device.rssi} contactLost={ageSeconds >= hubContactGrace(device.hubReportingProfile)} /> : <SignalIndicator rssi={device.rssi} snr={device.snr} ingestPath={device.ingestPath} />}</span>
+            {!isHub && <span className="collar-awake" title={(props.awakeSeconds ?? 0) > 0 ? "Fresh packet received — expected ten-second command receive window, not guaranteed delivery" : "Receive window ended — collar probably sleeping; sleep is not directly confirmed"} aria-label={(props.awakeSeconds ?? 0) > 0 ? `Collar recently heard; ${props.awakeSeconds} seconds remaining` : "Collar probably sleeping"}>{(props.awakeSeconds ?? 0) > 0 ? "💡" : "💤"}</span>}
             {!isHub && portableMode && <span className="card-indicator-group"><BleProximity rssi={device.rssi === null ? null : device.rssi + 28} /></span>}
           </div>
           <div className="card-indicators card-indicators-row3">

@@ -1,5 +1,6 @@
 import type { DeviceReport } from "./deviceReports";
 import type { HubPresence } from "./hubPresence";
+import { HUB_REPORTING } from "./hubReporting.ts";
 
 export function buildHubReport(hub: HubPresence): Pick<DeviceReport,"rows"|"summary"> {
   const mode = hub.mode === "home" ? "Home" : hub.mode === "portable" ? "Portable" : "Off-Grid";
@@ -7,7 +8,9 @@ export function buildHubReport(hub: HubPresence): Pick<DeviceReport,"rows"|"summ
   const coordinates = hub.latitude === null || hub.longitude === null ? "Waiting for GPS fix" : `${hub.latitude.toFixed(5)}, ${hub.longitude.toFixed(5)}`;
   const values = [
     ["Received",received,"When Bluepaws accepted this hub’s own status report, not a collar report."],
-    ["Report type","Hub self-report","The hub normally reports its own status about once a minute while online."],
+    ["Report type","Hub self-report","The hub reports its own status at its selected reporting cadence while online."],
+    ["Reporting profile",HUB_REPORTING[hub.reporting_profile ?? "normal"].label,
+      `Reports approximately every ${HUB_REPORTING[hub.reporting_profile ?? "normal"].seconds} seconds. Reception and command handling stay on.`],
     ["Hub ID",hub.gateway_guid16.toString(16).padStart(4,"0"),"The identity of this Home Hub."],
     ["Mode",mode,"Home uses primary Wi-Fi; Portable uses a fallback connection; Off-Grid is local only."],
     ["Coordinates",coordinates,"The hub’s own last known GPS position, never a collar’s position."],
