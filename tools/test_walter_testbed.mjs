@@ -73,6 +73,7 @@ struct SimModem {
 ${firmwareFunction('waitForSimReady')}
 std::atomic<bool> offlineBench{true},simulatedHome{false},running{false};
 std::atomic<uint32_t> loraTxCount{0},lteSkippedCount{0};
+std::atomic<uint8_t> selectedProfile{PROFILE_NORMAL};
 bool begun=false,cellularFailure=false,setupOk=true,uploadOk=false;
 uint32_t nowUtc=utc;
 uint32_t utcNow(){return nowUtc;}
@@ -89,6 +90,7 @@ int mbedtls_base64_encode(unsigned char* dest,size_t,size_t* n,const uint8_t* da
     sentPacket.assign(data,data+size);strcpy(reinterpret_cast<char*>(dest),"fixture");*n=7;return 0;
 }
 bool upload(const uint8_t* data,uint8_t size){++modemCalls;uploadedPacket.assign(data,data+size);return uploadOk;}
+${firmwareFunction('testLteOnly')}
 ${firmwareFunction('transmitLoraStub')}
 ${firmwareFunction('cycle','void')}
 void cycleTests(){
@@ -129,6 +131,31 @@ void cycleTests(){
     assert(!transmitLoraStub(sentPacket.data(),1));
     assert(!transmitLoraStub(sentPacket.data(),BP_MAX_PACKET_SIZE+1));
     cancelRequested=true;assert(!transmitLoraStub(sentPacket.data(),46));cancelRequested=false;
+}
+void lteOnlyTests(){
+    WALTER_TLS_CA_PEM="-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----";
+    modemCalls=0;uploadedPacket.clear();console.log.clear();
+    const auto txBefore=loraTxCount.load();
+    const auto skippedBefore=lteSkippedCount.load();
+    offlineBench=true;nowUtc=0;assert(!testLteOnly() && modemCalls==0);
+    nowUtc=utc;hmacKey[0]=0;assert(!testLteOnly() && modemCalls==0);hmacKey[0]=1;
+    cancelRequested=true;assert(!testLteOnly() && modemCalls==0);cancelRequested=false;
+    setupOk=false;assert(!testLteOnly() && modemCalls==1 && uploadedPacket.empty());
+    setupOk=true;sequenceNext=sequenceEnd;sequenceStore.fail=true;
+    assert(!testLteOnly() && modemCalls==2 && uploadedPacket.empty());sequenceStore.fail=false;
+    // A retained real fix must not leak into this intentionally no-GNSS test.
+    lastFix={true,519084900,-22587900,utc,8,9};
+    uploadOk=false;assert(!testLteOnly() && modemCalls==4 && cellularFailure);
+    assert(!(pkt_flags(uploadedPacket.data())&FLAG_GNSS_VALID));
+    assert(pkt_flags(uploadedPacket.data())&FLAG_ERROR_PRESENT);
+    assert(pkt_lat_e7(uploadedPacket.data())==0 && pkt_lon_e7(uploadedPacket.data())==0);
+    assert(pkt_tx_reason(uploadedPacket.data())==TX_INTERRUPT);
+    const auto seq=pkt_msg_seq(uploadedPacket.data());
+    uploadOk=true;assert(testLteOnly() && modemCalls==6 && !cellularFailure);
+    assert(pkt_msg_seq(uploadedPacket.data())==uint16_t(seq+1));
+    assert(loraTxCount==txBefore && lteSkippedCount==skippedBefore && offlineBench);
+    assert(console.log.find("[LORA-STUB]")==std::string::npos);
+    assert(console.log.find("No-fix test packet")!=std::string::npos);
 }
 int main() {
     modem.states={-1,-1,0};assert(waitForSimReady() && modem.calls==3);
@@ -236,6 +263,7 @@ int main() {
     JsonDocument request;walter::fillRequest(request,"fixture");
     std::string json;serializeJson(request,json);puts(json.c_str());
     cycleTests();
+    lteOnlyTests();
 }
 `);
 const compiler=process.env.CXX||(process.platform==='win32'?'C:/ProgramData/mingw64/mingw64/bin/g++.exe':'g++');
@@ -260,4 +288,4 @@ assert.equal(parsed.packet.deviceGuid16,1010);
 assert.deepEqual(Buffer.from(parsed.packet.rawBytes),packet);
 assert.equal(decoded.packet.sha256,createHash('sha256').update(packet).digest('hex'));
 writeFileSync(resolve(dir,'packet-fixture.json'),JSON.stringify({hex,wrapper,decoded},null,2));
-console.log('Walter PASS: actual offline/online cycle, TX completion, immutable fallback bytes, stop/no-clock gates, credential gates, NVS reservations/reboots/write failures, five-profile cadence, home/away, boot/forced LTE, GNSS validity/staleness, fault flags, strict receipts, C++ HMAC -> web workbench -> Supabase parser. No network or serial traffic.');
+console.log('Walter PASS: actual offline/online cycle, isolated LTE-only diagnostic, TX completion, immutable fallback bytes, stop/no-clock gates, credential gates, NVS reservations/reboots/write failures, five-profile cadence, home/away, boot/forced LTE, GNSS validity/staleness, fault flags, strict receipts, C++ HMAC -> web workbench -> Supabase parser. No network or serial traffic.');

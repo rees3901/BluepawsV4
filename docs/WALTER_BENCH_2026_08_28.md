@@ -175,3 +175,43 @@ Final image uses64,188 bytes static RAM and413,813 bytes flash. Post-flash statu
 confirmed Normal profile, offline=1, busy=0/running=0, UTC unset and counters zero;
 COM26 released. The new invalid-signal display is host-tested but was not used to
 justify another RF retry. Post-flash log: `antennas-swapped-postflash-status.log`.
+
+## Full-band LTE antenna, LTE-only retest, 19:00-19:04 UTC
+
+The user fitted an antenna labelled698-960MHz and1710-2690MHz and explicitly
+requested LTE only. Added an idle-only `lte` command: actual host UTC and device
+credentials are required; it prepares SIM/APN/TLS, builds one signed no-fix report,
+attempts registration/HTTPS once, then performs RF-off cleanup. It neither requests
+GNSS nor calls the LoRa stub, even when a previous GNSS fix is cached. GNSS
+configuration is now confined to the existing explicit GNSS/cycle paths. Bench
+mode remains unchanged; this explicit diagnostic permits real LTE in bench mode.
+
+- Walter host tests and all15 console tests passed. Build:64,188 bytes static RAM,
+  415,205 bytes flash; uploaded only COM26 and verified flash hash.
+- SIMREADY, PDP context/authentication, CA slot, TLS validation settings and HTTPS
+  profile configuration all succeeded. This is not proof of SIM subscription
+  activation, a working data session or an HTTPS handshake.
+- LTE-M automatic registration in CFUN1 progressed0->2->3->2->0->2 and timed out
+  after the180-second window. No home/roaming registered state was seen.
+- CESQ measurements were unavailable, correctly rejected by the sentinel guard.
+  No HTTP POST was attempted because registration failed. Supabase before/after:
+  zero device1010 observations, zero positions and null last_seen_at.
+- ESP packet1025:46 bytes, source1010/destination16, no valid coordinates,
+  GNSS_VALID clear and ERROR_PRESENT set. HMAC verification and the live workbench
+  parse-only API matched the exact bytes/hash; no simulator upload was substituted.
+- RF-off cleanup succeeded. After an ESP-only reset, fixed read-only diagnostics
+  confirmed CFUN0/CEREG0; CEER reported NO CAUSE RECEIVED for both EMM and ESM.
+  SQNMONI could not supply a serving cell in RF-off mode (CME551). CPIN returned
+  CME10 in this mode, not a contradiction of SIMREADY during RF-off initialization
+  at CFUN4. Band profiles were readable; no band/RAT changes were made.
+- Physical no-clock guard verified: `lte` refused to run after reset with UTC unset.
+  Final status Normal/offline, busy=0/running=0, LoRa counters0; COM26 released.
+  COM23/7/11 and PCB files untouched. GNSS was not exercised in this retest.
+
+The new antenna did not establish LTE connectivity. Neither an antenna defect nor
+an RF-front-end defect is proven. SIM activation/data allowance, LTE-M roaming
+availability and RF installation/coverage remain open checks; keep PR142 draft.
+
+Private evidence: `full-band-lte.log`, `full-band-lte-diagnostics.log`,
+`full-band-lte-final-status.log`, `full-band-lte-packet.json`. Packet1025 SHA-256:
+`2726f8b353538b4756b82a88b3829b2e0c1e7276594016db7527ed2189b97d1c`.

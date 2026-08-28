@@ -199,6 +199,7 @@ which must use a different spare identity.
 | `diagnose` | Before any modem initialization after ESP boot: fixed read-only AT queries for version, operational state, registration, rejection history and bands |
 | `clock <UTC epoch>` | Explicitly seed actual host UTC while idle; no invented GNSS fix |
 | `gnss` | With a valid UTC seed, test real GNSS with LTE off; no packet or upload |
+| `lte` | With actual host UTC and credentials, register on LTE and attempt one signed no-fix upload; no GNSS or LoRa stub; returns to RF-off/idle |
 | `send` | One forced-report cycle, then idle; LTE is skipped in offline mode |
 | `start` | BOOT cycle, then recurring profile policy |
 | `stop` | Cancel pending work/interrupt waits and clean up modem state |
@@ -229,7 +230,12 @@ LTE ratios/heartbeats are preserved, using a simulated schedule when offline.
 An online cycle with host UTC can also build its LoRa packet after GNSS failure;
 APN/TLS preparation is deferred until LTE is actually due.
 
-Explicit diagnostic commands (`inspect`, `diagnose`, `gnss`) remain real modem
+For LTE antenna testing alone, seed `clock <current UTC epoch>` then use `lte`.
+This deliberately reports no valid coordinates, even if an earlier GNSS fix is
+cached. It leaves bench mode and LoRa counters unchanged. The normal `send` command
+still follows the complete telemetry cycle and can request GNSS when online.
+
+Explicit diagnostic commands (`inspect`, `diagnose`, `gnss`, `lte`) remain real modem
 operations even in bench mode. Offline only suppresses modem operations in the
 telemetry cycle. It does not forcibly switch off an independently running modem;
 check any prior RF-off failure before treating the physical board as RF-inactive.

@@ -20,6 +20,7 @@ std::atomic<bool> running{false}, busy{false}, cancelRequested{false}, oneShot{f
 std::atomic<bool> inspectRequested{false};
 std::atomic<bool> rawDiagnosticRequested{false};
 std::atomic<bool> gnssInspectionRequested{false};
+std::atomic<bool> lteInspectionRequested{false};
 std::atomic<bool> offlineBench{true}; // Safe default after every ESP reboot.
 std::atomic<uint32_t> loraTxCount{0}, lteSkippedCount{0};
 std::atomic<uint8_t> selectedProfile{PROFILE_NORMAL};
@@ -159,7 +160,7 @@ bool prepareModem() {
     if (!beginModem()) return false;
     if (configured) return true;
     if (cancelRequested.load()) return false;
-    console.println("[WALTER] Configuring SIM, APN, GNSS and TLS (CA slot12/profile2)");
+    console.println("[WALTER] Configuring SIM, APN and TLS (CA slot12/profile2)");
     WalterModemRsp rsp{};
     if (!modem.checkComm() || !modem.setOpState(WALTER_MODEM_OPSTATE_NO_RF) ||
         !waitForSimReady()) {
@@ -178,13 +179,21 @@ bool prepareModem() {
     if (!modemStep("PDP context", modem.definePDPContext(1, WALTER_APN)) ||
         !modemStep("PDP authentication", modem.setPDPAuthParams(WalterModemPDPAuthProtocol(WALTER_APN_AUTH),
                                WALTER_APN_USER, WALTER_APN_PASSWORD, 1)) ||
-        !modemStep("GNSS configuration", modem.gnssConfig()) ||
         !modemStep("Trusted CA slot", modem.tlsWriteCredential(false, WALTER_CA_SLOT, WALTER_TLS_CA_PEM)) ||
         !modemStep("TLS CA/hostname validation", modem.tlsConfigProfile(WALTER_TLS_PROFILE, WALTER_MODEM_TLS_VALIDATION_URL_AND_CA,
                                WALTER_MODEM_TLS_VERSION_12, WALTER_CA_SLOT)) ||
         !modemStep("HTTPS profile", modem.httpConfigProfile(WALTER_HTTP_PROFILE, WALTER_HTTPS_HOST, 443, WALTER_TLS_PROFILE))) return false;
     configured = true;
     return !cancelRequested.load();
+}
+void reportSignal() {
+    WalterModemRsp signal{};
+    if (!cancelRequested.load() && modem.getSignalQuality(&signal)) {
+        const auto& quality = signal.data.signalQuality;
+        if (walter::signalQualityAvailable(quality.rsrp, quality.rsrq))
+            console.printf("[LTE] Signal RSRP=%ddBm RSRQ=%d/10dB (CESQ estimate)\n", quality.rsrp, quality.rsrq);
+        else console.println("[LTE] Signal unavailable (unknown/out-of-range CESQ result)");
+    }
 }
 bool networkOn() {
     if (cancelRequested.load()) return false;
@@ -204,19 +213,14 @@ bool networkOn() {
         // Roaming can reject one PLMN before automatic selection finds another.
         if (monotonicMs() >= deadline || !pauseMs(500)) {
             console.printf("[LTE] Registration incomplete; state=%u\n", unsigned(state));
-            WalterModemRsp signal{};
-            if (!cancelRequested.load() && modem.getSignalQuality(&signal)) {
-                const auto& quality = signal.data.signalQuality;
-                if (walter::signalQualityAvailable(quality.rsrp, quality.rsrq))
-                    console.printf("[LTE] Signal RSRP=%ddBm RSRQ=%d/10dB (CESQ estimate)\n", quality.rsrp, quality.rsrq);
-                else console.println("[LTE] Signal unavailable (unknown/out-of-range CESQ result)");
-            }
+            reportSignal();
             return false;
         }
     }
     WalterModemRsp rsp{};
     if (modem.getClock(&rsp)) setUtc(rsp.data.clock.epochTime);
     console.printf("[LTE] Registered; UTC=%lu\n", (unsigned long)utcNow());
+    reportSignal();
     return !cancelRequested.load();
 }
 bool acquireFix() {
@@ -301,6 +305,25 @@ bool upload(const uint8_t* packet, uint8_t length) {
     }
     return false;
 }
+bool testLteOnly() {
+    // Explicit diagnostic: independent of bench mode, without GNSS or LoRa.
+    if (cancelRequested.load() || !credentialsReady() || !utcNow()) return false;
+    console.println("[LTE] One-shot LTE-only test; no GNSS acquisition or LoRa stub");
+    if (!prepareModem() || cancelRequested.load()) return false;
+    uint16_t sequence;
+    if (!nextSequence(sequence)) { console.println("[LTE] NVS reservation failed; upload blocked"); return false; }
+    uint8_t packet[BP_MAX_PACKET_SIZE]{};
+    const uint8_t length = walter::buildPacket(packet, WALTER_DEVICE_ID, WALTER_HOME_HUB_ID, sequence,
+        utcNow(), bp_profile_t(selectedProfile.load()), simulatedHome.load(), TX_INTERRUPT, walter::Fix{},
+        false, cellularFailure, uint32_t(monotonicMs() / 1000), hmacKey);
+    if (!length) return false;
+    char hex[BP_MAX_PACKET_SIZE * 2 + 1]{};
+    for (uint8_t i = 0; i < length; ++i) snprintf(hex + i * 2, 3, "%02X", packet[i]);
+    console.printf("[LTE] No-fix test packet seq=%u bytes=%u hex=%s\n", sequence, length, hex);
+    const bool accepted = upload(packet, length); // Registers once before attempting HTTPS.
+    cellularFailure = !accepted;
+    return accepted;
+}
 bool transmitLoraStub(const uint8_t* packet, uint8_t length) {
     if (cancelRequested.load() || !packet || length < BP_HEADER_SIZE + BP_AUTH_TAG_SIZE ||
         length > BP_MAX_PACKET_SIZE) return false;
@@ -370,6 +393,7 @@ void worker(void*) {
         if (inspectRequested.exchange(false)) {
             const bool raw = rawDiagnosticRequested.exchange(false);
             const bool gnss = gnssInspectionRequested.exchange(false);
+            const bool lte = lteInspectionRequested.exchange(false);
             if (!cancelRequested.load()) {
                 if (raw) diagnoseRaw();
                 else if (gnss) {
@@ -378,6 +402,14 @@ void worker(void*) {
                         console.printf("[GNSS] Inspection result=%s (no upload)\n", fixed ? "VALID FIX" : "NO FIX");
                     }
                     if (begun && !radioOff()) console.println("[GNSS] Could not confirm RF off");
+                } else if (lte) {
+                    const bool accepted = testLteOnly();
+                    console.printf("[LTE] Test result=%s (no automatic retry)\n", accepted ? "CLOUD ACCEPTED" : "DELIVERY UNCONFIRMED");
+                    if (begun) {
+                        modem.httpClose(WALTER_HTTP_PROFILE);
+                        if (radioOff()) console.println("[LTE] RF-off cleanup confirmed");
+                        else console.println("[LTE] Could not confirm RF off; check board");
+                    }
                 } else inspectModem();
             }
             busy = false; console.println("[WALTER] Idle after inspection"); continue;
@@ -435,11 +467,15 @@ void command(const String& text) {
         setUtc(epoch);
         console.println("[CLOCK] Explicit host UTC seed accepted; no coordinates or GNSS validity fabricated"); return;
     }
-    if (text == "inspect" || text == "diagnose" || text == "gnss") {
+    if (text == "inspect" || text == "diagnose" || text == "gnss" || text == "lte") {
         if (text == "diagnose" && begun) { console.println("[DIAG] Requires a fresh ESP boot before inspect/start/send"); return; }
         if (text == "gnss" && !utcNow()) { console.println("[GNSS] Seed actual UTC with clock <epoch> first"); return; }
+        if (text == "lte" && (!utcNow() || !credentialsReady())) {
+            console.println("[LTE] Seed actual UTC with clock <epoch>; APN, bearer, CA and HMAC required"); return;
+        }
         cancelRequested = false; rawDiagnosticRequested = text == "diagnose";
-        gnssInspectionRequested = text == "gnss"; inspectRequested = true; return;
+        gnssInspectionRequested = text == "gnss"; lteInspectionRequested = text == "lte";
+        inspectRequested = true; return;
     }
     if (text == "start" || text == "send") {
         if (!packetCredentialsReady() || (!offlineBench.load() && !credentialsReady())) {
@@ -453,7 +489,7 @@ void command(const String& text) {
     } else if (text == "home on" || text == "home off") {
         simulatedHome = text == "home on";
         console.println("[WALTER] Home is an explicit simulation, not a received BLE beacon");
-    } else console.println("Commands: status | bench on/off | inspect | diagnose | clock <UTC epoch> | gnss | start | stop | send | profile normal/powersave/active/lost/debug | home on/off");
+    } else console.println("Commands: status | bench on/off | inspect | diagnose | clock <UTC epoch> | gnss | lte | start | stop | send | profile normal/powersave/active/lost/debug | home on/off");
 }
 } // namespace
 
