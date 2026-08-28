@@ -75,6 +75,27 @@ uptime or a completed recovery test.
 
 ### Gates after the clock fix
 
+Restarted at **22:48:11 UTC**. At 22:48:55 the real GNSS result reported 93.3 m
+uncertainty with sample UTC 22:48:15. Packet 2305 preserved fix age **39 seconds**
+and current packet UTC, rather than age zero. It passed independent local HMAC
+verification; its hash matched Supabase observation **6514**, received at
+22:49:14 through `cellular_direct`, GNSS valid, accuracy rounded up to 94 m:
+`09ffcdb5d205896a12f956e14ae44ae2b305c7188aed8469f4df7e4e8a213ce3`.
+
+Command 6 changed Normal to Active. ACK packet **2306**, observation **6515**,
+carried ACK TLV 6 and Active profile; the command row was `acked` at
+22:49:16.517659 UTC, attempts 1. Its serial/cloud hash was
+`559b4d56dbb5f64db6fa4fa96ead033a305f45fea612937547767c2526c3f2de`.
+The LTE window ran 22:49:14.605–22:49:25.873 (11.27 seconds). Sleep began
+22:49:26.744 for 60 seconds, with the UTC next-wake now matching the host clock.
+Status at 22:49:42 showed online, running, Active, free heap 298,964 bytes.
+Device 1001's cloud last-seen was still current at 22:49:20.
+
+This verifies one real GNSS/BOOT LTE upload after the clock fix, not the full
+recurring baseline. Normal restoration has **not yet been queued or verified**.
+The follow-up should queue it near the Active cycle-5 LTE opportunity, with no
+forced `send`. Keep this PR draft until the remaining evidence is established.
+
 1. Observe unforced Active wake cycles and its scheduled LTE attempt at cycle 5.
 2. Queue Normal near that delivery opportunity; verify a signed cloud ACK and
    the subsequent 600-second wait.
