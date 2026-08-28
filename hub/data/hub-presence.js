@@ -2,6 +2,25 @@
 (function (root) {
     'use strict';
     var latest = null, saveRequest = null;
+    function reportRows(s) {
+        return [
+            ['Report type','Hub local status','Read directly from this Home Hub; no cloud connection is needed.'],
+            ['Hub ID',s.gateway_guid16,'The identity of this Home Hub.'],
+            ['Mode',s.mode,'Home, Portable or Off-Grid communications mode.'],
+            ['Coordinates',Number.isFinite(s.latitude) && Number.isFinite(s.longitude) ? s.latitude.toFixed(5)+', '+s.longitude.toFixed(5) : 'Waiting for GPS fix','The hub’s own GPS position, never a collar’s position.'],
+            ['GPS fix',s.fix_age_s == null ? 'Not acquired' : s.fix_age_s+' seconds old','Position age is separate from last contact.'],
+            ['Battery','No data','Battery telemetry is not supplied yet; this does not mean the battery is empty.'],
+            ['Wi-Fi signal',Number.isFinite(s.wifi_rssi_dbm) ? s.wifi_rssi_dbm+' dBm' : 'Not connected','Less negative values indicate a stronger Wi-Fi connection.'],
+            ['Home beacon',s.ble_advertising ? 'Advertising' : 'Off','Actual BLE Home beacon activity.'],
+            ['Uptime',s.uptime_s+' seconds','Time since the hub last restarted.']
+        ];
+    }
+    function downloadReport(rows) {
+        var cell=function(value) { var s=String(value); return '"'+(/^[\s]*[=+\-@]/.test(s) ? "'"+s : s).replace(/"/g,'""')+'"'; };
+        var csv=[['Field','Data','Description']].concat(rows).map(function(row){return row.map(cell).join(',');}).join('\r\n');
+        var url=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
+        var a=document.createElement('a');a.href=url;a.download='bluepaws_hub_report.csv';a.click();URL.revokeObjectURL(url);
+    }
     function view(s) {
         var guid = parseInt(s.gateway_guid16, 16);
         if (!Number.isInteger(guid) || guid <= 0 || guid > 65535) throw new Error('Invalid hub identity');
@@ -18,6 +37,24 @@
     }
     root.HubPresencePanel = {
         view: view,
+        report: function(exportOnly) {
+            fetch('/api/hub-presence',{cache:'no-store'}).then(function(r){if(!r.ok) throw new Error('Unable to load hub report');return r.json();})
+                .then(function(s){
+                    var rows=reportRows(s);
+                    if(exportOnly) {downloadReport(rows);return;}
+                    var old=document.getElementById('hub-report-modal');if(old)old.remove();
+                    var modal=document.createElement('div');modal.id='hub-report-modal';modal.className='modal';modal.setAttribute('role','dialog');modal.setAttribute('aria-modal','true');modal.setAttribute('aria-label','Latest Home Hub report');
+                    var body=document.createElement('div');body.className='modal-content hub-report';modal.appendChild(body);
+                    var title=document.createElement('h2');title.textContent='Latest Home Hub report';body.appendChild(title);
+                    var summary=document.createElement('p');summary.textContent=(s.display_name || 'Home Hub')+' responded in '+s.mode+' mode at '+new Date().toLocaleTimeString()+'.';body.appendChild(summary);
+                    var table=document.createElement('table');table.className='hub-report-table';body.appendChild(table);
+                    [['Field','Data','Description']].concat(rows).forEach(function(row,index){var tr=document.createElement('tr');table.appendChild(tr);row.forEach(function(value){var td=document.createElement(index===0 ? 'th' : 'td');td.textContent=value;tr.appendChild(td);});});
+                    var actions=document.createElement('div');actions.className='modal-actions';body.appendChild(actions);
+                    var download=document.createElement('button');download.className='btn-primary';download.textContent='Download CSV';download.onclick=function(){downloadReport(rows);};actions.appendChild(download);
+                    var close=document.createElement('button');close.className='btn-secondary';close.textContent='Close';close.onclick=function(){modal.remove();};actions.appendChild(close);
+                    document.body.appendChild(modal);close.focus();
+                }).catch(function(e){window.alert(e.message);});
+        },
         toggleBluetooth: function () {
             if (latest && saveRequest) saveRequest({ble_enabled: !latest.ble_enabled});
         },

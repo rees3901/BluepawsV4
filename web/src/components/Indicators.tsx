@@ -58,8 +58,15 @@ export function SignalIndicator({ rssi, snr, ingestPath }: { rssi: number | null
 
 // Wi-Fi is not LoRa: show its reported RSSI without inventing an SNR or RF badge.
 export function WifiIndicator({ rssi }: { rssi: number | null }) {
-  return <span className="signal-indicator" title="Home Hub Wi-Fi uplink signal">
-    <AntennaIcon /><span className="sig-label">Wi-Fi {rssi == null ? "not connected" : `${rssi} dBm`}</span>
+  // Wi-Fi RSSI thresholds, not the LoRa RSSI/SNR scoring model.
+  const level = rssi === null ? 0 : rssi >= -50 ? 5 : rssi >= -60 ? 4 : rssi >= -70 ? 3 : rssi >= -80 ? 2 : 1;
+  const label = ["No data", "Very poor", "Poor", "Average", "Good", "Excellent"][level];
+  const color = ["#607d8b", "#ef4444", "#f97316", "#f59e0b", "#84cc16", "#22c55e"][level];
+  return <span className="signal-indicator" title={`Wi-Fi ${rssi === null ? "not connected" : `${rssi} dBm`} — ${label}`}>
+    <AntennaIcon />
+    {[1,2,3,4,5].map(bar => <span key={bar} className={`sig-bar${bar <= level ? " filled" : ""}`} style={{height:4+bar*3, backgroundColor:bar <= level ? color : undefined}} />)}
+    <span className="sig-label" style={{color}}>{label}</span>
+    <span className="transport-badge" title="Home Hub Wi-Fi uplink" aria-label="Wi-Fi">Wi-Fi</span>
   </span>;
 }
 
@@ -77,10 +84,10 @@ function TransportBadge({ ingestPath }: { ingestPath: IngestPath | null }) {
   );
 }
 
-export function BatteryIndicator({ millivolts, percent }: { millivolts: number; percent?: number | null }) {
+export function BatteryIndicator({ millivolts, percent }: { millivolts: number | null; percent?: number | null }) {
   const hasPercent = percent !== undefined && percent !== null;
-  const battery = hasPercent ? batteryPercentLevel(percent) : batteryLevel(millivolts);
-  const measurement = hasPercent ? `${percent}%` : `${(millivolts / 1000).toFixed(2)} V`;
+  const battery = hasPercent ? batteryPercentLevel(percent) : millivolts === null ? {level:0,label:"No data",color:"#607d8b"} : batteryLevel(millivolts);
+  const measurement = hasPercent ? `${percent}%` : millivolts === null ? "Battery not reported" : `${(millivolts / 1000).toFixed(2)} V`;
   return (
     <span className="battery-indicator" title={`${measurement} — ${battery.label}`}>
       <svg className="indicator-icon icon-battery" viewBox="0 0 28 18" fill="none">

@@ -13,6 +13,8 @@ import { useCollarFeedback } from "@/lib/useCollarFeedback";
 import { useHubPresence } from "@/lib/useHubPresence";
 import { hubAvatar, hubMapDevice, type HubPresence } from "@/lib/hubPresence";
 import { HubCard } from "@/components/HubCard";
+import { useHubPhotos } from "@/lib/useHubPhotos";
+import { saveHubAppearance } from "@/lib/hubAppearances";
 import { commandMessage } from "@/lib/collarFeedback";
 import { CUSTOMER_POWER_PROFILES, powerProfileLabel, type CustomerPowerProfile } from "@/lib/powerProfiles";
 import { deviceCardOrderStorageKey, moveDeviceBefore, orderDeviceIds, pinDeviceFirst } from "@/lib/deviceCardOrder";
@@ -109,6 +111,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
   const reportVersion = devices.map(device => `${device.id}:${device.lastUpdate}:${device.seq}`).join(",");
   const { feedback, refresh: refreshFeedback } = useCollarFeedback(hasFamilyContext ? householdId : null, reportVersion);
   const { hubs, error: hubError, refresh: refreshHubs } = useHubPresence(hasFamilyContext ? householdId : null);
+  const hubPhotos = useHubPhotos(hubs, hasFamilyContext ? householdId : null);
   const mapHubs = useMemo(() => hubs.map(hubMapDevice), [hubs]);
   const mapDevices = useMemo(() => [...mapHubs, ...devices], [devices, mapHubs]);
   const orderedDeviceIds = useMemo(() => orderDeviceIds(mapDevices.map(device => device.id), cardOrder), [cardOrder, mapDevices]);
@@ -146,7 +149,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
     device.id,
     (!tutorialMode ? customAvatars[device.id] : undefined) ?? defaultDeviceAvatar(device.id),
   ])), [customAvatars, orderedDevices, tutorialMode]);
-  const mapAvatars = useMemo<Record<number, DeviceAvatar>>(() => ({ ...avatars, ...Object.fromEntries(hubs.map(h => [-h.gateway_guid16, hubAvatar(h)])) }), [avatars, hubs]);
+  const mapAvatars = useMemo<Record<number, DeviceAvatar>>(() => ({ ...avatars, ...Object.fromEntries(hubs.map(h => [-h.gateway_guid16, hubAvatar(h, hubPhotos[h.gateway_guid16])])) }), [avatars, hubs, hubPhotos]);
 
   const replaceCustomAvatars = useCallback((next: Record<number, DeviceAvatar>) => {
     revokeAvatarUrls(customAvatarsRef.current);
@@ -630,10 +633,11 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
         <AvatarEditorModal
           device={avatarDevice}
           householdId={householdId}
-          avatar={avatars[avatarDevice.id]}
+          avatar={mapAvatars[avatarDevice.id]}
           theme={darkMode ? "dark" : "light"}
           onClose={() => setAvatarDevice(null)}
-          onSaved={refreshAppearances}
+          saveAppearance={avatarDevice.entity === "hub" ? input => saveHubAppearance(input, avatarDevice.hubMode ?? "home") : undefined}
+          onSaved={avatarDevice.entity === "hub" ? async () => { refreshHubs(); } : refreshAppearances}
         />
       )}
       {tutorialOpen && tutorialMode && (

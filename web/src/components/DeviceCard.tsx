@@ -132,7 +132,7 @@ export function DeviceCard(props: DeviceCardProps) {
             {!isHub && reportedFault && <span className="error-badge" title="A fault is indicated in the collar's latest available report. This is separate from Lost Alert.">Reported fault</span>}
           </div>
           <div className="card-indicators">
-            {!isHub && <span className="card-indicator-group"><BatteryIndicator millivolts={device.batt} percent={device.batteryPercent} /></span>}
+            <span className="card-indicator-group"><BatteryIndicator millivolts={isHub ? null : device.batt} percent={device.batteryPercent} /></span>
             <span className="card-indicator-group">{isHub ? <WifiIndicator rssi={device.rssi} /> : <SignalIndicator rssi={device.rssi} snr={device.snr} ingestPath={device.ingestPath} />}</span>
             {!isHub && (props.awakeSeconds ?? 0) > 0 && <span className="collar-awake" title="Fresh packet received — expected ten-second command receive window, not guaranteed delivery" aria-label={`Collar recently heard; ${props.awakeSeconds} seconds remaining`}>💡</span>}
             {!isHub && portableMode && <span className="card-indicator-group"><BleProximity rssi={device.rssi === null ? null : device.rssi + 28} /></span>}
@@ -162,12 +162,12 @@ export function DeviceCard(props: DeviceCardProps) {
             </div>
             <ActionButtons followed={followed} trailVisible={trailVisible} onAction={onAction} collarControls={!isHub} hasGps={hasGps} extra={props.hubActions} />
             {!isHub && props.commandFeedback && <div role="status" className={`command-feedback ${props.commandFeedback.pending ? "pending" : props.commandFeedback.status}`}>{props.commandFeedback.text}</div>}
-            {!isHub && <div className="log-btn-row">
+            <div className="log-btn-row">
               <button className="btn-device-log btn-secondary" type="button" onClick={onReportLog}>Message Log</button>
               <button className="btn-log-export" type="button" title="Export report log as CSV" aria-label="Export report log" onClick={onReportExport}>
                 <DownloadIcon />
               </button>
-            </div>}
+            </div>
             {isHub && props.hubFooter}
           </div>
         </div>

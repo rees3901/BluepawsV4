@@ -165,7 +165,7 @@
     }
 
     function renderBatteryBars(millivolts) {
-        var batt = getBatteryLevel(millivolts);
+        var batt = millivolts == null ? {level:0,label:'No data',color:'#607d8b'} : getBatteryLevel(millivolts);
         // Build 5 bars inside the battery body — each bar is a rect
         // Battery body inner area: x 4–21, y 4.5–13.5 → 17px wide, 9px tall
         // 5 bars with gaps: each bar 2.6px wide, gap 0.8px
@@ -180,7 +180,7 @@
             '<rect x="24" y="5.5" width="3" height="7" rx="1.2" fill="#607d8b"/>' +
             barRects +
             '</svg>';
-        return '<span class="battery-indicator" title="' + (millivolts / 1000).toFixed(2) + ' V — ' + batt.label + '">' +
+        return '<span class="battery-indicator" title="' + (millivolts == null ? 'Battery not reported' : (millivolts / 1000).toFixed(2) + ' V') + ' — ' + batt.label + '">' +
             svg +
             '<span class="sig-label" style="color:' + batt.color + '">' + batt.label + '</span>' +
             '</span>';
@@ -918,8 +918,14 @@
     }
 
     function hubSignal(data) {
-        return '<span class="signal-indicator" title="Home Hub Wi-Fi uplink signal"><span class="sig-label">Wi-Fi ' +
-            (Number.isFinite(data.rssi) ? data.rssi + ' dBm' : 'not connected') + '</span></span>';
+        var rssi=data.rssi;
+        var level=!Number.isFinite(rssi) ? 0 : rssi>=-50 ? 5 : rssi>=-60 ? 4 : rssi>=-70 ? 3 : rssi>=-80 ? 2 : 1;
+        var label=['No data','Very poor','Poor','Average','Good','Excellent'][level];
+        var color=['#607d8b','#ef4444','#f97316','#f59e0b','#84cc16','#22c55e'][level];
+        var bars='';
+        for(var i=1;i<=5;i++) bars+='<span class="sig-bar'+(i<=level ? ' filled' : '')+'" style="height:'+(4+i*3)+'px;'+(i<=level ? 'background:'+color : '')+'"></span>';
+        return '<span class="signal-indicator" title="Wi-Fi '+(Number.isFinite(rssi) ? rssi+' dBm' : 'not connected')+'">'+ICON_ANTENNA+bars+
+            '<span class="sig-label" style="color:'+color+'">'+label+'</span><span class="transport-badge">Wi-Fi</span></span>';
     }
 
     function coordinateHtml(data) {
@@ -1091,7 +1097,7 @@
                         (data.errorPresent === true ? '<span class="error-badge" title="The collar set its ERROR_PRESENT flag. Lost Alert alone is not a fault.">Collar reported a fault</span>' : '') +
                     '</div>' +
                     '<div class="card-indicators">' +
-                        (isHub ? '' : '<span class="card-indicator-group">' + renderBatteryBars(data.batt) + '</span>') +
+                        '<span class="card-indicator-group">' + renderBatteryBars(isHub ? null : data.batt) + '</span>' +
                         '<span class="card-indicator-group">' + (isHub ? hubSignal(data) : renderSignalBars(data.rssi, data.snr)) + '</span>' +
                         (isHub ? '' : '<span class="collar-awake" data-awake="' + dev.id + '" hidden></span>') +
                         (hubPortableMode && bleResults[dev.id] ? '<span class="card-indicator-group">' + renderBleProximity(bleResults[dev.id].rssi) + '</span>' : '') +
@@ -1131,16 +1137,16 @@
                     '<div class="card-actions">' +
                         buildActionButtons(dev, isFollowed) +
                     '</div>' +
-                    (isHub ? '' : '<div class="command-feedback" data-command-feedback="' + dev.id + '" role="status" hidden></div>' +
+                    (isHub ? '' : '<div class="command-feedback" data-command-feedback="' + dev.id + '" role="status" hidden></div>') +
 
                     '<div class="log-btn-row">' +
                         '<button class="btn-device-log btn-secondary" data-logid="' + dev.id + '">Message Log</button>' +
                         '<button class="btn-device-appearance btn-secondary" data-deviceid="' + dev.id + '">Local appearance</button>' +
-                        '<button class="btn-log-export btn-export-device" data-logid="' + dev.id + '" data-name="' + data.name + '" title="Export log as CSV"><svg class="icon-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M12 4v12m0 0l-4-4m4 4l4-4"/><path d="M5 20h14"/></svg></button>' +
+                        '<button class="btn-log-export btn-export-device" data-logid="' + dev.id + '" title="Export log as CSV"><svg class="icon-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M12 4v12m0 0l-4-4m4 4l4-4"/><path d="M5 20h14"/></svg></button>' +
                     '</div>' +
                     '<div id="deviceLogPanel-' + dev.id + '" class="device-log-panel hidden">' +
                         '<pre id="deviceLog-' + dev.id + '" class="console-log device-log">' + logContent + '</pre>' +
-                    '</div>') +
+                    '</div>' +
                 '</div>';
         }
 
@@ -1157,6 +1163,7 @@
             if (logBtn) {
                 logBtn.addEventListener('click', function (e) {
                     e.stopPropagation();
+                    if (isHub) { HubPresencePanel.report(false); return; }
                     var did = logBtn.getAttribute('data-logid');
                     var panel = document.getElementById('deviceLogPanel-' + did);
                     panel.classList.toggle('hidden');
@@ -1171,6 +1178,7 @@
             if (exportBtn) {
                 exportBtn.addEventListener('click', function (e) {
                     e.stopPropagation();
+                    if (isHub) { HubPresencePanel.report(true); return; }
                     var did = parseInt(exportBtn.getAttribute('data-logid'), 10);
                     window.location.href = '/api/history.csv?device=' + encodeURIComponent(did);
                 });

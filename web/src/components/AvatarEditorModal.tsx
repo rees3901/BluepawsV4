@@ -3,7 +3,7 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import EmojiPicker, { Emoji, EmojiStyle, Theme, type EmojiClickData } from "emoji-picker-react";
 import { prepareAvatarImage, validateAvatarFile } from "@/lib/avatarImage";
-import { saveDeviceAppearance } from "@/lib/deviceAppearances";
+import { saveDeviceAppearance, type SaveDeviceAppearance } from "@/lib/deviceAppearances";
 import { emojiToUnified } from "@/lib/emoji";
 import { normalizeMarkerColor } from "@/lib/markerColor";
 import type { DeviceAvatar, TelemetryDevice } from "@/types/telemetry";
@@ -17,9 +17,10 @@ interface AvatarEditorModalProps {
   theme: "dark" | "light";
   onClose: () => void;
   onSaved: () => Promise<void>;
+  saveAppearance?: (input: SaveDeviceAppearance) => Promise<void>;
 }
 
-export function AvatarEditorModal({ device, householdId, avatar, theme, onClose, onSaved }: AvatarEditorModalProps) {
+export function AvatarEditorModal({ device, householdId, avatar, theme, onClose, onSaved, saveAppearance = saveDeviceAppearance }: AvatarEditorModalProps) {
   const [kind, setKind] = useState<"emoji" | "photo">(avatar.kind);
   const [emoji, setEmoji] = useState(avatar.emoji);
   const [color, setColor] = useState(() => normalizeMarkerColor(avatar.color));
@@ -61,7 +62,7 @@ export function AvatarEditorModal({ device, householdId, avatar, theme, onClose,
       const preparedPhoto = kind === "photo" && file
         ? await prepareAvatarImage(file, { zoom, offsetX, offsetY })
         : undefined;
-      await saveDeviceAppearance({
+      await saveAppearance({
         deviceId: device.id,
         householdId,
         kind,
@@ -85,7 +86,7 @@ export function AvatarEditorModal({ device, householdId, avatar, theme, onClose,
       <div className="modal-content avatar-editor-content">
         <div className="avatar-editor-heading">
           <div>
-            <span className="avatar-editor-eyebrow">Pet marker</span>
+            <span className="avatar-editor-eyebrow">{device.entity === "hub" ? "Home Hub marker" : "Pet marker"}</span>
             <h2 id="avatar-editor-title">Customise {device.name}</h2>
           </div>
           <button type="button" className="avatar-editor-close" aria-label="Close avatar editor" onClick={onClose}>×</button>
@@ -95,6 +96,7 @@ export function AvatarEditorModal({ device, householdId, avatar, theme, onClose,
           <button type="button" role="tab" aria-selected={kind === "emoji"} className={kind === "emoji" ? "active" : ""} onClick={() => setKind("emoji")}>Emoji</button>
           <button type="button" role="tab" aria-selected={kind === "photo"} className={kind === "photo" ? "active" : ""} onClick={() => setKind("photo")}>Photo</button>
         </div>
+        {device.entity === "hub" && <p className="form-hint">Photos apply in every hub mode. Selecting an emoji changes the current mode’s marker; Home and Portable keep their own defaults.</p>}
 
         {kind === "emoji" ? (
           <div className="avatar-emoji-picker">

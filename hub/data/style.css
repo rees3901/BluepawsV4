@@ -1208,3 +1208,7 @@ body.light .leaflet-control-scale-line {
     padding: 3px 8px;
     letter-spacing: 0.5px;
 }
+.transport-badge { color: var(--text-muted, #78909c); border: 1px solid currentColor; border-radius: 4px; font-size: 9px; line-height: 1; padding: 2px 3px; white-space: nowrap; }
+.hub-report { max-width: 760px; max-height: 85vh; overflow: auto; }
+.hub-report-table { width: 100%; border-collapse: collapse; font-size: 12px; margin: 14px 0; }
+.hub-report-table td, .hub-report-table th { text-align: left; padding: 8px; border-bottom: 1px solid #2f3e4e; vertical-align: top; }
