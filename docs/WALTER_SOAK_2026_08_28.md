@@ -91,8 +91,8 @@ The LTE window ran 22:49:14.605–22:49:25.873 (11.27 seconds). Sleep began
 Status at 22:49:42 showed online, running, Active, free heap 298,964 bytes.
 Device 1001's cloud last-seen was still current at 22:49:20.
 
-This verifies one real GNSS/BOOT LTE upload after the clock fix, not the full
-recurring baseline. Normal restoration has **not yet been queued or verified**.
+At the 22:49 checkpoint this verified one real GNSS/BOOT LTE upload after the
+clock fix, not the full recurring baseline. Normal was not yet queued then.
 The follow-up should queue it near the Active cycle-5 LTE opportunity, with no
 forced `send`. Keep this PR draft until the remaining evidence is established.
 
@@ -129,3 +129,43 @@ collar needs shared duplicate handling across both receivers; the separate board
 do not validate that integration. Current dashboard commands expire after ten
 minutes, which can be shorter than a Normal LTE interval; that expiry must remain
 visible, not be misreported as delivery or silently extended.
+
+## Follow-up — 23:01 UTC
+
+The monitor remains running on COM26; no second serial connection, forced report,
+reset, firmware change or live fault injection was made during this check.
+Six completed Active sleep intervals measured **60.013–60.015 seconds** from
+logged sleep to next start. Cycle 7 finished at 23:01:19 and selected another
+60-second wait. Free heap between operations remained 298,964 bytes; latest
+status showed running/online Active, uptime 811 seconds, with no reboot observed.
+
+The first **unforced scheduled LTE upload**, cycle 5, packet **2310**, reached
+Supabase as observation **6524** at **22:57:14.400258 UTC**, Active profile,
+`cellular_direct`. The serial packet passed independent HMAC verification and
+matched the cloud SHA-256:
+`0389fa204ddda23ada1efe17389f3ed7c8bfab7aa7f7d1ac0f6d131dd32f5eaf`.
+The receive window ran 22:57:14.456–22:57:24.796, **10.34 seconds**. No command
+was queued in that window, so there was no Normal ACK to expect yet.
+
+GNSS remains inconsistent. Cycles 2/3/4 reported valid uncertainty values of
+359/324/84 m respectively. Cycles 5 and 6 returned unusable 20,000,000 m values
+and were rejected. The cycle-5 cloud observation correctly has `gnss_valid=false`,
+no valid coordinates, accuracy zero and previous-fix age 162 seconds. Cycle 7
+recovered a valid result with 168 m reported uncertainty. These are receiver
+uncertainty estimates, not measured position errors. Nine captured packets across
+both sessions passed HMAC verification; non-LTE stub packets are not claimed as
+cloud deliveries. Device 1001 still had a recent cloud last-seen at 23:00:12.
+
+After verifying no pending/sent unexpired command, queued **one Normal command**
+at **23:01:49.502219 UTC** through the existing admin test path (`requested_by`
+null): sequence **7**, UUID `a2e5a13b-d2b0-41ca-b2a5-7bf2f64cb23a`, expiry
+**23:11:49.502219 UTC**. It is pending, not yet applied or acknowledged. The next
+natural LTE opportunity is Active cycle 10 (roughly 23:07–23:08 at the observed
+cadence; not guaranteed if acquisition/registration takes longer). Do not enqueue
+a duplicate, force a report or silently extend expiry. Check command 7 and the
+following 600-second sleep at the next heartbeat.
+
+Transport cadence and scheduled LTE delivery have passed this checkpoint;
+Normal restoration and multiple GNSS-bearing scheduled cloud reports have not.
+The full sunny-day baseline remains incomplete, PR #147 stays draft, and live
+recovery/fault injection stays gated. Capture and scheduled checks continue.
