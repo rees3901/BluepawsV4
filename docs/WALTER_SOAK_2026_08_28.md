@@ -169,3 +169,40 @@ Transport cadence and scheduled LTE delivery have passed this checkpoint;
 Normal restoration and multiple GNSS-bearing scheduled cloud reports have not.
 The full sunny-day baseline remains incomplete, PR #147 stays draft, and live
 recovery/fault injection stays gated. Capture and scheduled checks continue.
+
+## Follow-up — 23:13 UTC: Normal restored
+
+The next natural LTE opportunity arrived earlier than estimated, because GNSS
+acquisition was quicker. Active cycle 10 started at 23:05:29.392 UTC. Packet
+**2315** was accepted as Supabase observation **6531** at **23:05:57.239974 UTC**,
+`cellular_direct`, profile Active, **GNSS valid**, fix age **11 seconds**, encoded
+uncertainty **105 m**. Independent local HMAC verification passed, and the
+serial/cloud SHA-256 matched:
+`e96072da8083bd960b755a75dc6eca6c1a17d778bffa38e070cb5102b64a5582`.
+This is the first GNSS-bearing *scheduled* LTE upload after the clock fix; the
+earlier GNSS-bearing packet 2305 was a BOOT upload. Twelve captured stub packets
+across both sessions now pass HMAC verification.
+
+Pending **command 7** was applied as **Normal** at 23:05:57.132 UTC. Signed ACK
+packet **2316**, observation **6532**, carried Normal profile and ACK TLV 7; its
+serial/cloud hash matched
+`10f7f2a1a43ef6dd8d6ab984ae2770d83de087517a029d72a26e0acb4cd74f42`.
+The command row is independently confirmed **acked**, attempts **1**, at
+**23:05:58.956555 UTC**, before expiry. Active command 6 also remains acked.
+No duplicate command was queued and no ACK status was manually changed.
+
+The LTE window ran 23:05:57.132–23:06:08.548, **11.42 seconds**. At
+**23:06:09.238 UTC**, the worker selected the **600-second Normal wait**, with
+next-wake UTC **23:16:09**. The completed interval is not yet measured at this
+checkpoint; verify the cycle-11 start next time. Subsequent Normal LTE is due
+at session cycle 20, not immediately at cycle 11. Preserve that cadence.
+
+Latest captured status remains online/running Normal with free heap 298,964 bytes
+and no observed reset. Nine completed Active waits measured 60.013–60.015 seconds.
+Device 1001's cloud last-seen is 23:02:59.667 UTC and its reported profile is now
+PowerSave (code 0); this check did not change it or open its ports.
+
+Normal → Active → Normal application and both cloud ACKs are now verified.
+Multiple GNSS-bearing scheduled uploads, a completed Normal wait and a scheduled
+Normal LTE report are still outstanding. No live fault injection; keep the full
+baseline incomplete and PR #147 draft. Monitoring and capture continue unchanged.
