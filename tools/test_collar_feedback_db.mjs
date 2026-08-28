@@ -15,6 +15,13 @@ try {
     create function auth.uid() returns uuid language sql as $$ select current_setting('test.user')::uuid $$;
     grant usage on schema auth to authenticated;
     create schema private; create schema realtime;
+    create schema storage;
+    create table storage.buckets(id text primary key,name text,public boolean,file_size_limit bigint,allowed_mime_types text[]);
+    create table storage.objects(bucket_id text,name text);
+    alter table storage.objects enable row level security;
+    create function storage.foldername(text) returns text[] language sql immutable as $$ select (string_to_array($1,'/'))[1:array_length(string_to_array($1,'/'),1)-1] $$;
+    grant usage on schema storage to authenticated;
+    grant select,insert,delete on storage.objects to authenticated;
     create table households(id uuid primary key, access_version integer);
     insert into households values('${family}',1),('${other}',1);
     create table gateways(gateway_guid16 integer primary key, household_id uuid, display_name text, enabled boolean);
@@ -47,6 +54,7 @@ try {
   `);
   await db.exec(readFileSync(new URL('../supabase/migrations/20260827143000_add_collar_feedback_snapshot.sql', import.meta.url),'utf8'));
   await db.exec(readFileSync(new URL('../supabase/migrations/20260827215926_add_hub_presence_and_receive_activity.sql', import.meta.url),'utf8'));
+  await db.exec(readFileSync(new URL('../supabase/migrations/20260827230148_add_hub_avatar_photos.sql', import.meta.url),'utf8'));
   const read = async (id=family) => {
     await db.exec('set role authenticated');
     try { return (await db.query('select * from bluepaws_collar_feedback($1)',[id])).rows; }
@@ -96,8 +104,28 @@ try {
   hub=await report(16,null,null,2);
   assert.equal(hub.home_emoji,'🐈','telemetry cannot overwrite preferences');
   assert.equal(hub.applied_revision,2); assert.equal(hub.desired_ble_enabled,false);
+  await db.exec('reset role; set role authenticated');
+  const photo=`${family}/16/${family}.webp`, alien=`${other}/32/${other}.webp`;
+  await db.query("insert into storage.objects values('hub-avatars',$1)",[photo]);
+  await assert.rejects(db.query("insert into storage.objects values('hub-avatars',$1)",[alien]),/row-level security/);
+  await assert.rejects(db.query("insert into storage.objects values('pet-avatars',$1)",[photo]),/row-level security/);
+  await db.query("update hub_presence set avatar_kind='photo',avatar_storage_path=$1 where gateway_guid16=16",[photo]);
+  await assert.rejects(db.query("update hub_presence set avatar_storage_path=$1 where gateway_guid16=16",[alien]),/hub_avatar_path/);
+  assert.equal((await db.query("select * from storage.objects")).rows.length,1);
+  await db.exec(`reset role; insert into household_members values('${family}','00000000-0000-0000-0000-000000000003','guest_viewer'); select set_config('test.user','00000000-0000-0000-0000-000000000003',false); set role authenticated`);
+  assert.equal((await db.query("select * from storage.objects")).rows.length,0,'guest viewer cannot read private hub photos');
+  await db.exec(`reset role; select set_config('test.user','${family}',false); set role service_role`);
+  hub=await report(16,null,null,2);
+  assert.equal(hub.avatar_storage_path,photo,'heartbeats preserve avatar');
+  await db.exec(`reset role; update gateways set household_id='${other}' where gateway_guid16=16; set role service_role`);
+  hub=await report(16);
+  assert.equal(hub.avatar_kind,'emoji','family transfer clears private photo');
+  assert.equal(hub.avatar_storage_path,null);
+  await db.exec(`reset role; update gateways set household_id='${family}' where gateway_guid16=16; set role service_role`);
+  await report(16);
   await db.exec(`reset role; delete from household_members where user_id='${family}'; set role authenticated`);
   assert.equal((await db.query('select * from hub_presence')).rows.length,0,'revocation takes effect');
+  assert.equal((await db.query('select * from storage.objects')).rows.length,0,'revocation hides photos');
   await db.exec('reset role; set role anon');
   await assert.rejects(db.query('select * from bluepaws_collar_feedback($1)',[family]),/permission denied/);
   console.log('PASS: feedback SQL, live/replay/duplicate/clock/fault/retention and invoker RLS isolation');

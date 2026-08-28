@@ -30,21 +30,37 @@ expansion limit, avatar expansion, Jump, Follow and Trail controls. The local
 dashboard likewise routes hub data through its existing `updateDevice`,
 `renderDeviceCard` and marker/popup functions.
 
-Hub cards show their communications mode, Wi-Fi signal, last contact, coordinates,
-GPS fix age/time and Home beacon state. Collar-only power profile, battery,
-command receive indicator and collar commands are omitted. Bluetooth preference
-and editable name/mode emojis/colour retain the hub-specific persistence path.
-Collar message-log endpoints are not queried for hubs; hub trails currently build
-from observed live fixes in the browser session, not collar history.
+Hub cards show their communications mode, Wi-Fi signal **bars and Wi-Fi badge**,
+last-contact stopwatch, coordinates, GPS fix age/time and Home beacon state. The
+same battery graphic shows **No data** until actual hub battery reporting is
+implemented; it must not display zero volts or an invented percentage. Collar-only
+power profile, command receive indicator and collar commands are omitted.
+Bluetooth preference and editable names retain the hub-specific persistence path.
+
+Message Log and Download use the same three-column report presentation, populated
+from the latest `hub_presence` row (cloud) or `/api/hub-presence` response (local).
+They are latest-status snapshots, not a claimed archive of previous hub reports.
+Hub trails currently build from observed live fixes in the browser session, not
+collar history. Neither reports nor trails call collar endpoints with hub keys.
+
+The cloud avatar plus button opens the **same AvatarEditorModal** as collars:
+searchable emojis, photo upload/cropping and marker colour. Metadata-free 256px
+WebP files are saved in the private `hub-avatars` bucket, scoped to Family/gateway.
+Photos apply in all modes; choosing an emoji changes the currently edited mode
+and returns to mode-specific emoji display. No service key or public photo URL
+is used. Family removal denies future downloads. Hub telemetry preserves photos;
+Family transfers clear the old private photo reference. Offline name/emoji/colour
+remain hub-local; Supabase photo upload is online-only and private cloud photos
+are not automatically copied onto the open hotspot.
 
 Negative browser-only hub keys avoid collisions with collar IDs. They never
 change the actual gateway ID or enter collar command/history APIs. A hub without
 its own GPS fix keeps its card but has no map marker and a disabled Jump control;
 adapter placeholder coordinates must never place it at 0,0.
 
-The shared-card refactor requires the web deployment and updated hub public
-assets only, with no new database migration or ingestion deployment. Preserve
-existing hub journals/config when updating those assets.
+Full card parity requires the `add_hub_avatar_photos` migration before deploying
+the web changes, plus updated hub public assets. No ingestion or collar firmware
+change is needed. Preserve existing hub journals/config when updating assets.
 
 ## Position integrity
 
@@ -108,7 +124,20 @@ Local timing remains monotonic and radio-driven.
 
 ## Rollout and verification
 
-After merging and pulling main, from the repository root:
+For the **card/photo parity update** on a hub already reporting successfully:
+
+1. From the updated feature branch, run the migration dry-run and push below.
+2. Merge the PR so Vercel deploys the matching web code.
+3. Update the hub's public assets using the preservation procedure. No firmware
+   or Edge Function redeployment is required for this card-only update.
+
+```powershell
+npx --yes supabase@latest db push --linked --dry-run
+npx --yes supabase@latest db push --linked
+```
+
+For the **initial self-presence installation**, after merging and pulling main,
+from the repository root:
 
 ```powershell
 npx --yes supabase@latest db push --linked --dry-run

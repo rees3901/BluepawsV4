@@ -5,6 +5,66 @@ import vm from 'node:vm';
 import {renderHub,renderCollar} from './shared_device_card_fixture.mjs';
 import {orderDeviceIds,pinDeviceFirst,moveDeviceBefore} from '../web/src/lib/deviceCardOrder.ts';
 import {nextExpandedDeviceCards} from '../web/src/lib/expandedCards.ts';
+import {buildHubReport,hubReportCsv} from '../web/src/lib/hubReports.ts';
+import {hub} from './shared_device_card_fixture.mjs';
+import {createRequire} from 'node:module';
+const require = createRequire(new URL('../web/package.json',import.meta.url));
+
+function appearanceService({uploadError=null,saveError=null,affected=true}={}) {
+  const calls=[];
+  const chain={eq(field,value){calls.push(['eq',field,value]);return chain;},
+    async select(){return {data:affected?[{gateway_guid16:16}]:[],error:saveError};}};
+  const db={storage:{from(bucket){assert.equal(bucket,'hub-avatars');return {
+    async upload(path,blob,options){calls.push(['upload',path,options]);return {error:uploadError};},
+    async remove(paths){calls.push(['remove',...paths]);return {error:null};}
+  };}},from(table){assert.equal(table,'hub_presence');return {update(values){calls.push(['update',values]);return chain;}};}};
+  const source=readFileSync(new URL('../web/src/lib/hubAppearances.ts',import.meta.url),'utf8');
+  const ts=require('typescript');
+  const context=vm.createContext({exports:{},crypto:{randomUUID:()=> '00000000-0000-0000-0000-000000000099'},
+    require(name){assert.equal(name,'@/lib/supabase/client');return {createClient:()=>db};}});
+  vm.runInContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,context);
+  return {save:context.exports.saveHubAppearance,calls};
+}
+
+test('hub photo upload saves only its Family-scoped preferences then removes the old photo',async()=>{
+  const {save,calls}=appearanceService();
+  await save({deviceId:-16,householdId:'family',kind:'photo',emoji:'🏡',color:'#38bdf8',preparedPhoto:{},previousStoragePath:'family/16/old.webp'},'home');
+  const uploaded=calls.find(c=>c[0]==='upload');
+  assert.match(uploaded[1],/^family\/16\/.+\.webp$/);
+  assert.equal(uploaded[2].upsert,false);
+  assert.equal(uploaded[2].contentType,'image/webp');
+  const values=calls.find(c=>c[0]==='update')[1];
+  assert.equal(values.avatar_storage_path,uploaded[1]);
+  assert.equal(values.home_emoji,'🏡');
+  assert.ok(calls.some(c=>c[0]==='eq'&&c[1]==='gateway_guid16'&&c[2]===16));
+  assert.ok(calls.some(c=>c[0]==='eq'&&c[1]==='household_id'&&c[2]==='family'));
+  assert.equal(calls.at(-1)[1],'family/16/old.webp');
+});
+
+test('failed hub photo saves clean up only the new file and never report success',async()=>{
+  for(const options of [{saveError:new Error('Denied')},{affected:false}]) {
+    const {save,calls}=appearanceService(options);
+    await assert.rejects(save({deviceId:-16,householdId:'family',kind:'photo',preparedPhoto:{},previousStoragePath:'old'},'home'));
+    assert.equal(calls.at(-1)[0],'remove');
+    assert.equal(calls.at(-1)[1],calls.find(c=>c[0]==='upload')[1]);
+    assert.ok(!calls.some(c=>c[0]==='remove'&&c[1]==='old'));
+  }
+  const {save,calls}=appearanceService({uploadError:new Error('Upload failed')});
+  await assert.rejects(save({deviceId:-16,householdId:'family',kind:'photo',preparedPhoto:{}},'home'));
+  assert.equal(calls.length,1);
+});
+
+test('hub emoji changes remove the photo and invalid identities cannot write',async()=>{
+  const {save,calls}=appearanceService();
+  await save({deviceId:-16,householdId:'family',kind:'emoji',emoji:'📱',previousStoragePath:'old'},'portable');
+  const values=calls.find(c=>c[0]==='update')[1];
+  assert.equal(values.avatar_storage_path,null);
+  assert.equal(values.portable_emoji,'📱');
+  assert.equal(calls.at(-1)[1],'old');
+  const before=calls.length;
+  for(const deviceId of [16,-17,-65536]) await assert.rejects(save({deviceId},'home'),/Invalid hub identity/);
+  assert.equal(calls.length,before);
+});
 
 test('hub and collar share card shell, avatar, expansion and navigation',()=>{
   for (const html of [renderHub(),renderCollar()]) {
@@ -15,9 +75,27 @@ test('hub and collar share card shell, avatar, expansion and navigation',()=>{
   const html=renderHub();
   assert.match(html,/Wi-Fi -40 dBm/);
   assert.match(html,/Bluetooth On/);
-  assert.doesNotMatch(html,/Power Profile|Dist From Hub|btn-cmd|btn-find|battery-indicator|Reported fault|hub-summary|Uptime|Free memory/);
+  for (const part of ['battery-indicator','No data','sig-bar filled','>Wi-Fi</span>','icon-stopwatch','Message Log','btn-log-export']) assert.ok(html.includes(part),part);
+  assert.doesNotMatch(html,/Power Profile|Dist From Hub|btn-cmd|btn-find|Reported fault|hub-summary|Uptime|Free memory/);
   assert.match(renderCollar(),/Power Profile/);
   assert.match(renderCollar(),/btn-cmd/);
+});
+
+test('hub report and CSV use hub data, not invented collar fields',()=>{
+  const report=buildHubReport({...hub,uptime_s:90});
+  assert.match(report.summary,/Bluepaws Test Hub checked in/);
+  assert.equal(report.rows.find(r=>r.field==='Battery').data,'No data');
+  assert.equal(report.rows.find(r=>r.field==='Wi-Fi signal').data,'-40 dBm');
+  assert.ok(!report.rows.some(r=>/Power Profile|Sequence|TLV/.test(r.field)));
+  assert.match(hubReportCsv({...hub,display_name:'=formula',uptime_s:90}),/"'=formula/);
+  assert.match(buildHubReport({...hub,latitude:null,longitude:null,fix_at:null}).rows.find(r=>r.field==='Coordinates').data,/Waiting/);
+});
+
+test('hub photo uses the same avatar image as collars and retains edit control',()=>{
+  const html=renderHub({avatar_kind:'photo'}, {avatar:{kind:'photo',emoji:'🏡',color:'#38bdf8',photoUrl:'blob:synthetic-photo'}});
+  assert.match(html,/card-avatar has-photo/);
+  assert.match(html,/background-image:url\(&quot;blob:synthetic-photo/);
+  assert.match(html,/card-avatar-edit/);
 });
 test('hub no-fix, collapsed, stale and mode states remain honest',()=>{
   const html=renderHub({latitude:null,longitude:null,fix_at:null});

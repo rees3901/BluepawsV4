@@ -2,14 +2,15 @@ import type { DeviceReport } from "@/lib/deviceReports";
 
 interface DeviceReportModalProps {
   deviceName: string;
-  reports: DeviceReport[];
+  reports: Pick<DeviceReport, "rows" | "summary">[];
+  entityLabel?: string;
   loading: boolean;
   error: string | null;
   onClose: () => void;
   onDownload: () => void;
 }
 
-export function DeviceReportModal({ deviceName, reports, loading, error, onClose, onDownload }: DeviceReportModalProps) {
+export function DeviceReportModal({ deviceName, reports, loading, error, onClose, onDownload, entityLabel = "collar" }: DeviceReportModalProps) {
   const latest = reports[0] ?? null;
 
   return (
@@ -17,7 +18,7 @@ export function DeviceReportModal({ deviceName, reports, loading, error, onClose
       <div className="modal-content device-report-modal">
         <div className="modal-header">
           <div>
-            <span className="report-eyebrow">Latest collar report</span>
+            <span className="report-eyebrow">Latest {entityLabel} report</span>
             <h2 id="device-report-title">{deviceName}</h2>
           </div>
           <button className="modal-close-btn" type="button" aria-label="Close report log" onClick={onClose}>×</button>
@@ -26,7 +27,7 @@ export function DeviceReportModal({ deviceName, reports, loading, error, onClose
         {loading && <p className="report-summary">Loading the latest accepted reports…</p>}
         {error && <p className="settings-message error" role="alert">{error}</p>}
         {!loading && !error && !latest && (
-          <p className="report-summary">No accepted reports are available for this pet yet.</p>
+          <p className="report-summary">No accepted reports are available for this device yet.</p>
         )}
         {latest && (
           <>
@@ -56,8 +57,8 @@ export function DeviceReportModal({ deviceName, reports, loading, error, onClose
               <details className="previous-reports">
                 <summary>Previous accepted reports ({reports.length - 1})</summary>
                 <ol>
-                  {reports.slice(1).map((report) => (
-                    <li key={`${report.observation.id}-${report.observation.msg_seq_id}`}>
+                  {reports.slice(1).map((report, index) => (
+                    <li key={index}>
                       {report.summary}
                     </li>
                   ))}

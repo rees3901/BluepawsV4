@@ -1,13 +1,16 @@
 import type { DeviceAvatar, TelemetryDevice } from "../types/telemetry";
 export interface HubPresence {
+  avatar_kind?: "emoji" | "photo"; avatar_storage_path?: string | null;
   gateway_guid16: number; household_id: string; mode: "home" | "portable" | "off_grid";
   received_at: string; latitude: number | null; longitude: number | null; fix_at: string | null;
   uptime_s: number; wifi_rssi_dbm: number | null; ble_enabled: boolean; ble_advertising: boolean;
   free_heap: number; display_name: string; home_emoji: string; portable_emoji: string;
   marker_colour: string; desired_ble_enabled: boolean; settings_revision: number; applied_revision: number;
 }
-export function hubAvatar(hub: HubPresence): DeviceAvatar {
-  return { kind: "emoji", emoji: hub.mode === "home" ? hub.home_emoji || "🏡" : hub.portable_emoji || "📱", color: hub.marker_colour };
+export function hubAvatar(hub: HubPresence, photoUrl?: string): DeviceAvatar {
+  return { kind: hub.avatar_kind === "photo" ? "photo" : "emoji", photoUrl,
+    storagePath: hub.avatar_storage_path ?? undefined,
+    emoji: hub.mode === "home" ? hub.home_emoji || "🏡" : hub.portable_emoji || "📱", color: hub.marker_colour };
 }
 export function hubMapDevice(hub: HubPresence): TelemetryDevice {
   return { id: -hub.gateway_guid16, name: hub.display_name, entity: "hub", hubMode: hub.mode,
