@@ -24,7 +24,7 @@ function fixture(roaming, bleResults = {}) {
         getCollarStatus: () => ({ css: 'home', emoji: '', label: 'Home' }),
         formatDistFromHub: () => '1 km', formatLastSeen: () => 'just now', formatAge: () => 'just now',
         renderBatteryBars: () => 'Battery', renderSignalBars: () => 'LoRa',
-        renderBleProximity: rssi => `BLE:${rssi}`, ICON_HOME_DIST: '', ICON_STOPWATCH: '',
+        renderBleProximity: rssi => `BLE:${rssi}`, ICON_HOME_DIST: '', ICON_STOPWATCH: '', ICON_ANTENNA: '',
         buildActionButtons: () => '', wireActionButtons() {},
     });
     vm.runInContext(readFileSync(new URL('../hub/data/feedback.js', import.meta.url), 'utf8'), context);
@@ -48,6 +48,19 @@ for (const mode of ['home', 'portable', 'off_grid']) {
         assert.doesNotMatch(f.cards.get('card-1001').innerHTML, /BLE:/);
     });
 }
+
+test('local hub badge follows confirmed reporting profile, not pending target', () => {
+    const f=fixture(false);
+    const dev=f.device(-16);
+    Object.assign(dev.data,{entity:'hub',verification:undefined,hub:{reporting_profile:'power_save',desired_reporting_profile:'active'}});
+    for(const [profile,css,label] of [['power_save','power','Power Save'],['normal','normal','Normal'],['active','active','Active'],[undefined,'normal','Normal']]) {
+        dev.data.hub.reporting_profile=profile;
+        f.context.renderDeviceCard(dev);
+        const html=f.cards.get('card--16').innerHTML;
+        assert.ok(html.includes(`class="card-profile profile-${css}">${label}</span>`));
+        assert.doesNotMatch(html,/collar-awake|💤/);
+    }
+});
 
 test('BLE proximity belongs to the card device, never a different row', () => {
     const f = fixture(true, {1001:{rssi:-44},1002:{rssi:-80}});

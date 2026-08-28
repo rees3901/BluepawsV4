@@ -1,7 +1,7 @@
 /* eslint-disable @next/next/no-img-element -- Tiny pre-sized emoji artwork is intentionally served directly from the picker CDN. */
 import type { ReactNode } from "react";
 import { BatteryIndicator, BleProximity, HomeDistance, LastSeen, SignalIndicator, WifiIndicator } from "@/components/Indicators";
-import { hubContactGrace } from "@/lib/hubReporting";
+import { HUB_REPORTING, hubContactGrace } from "@/lib/hubReporting";
 import { emojiImageUrl } from "@/lib/emoji";
 import { formatMapCoordinates, googleMapsUrl } from "@/lib/mapLocation";
 import type { DeviceAction, DeviceAvatar, TelemetryDevice } from "@/types/telemetry";
@@ -50,9 +50,10 @@ export function DeviceCard(props: DeviceCardProps) {
   const status = isHub
     ? { emoji: device.hubMode === "home" ? "🏡" : "📱", label: device.hubMode === "home" ? "Home" : device.hubMode === "portable" ? "Portable" : "Off-Grid", css: device.hubMode === "home" ? "status-home" : "status-out" }
     : STATUS[device.status.toLowerCase() as keyof typeof STATUS] ?? STATUS.error;
-  const profileLower = device.profile.toLowerCase();
+  const profileName = isHub ? HUB_REPORTING[device.hubReportingProfile ?? "normal"].label : device.profile;
+  const profileLower = isHub ? profileName.toLowerCase().replaceAll(" ", "") : device.profile.toLowerCase();
   const profileClass = `profile-${profileLower.replace("save", "").replaceAll(" ", "-")}`;
-  const profileLabel = profileLower === "powersave" ? "💤 PowerSave" : profileLower === "debug" ? "🧪 Debug" : device.profile;
+  const profileLabel = isHub ? profileName : profileLower === "powersave" ? "💤 PowerSave" : profileLower === "debug" ? "🧪 Debug" : device.profile;
   const lastSeen = formatLastSeen(ageSeconds);
   // A recent no-GNSS report may supersede the flags on the last GPS position.
   // Neither Lost status nor Lost Alert profile constitutes a hardware fault.
@@ -129,7 +130,7 @@ export function DeviceCard(props: DeviceCardProps) {
           <div className="card-name-row">
             <span className="card-name">{device.name}</span>
             <span className={`card-status ${status.css}`}>{status.emoji} {status.label}</span>
-            {!isHub && <span className={`card-profile ${profileClass}`}>{profileLabel}</span>}
+            <span className={`card-profile ${profileClass}`}>{profileLabel}</span>
             {!isHub && reportedFault && <span className="error-badge" title="A fault is indicated in the collar's latest available report. This is separate from Lost Alert.">Reported fault</span>}
           </div>
           <div className="card-indicators">
