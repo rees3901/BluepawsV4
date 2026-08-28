@@ -21,6 +21,8 @@ writeFileSync(source,String.raw`
 #include <cassert>
 #include <cstdio>
 #include <string>
+#include <atomic>
+#include <vector>
 #include "walter_policy.h"
 #include "walter_http.h"
 constexpr uint32_t utc=1787911200;
@@ -43,7 +45,30 @@ const char* WALTER_TLS_CA_PEM="-----BEGIN CERTIFICATE-----\ntest\n-----END CERTI
 uint8_t hmacKey[32]={1};
 ${firmwareFunction('safeAtString')}
 ${firmwareFunction('credentialsReady')}
+constexpr unsigned WALTER_MODEM_SIM_STATE_READY=0, WALTER_MODEM_RSP_DATA_TYPE_CME_ERROR=1;
+struct WalterModemRsp {unsigned result=0,type=0;struct {unsigned simState=0,cmeError=0;} data;};
+std::atomic<bool> cancelRequested{false};
+uint64_t fakeMs=0;
+uint64_t monotonicMs(){return fakeMs;}
+bool pauseMs(uint32_t ms){fakeMs+=ms;return !cancelRequested.load();}
+struct QuietSerial {template<typename... T>void printf(const char*,T...) {}} Serial;
+struct SimModem {
+    std::vector<int> states;size_t calls=0;
+    bool getSIMState(WalterModemRsp* rsp) {
+        const int state=calls<states.size()?states[calls]:-1;++calls;
+        if(state<0){rsp->result=1;rsp->type=1;rsp->data.cmeError=14;return false;}
+        rsp->data.simState=state;return true;
+    }
+} modem;
+${firmwareFunction('waitForSimReady')}
 int main() {
+    modem.states={-1,-1,0};assert(waitForSimReady() && modem.calls==3);
+    modem.calls=0;modem.states={1};assert(!waitForSimReady() && modem.calls==1); // PIN required: no guessing/retry.
+    modem.calls=0;modem.states={};fakeMs=0;assert(!waitForSimReady() && fakeMs==10000);
+    modem.calls=0;cancelRequested=true;assert(!waitForSimReady() && modem.calls==0);cancelRequested=false;
+    assert(walter::plausibleUtc(utc,utc));
+    assert(!walter::plausibleUtc(3155760003LL,utc)); // Observed factory/default 2070 clock.
+    assert(!walter::plausibleUtc(utc-86401,utc));
     uint16_t sequence;
     assert(nextSequence(sequence) && sequence==1 && sequenceStore.stored==257);
     assert(nextSequence(sequence) && sequence==2 && sequenceStore.stored==257);

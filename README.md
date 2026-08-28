@@ -29,7 +29,7 @@ The Sequans GM02SP replaces the previous BG77 + L76K combination. A single modul
 ### Independent Walter LTE testbed
 
 The separate `walter` PlatformIO target exercises real GM02SP LTE/GNSS on an
-ESP32-S3 Walter board, with a simulated LoRa transmit step and its own provisional
+ESP32-S3 Walter board, with a simulated LoRa transmit step and its own independent
 collar ID **1010**. It does not replace or alter the WisMesh collar firmware.
 See [Walter setup and commissioning](docs/WALTER_LTE_TESTBED.md) before provisioning
 credentials or flashing. It boots idle and is not a default build/upload target.

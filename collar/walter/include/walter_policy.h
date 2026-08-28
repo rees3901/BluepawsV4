@@ -31,6 +31,13 @@ inline uint32_t sleepSeconds(bp_profile_t profile) {
 
 inline bool validUtc(int64_t utc) { return utc >= 1704067200LL && utc <= UINT32_MAX; }
 
+// Reject reset/default modem dates such as 2070. Build time is a plausibility
+// bound only, never a substitute timestamp in telemetry or the GNSS fix.
+inline bool plausibleUtc(int64_t utc, uint32_t buildUtc) {
+    return validUtc(utc) && utc >= int64_t(buildUtc) - 86400 &&
+        utc <= int64_t(buildUtc) + 5LL * 366 * 86400;
+}
+
 struct Fix {
     bool valid = false;
     int32_t latE7 = 0;

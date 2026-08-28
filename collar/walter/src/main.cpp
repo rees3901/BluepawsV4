@@ -15,6 +15,9 @@ WalterModem modem;
 Preferences sequenceStore;
 QueueHandle_t gnssEvents, httpEvents;
 std::atomic<bool> running{false}, busy{false}, cancelRequested{false}, oneShot{false};
+std::atomic<bool> inspectRequested{false};
+std::atomic<bool> rawDiagnosticRequested{false};
+std::atomic<bool> gnssInspectionRequested{false};
 std::atomic<uint8_t> selectedProfile{PROFILE_NORMAL};
 std::atomic<bool> simulatedHome{false};
 const uint8_t hmacKey[] = WALTER_HMAC_KEY_BYTES;
@@ -32,7 +35,9 @@ uint32_t utcNow() {
     return walter::validUtc(now) ? uint32_t(now) : 0;
 }
 void setUtc(int64_t utc) {
-    if (walter::validUtc(utc)) { clockAnchorUtc = uint32_t(utc); clockAnchorMs = monotonicMs(); }
+    if (walter::plausibleUtc(utc, BLUEPAWS_BUILD_UNIX_TIME)) {
+        clockAnchorUtc = uint32_t(utc); clockAnchorMs = monotonicMs();
+    } else Serial.println("[CLOCK] Ignoring implausible modem/GNSS UTC");
 }
 bool pauseMs(uint32_t duration) {
     const auto until = monotonicMs() + duration;
@@ -66,11 +71,6 @@ void onHttp(WMHTTPEventType event, const WMHTTPEventData* data, void*) {
     if (event == WALTER_MODEM_HTTP_EVENT_RING && data->profile_id == WALTER_HTTP_PROFILE)
         xQueueOverwrite(httpEvents, data);
 }
-bool registered() {
-    const auto state = modem.getNetworkRegState();
-    return state == WALTER_MODEM_NETWORK_REG_REGISTERED_HOME ||
-        state == WALTER_MODEM_NETWORK_REG_REGISTERED_ROAMING;
-}
 bool radioOff() {
     if (!modem.setOpState(WALTER_MODEM_OPSTATE_MINIMUM)) return false;
     const auto deadline = monotonicMs() + 30000;
@@ -80,31 +80,102 @@ bool radioOff() {
     }
     return true;
 }
-bool prepareModem() {
+bool beginModem() {
     if (!begun) {
         if (!modem.begin(&Serial2)) return false;
         begun = true;
         modem.setGNSSEventHandler(onGnss, nullptr);
         modem.setHTTPEventHandler(onHttp, nullptr);
     }
+    return true;
+}
+bool modemStep(const char* label, bool ok) {
+    Serial.printf("[MODEM] %s: %s\n", label, ok ? "OK" : "FAILED");
+    return ok;
+}
+bool waitForSimReady() {
+    const auto deadline = monotonicMs() + 10000;
+    WalterModemRsp rsp{};
+    do {
+        if (cancelRequested.load()) return false;
+        if (modem.getSIMState(&rsp)) {
+            Serial.printf("[SIM] state=%u (0=ready)\n", unsigned(rsp.data.simState));
+            return rsp.data.simState == WALTER_MODEM_SIM_STATE_READY; // Never guess a PIN.
+        }
+    } while (monotonicMs() < deadline && pauseMs(500));
+    Serial.printf("[SIM] Not ready: result=%u CME=%u\n", unsigned(rsp.result),
+        rsp.type == WALTER_MODEM_RSP_DATA_TYPE_CME_ERROR ? unsigned(rsp.data.cmeError) : 0);
+    return false;
+}
+void diagnoseRaw() {
+    // Fresh-boot-only, fixed read-only queries. No arbitrary AT passthrough,
+    // credential queries or concurrent access to WalterModem's UART tasks.
+    Serial.println("[DIAG] Reading modem diagnostics without resetting its rejection history");
+    Serial2.begin(115200, SERIAL_8N1, 14, 48);
+    Serial2.setPins(14, 48, 47, 21);
+    Serial2.setHwFlowCtrlMode(UART_HW_FLOWCTRL_CTS_RTS, 64);
+    while (Serial2.available()) Serial2.read();
+    for (const char* query : {"AT", "AT+CGMR", "AT+CFUN?", "AT+CPIN?", "AT+CEREG?",
+                              "AT+CEER", "AT+SQNMONI=0", "AT+SQNBANDSEL?"}) {
+        if (cancelRequested.load()) break;
+        Serial.printf("[DIAG] %s\n", query);
+        Serial2.print(query); Serial2.print("\r\n");
+        String line;
+        const auto deadline = monotonicMs() + 4000;
+        while (monotonicMs() < deadline && !cancelRequested.load()) {
+            if (!Serial2.available()) { vTaskDelay(pdMS_TO_TICKS(10)); continue; }
+            const char c = Serial2.read();
+            if (c == '\n') {
+                line.trim();
+                if (line.length()) Serial.printf("[DIAG] %s\n", line.c_str());
+                const bool done = line == "OK" || line == "ERROR" || line.startsWith("+CME ERROR:");
+                line = "";
+                if (done) break;
+            } else if (line.length() < 220) line += c;
+        }
+    }
+    Serial2.end();
+}
+void inspectModem() {
+    Serial.println("[INSPECT] Initializing modem; no telemetry or network registration requested");
+    if (!beginModem() || !modem.setOpState(WALTER_MODEM_OPSTATE_NO_RF)) {
+        Serial.println("[INSPECT] Modem communication/RF-off failed"); return;
+    }
+    WalterModemRsp rsp{};
+    if (modem.getIdentity(&rsp)) Serial.printf("[INSPECT] Modem SVN=%s (IMEI withheld)\n", rsp.data.identity.svn);
+    waitForSimReady(); // SIM initialization can lag a CFUN transition.
+    if (modem.getRAT(&rsp)) Serial.printf("[INSPECT] RAT=%u (0=LTE-M, 1=NB-IoT, 2=auto)\n", unsigned(rsp.data.rat));
+    if (modem.getClock(&rsp)) Serial.printf("[INSPECT] Modem UTC=%lld\n", (long long)rsp.data.clock.epochTime);
+    if (!radioOff()) Serial.println("[INSPECT] Could not confirm radio off; check board");
+}
+bool prepareModem() {
+    if (!beginModem()) return false;
     if (configured) return true;
     if (cancelRequested.load()) return false;
     Serial.println("[WALTER] Configuring SIM, APN, GNSS and TLS (CA slot12/profile2)");
     WalterModemRsp rsp{};
     if (!modem.checkComm() || !modem.setOpState(WALTER_MODEM_OPSTATE_NO_RF) ||
-        !modem.getSIMState(&rsp) || rsp.data.simState != WALTER_MODEM_SIM_STATE_READY) {
+        !waitForSimReady()) {
         Serial.println("[WALTER] SIM/modem not ready; no PIN attempts made"); return false;
     }
     if (!modem.getRAT(&rsp)) return false;
-    if (rsp.data.rat != WALTER_RAT && !modem.setRAT(WalterModemRAT(WALTER_RAT))) return false;
-    if (!modem.definePDPContext(1, WALTER_APN) ||
-        !modem.setPDPAuthParams(WalterModemPDPAuthProtocol(WALTER_APN_AUTH),
-                               WALTER_APN_USER, WALTER_APN_PASSWORD, 1) ||
-        !modem.gnssConfig() ||
-        !modem.tlsWriteCredential(false, WALTER_CA_SLOT, WALTER_TLS_CA_PEM) ||
-        !modem.tlsConfigProfile(WALTER_TLS_PROFILE, WALTER_MODEM_TLS_VALIDATION_URL_AND_CA,
-                               WALTER_MODEM_TLS_VERSION_12, WALTER_CA_SLOT) ||
-        !modem.httpConfigProfile(WALTER_HTTP_PROFILE, WALTER_HTTPS_HOST, 443, WALTER_TLS_PROFILE)) return false;
+    if (rsp.data.rat != WALTER_RAT) {
+        // SQNMODEACTIVE takes effect after a modem restart. Refresh the driver's
+        // cached RAT explicitly rather than trusting its pre-reset value.
+        if (!modem.setRAT(WalterModemRAT(WALTER_RAT)) || !modem.softReset() ||
+            !modem.configCMEErrorReports() ||
+            !modem.configCEREGReports(WALTER_MODEM_CEREG_REPORTS_ENABLED_UE_PSM_WITH_LOCATION_EMM_CAUSE) ||
+            !modem.sendCmd("AT+SQNMODEACTIVE?") || !modem.getRAT(&rsp) || rsp.data.rat != WALTER_RAT ||
+            !modem.setOpState(WALTER_MODEM_OPSTATE_NO_RF) || !waitForSimReady()) return false;
+    }
+    if (!modemStep("PDP context", modem.definePDPContext(1, WALTER_APN)) ||
+        !modemStep("PDP authentication", modem.setPDPAuthParams(WalterModemPDPAuthProtocol(WALTER_APN_AUTH),
+                               WALTER_APN_USER, WALTER_APN_PASSWORD, 1)) ||
+        !modemStep("GNSS configuration", modem.gnssConfig()) ||
+        !modemStep("Trusted CA slot", modem.tlsWriteCredential(false, WALTER_CA_SLOT, WALTER_TLS_CA_PEM)) ||
+        !modemStep("TLS CA/hostname validation", modem.tlsConfigProfile(WALTER_TLS_PROFILE, WALTER_MODEM_TLS_VALIDATION_URL_AND_CA,
+                               WALTER_MODEM_TLS_VERSION_12, WALTER_CA_SLOT)) ||
+        !modemStep("HTTPS profile", modem.httpConfigProfile(WALTER_HTTP_PROFILE, WALTER_HTTPS_HOST, 443, WALTER_TLS_PROFILE))) return false;
     configured = true;
     return !cancelRequested.load();
 }
@@ -114,15 +185,27 @@ bool networkOn() {
     if (!modem.setOpState(WALTER_MODEM_OPSTATE_FULL) ||
         !modem.setNetworkSelectionMode(WALTER_MODEM_NETWORK_SEL_MODE_AUTOMATIC)) return false;
     const auto deadline = monotonicMs() + WALTER_NETWORK_TIMEOUT_MS;
-    while (!registered()) {
-        if (modem.getNetworkRegState() == WALTER_MODEM_NETWORK_REG_DENIED ||
-            monotonicMs() >= deadline || !pauseMs(250)) {
-            Serial.printf("[LTE] Registration incomplete; state=%u\n", unsigned(modem.getNetworkRegState()));
+    auto previous = WALTER_MODEM_NETWORK_REG_UNKNOWN;
+    while (true) {
+        const auto state = modem.getNetworkRegState();
+        if (state != previous) {
+            Serial.printf("[LTE] Registration state=%u\n", unsigned(state)); previous = state;
+            WalterModemRsp mode{};
+            if (modem.getOpState(&mode)) Serial.printf("[LTE] Operational state=%u (1=full)\n", unsigned(mode.data.opState));
+        }
+        if (state == WALTER_MODEM_NETWORK_REG_REGISTERED_HOME || state == WALTER_MODEM_NETWORK_REG_REGISTERED_ROAMING) break;
+        // Roaming can reject one PLMN before automatic selection finds another.
+        if (monotonicMs() >= deadline || !pauseMs(500)) {
+            Serial.printf("[LTE] Registration incomplete; state=%u\n", unsigned(state));
+            WalterModemRsp signal{};
+            if (!cancelRequested.load() && modem.getSignalQuality(&signal))
+                Serial.printf("[LTE] Signal RSRP=%ddBm RSRQ=%d/10dB\n", signal.data.signalQuality.rsrp, signal.data.signalQuality.rsrq);
             return false;
         }
     }
     WalterModemRsp rsp{};
     if (modem.getClock(&rsp)) setUtc(rsp.data.clock.epochTime);
+    Serial.printf("[LTE] Registered; UTC=%lu\n", (unsigned long)utcNow());
     return !cancelRequested.load();
 }
 bool acquireFix() {
@@ -142,8 +225,10 @@ bool acquireFix() {
         Serial.println("[GNSS] Could not confirm cancellation; stopping before LTE");
         running = false; cancelRequested = true; return false;
     }
+    if (received) Serial.printf("[GNSS] Event status=%u satellites=%u accuracy=%.1fm UTC=%lld\n",
+        unsigned(fix.status), fix.satCount, fix.estimatedConfidence, (long long)fix.timestamp);
     if (!received || cancelRequested.load() || fix.status != WALTER_MODEM_GNSS_FIX_STATUS_READY ||
-        !walter::validUtc(fix.timestamp) || !std::isfinite(fix.latitude) || !std::isfinite(fix.longitude) ||
+        !walter::plausibleUtc(fix.timestamp, BLUEPAWS_BUILD_UNIX_TIME) || !std::isfinite(fix.latitude) || !std::isfinite(fix.longitude) ||
         fabs(fix.latitude) > 90 || fabs(fix.longitude) > 180 || fix.satCount < 4 ||
         !std::isfinite(fix.estimatedConfidence) || fix.estimatedConfidence <= 0 || fix.estimatedConfidence > 1000) {
         Serial.println("[GNSS] No usable fix; not fabricating coordinates"); return false;
@@ -237,8 +322,23 @@ void cycle(bool boot, bool force, bp_profile_t profile, uint32_t count, uint32_t
 }
 void worker(void*) {
     for (;;) {
-        if (!running.load() && !oneShot.load()) { vTaskDelay(pdMS_TO_TICKS(100)); continue; }
+        if (!running.load() && !oneShot.load() && !inspectRequested.load()) { vTaskDelay(pdMS_TO_TICKS(100)); continue; }
         busy = true;
+        if (inspectRequested.exchange(false)) {
+            const bool raw = rawDiagnosticRequested.exchange(false);
+            const bool gnss = gnssInspectionRequested.exchange(false);
+            if (!cancelRequested.load()) {
+                if (raw) diagnoseRaw();
+                else if (gnss) {
+                    if (beginModem() && radioOff() && modem.gnssConfig()) {
+                        const bool fixed = acquireFix();
+                        Serial.printf("[GNSS] Inspection result=%s (no upload)\n", fixed ? "VALID FIX" : "NO FIX");
+                    }
+                    if (begun && !radioOff()) Serial.println("[GNSS] Could not confirm RF off");
+                } else inspectModem();
+            }
+            busy = false; Serial.println("[WALTER] Idle after inspection"); continue;
+        }
         const bool single = oneShot.exchange(false);
         uint32_t count = 0, homeCount = 0;
         uint64_t lastLteMs = monotonicMs(), lostStartMs = monotonicMs();
@@ -263,15 +363,32 @@ void worker(void*) {
 }
 void command(const String& text) {
     if (text == "stop") {
-        cancelRequested = true; running = false; oneShot = false;
+        cancelRequested = true; running = false; oneShot = false; inspectRequested = false;
         Serial.println("[WALTER] Stop requested; completing/cancelling current modem operation"); return;
     }
     if (text == "status") {
         Serial.printf("[WALTER] device=%u hub=%u busy=%u running=%u profile=%s home_stub=%u credentials=%s\n",
             WALTER_DEVICE_ID, WALTER_HOME_HUB_ID, busy.load(), running.load(),
-            bp_profile_name(bp_profile_t(selectedProfile.load())), simulatedHome.load(), credentialsReady() ? "configured" : "missing"); return;
+            bp_profile_name(bp_profile_t(selectedProfile.load())), simulatedHome.load(), credentialsReady() ? "configured" : "missing");
+        Serial.printf("[WALTER] uptime=%lus reset_reason=%u free_heap=%u\n", (unsigned long)(monotonicMs()/1000),
+            unsigned(esp_reset_reason()), unsigned(ESP.getFreeHeap())); return;
     }
-    if (busy.load() || running.load() || oneShot.load()) { Serial.println("[WALTER] Stop and wait for Idle before changing settings"); return; }
+    if (busy.load() || running.load() || oneShot.load() || inspectRequested.load()) { Serial.println("[WALTER] Stop and wait for Idle before changing settings"); return; }
+    if (text.startsWith("clock ")) {
+        const String value = text.substring(6);
+        if (value.length() != 10) { Serial.println("[CLOCK] Supply a 10-digit current UTC epoch"); return; }
+        for (char c : value) if (c < '0' || c > '9') { Serial.println("[CLOCK] Invalid UTC epoch"); return; }
+        const int64_t epoch = strtoll(value.c_str(), nullptr, 10);
+        if (!walter::plausibleUtc(epoch, BLUEPAWS_BUILD_UNIX_TIME)) { Serial.println("[CLOCK] Implausible UTC epoch"); return; }
+        setUtc(epoch);
+        Serial.println("[CLOCK] Explicit host UTC seed accepted; no coordinates or GNSS validity fabricated"); return;
+    }
+    if (text == "inspect" || text == "diagnose" || text == "gnss") {
+        if (text == "diagnose" && begun) { Serial.println("[DIAG] Requires a fresh ESP boot before inspect/start/send"); return; }
+        if (text == "gnss" && !utcNow()) { Serial.println("[GNSS] Seed actual UTC with clock <epoch> first"); return; }
+        cancelRequested = false; rawDiagnosticRequested = text == "diagnose";
+        gnssInspectionRequested = text == "gnss"; inspectRequested = true; return;
+    }
     if (text == "start" || text == "send") {
         if (!credentialsReady()) { Serial.println("[WALTER] Blocked: configure separate APN, bearer, HMAC and trusted CA first"); return; }
         cancelRequested = false;
@@ -282,11 +399,13 @@ void command(const String& text) {
     } else if (text == "home on" || text == "home off") {
         simulatedHome = text == "home on";
         Serial.println("[WALTER] Home is an explicit simulation, not a received BLE beacon");
-    } else Serial.println("Commands: status | start | stop | send | profile normal/powersave/active/lost/debug | home on/off");
+    } else Serial.println("Commands: status | inspect | diagnose | clock <UTC epoch> | gnss | start | stop | send | profile normal/powersave/active/lost/debug | home on/off");
 }
 } // namespace
 
 void setup() {
+    Serial.setTxBufferSize(4096);
+    Serial.setTxTimeoutMs(1000);
     Serial.begin(115200);
     gnssEvents = xQueueCreate(1, sizeof(WMGNSSFixEvent));
     httpEvents = xQueueCreate(1, sizeof(WMHTTPEventData));

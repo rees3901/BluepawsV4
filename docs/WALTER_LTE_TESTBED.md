@@ -11,15 +11,17 @@ together and must not share an identity or credentials.
 | WisMesh board 1 | Existing collar 1001 | COM23, 115200 | Real LoRa; no GNSS/LTE hardware attached |
 | LoRa home hub | Existing hub 16 / `0010` | COM7, 115200 | Receives LoRa and forwards to cloud |
 | LoRa sniffer | Existing sniffer | COM11, 115200 | Passive RF observation |
-| Walter | **1010 provisional**, not provisioned by this change | **TBD**, 115200 | Real GNSS and LTE; simulated LoRa TX |
+| Walter | **1010**, separately provisioned | **COM26**, 115200 | Real GNSS and LTE; simulated LoRa TX |
 
 The WisMesh build-time/spoof clock and missing-modem faults are expected on that
 hardware. This work does not try to fix them. Device 1005 has already been used for
 test data; confirm 1010 is still spare when provisioning.
 
-The Walter implementation is **compile/offline tested, not hardware commissioned**.
-No SIM, credentials, database records, cloud deployment or board flash is part of
-this preparation. The existing TLV simulator and workbench are unchanged.
+The initial target was compile/offline tested before hardware arrived. Hardware
+commissioning is now in progress on **COM26**, with a 1NCE SIM and separate device
+1010 credentials. See [the dated bench record](WALTER_BENCH_2026_08_28.md) for results; do not infer LTE/GNSS
+success merely from a successful firmware build. The existing TLV simulator and
+workbench are unchanged.
 
 ## Build and architecture
 
@@ -56,7 +58,10 @@ not a reason to wire the two testbeds together.
 1. Boot idle. An explicit `start` or `send` is required after every ESP reboot.
 2. Validate separate credentials; initialize the modem and SIM without guessing
    a SIM PIN. Configure the selected LTE-M/NB-IoT RAT and APN.
-3. If necessary, register once to acquire network UTC. No compile timestamp or
+3. If necessary, register once to acquire network UTC. A plausibility guard rejects
+   the observed default modem date in 2070. Build time only bounds accepted dates
+   (one day before compilation through five years afterward); rebuild an older
+   test image before using it beyond that window. No compile timestamp or
    invented location is substituted. Without usable UTC, packets are blocked.
 4. Deregister/put LTE in minimum mode, then acquire GNSS. The modem cannot operate
    GNSS and LTE concurrently. A failed GNSS cancellation stops the session before
@@ -114,7 +119,12 @@ Lost falls back to Active after two hours, checked between cycles.
   numbers instead of reusing the current block. The wire sequence is still 16-bit
   and eventually wraps; it is not a globally unique receipt identifier by itself.
 
-## Provisioning when the board arrives
+## Provisioning and repeat setup
+
+Device1010 is now provisioned for the COM26 board. Reuse its private local
+credentials for routine rebuilds; do not generate replacement keys or rerun its
+provisioning SQL. The following checklist also describes setup for another board,
+which must use a different spare identity.
 
 1. Confirm the selected spare device ID and its owner/animal/hub association.
    Follow the existing [TLV ingestion runbook](TLV_INGESTION_RUNBOOK.md) to provision
@@ -171,6 +181,10 @@ Lost falls back to Active after two hours, checked between cycles.
 | Command | Effect |
 | --- | --- |
 | `status` | Identity, profile, busy/running, simulated home and configuration presence; no secrets |
+| `inspect` | Initialize modem, select RF-off mode and inspect SIM readiness, modem SVN, RAT and raw clock; no telemetry |
+| `diagnose` | Before any modem initialization after ESP boot: fixed read-only AT queries for version, operational state, registration, rejection history and bands |
+| `clock <UTC epoch>` | Explicitly seed actual host UTC while idle; no invented GNSS fix |
+| `gnss` | With a valid UTC seed, test real GNSS with LTE off; no packet or upload |
 | `send` | One forced LTE cycle, then idle |
 | `start` | BOOT cycle, then recurring profile policy |
 | `stop` | Cancel pending work/interrupt waits and clean up modem state |
@@ -184,6 +198,25 @@ vendor command timeouts. A cleanup failure is printed, stops further scheduling,
 and requires checking the board; do not assume RF is off after such a failure.
 An ESP-only reset does not guarantee that an independently powered modem reset:
 boot-idle means no application-initiated traffic, not proof of modem RF state.
+
+SIM initialization can lag a transition to RF-off mode. The firmware uses a
+ten-second polling window (plus any in-flight vendor AT timeout), stopping
+immediately if a PIN/PUK is requested; it never attempts
+to unlock the SIM. Setup diagnostics identify the failing stage without printing
+credentials. 1NCE's published APN is `iot.1nce.net`; LTE-M is selected for this
+bench. [1NCE APN guidance](https://help.1nce.com/dev-hub/docs/data-services-apn).
+
+The registration loop logs state changes and allows the full timeout even when an
+individual roaming network rejects registration. It only considers home/roaming
+registered states successful. A denied state followed by searching is not itself
+a completed connection. On timeout, measured RSRP and RSRQ are printed when the
+modem supplies them; they are not fabricated into the TLV.
+
+For independent GNSS testing, use the host's **current** UTC rather than copying an
+old timestamp. This is an explicit bench clock source, not a GNSS fix or a test of
+network time acquisition. Serial diagnostics use a 4 KB USB transmit buffer;
+assert DTR in the host terminal for reliable logging. No unrestricted AT console
+or credential-reading command is exposed.
 
 This is a transport/GNSS bench, **not production power validation**: the ESP uses
 interruptible FreeRTOS waits rather than deep sleep, and PSM/eDRX are not enabled.
