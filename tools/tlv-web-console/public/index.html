@@ -38,6 +38,7 @@
         <button class="tab active" data-tab="packet">1. Packet generation</button>
         <button class="tab" data-tab="wrapper">2. HTTPS wrapper</button>
         <button class="tab" data-tab="send">3. Send & response log</button>
+        <button class="tab" data-tab="workbench">4. Packet reader & builder</button>
       </nav>
 
       <section id="tab-packet" class="tab-panel active">
@@ -190,6 +191,64 @@
           </section>
         </div>
       </section>
+      <section id="tab-workbench" class="tab-panel" aria-label="Standalone packet reader and builder">
+        <section class="panel workbench-intro">
+          <div><p class="eyebrow">Standalone tool · TLV v1.2</p><h2>Packet reader & builder</h2>
+          <p class="muted">Inspect a captured packet or build one by hand. Nothing here changes the fleet, advances sequences or sends reports.</p></div>
+          <span class="status-pill">Local only · no sending</span>
+        </section>
+        <div class="grid two workbench-grid">
+          <section class="panel">
+            <div class="toolbar workbench-modes" aria-label="Packet tool mode">
+              <button type="button" id="wb-read-mode" aria-pressed="true">Read a packet</button>
+              <button type="button" id="wb-build-mode" aria-pressed="false">Build a packet</button>
+            </div>
+            <div class="workbench-auth">
+              <label>HMAC key
+                <select id="wb-key-mode">
+                  <option value="none">No key — decode only / unsigned build</option>
+                  <option value="loaded">Use loaded source collar key (read only)</option>
+                  <option value="custom">Custom 32-byte key</option>
+                </select>
+              </label>
+              <label id="wb-key-field" hidden>Custom HMAC key (hex or base64)
+                <input id="wb-key" type="password" autocomplete="off" spellcheck="false" placeholder="64 hex digits or base64" />
+              </label>
+              <p class="muted">Keys are used only by this local console and are never saved by this tool. Decoding alone does not authenticate a packet.</p>
+            </div>
+            <form id="wb-reader">
+              <label>Input format<select id="wb-format"><option value="auto">Auto detect</option><option value="hex">Hex</option><option value="base64">Base64</option></select></label>
+              <label>Raw TLV packet<textarea id="wb-input" spellcheck="false" maxlength="8192" placeholder="Paste hex, base64, a [PKT] N bytes: line or a [RX] Hex: line"></textarea></label>
+              <p class="muted">One complete 40–64 byte packet, including the 8-byte tag. Whitespace and 0xNN byte lists are supported.</p>
+              <div class="toolbar"><button type="submit" class="primary">Parse packet</button><button type="button" id="wb-load-builder" disabled>Load parsed fields into builder</button></div>
+            </form>
+            <form id="wb-builder" hidden>
+              <div id="wb-fields" class="form-grid"></div>
+              <fieldset class="workbench-flags"><legend>Header flags</legend><div id="wb-flags"></div></fieldset>
+              <details class="workbench-tlvs">
+                <summary>Optional TLVs · 0–24 bytes</summary>
+                <p class="muted">Complete type / length / value bytes, in wire order. Leave blank for a header-only packet. Example: <code>06 01 02</code> is reset diagnostic 2.</p>
+                <label>TLV section (hex)<textarea id="wb-tlv-hex" spellcheck="false" placeholder="04 02 02 01 06 01 02"></textarea></label>
+                <p class="muted">Known types: 04 firmware (u16), 06 reset (u8), 10 uptime (u32), 13 activity (u8), 20 ACK sequence (u16), F1 profile (u8). Multi-byte values are little-endian. Unknown types are preserved.</p>
+              </details>
+              <div class="toolbar"><button type="submit" class="primary">Build packet — no sending</button><button type="button" id="wb-now">Use current UTC time</button></div>
+              <p class="muted">No key creates a diagnostic zero tag, not a packet ready for ingestion. Selecting Home does not silently alter the independently editable flags.</p>
+            </form>
+            <p id="wb-feedback" role="status" aria-live="polite" class="muted">Loading packet tools…</p>
+          </section>
+          <section class="panel workbench-output" aria-label="Packet report">
+            <p class="eyebrow">Packet report</p><h2>Human-readable TLV</h2>
+            <p id="wb-auth-status" class="status-pill">No packet inspected yet</p>
+            <ul id="wb-warnings" class="workbench-warnings" hidden></ul>
+            <dl id="wb-report" class="workbench-report"></dl>
+            <div class="workbench-copy"><label for="wb-hex">Packet hex</label><button type="button" data-wb-copy="wb-hex" disabled>Copy hex</button></div>
+            <textarea id="wb-hex" readonly spellcheck="false"></textarea>
+            <div class="workbench-copy"><label for="wb-base64">Packet base64</label><button type="button" data-wb-copy="wb-base64" disabled>Copy base64</button></div>
+            <textarea id="wb-base64" readonly spellcheck="false"></textarea>
+            <details><summary>Decoded JSON and authentication details</summary><pre id="wb-json">No packet inspected yet.</pre></details>
+          </section>
+        </div>
+      </section>
     </main>
 
     <dialog id="sql-dialog">
@@ -207,5 +266,6 @@
     </dialog>
 
     <script type="module" src="/app.js?v=20260821-preview-stable"></script>
+    <script type="module" src="/workbench.js"></script>
   </body>
 </html>

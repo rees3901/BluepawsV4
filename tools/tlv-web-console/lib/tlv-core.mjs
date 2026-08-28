@@ -327,7 +327,21 @@ export function provisioningSql(bundle, householdId, keyVersion = 1) {
 export function buildDiagnosticPacket(deviceSettings, credential) {
   const device = normalizeDeviceCredential(credential);
   const settings = normalizeDeviceSettings(deviceSettings, device.device_id);
-  const tlvs = buildTlvEntries(settings);
+  return encodePacket(settings, decodeHmacKey(device.hmac_key_b64), buildTlvEntries(settings));
+}
+
+// No credential registry, bearer token, wrapper or network operation is involved.
+// A missing key produces an explicitly unsigned diagnostic packet with a zero tag.
+export function buildStandalonePacket(input, hmacKey = null, tlvBytes = Buffer.alloc(0)) {
+  const settings = normalizeDeviceSettings({ ...input, tagMode: "valid" }, 1001, true);
+  if (hmacKey !== null && hmacKey.length !== 32) throw new Error("HMAC key must contain exactly 32 bytes");
+  const tlvs = Buffer.from(tlvBytes);
+  if (tlvs.length > MAX_TLV_SIZE) throw new Error(`TLV section allows at most ${MAX_TLV_SIZE} bytes`);
+  decodeTlvs(tlvs);
+  return encodePacket(settings, hmacKey, tlvs);
+}
+
+function encodePacket(settings, hmacKey, tlvs) {
   const body = Buffer.alloc(HEADER_SIZE + tlvs.length);
   body.writeUInt8(PROTOCOL_VERSION, 0);
   body.writeUInt16LE(settings.deviceId, 1);
@@ -345,9 +359,8 @@ export function buildDiagnosticPacket(deviceSettings, credential) {
   body.writeUInt8(settings.satelliteCount, 28);
   body.writeUInt8(tlvs.length, 31);
   tlvs.copy(body, HEADER_SIZE);
-  const hmacKey = decodeHmacKey(device.hmac_key_b64);
-  const expectedTag = crypto.createHmac("sha256", hmacKey).update(body).digest().subarray(0, AUTH_TAG_SIZE);
-  const transmittedTag = hmacTag(settings, expectedTag);
+  const expectedTag = hmacKey ? crypto.createHmac("sha256", hmacKey).update(body).digest().subarray(0, AUTH_TAG_SIZE) : null;
+  const transmittedTag = expectedTag ? hmacTag(settings, expectedTag) : Buffer.alloc(AUTH_TAG_SIZE);
   const packet = Buffer.concat([body, transmittedTag]);
   return {
     packet,
@@ -524,6 +537,7 @@ export function decodeTlvPacket(packet, hmacKey = null) {
   const raw = Buffer.isBuffer(packet) ? packet : Buffer.from(packet);
   if (raw.length < HEADER_SIZE + AUTH_TAG_SIZE) throw new Error("packet is too short");
   const tlvLength = raw[31];
+  if (tlvLength > MAX_TLV_SIZE) throw new Error(`TLV section allows at most ${MAX_TLV_SIZE} bytes`);
   if (raw.length !== HEADER_SIZE + tlvLength + AUTH_TAG_SIZE) throw new Error("packet length does not match tlv_len");
   if (raw[0] !== PROTOCOL_VERSION) throw new Error(`protocol version must be ${PROTOCOL_VERSION}`);
   const statusProfile = raw[11];
@@ -612,32 +626,37 @@ function encodeKnownTlv(type, value, length) {
 
 function decodeTlvs(tlvBytes) {
   const result = [];
+  const seenKnown = new Set();
   let offset = 0;
   while (offset < tlvBytes.length) {
+    if (offset + 2 > tlvBytes.length) throw new Error("TLV is missing its length byte");
     const type = tlvBytes[offset];
     const length = tlvBytes[offset + 1];
     const value = tlvBytes.subarray(offset + 2, offset + 2 + length);
-    if (!length || value.length !== length) throw new Error(`TLV 0x${type.toString(16)} has invalid length`);
+    if (value.length !== length) throw new Error(`TLV 0x${type.toString(16)} has invalid length`);
     const spec = Object.entries(KNOWN_TLVS).find(([, item]) => item.type === type);
+    if (spec && length !== spec[1].length) throw new Error(`TLV ${spec[0]} must contain ${spec[1].length} bytes`);
+    if (spec && seenKnown.has(type)) throw new Error(`TLV ${spec[0]} is duplicated`);
+    if (spec) seenKnown.add(type);
     const entry = {
       type: `0x${type.toString(16).padStart(2, "0").toUpperCase()}`,
       length_bytes: length,
       raw_value_hex: value.toString("hex").toUpperCase(),
       name: spec ? spec[0] : "unknown",
-      value: value.readUIntLE(0, value.length),
+      value: spec ? value.readUIntLE(0, value.length) : value.toString("hex").toUpperCase(),
     };
     if (type === 0x04) entry.value = `${(entry.value >>> 8) & 0xff}.${entry.value & 0xff}`;
-    if (!spec) entry.value = entry.raw_value_hex;
     result.push(entry);
     offset += 2 + length;
   }
   return result;
 }
 
-function normalizeDeviceSettings(input, fallbackDeviceId) {
+function normalizeDeviceSettings(input, fallbackDeviceId, allowHubSource = false) {
   const settings = input || {};
   const deviceId = toInteger(settings.deviceId ?? fallbackDeviceId, "device ID");
-  validateCollarId(deviceId, "device ID");
+  if (allowHubSource) validateRange(deviceId, 1, MAX_PHYSICAL_ID, "source ID");
+  else validateCollarId(deviceId, "device ID");
   return {
     ...settings,
     deviceId,

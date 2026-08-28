@@ -85,6 +85,38 @@ button.danger { border-color: #7c2636; color: #ffd4dc; }
 .tab.active { background: var(--blue); color: #00111f; }
 .tab-panel { display: none; }
 .tab-panel.active { display: block; }
+[hidden] { display: none !important; }
+.tabs { overflow-x: auto; }
+.tab { flex-shrink: 0; }
+.workbench-intro { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 16px; }
+.workbench-intro .status-pill { flex-shrink: 0; }
+.workbench-grid { align-items: start; }
+.workbench-modes { justify-content: flex-start; margin-bottom: 16px; }
+.workbench-modes [aria-pressed="true"] { border-color: var(--blue); color: var(--blue-2); }
+.workbench-auth { display: grid; gap: 12px; border-bottom: 1px solid var(--border); padding-bottom: 16px; margin-bottom: 16px; }
+#wb-reader, #wb-builder { display: grid; gap: 14px; }
+.workbench-flags { border: 1px solid var(--border); border-radius: 10px; margin: 0; }
+.workbench-flags legend { color: var(--blue-2); }
+#wb-flags { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; padding: 10px 0; }
+#wb-flags label { grid-column: auto; font-size: 12px; overflow-wrap: anywhere; }
+.workbench-tlvs { border: 1px solid var(--border); border-radius: 10px; padding: 12px; }
+.workbench-tlvs label { margin-top: 12px; }
+.workbench-output textarea, #wb-input, #wb-tlv-hex { font: 12px/1.6 Consolas, monospace; }
+.workbench-output textarea { min-height: 75px; margin-bottom: 14px; }
+.workbench-report { display: grid; grid-template-columns: 120px minmax(0,1fr); font-size: 13px; }
+.workbench-report dt, .workbench-report dd { margin: 0; padding: 9px 0; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+.workbench-report dt { color: var(--muted); padding-right: 10px; }
+.workbench-copy { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.workbench-copy button { padding: 6px 10px; font-size: 12px; }
+.workbench-warnings { color: var(--warn); padding-left: 18px; font-size: 13px; line-height: 1.5; }
+.wb-good { color: var(--good); }
+.wb-warning { color: var(--warn); }
+button:disabled { opacity: .5; cursor: not-allowed; }
+@media (max-width: 650px) {
+  .workbench-intro { align-items: flex-start; flex-direction: column; }
+  #wb-builder .form-grid, #wb-flags { grid-template-columns: 1fr; }
+  .workbench-grid .toolbar { flex-wrap: wrap; }
+}
 
 .grid { display: grid; gap: 16px; }
 .grid.stack { grid-template-columns: 1fr; }
