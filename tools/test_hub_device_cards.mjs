@@ -1,8 +1,12 @@
-// Run with node --test tools/test_hub_device_cards.mjs (no dependencies).
-import { readFileSync } from 'node:fs';
+// Run with node --test tools/test_hub_device_cards.mjs (Node + C++ compiler).
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import {spawnSync} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
+import {resolve} from 'node:path';
 import vm from 'node:vm';
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {collarFault} from '../web/src/lib/collarFault.ts';
 
 // Execute the real renderer, not a reimplementation. The tiny DOM surface keeps
 // this regression runnable without a browser or a powered-up hub.
@@ -96,5 +100,88 @@ test('reset diagnostics do not become faults, including in Lost Alert', () => {
     assert.doesNotMatch(html,/error-badge/);
     dev.data.errorPresent=true;
     f.context.renderDeviceCard(dev);
-    assert.match(f.cards.get('card-1001').innerHTML,/Collar reported a fault/);
+    assert.match(f.cards.get('card-1001').innerHTML,/Reported fault — cause unspecified/);
+});
+
+test('local fault labels match cloud rules for every flags byte and report type',()=>{
+    const f=fixture(false);
+    for(let flags=0;flags<256;flags++) for(const txReason of [0,1,2,3,4,5,6,7,undefined]) {
+        const report={flags,txReason,resetReason:2};
+        assert.equal(JSON.stringify(f.context.HubFeedback.fault(report)),JSON.stringify(collarFault(report)));
+    }
+});
+
+test('local fault reasons refresh and clear independently of the retained GPS position',()=>{
+    const f=fixture(false); const dev=f.device(1001);
+    Object.assign(dev.data,{errorPresent:true,flags:0xc4,txReasonCode:4,resetReason:2,resetReasonPresent:true});
+    f.context.renderDeviceCard(dev);
+    assert.match(f.cards.get('card-1001').innerHTML,/>Reported fault — stale GPS \+1<\/span>/);
+    assert.match(f.cards.get('card-1001').innerHTML,/stale GPS; low battery/);
+    assert.match(f.cards.get('card-1001').innerHTML,/Reset diagnostic 0x02/);
+    Object.assign(dev.data,{flags:0x88,txReasonCode:7,resetReasonPresent:false});
+    f.context.renderDeviceCard(dev);
+    assert.match(f.cards.get('card-1001').innerHTML,/>Reported fault — cause unspecified<\/span>/);
+    assert.doesNotMatch(f.cards.get('card-1001').innerHTML,/Reset diagnostic/);
+    Object.assign(dev.data,{flags:0,resetReason:3,rssi:-140,snr:-25});
+    f.context.renderDeviceCard(dev);
+    assert.doesNotMatch(f.cards.get('card-1001').innerHTML,/error-badge/);
+});
+
+test('real firmware JSON serializers preserve diagnostics for live, reconnect and API paths',()=>{
+    const root=fileURLToPath(new URL('../',import.meta.url));
+    const firmware=readFileSync(resolve(root,'hub/src/main.cpp'),'utf8').replaceAll('\r\n','\n');
+    const live=firmware.match(/static void buildDeviceJson\(const uint8_t \*buf[^;{]*\) \{[\s\S]*?\n}/)[0];
+    const state=firmware.match(/struct device_state_t \{[\s\S]*?\n};/)[0];
+    const snapshots=['handleEvents','handleApiDevices'].map(name=>{
+        const body=firmware.match(new RegExp('static void '+name+'\\(\\) \\{[\\s\\S]*?\\n}'))[0];
+        return body.match(/snprintf\((?:json|buf),[\s\S]*?\n            \);/)[0].replaceAll('sizeof(json)','outLen').replaceAll('sizeof(buf)','outLen').replace(/^snprintf\((json|buf),/,'snprintf(out,');
+    });
+    const code=`
+#include <initializer_list>
+#include "bp_protocol.h"
+${state}
+const char* deviceDisplayName(uint16_t) { return "Fixture"; }
+const char* deviceEmoji(uint16_t) { return "cat"; }
+const char* deviceColour(uint16_t) { return "#0099ff"; }
+const char* journalSyncName(uint8_t) { return "pending"; }
+unsigned long deviceRxWindowMs(const device_state_t&) { return 0; }
+unsigned long deviceAgeSeconds(const device_state_t&) { return 0; }
+${live}
+void reconnect(device_state_t* d,char* out,size_t outLen) { ${snapshots[0]} }
+void api(device_state_t* d,char* out,size_t outLen) { ${snapshots[1]} }
+int main() {
+  for(uint8_t flags : {0,128,192,196,133}) for(uint8_t reason : {0,4,7}) {
+    uint8_t packet[BP_MAX_PACKET_SIZE]; char out[768];
+    pkt_init(packet,1001,16,1,1787920000,STATUS_HOME,PROFILE_ACTIVE,flags,reason);
+    if(reason==4) pkt_add_tlv_u8(packet,TLV_RESET_REASON,2);
+    pkt_finalize(packet);
+    buildDeviceJson(packet,-140,-25,1,1787920000,0,out,sizeof(out)); puts(out);
+    device_state_t d{}; d.device_id=1001; d.flags=flags; d.tx_reason=reason;
+    d.error_present=flags & FLAG_ERROR_PRESENT; d.reset_reason=reason==4?2:0;
+    d.reset_reason_present=reason==4;
+    reconnect(&d,out,sizeof(out)); puts(out); api(&d,out,sizeof(out)); puts(out);
+  }
+}`;
+    const dir=resolve(root,'.pio/fault-tests'); mkdirSync(dir,{recursive:true});
+    const cpp=resolve(dir,'serialization.cpp'), exe=resolve(dir,process.platform==='win32'?'serialization.exe':'serialization');
+    writeFileSync(cpp,code);
+    const compiler=process.env.CXX || (process.platform==='win32'?'C:/ProgramData/mingw64/mingw64/bin/g++.exe':'g++');
+    const compiled=spawnSync(compiler,['-std=c++17','-I'+resolve(root,'shared/lib/BluepawsProtocol'),cpp,'-o',exe],{encoding:'utf8'});
+    assert.equal(compiled.status,0,compiled.stderr);
+    const result=spawnSync(exe,[],{encoding:'utf8'}); assert.equal(result.status,0,result.stderr);
+    const rows=result.stdout.trim().split(/\r?\n/).map(JSON.parse);
+    assert.equal(rows.length,45);
+    const f=fixture(false), dev=f.device(1001);
+    for(let index=0;index<rows.length;index+=3) {
+        const expected=rows[index];
+        assert.equal(typeof expected.txReason,'string','retain live SSE display-string compatibility');
+        for(const data of rows.slice(index,index+3)) {
+            for(const key of ['flags','txReasonCode','errorPresent','resetReason','resetReasonPresent']) assert.equal(data[key],expected[key],key);
+            dev.data=data; f.context.renderDeviceCard(dev);
+            const label=collarFault({flags:data.flags,txReason:data.txReasonCode})?.label;
+            const html=f.cards.get('card-1001').innerHTML;
+            if(label) assert(html.includes('>'+label+'</span>'));
+            else assert.doesNotMatch(html,/error-badge/);
+        }
+    }
 });

@@ -59,6 +59,7 @@ test("maps TLV projection fields into the live dashboard model", () => {
   assert.equal(device.status, "Lost");
   assert.equal(device.profile, "Emergency Lost");
   assert.equal(device.error, "Module");
+  assert.deepEqual(device.faultReport, {flags:0x89,txReason:5});
   assert.equal(device.batt, 3700);
   assert.equal(device.batteryPercent, null);
   assert.equal(device.rssi, -104);
@@ -146,5 +147,6 @@ test("overlays newer wake-check-in presence without moving the last known positi
   assert.equal(device.batteryPercent, null);
   assert.equal(device.bleHome, true);
   assert.equal(device.source, "tlv-wake-checkin");
+  assert.equal(device.faultReport, null, "new presence must discard older map-fix diagnostics");
   assert.equal(device.lastUpdate, Date.parse("2026-08-13T09:00:00.000Z"));
 });

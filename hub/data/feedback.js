@@ -60,5 +60,26 @@
             ? Math.min(dev.rxUntil || 0, deadline) : deadline;
         dev.rxIdentity = identity;
     }
-    root.HubFeedback = { profileLabel: profileLabel, createStore: createStore, receiveWindow: receiveWindow };
+    // Same report-only rules as web/src/lib/collarFault.ts; parity-tested.
+    function fault(report, legacyFault) {
+        var flags = report && report.flags;
+        var hasFlags = typeof flags === 'number' && Number.isInteger(flags) && flags >= 0 && flags <= 255;
+        if (hasFlags ? !(flags & 0x80) : !legacyFault) return null;
+        var reasons = [];
+        if (hasFlags) {
+            if (flags & 0x40) reasons.push('stale GPS');
+            else if (!(flags & 0x01) && [0,3,4,5].indexOf(report.txReason) >= 0) reasons.push('GPS fix unavailable');
+            if (flags & 0x04) reasons.push('low battery');
+        }
+        var detail = reasons.length ? reasons[0] + (reasons.length > 1 ? ' +' + (reasons.length - 1) : '') : 'cause unspecified';
+        var title = reasons.length
+            ? 'Reported fault — ' + reasons.join('; ') + '. These indicators accompany ERROR_PRESENT; they do not establish the root cause.'
+            : 'Reported fault — cause unspecified. The report does not identify a specific cause.';
+        var reset = report && report.resetReason;
+        if (hasFlags && typeof reset === 'number' && Number.isInteger(reset) && reset >= 0 && reset <= 255) {
+            title += ' Reset diagnostic 0x' + reset.toString(16).padStart(2, '0').toUpperCase() + ' describes the previous reset, not necessarily this fault.';
+        }
+        return {label: 'Reported fault — ' + detail, title: title};
+    }
+    root.HubFeedback = { profileLabel: profileLabel, createStore: createStore, receiveWindow: receiveWindow, fault: fault };
 })(globalThis);

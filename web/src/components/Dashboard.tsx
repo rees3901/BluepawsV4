@@ -577,6 +577,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
               awakeSeconds={now ? Math.max(0, Math.ceil(((feedback[device.id]?.rxWindowUntil ?? 0) - now) / 1000)) : 0}
               commandFeedback={commandMessage(feedback[device.id]?.command, now)}
               reportedFlags={feedback[device.id]?.flags}
+              reportedFaultReport={feedback[device.id]?.faultReport}
               onExpand={() => setExpandedIds((current) => nextExpandedDeviceCards(current, device.id))}
               onAction={(action) => handleAction(device, action)}
               onAvatarEdit={tutorialMode ? undefined : () => setAvatarDevice(device)}

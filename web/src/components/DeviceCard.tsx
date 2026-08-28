@@ -6,6 +6,7 @@ import { emojiImageUrl } from "@/lib/emoji";
 import { formatMapCoordinates, googleMapsUrl } from "@/lib/mapLocation";
 import type { DeviceAction, DeviceAvatar, TelemetryDevice } from "@/types/telemetry";
 import type { commandMessage } from "@/lib/collarFeedback";
+import { collarFault, type CollarFaultReport } from "@/lib/collarFault";
 
 const STATUS = {
   home: { emoji: "🏠", label: "Home", css: "status-home" },
@@ -28,6 +29,7 @@ export interface DeviceCardProps {
   awakeSeconds?: number;
   commandFeedback?: ReturnType<typeof commandMessage>;
   reportedFlags?: number | null;
+  reportedFaultReport?: CollarFaultReport | null;
   onExpand: () => void;
   onAction: (action: DeviceAction) => void;
   onDragStart: () => void;
@@ -57,7 +59,11 @@ export function DeviceCard(props: DeviceCardProps) {
   const lastSeen = formatLastSeen(ageSeconds);
   // A recent no-GNSS report may supersede the flags on the last GPS position.
   // Neither Lost status nor Lost Alert profile constitutes a hardware fault.
-  const reportedFault = props.reportedFlags == null ? device.error !== "None" : (props.reportedFlags & 0x80) !== 0;
+  const report = props.reportedFlags == null ? device.faultReport : {
+    ...(props.reportedFaultReport?.flags === props.reportedFlags ? props.reportedFaultReport : {}),
+    flags: props.reportedFlags,
+  };
+  const fault = isHub ? null : collarFault(report, device.error !== "None");
 
   return (
     <article
@@ -131,8 +137,8 @@ export function DeviceCard(props: DeviceCardProps) {
             <span className="card-name">{device.name}</span>
             <span className={`card-status ${status.css}`}>{status.emoji} {status.label}</span>
             <span className={`card-profile ${profileClass}`}>{profileLabel}</span>
-            {!isHub && reportedFault && <span className="error-badge" title="A fault is indicated in the collar's latest available report. This is separate from Lost Alert.">Reported fault</span>}
           </div>
+          {fault && <div className="card-fault-row"><span className="error-badge" title={fault.title} aria-label={fault.title}>{fault.label}</span></div>}
           <div className="card-indicators">
             <span className="card-indicator-group"><BatteryIndicator millivolts={isHub ? null : device.batt} percent={device.batteryPercent} /></span>
             <span className="card-indicator-group">{isHub ? <WifiIndicator rssi={device.rssi} contactLost={ageSeconds >= hubContactGrace(device.hubReportingProfile)} /> : <SignalIndicator rssi={device.rssi} snr={device.snr} ingestPath={device.ingestPath} />}</span>

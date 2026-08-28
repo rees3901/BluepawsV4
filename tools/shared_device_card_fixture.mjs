@@ -50,6 +50,16 @@ if (process.argv.includes('--serve')) {
       return res.end(readFileSync(new URL('../web/src/app'+req.url,import.meta.url)));
     }
     res.setHeader('Content-Type','text/html; charset=utf-8');
+    if (req.url === '/faults') {
+      const cases=[['Stale GPS',0xc1,0],['GPS unavailable',0x80,0],['Low battery',0x85,0],
+        ['Multiple indicators',0xc4,4],['Wake check-in',0x88,7],['Healthy / Lost Alert',0x09,7]];
+      res.end('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">' +
+        '<title>Collar fault reasons — synthetic fixture</title><link rel="stylesheet" href="/parity.css"><link rel="stylesheet" href="/web.css">' +
+        '<main style="padding:12px;display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,360px));gap:16px">' +
+        cases.map(([name,flags,txReason])=>'<section><h3>'+name+'</h3>'+[false,true].map(expanded=>renderCollar({expanded,
+          reportedFlags:flags,reportedFaultReport:{flags,txReason,resetReason:txReason===4?2:null}})).join('')+'</section>').join('')+'</main>');
+      return;
+    }
     res.end('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">' +
       '<title>Shared cloud cards — synthetic fixture</title><link rel="stylesheet" href="/parity.css"><link rel="stylesheet" href="/web.css"><link rel="stylesheet" href="/hub-presence.css">' +
       '<main style="width:460px;max-width:100%;padding:12px"><h3>Shared cloud cards · UI fixture</h3>' +

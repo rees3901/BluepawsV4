@@ -45,6 +45,7 @@ export function positionToTelemetryDevice(row: PositionRow): TelemetryDevice {
     status: statusName(row.status_code),
     profile: profileName(row.power_profile_code),
     error: flags !== null && (flags & 0x80) !== 0 ? "Module" : "None",
+    faultReport: flags === null ? null : { flags, txReason: row.tx_reason },
     lat: row.latitude,
     lon: row.longitude,
     hasGps: flags === null || (flags & 0x01) !== 0,
@@ -75,6 +76,9 @@ export function applyPresenceToTelemetryDevice(device: TelemetryDevice, row: Dev
   return {
     ...device,
     time: Math.floor(lastSeenAt / 1000),
+    // Presence does not carry flags: never label this newer report with the
+    // previous GPS observation's diagnostics while feedback is loading.
+    faultReport: null,
     status: row.last_seen_status_code === null ? device.status : statusName(row.last_seen_status_code),
     profile: row.last_seen_power_profile_code === null ? device.profile : profileName(row.last_seen_power_profile_code),
     batt: row.last_seen_battery_mv ?? device.batt,

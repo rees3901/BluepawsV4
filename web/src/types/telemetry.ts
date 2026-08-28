@@ -14,6 +14,7 @@ export interface TelemetryDevice {
   status: CollarStatus;
   profile: PowerProfile;
   error: TelemetryError;
+  faultReport?: { flags: number; txReason?: number | null } | null;
   lat: number;
   lon: number;
   hasGps: boolean;

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { commandMessage, receiveDeadline, type CollarFeedback } from "@/lib/collarFeedback";
+import { loadFaultReports } from "@/lib/collarFault";
 
 export function useCollarFeedback(householdId: string | null, reportVersion: string) {
   const [state, setState] = useState<{ family: string | null; rows: Record<number, CollarFeedback> }>({ family: null, rows: {} });
@@ -37,12 +38,30 @@ export function useCollarFeedback(householdId: string | null, reportVersion: str
             rows[row.device_id] = {
               device_id: row.device_id, observation_id: row.observation_id,
               flags: Number.isInteger(row.flags) ? row.flags : null,
+              faultReport: old?.observation_id === row.observation_id && old?.flags === row.flags ? old?.faultReport : null,
               command: row.command,
               rxWindowUntil: receiveDeadline(row.rx_window_remaining_ms, now, now - started,
                 old?.observation_id === row.observation_id ? old?.rxWindowUntil : undefined),
             };
           }
           return { family: householdId, rows };
+        });
+        // Publish flags/ACK/receive-window state first. Optional diagnostic
+        // enrichment must not delay these, and its network wait is bounded.
+        const faultReports = await loadFaultReports(data, ids => supabase.from("observations")
+          .select("id,device_guid16,flags,tx_reason,reset_reason:tlv_data->reset_reason")
+          .eq("household_id", householdId).in("id", ids).abortSignal(AbortSignal.timeout(3000)));
+        if (!active) return;
+        if (Object.keys(faultReports).length) setState(previous => {
+          if (previous.family !== householdId) return previous;
+          const rows = { ...previous.rows };
+          for (const row of data) {
+            const current = rows[row.device_id];
+            if (current?.observation_id === row.observation_id && current?.flags === row.flags && faultReports[row.device_id]) {
+              rows[row.device_id] = { ...current, faultReport: faultReports[row.device_id] };
+            }
+          }
+          return { ...previous, rows };
         });
         // Poll only while waiting for an ACK. Otherwise report broadcasts,
         // reconnect/focus and a successful command submission drive refreshes.
