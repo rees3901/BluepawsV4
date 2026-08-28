@@ -14,7 +14,7 @@ import type { TelemetryDevice, TelemetrySource, TrailPoint } from "@/types/telem
 const INITIAL_FALLBACK_DELAY_MS = 30_000;
 const MAX_FALLBACK_DELAY_MS = 120_000;
 const POSITION_COLUMNS = "position_id,device_uid,household_id,message_id,latitude,longitude,battery,battery_mv,status_code,power_profile_code,flags,tx_reason,ingest_path,link_type,link_rssi_dbm,link_snr_db,source,recorded_at,received_at,schema_version";
-const PRESENCE_COLUMNS = "device_id,household_id,last_seen_at,last_seen_status_code,last_seen_power_profile_code,last_seen_tx_reason,last_seen_battery_mv";
+const PRESENCE_COLUMNS = "device_id,household_id,display_name,last_seen_at,last_seen_status_code,last_seen_power_profile_code,last_seen_tx_reason,last_seen_battery_mv";
 
 export function createRealtimeTelemetrySource(
   householdId: string,
@@ -41,7 +41,7 @@ export function createRealtimeTelemetrySource(
         const next = positionToTelemetryDevice(value);
         const current = devices.get(next.id);
         if (current && !isNewer(next, current)) return;
-        devices.set(next.id, next);
+        devices.set(next.id, current ? { ...next, name: current.name } : next);
         publish();
       };
 
@@ -86,7 +86,11 @@ export function createRealtimeTelemetrySource(
         devices.forEach((_device, deviceId) => {
           if (!incomingIds.has(deviceId)) devices.delete(deviceId);
         });
-        incoming.forEach((row: PositionRow) => devices.set(row.device_uid, positionToTelemetryDevice(row)));
+        incoming.forEach((row: PositionRow) => {
+          const next = positionToTelemetryDevice(row);
+          const current = devices.get(next.id);
+          devices.set(next.id, current ? { ...next, name: current.name } : next);
+        });
         presenceRows.forEach((row) => {
           const current = devices.get(row.device_id);
           if (current) devices.set(row.device_id, applyPresenceToTelemetryDevice(current, row));
@@ -193,6 +197,13 @@ export function createRealtimeTelemetrySource(
       };
       document.addEventListener("visibilitychange", recoverSnapshot);
       window.addEventListener("online", recoverSnapshot);
+      const handleRename = (event: Event) => {
+        const detail = (event as CustomEvent).detail;
+        if (detail?.householdId !== householdId || typeof detail.name !== "string") return;
+        const current = devices.get(detail.deviceId);
+        if (current) { devices.set(current.id, { ...current, name: detail.name }); publish(); }
+      };
+      window.addEventListener("bluepaws:device-renamed", handleRename);
 
       return () => {
         active = false;
@@ -200,6 +211,7 @@ export function createRealtimeTelemetrySource(
         clearFallback();
         document.removeEventListener("visibilitychange", recoverSnapshot);
         window.removeEventListener("online", recoverSnapshot);
+        window.removeEventListener("bluepaws:device-renamed", handleRename);
         if (channel) void supabase.removeChannel(channel);
       };
     },

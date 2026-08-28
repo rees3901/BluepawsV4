@@ -758,7 +758,14 @@ body.panel-open .map-loading {
 
 .avatar-editor-content {
   max-width: 470px;
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
 }
+
+.marker-name-field { display: grid; gap: 6px; margin-bottom: 16px; }
+.marker-name-field label { font-weight: 600; }
+.marker-name-field input { width: 100%; min-width: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-primary); color: var(--text-primary); font: inherit; }
+.marker-name-field .form-hint { margin: 0; text-align: left; }
 
 .avatar-editor-heading {
   display: flex;

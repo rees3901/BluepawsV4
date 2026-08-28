@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/client";
 import type { DeviceAvatar } from "@/types/telemetry";
+import { normalizeDeviceName } from "./deviceName";
 
 export const PET_AVATAR_BUCKET = "pet-avatars";
 
@@ -14,6 +15,7 @@ interface DeviceAppearanceRow {
 export interface SaveDeviceAppearance {
   deviceId: number;
   householdId: string;
+  name: string;
   kind: "emoji" | "photo";
   emoji: string;
   color: string;
@@ -52,6 +54,7 @@ export async function loadDeviceAppearances(householdId: string) {
 }
 
 export async function saveDeviceAppearance(input: SaveDeviceAppearance) {
+  const name = normalizeDeviceName(input.name);
   const supabase = createClient();
   let storagePath = input.kind === "photo" ? input.previousStoragePath : undefined;
   let uploadedPath: string | undefined;
@@ -69,14 +72,16 @@ export async function saveDeviceAppearance(input: SaveDeviceAppearance) {
     throw new Error("Choose a photo before saving");
   }
 
-  const { error } = await supabase.from("device_appearances").upsert({
-    device_id: input.deviceId,
-    household_id: input.householdId,
-    avatar_kind: input.kind,
-    emoji_value: input.emoji,
-    marker_colour: input.color,
-    avatar_storage_path: storagePath ?? null,
-  }, { onConflict: "device_id" });
+  // One transaction: a failed appearance save must not leave a partial rename.
+  const { error } = await supabase.rpc("bluepaws_save_device_marker", {
+    requested_device_id: input.deviceId,
+    requested_household_id: input.householdId,
+    requested_name: name,
+    requested_avatar_kind: input.kind,
+    requested_emoji: input.emoji,
+    requested_colour: input.color,
+    requested_storage_path: storagePath ?? null,
+  });
 
   if (error) {
     if (uploadedPath) await supabase.storage.from(PET_AVATAR_BUCKET).remove([uploadedPath]);

@@ -18,6 +18,7 @@ export interface SearchPartySnapshot {
 }
 
 interface SearchPartyDeviceRow extends PositionRow {
+  display_name?: unknown;
   avatar_kind?: unknown;
   emoji_value?: unknown;
   marker_colour?: unknown;
@@ -64,6 +65,7 @@ export function parseSearchPartySnapshot(value: unknown): SearchPartySnapshot {
     if (!isPositionRow(rawDevice)) return;
     const row = rawDevice as SearchPartyDeviceRow;
     const device = positionToTelemetryDevice(row);
+    if (typeof row.display_name === "string" && row.display_name.trim()) device.name = row.display_name.trim();
     devices.push(device);
     avatars[device.id] = appearanceAvatar(device.id, row);
   });

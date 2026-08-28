@@ -33,7 +33,7 @@ export async function getLiveTelemetrySnapshot(householdId: string): Promise<Liv
       .eq("household_id", householdId);
     const presenceResult = await supabase
       .from("devices")
-      .select("device_id,household_id,last_seen_at,last_seen_status_code,last_seen_power_profile_code,last_seen_tx_reason,last_seen_battery_mv")
+      .select("device_id,household_id,display_name,last_seen_at,last_seen_status_code,last_seen_power_profile_code,last_seen_tx_reason,last_seen_battery_mv")
       .eq("household_id", householdId);
 
     if (positionResult.error) {

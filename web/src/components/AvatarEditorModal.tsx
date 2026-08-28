@@ -6,6 +6,7 @@ import { prepareAvatarImage, validateAvatarFile } from "@/lib/avatarImage";
 import { saveDeviceAppearance, type SaveDeviceAppearance } from "@/lib/deviceAppearances";
 import { emojiToUnified } from "@/lib/emoji";
 import { normalizeMarkerColor } from "@/lib/markerColor";
+import { normalizeDeviceName } from "@/lib/deviceName";
 import type { DeviceAvatar, TelemetryDevice } from "@/types/telemetry";
 
 const SUGGESTED_COLORS = ["#1d9bf0", "#ff6b35", "#a855f7", "#22c55e", "#f59e0b", "#06b6d4", "#84cc16", "#ec4899"];
@@ -16,11 +17,12 @@ interface AvatarEditorModalProps {
   avatar: DeviceAvatar;
   theme: "dark" | "light";
   onClose: () => void;
-  onSaved: () => Promise<void>;
+  onSaved: (name: string) => Promise<void>;
   saveAppearance?: (input: SaveDeviceAppearance) => Promise<void>;
 }
 
 export function AvatarEditorModal({ device, householdId, avatar, theme, onClose, onSaved, saveAppearance = saveDeviceAppearance }: AvatarEditorModalProps) {
+  const [name, setName] = useState(device.name);
   const [kind, setKind] = useState<"emoji" | "photo">(avatar.kind);
   const [emoji, setEmoji] = useState(avatar.emoji);
   const [color, setColor] = useState(() => normalizeMarkerColor(avatar.color));
@@ -59,19 +61,21 @@ export function AvatarEditorModal({ device, householdId, avatar, theme, onClose,
     setSaving(true);
     setError(null);
     try {
+      const friendlyName = normalizeDeviceName(name, device.entity === "hub");
       const preparedPhoto = kind === "photo" && file
         ? await prepareAvatarImage(file, { zoom, offsetX, offsetY })
         : undefined;
       await saveAppearance({
         deviceId: device.id,
         householdId,
+        name: friendlyName,
         kind,
         emoji,
         color,
         previousStoragePath: avatar.storagePath,
         preparedPhoto,
       });
-      await onSaved();
+      await onSaved(friendlyName);
       onClose();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "The appearance could not be saved");
@@ -90,6 +94,16 @@ export function AvatarEditorModal({ device, householdId, avatar, theme, onClose,
             <h2 id="avatar-editor-title">Customise {device.name}</h2>
           </div>
           <button type="button" className="avatar-editor-close" aria-label="Close avatar editor" onClick={onClose}>×</button>
+        </div>
+
+        <div className="marker-name-field">
+          <label htmlFor="marker-friendly-name">{device.entity === "hub" ? "Hub name" : "Pet name"}</label>
+          <input id="marker-friendly-name" type="text" value={name} maxLength={160}
+            placeholder={device.entity === "hub" ? "Home Hub" : "e.g. Mittens"} disabled={saving}
+            aria-describedby="marker-name-hint" onChange={event => setName(event.target.value)} />
+          <p id="marker-name-hint" className="form-hint">
+            {device.entity === "hub" ? `Hub ID ${(-device.id).toString(16).padStart(4, "0").toUpperCase()}` : `Device ID ${device.id}`} stays unchanged. This name is shared with your Family.
+          </p>
         </div>
 
         <div className="avatar-kind-tabs" role="tablist" aria-label="Avatar type">
@@ -171,7 +185,7 @@ export function AvatarEditorModal({ device, householdId, avatar, theme, onClose,
 
         {error && <p className="avatar-editor-error" role="alert">{error}</p>}
         <div className="modal-actions">
-          <button className="btn-primary" type="button" disabled={saving || (kind === "photo" && !photoPreview)} onClick={save}>{saving ? "Saving…" : "Save appearance"}</button>
+          <button className="btn-primary" type="button" disabled={saving || !name.trim() || (kind === "photo" && !photoPreview)} onClick={save}>{saving ? "Saving…" : "Save changes"}</button>
           <button className="btn-secondary" type="button" disabled={saving} onClick={onClose}>Cancel</button>
         </div>
       </div>

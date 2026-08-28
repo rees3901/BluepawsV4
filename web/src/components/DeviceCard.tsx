@@ -155,7 +155,8 @@ export function DeviceCard(props: DeviceCardProps) {
                   {formatMapCoordinates(device.lat, device.lon)}
                 </a> : "Waiting for GPS fix"}
               </span>
-              {!isHub && <><span className="label">Power Profile</span><span className="value">{device.profile}</span>
+              {!isHub && <><span className="label">Device ID</span><span className="value">{device.id}</span>
+              <span className="label">Power Profile</span><span className="value">{device.profile}</span>
               <span className="label">Dist From Hub</span><span className="value">{distance}</span></>}
               {isHub && props.hubDetails}
               <span className="label">Last seen</span><span className="value">{formatAge(ageSeconds)}</span>
