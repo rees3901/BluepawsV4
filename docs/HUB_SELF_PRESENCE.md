@@ -8,8 +8,10 @@
   mode's emoji, and border colour. Hub appearance is separate from collar IDs.
 - Cloud edits are Family owner/member-only. Local edits use the hub's existing
   command-access boundary (optional Off-Grid PIN); no credentials reach browsers.
-- Cloud settings have a revision. A self-report response delivers newer settings;
-  the following self-report confirms application. Local overrides persist in NVS
+- Cloud settings have a revision. A lightweight authenticated settings read
+  checks for changes about every five seconds; after the BLE task applies them,
+  an immediate self-report confirms application. The minute heartbeat remains
+  independent. Local overrides persist in NVS
   and are not uploaded as cloud edits. A subsequent explicit cloud edit wins.
 - The Bluetooth control enables/disables the **Home beacon preference**.
   Advertising still requires primary Home Wi-Fi; Portable/Off-Grid scanning is
@@ -17,10 +19,17 @@
 - Hub telemetry is attempted about once per minute while online, independently
   of collar traffic, in the existing cloud task. Network failure/busy HTTP work
   can delay it; it is not a real-time deadline.
-- The cloud UI polls hub status every ten seconds; local UI polls every five.
-  Hub and collar cards share the ten-minute stale/dimmed styling. Hub age uses
+- The cloud UI polls hub status every ten seconds, accelerating to two seconds
+  while a settings revision awaits confirmation; local UI polls every five.
+  A cloud hub without a self-report for 90 seconds shows **No contact**, unfilled
+  signal bars and a dimmed card. The local hub uses 15 seconds (three missed
+  local polls); collars retain their ten-minute threshold. Hub age uses
   the last cloud self-report or successful local API response; failed polls do
   not refresh it. GPS fix age remains separate from contact age.
+- Missing cloud reports mean contact is lost, not proof that Wi-Fi specifically
+  failed. Power loss, internet loss and a cloud outage can look identical.
+  A connected local hub in Off-Grid mode can correctly report **No Wi-Fi**
+  uplink while its hotspot and local commands remain available.
 
 ## Shared device presentation
 
@@ -40,6 +49,9 @@ Bluetooth preference and editable names retain the hub-specific persistence path
 Message Log and Download use the same three-column report presentation, populated
 from the latest `hub_presence` row (cloud) or `/api/hub-presence` response (local).
 They are latest-status snapshots, not a claimed archive of previous hub reports.
+Cloud report modals use a body-level React portal, escaping the transformed
+sidebar and centering on the viewport for both collars and hubs. Indicator groups
+use actual compact dimensions, not visual-only scaling; Wi-Fi badges never wrap.
 Hub trails currently build from observed live fixes in the browser session, not
 collar history. Neither reports nor trails call collar endpoints with hub keys.
 
@@ -113,6 +125,47 @@ Self reports do **not** claim collar commands or enter collar history.
 Local endpoints: GET /api/hub-presence; POST /api/hub-preferences
 (display_name, home_emoji, portable_emoji, marker_colour, ble_enabled).
 Names/emoji are bounded to 64 UTF-8 bytes in firmware/storage.
+Local status also includes `ble_settled`: the requested Home beacon preference
+has reached the BLE task's actual mode-dependent advertising state.
+
+### Prompt hub settings (28 August 2026)
+
+The hub makes this small POST to the same endpoint and gateway bearer boundary:
+
+```json
+{"format":"hub_settings","ingest_path":"hub_self","gateway_guid16":"0010"}
+```
+
+It returns only the existing `settings` object (or null before the first real
+hub report). It checks the enabled bearer, enabled gateway, and current Family
+before reading that gateway's settings. This is strictly read-only: it does not
+refresh presence, write a GPS point, claim collar commands, or acknowledge a
+setting. A later real `hub_status` reports the applied revision and BLE state.
+No database migration, collar protocol change, or new browser credentials.
+
+REST remains outbound through the router/NAT. A browser cannot assume it can
+reach the hub's LAN address. A persistent private WebSocket would need its own
+gateway authentication and reconnect design; it is not introduced here.
+Five-second polling is a bench/product-development latency choice (up to 720
+settings calls/hour per online hub); revisit event delivery/cost before fleet rollout.
+Polling shares the existing single cloud worker/TLS connection budget. LoRa
+reception stays in its higher-priority task; queued live collar work wins.
+Settings reads back off to 60 seconds on failures. Two-second HTTP timeouts and
+other cloud work mean five seconds is an aim, not a guaranteed delivery deadline.
+
+The cloud button shows **reported** Bluetooth, not the desired database value.
+After saving: updating → hub-confirmed, or an actionable unconfirmed warning
+after 30 seconds. A saved but unconfirmed setting remains durable and may apply
+after reconnection; the UI explicitly says this, rather than pretending it was
+cancelled. A later matching acknowledgement clears that warning. Concurrent
+newer settings supersede the older request. No collar one-hour/ten-minute queue
+semantics are used for this always-on hub setting.
+
+Local commands go directly to the hub (existing optional PIN boundary) and await
+`ble_settled`, with an eight-second confirmation window and request timeouts.
+Other local browsers see the updated preference on their next local poll.
+Neither setting enables Home advertising in Portable/Off-Grid mode; the existing
+primary-Home-Wi-Fi safety gate remains unchanged.
 
 ## Collar 💡
 
@@ -125,6 +178,26 @@ can shorten or consume the indicator; it is not a promise of command delivery.
 Local timing remains monotonic and radio-driven.
 
 ## Rollout and verification
+
+For the **prompt Bluetooth/card layout update**:
+
+1. Deploy `ingest-position` from this branch or the merged updated main:
+   `npx --yes supabase@latest functions deploy ingest-position --project-ref ykcdaonkvwemedotdpdr`.
+2. Merge the PR for the Vercel frontend update.
+3. Build/upload the Home Hub firmware using the existing hub procedure; update
+   public assets with a fresh private-files/journal-preserving filesystem image.
+   **Do not use a plain uploadfs on a configured hub.**
+4. No new SQL migration or collar firmware flash is required for this update.
+
+Verify with Home Wi-Fi: toggle Bluetooth, observe settings revision in serial,
+then a prompt `[HUB SELF]` success and confirmed UI state. Check actual BLE beacon
+advertising stops/resumes. Disconnect hub uplink: after 90 seconds the cloud card
+must not retain green Wi-Fi bars; an unconfirmed request must never claim success.
+Use the hotspot to repeat the local toggle without cloud access. Check 15-second
+local contact-loss indication after disconnecting that browser from the hub.
+Hardware timing/real BLE acceptance still needs this check after flashing.
+
+Automated controls regression: `npm --prefix web run test:hub-controls`.
 
 For the **card/photo parity update** on a hub already reporting successfully:
 

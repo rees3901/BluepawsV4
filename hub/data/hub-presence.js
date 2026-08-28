@@ -1,7 +1,13 @@
 /* Hub data adapter. Card, marker, popup and navigation belong to app.js. */
 (function (root) {
     'use strict';
-    var latest = null, saveRequest = null;
+    var latest = null, saveRequest = null, feedback = null;
+    function timedFetch(send, url, options) {
+        var controller = new AbortController();
+        var timer = setTimeout(function () { controller.abort(); }, 4000);
+        return send(url, Object.assign({}, options, {signal: controller.signal}))
+            .finally(function () { clearTimeout(timer); });
+    }
     function reportRows(s) {
         return [
             ['Report type','Hub local status','Read directly from this Home Hub; no cloud connection is needed.'],
@@ -37,6 +43,7 @@
     }
     root.HubPresencePanel = {
         view: view,
+        feedback: function () { return feedback; },
         report: function(exportOnly) {
             fetch('/api/hub-presence',{cache:'no-store'}).then(function(r){if(!r.ok) throw new Error('Unable to load hub report');return r.json();})
                 .then(function(s){
@@ -70,23 +77,53 @@
             if (!colour) return;
             saveRequest({display_name: name, home_emoji: home, portable_emoji: portable, marker_colour: colour});
         },
-        start: function (protectedFetch, onUpdate) {
-            var busy = false;
+        start: function (protectedFetch, onUpdate, onFeedback) {
+            var busy = false, pending = null, confirmationTimer = null;
+            function notify(state, text) {
+                feedback = {state: state, text: text};
+                if (onFeedback && latest) onFeedback(-parseInt(latest.gateway_guid16, 16));
+            }
             saveRequest = function (values) {
-                return protectedFetch('/api/hub-preferences', {method: 'POST',
+                if (feedback && feedback.state === 'pending') return Promise.resolve();
+                notify('pending', 'Updating hub settings…');
+                return timedFetch(protectedFetch, '/api/hub-preferences', {method: 'POST',
                     headers: {'Content-Type': 'application/json'}, body: JSON.stringify(values)})
-                    .then(function (r) { if (!r.ok) throw new Error('Could not save hub preferences'); return load(); })
-                    .catch(function (e) { window.alert(e.message); });
+                    .then(function (r) {
+                        if (!r.ok) throw new Error('Could not save hub preferences');
+                        if (typeof values.ble_enabled !== 'boolean') {
+                            notify('confirmed', 'Settings saved on this hub.'); return load();
+                        }
+                        pending = values.ble_enabled;
+                        confirmationTimer = setTimeout(function () {
+                            pending = null;
+                            notify('failed', 'Bluetooth change not confirmed. Check your connection to the hub before retrying.');
+                        }, 8000);
+                        return load();
+                    })
+                    .catch(function () {
+                        pending = null;
+                        notify('failed', 'Could not confirm the change. Check your connection to the hub before retrying.');
+                    });
             };
             function load() {
                 if (busy || document.hidden) return Promise.resolve();
                 busy = true;
-                return fetch('/api/hub-presence', {cache: 'no-store'})
+                return timedFetch(fetch, '/api/hub-presence', {cache: 'no-store'})
                     .then(function (r) { if (!r.ok) throw new Error('Hub disconnected'); return r.json(); })
-                    .then(function (s) { var device = view(s); latest = s; onUpdate(device); })
+                    .then(function (s) {
+                        var device = view(s); latest = s; onUpdate(device);
+                        if (pending !== null && s.ble_enabled === pending && s.ble_settled === true) {
+                            clearTimeout(confirmationTimer);
+                            notify('confirmed', 'Bluetooth ' + (pending ? 'enabled' : 'disabled') + ' — confirmed by hub.');
+                            pending = null;
+                        }
+                    })
                     // Leave the last successful receive time untouched on failure.
                     .catch(function () {})
-                    .finally(function () { busy = false; });
+                    .finally(function () {
+                        busy = false;
+                        if (pending !== null) setTimeout(load, 250);
+                    });
             }
             load(); setInterval(load, 5000);
             document.addEventListener('visibilitychange', load);

@@ -1,6 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { handleHubPresence } from "./hub-presence.ts";
+import { handleHubPresence, handleHubSettings } from "./hub-presence.ts";
 import {
   bytesToBase64,
   bytesToHex,
@@ -98,6 +98,10 @@ Deno.serve(async (request: Request) => {
 
   try {
     const supabase = serverClient();
+    if (unknownPayload && typeof unknownPayload === "object" && "format" in unknownPayload
+        && unknownPayload.format === "hub_settings") {
+      return await handleHubSettings(supabase, unknownPayload, token, requestId);
+    }
     if (unknownPayload && typeof unknownPayload === "object" && "format" in unknownPayload
         && unknownPayload.format === "hub_status") {
       return await handleHubPresence(supabase, unknownPayload, token, requestId);

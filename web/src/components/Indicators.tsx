@@ -57,12 +57,13 @@ export function SignalIndicator({ rssi, snr, ingestPath }: { rssi: number | null
 }
 
 // Wi-Fi is not LoRa: show its reported RSSI without inventing an SNR or RF badge.
-export function WifiIndicator({ rssi }: { rssi: number | null }) {
+export function WifiIndicator({ rssi, contactLost = false }: { rssi: number | null; contactLost?: boolean }) {
+  if (contactLost) rssi = null;
   // Wi-Fi RSSI thresholds, not the LoRa RSSI/SNR scoring model.
   const level = rssi === null ? 0 : rssi >= -50 ? 5 : rssi >= -60 ? 4 : rssi >= -70 ? 3 : rssi >= -80 ? 2 : 1;
-  const label = ["No data", "Very poor", "Poor", "Average", "Good", "Excellent"][level];
+  const label = contactLost ? "No contact" : ["No Wi-Fi", "Very poor", "Poor", "Average", "Good", "Excellent"][level];
   const color = ["#607d8b", "#ef4444", "#f97316", "#f59e0b", "#84cc16", "#22c55e"][level];
-  return <span className="signal-indicator" title={`Wi-Fi ${rssi === null ? "not connected" : `${rssi} dBm`} — ${label}`}>
+  return <span className="signal-indicator" title={contactLost ? "Hub report overdue; current Wi-Fi connection is unknown" : `Wi-Fi ${rssi === null ? "not connected" : `${rssi} dBm`} — ${label}`}>
     <AntennaIcon />
     {[1,2,3,4,5].map(bar => <span key={bar} className={`sig-bar${bar <= level ? " filled" : ""}`} style={{height:4+bar*3, backgroundColor:bar <= level ? color : undefined}} />)}
     <span className="sig-label" style={{color}}>{label}</span>
