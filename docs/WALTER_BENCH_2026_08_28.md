@@ -378,3 +378,51 @@ receipt handling, combined GNSS-to-cloud testing and further accuracy validation
 Private logs: `outside-window-gnss.log`, `outside-window-gnss-repeat.log`,
 `sensor-apn-registration-ltem.log`, `sensor-apn-lte-upload.log`,
 `sensor-apn-cloud-comparison.json`, `sensor-apn-final-status.log`.
+
+## Canonical credentials and complete GNSS-to-GUI path, 20:12 UTC
+
+Merged the already-provisioned1010 bearer/HMAC entry into local `tools/devices.json`
+after comparing both values with the flashed firmware. Preserved all five existing
+collars and the gateway; kept a private backup. No key rotation or SQL provisioning
+rerun. Both JSON/backup remain gitignored. Loaded the same bundle into the running
+localhost8787 console only after verifying its existing entries matched the old
+bundle; no unsaved credential changes or simulator reports were overwritten.
+
+One online `send` cycle, with actual host UTC, acquired a fresh GNSS fix with
+estimated confidence213.9m (packet214m),6 satellite entries. It built sequence1282,
+simulated local LoRa completion/listening and sent the same46 bytes through LTE.
+No LoRa transmission over air occurred. HTTP201 again advertised response length0;
+the application retained delivery-unconfirmed status and did not automatically retry.
+
+Supabase independently confirmed GNSS_VALID=true, sequence1282, cellular_direct/lte,
+an observation, a position and a matching `device_latest_positions` entry in the
+same Family as collar1001. Serial bytes and HMAC verification using the newly
+merged canonical bundle matched both Supabase and the live standalone workbench.
+SHA-256: `77b20bed3d6ecee883c0967ee56c3b9998dcc44cd440e6d1af787488ec78becf`.
+
+The GUI uses `devices.display_name`, so device1010 appears as **Walter LTE Testbed**.
+Code inspection also confirmed that the dashboard seeds its device list from
+latest positions, not positionless presence alone. The user explicitly confirmed
+the Walter card was visible. The agent's own available browser was signed out;
+visual confirmation here is the user's, supplemented by database/code checks.
+
+### User-requested approximately5m accuracy target
+
+The214m transmission was already in flight when the user requested the tighter
+target. No subsequent position uploads were made. Six GNSS-only settling checks
+returned confidence205.2,202.3,198.1,101.3,101.0 and100.8 metres. The final three
+included20-second gaps, without modem resets. **The5m target was not reached.**
+No timeout/accuracy threshold was relaxed and no precision was fabricated. The
+firmware still has its existing1000m validity ceiling; ordinary `send` is not a
+5m-gated command. Further GNSS antenna/sky-view/assistance investigation is separate
+from the now-demonstrated transport/display pipeline.
+
+Final board status Normal, offline=1, busy=0/running=0, no scheduled transmissions;
+COM26 released. GNSS-only diagnostics kept LTE off. No firmware change in this
+follow-up; response-body handling remains open. No backend schema, account or
+credential mutation, no changes to other physical bench ports or PCB files.
+
+Private evidence: `gnss-lte-full-pipeline.log`, `gnss-lte-full-pipeline-comparison.json`,
+`gnss-lte-workbench.json`, `precision-gnss-01.log`, `precision-gnss-02.log`,
+`precision-gnss-03.log`, `precision-gnss-final-rounds.log`,
+`full-pipeline-final-status.log`.
