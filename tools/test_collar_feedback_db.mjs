@@ -49,12 +49,18 @@ try {
     create policy family_cmd on device_commands to authenticated using (household_id = current_setting('test.family')::uuid);
     create policy family_paths on observation_paths to authenticated using (exists(select 1 from observations o where o.id=observation_id));
     grant select on all tables in schema public to authenticated;
+    -- Match hosted permissions: registry is server-only, not a public lookup.
+    revoke all on gateways from authenticated;
+    alter table gateways enable row level security;
+    alter table household_members enable row level security;
+    create policy own_membership on household_members for select to authenticated using(user_id=auth.uid());
     insert into devices values (1001,'${family}'),(2001,'${other}');
     set test.family = '${family}';
   `);
   await db.exec(readFileSync(new URL('../supabase/migrations/20260827143000_add_collar_feedback_snapshot.sql', import.meta.url),'utf8'));
   await db.exec(readFileSync(new URL('../supabase/migrations/20260827215926_add_hub_presence_and_receive_activity.sql', import.meta.url),'utf8'));
   await db.exec(readFileSync(new URL('../supabase/migrations/20260827230148_add_hub_avatar_photos.sql', import.meta.url),'utf8'));
+  await db.exec(readFileSync(new URL('../supabase/migrations/20260828081601_fix_hub_avatar_policy_lookup.sql', import.meta.url),'utf8'));
   const read = async (id=family) => {
     await db.exec('set role authenticated');
     try { return (await db.query('select * from bluepaws_collar_feedback($1)',[id])).rows; }
@@ -106,6 +112,7 @@ try {
   assert.equal(hub.applied_revision,2); assert.equal(hub.desired_ble_enabled,false);
   await db.exec('reset role; set role authenticated');
   const photo=`${family}/16/${family}.webp`, alien=`${other}/32/${other}.webp`;
+  await assert.rejects(db.exec('select * from gateways'),/permission denied/,'photo operations must not need registry access');
   await db.query("insert into storage.objects values('hub-avatars',$1)",[photo]);
   await assert.rejects(db.query("insert into storage.objects values('hub-avatars',$1)",[alien]),/row-level security/);
   await assert.rejects(db.query("insert into storage.objects values('pet-avatars',$1)",[photo]),/row-level security/);

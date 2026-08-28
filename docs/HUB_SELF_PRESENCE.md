@@ -59,7 +59,9 @@ its own GPS fix keeps its card but has no map marker and a disabled Jump control
 adapter placeholder coordinates must never place it at 0,0.
 
 Full card parity requires the `add_hub_avatar_photos` migration before deploying
-the web changes, plus updated hub public assets. No ingestion or collar firmware
+the web changes, followed by `fix_hub_avatar_policy_lookup`, plus updated hub
+public assets. Photo policies use the Family-scoped `hub_presence` table, not
+the server-only gateway provisioning registry. No ingestion or collar firmware
 change is needed. Preserve existing hub journals/config when updating assets.
 
 ## Position integrity
