@@ -200,6 +200,7 @@ which must use a different spare identity.
 | `clock <UTC epoch>` | Explicitly seed actual host UTC while idle; no invented GNSS fix |
 | `gnss` | With a valid UTC seed, test real GNSS with LTE off; no packet or upload |
 | `lte` | With actual host UTC and credentials, register on LTE and attempt one signed no-fix upload; no GNSS or LoRa stub; returns to RF-off/idle |
+| `register ltem` / `register nbiot` | Before library initialization: reset modem, apply APN/authentication, compare registration for up to five minutes, capture raw diagnostics, restore original RAT and RF off; no GNSS/LoRa/HTTP |
 | `send` | One forced-report cycle, then idle; LTE is skipped in offline mode |
 | `start` | BOOT cycle, then recurring profile policy |
 | `stop` | Cancel pending work/interrupt waits and clean up modem state |
@@ -235,7 +236,7 @@ This deliberately reports no valid coordinates, even if an earlier GNSS fix is
 cached. It leaves bench mode and LoRa counters unchanged. The normal `send` command
 still follows the complete telemetry cycle and can request GNSS when online.
 
-Explicit diagnostic commands (`inspect`, `diagnose`, `gnss`, `lte`) remain real modem
+Explicit diagnostic commands (`inspect`, `diagnose`, `gnss`, `lte`, `register`) remain real modem
 operations even in bench mode. Offline only suppresses modem operations in the
 telemetry cycle. It does not forcibly switch off an independently running modem;
 check any prior RF-off failure before treating the physical board as RF-inactive.
@@ -247,6 +248,28 @@ immediately if a PIN/PUK is requested; it never attempts
 to unlock the SIM. Setup diagnostics identify the failing stage without printing
 credentials. 1NCE's published APN is `iot.1nce.net`; LTE-M is selected for this
 bench. [1NCE APN guidance](https://help.1nce.com/dev-hub/docs/data-services-apn).
+
+Empty PAP credentials are accepted by host validation, but this board's UE8.2.1.0
+firmware rejects both omitted and quoted-empty credential forms with CME50.
+The bench therefore retains explicit no-authentication mode; no invented
+username/password or silent authentication fallback. The application sends
+CGAUTH explicitly because the pinned driver's authentication setter returns early
+when its cached protocol is NONE, without applying the requested setting. User and
+password validation still rejects command delimiters/control characters. RAT
+changes use CFUN0, then restart and verify the modem's mode before SIM setup.
+
+The registration-only commands own UART2 without WalterModem tasks; they refuse
+to run after `inspect`, `gnss`, `lte` or an online cycle initialized the library.
+Reboot the ESP first in that case. Each registration test resets the modem and
+captures only allowlisted diagnostic responses, never authentication echoes.
+Read-only `diagnose` still preserves rejection history by not resetting the modem.
+Registration tests report raw CESQ codes (255 means unknown), active operator
+profile, CEREG details, CEER and serving-cell readings while RF is active. They do
+not require a host clock, consume packet sequences or contact Supabase. Both RATs
+use the same APN/authentication settings and five-minute search window. Stop cancels waits;
+cleanup attempts CFUN0 and restores/verifies the original RAT even after stop.
+Any unconfirmed cleanup requires checking the board. A passed registration test
+does not prove HTTPS or delivery.
 
 The registration loop logs state changes and allows the full timeout even when an
 individual roaming network rejects registration. It only considers home/roaming
@@ -312,7 +335,7 @@ The full512-page AT manual above was downloaded and the relevant pages rendered
 locally because its embedded text extraction is unreliable. Private working copy:
 `.pio/walter-bench-20260828/gm02s_at_commands.pdf` (not vendored into Git).
 
-Findings against current firmware; these are **not yet implemented or retested**:
+Findings against firmware at review time (subsequent changes are noted below):
 
 1. Walter's cellular guide records poor UK LTE-M coverage reported with Soracom
    SIMs and suggests NB-IoT. This is a reason for a controlled alternate-RAT test,
@@ -333,7 +356,7 @@ Findings against current firmware; these are **not yet implemented or retested**
    Printed page40 identifies SQNCTM? as the active operator-profile query; the
    existing SQNBANDSEL listing alone does not establish which profile is active.
 
-Next controlled checks: read active modem/profile settings; verify the SIM's
+Checks proposed at review time: read active modem/profile settings; verify the SIM's
 Activated state, allowance and IMEI lock in1NCE; align the APN authentication
 configuration, then compare registration-only LTE-M/NB-IoT attempts one variable
 at a time. Keep GNSS, LoRa and cloud uploads out of this diagnostic comparison.
@@ -344,3 +367,19 @@ ten-minute demo allowance includes GNSS and must not be presented as an LTE-only
 registration timeout.
 
 This review made no firmware, modem configuration, SIM account or hardware changes.
+
+Subsequent implementation: PAP empty-credential validation, explicit CGAUTH,
+CFUN0 RAT switching and registration-only raw diagnostics are now implemented.
+See the dated bench record for actual tests; these changes alone do not establish
+that the original registration problem is fixed. The user confirms the same SIM
+worked in a Quectel modem before moving it to Walter; no SIM-account changes are
+needed merely to repeat that check.
+
+The subsequent five-minute LTE-M test identified Three UK/23420 on band20
+(RSRP about -101 to -97.6dBm), but ended with CEER ESM_FAILURE /
+OPERATOR_DETERMINED_BARRING. NB-IoT also timed out, with no usable cell measurement
+or rejection cause. Both used explicit accepted IPv4 APN/no-authentication
+configuration. Original LTE-M selection and CFUN0 were restored and verified.
+Provider event logs and any existing Quectel IMEI binding are the next targeted
+checks; an RF-front-end defect or particular account restriction is not proven.
+No cloud upload was attempted in this comparison.

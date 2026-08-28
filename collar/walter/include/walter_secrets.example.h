@@ -4,7 +4,7 @@
 #define WALTER_DEVICE_ID 1010
 #define WALTER_HOME_HUB_ID 0x0010
 #define WALTER_APN ""              // SIM provider's LTE-M/NB-IoT APN
-#define WALTER_APN_AUTH 0           // none=0, PAP=1, CHAP=2
+#define WALTER_APN_AUTH 0           // UE8.2.1.0 rejects empty PAP; none=0, PAP=1, CHAP=2
 #define WALTER_APN_USER ""
 #define WALTER_APN_PASSWORD ""
 #define WALTER_RAT 0                // LTE-M=0, NB-IoT=1

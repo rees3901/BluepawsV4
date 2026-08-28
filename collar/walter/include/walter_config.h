@@ -26,7 +26,7 @@
 #define WALTER_APN_PASSWORD ""
 #endif
 #ifndef WALTER_APN_AUTH
-#define WALTER_APN_AUTH 0 // none=0, PAP=1, CHAP=2
+#define WALTER_APN_AUTH 0 // GM02SP UE8.2.1.0 rejects empty PAP (CME50); none=0, PAP=1, CHAP=2
 #endif
 #ifndef WALTER_RAT
 #define WALTER_RAT 0 // WalterModemRAT: LTE-M=0, NB-IoT=1

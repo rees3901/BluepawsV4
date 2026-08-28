@@ -215,3 +215,91 @@ availability and RF installation/coverage remain open checks; keep PR142 draft.
 Private evidence: `full-band-lte.log`, `full-band-lte-diagnostics.log`,
 `full-band-lte-final-status.log`, `full-band-lte-packet.json`. Packet1025 SHA-256:
 `2726f8b353538b4756b82a88b3829b2e0c1e7276594016db7527ed2189b97d1c`.
+
+## Explicit authentication and alternate-RAT commissioning
+
+The user confirmed the same 1NCE SIM worked in a Quectel modem immediately before
+moving it to Walter. Treat that as established bench history, not an unresolved
+SIM-activation question. Only COM26 was used; no GNSS, LoRa or cloud transmission
+was requested during the following registration-only tests.
+
+### Implemented and verified changes
+
+- Host credential validation permits empty PAP username/password while retaining
+  AT-command delimiter/control-character checks.
+- The pinned WalterModem `setPDPAuthParams()` checks its cached NONE protocol
+  before assigning the requested protocol and can return success without sending
+  CGAUTH. The application now sends the validated command explicitly and propagates
+  modem rejection. Earlier generic authentication-OK messages did not prove PAP.
+- RAT changes now enter CFUN0 before SQNMODEACTIVE, reset the modem, refresh and
+  verify the selected mode, then return to CFUN4 for SIM initialization.
+- Fresh-boot `register ltem` / `register nbiot` commands own UART2, perform the
+  vendor GPIO45 reset sequence, apply identical APN/authentication settings and
+  allow five minutes of registration. They capture raw CEREG causes, CESQ and
+  SQNMONI, plus CEER before RF-off cleanup. They restore the original RAT and
+  verify CFUN0. No device clock, sequence number, TLS or HTTP is involved.
+- An initial raw test timed out at ATE0 after ESP flashing. Vendor initialization
+  recovered the modem and SIM; adding the same hardware reset pulse to the raw
+  diagnostic resolved that startup problem. It was not a network rejection.
+
+### Authentication result
+
+The modem accepted `AT+CGDCONT=1,"IP","iot.1nce.net"`. On UE8.2.1.0, both empty-PAP
+forms (`AT+CGAUTH=1,1,"",""` and `AT+CGAUTH=1,1`) failed with CME50. Consequently
+the testbed retains authentication NONE and explicitly sends `AT+CGAUTH=1,0`,
+which the modem accepted. No credentials were invented and no silent authentication
+fallback was added. This is a measured firmware/modem compatibility constraint,
+not evidence that 1NCE requires nonempty credentials.
+
+### LTE-M result, 19:28-19:33 UTC
+
+- SQNMODEACTIVE1 confirmed; active SQNCTM profile `standard`; SIM READY.
+- APN and explicit CGAUTH accepted. Automatic network selection was used.
+- CEREG included EMM cause15 (no suitable cells in tracking area), then cause19
+  (ESM failure). A transient vendor state80 was also seen, but no stable
+  registered-home/roaming state1/5 was reached in the five-minute window.
+- Unlike earlier unknown measurements, SQNMONI repeatedly identified **3 UK,
+  PLMN23420, band20, EARFCN6300**, with RSRP approximately -101 to -97.6dBm and
+  RSRQ -15.2 to -13dB. This establishes reception of a cell, not a working bearer.
+- Final live CEER: `lastEmmCause: ESM_FAILURE`,
+  `lastEsmCause: OPERATOR_DETERMINED_BARRING`.
+- Result NOT REGISTERED; no cloud transmission. Cleanup read back CFUN0 and
+  left the original LTE-M RAT unchanged.
+
+The explicit operator-barring result shifts the investigation toward network
+authorization/roaming/device policy. It does not identify which policy caused
+the refusal, and does not establish that all RF hardware is healthy. In particular,
+a previously working SIM can still encounter a different RAT/roaming policy or
+a device binding after being moved. Check 1NCE event logs and any existing IMEI
+lock for the Walter attempt; do not change subscription/security settings blindly.
+
+References: [Sequans AT manual](https://quickspot.io/docs/file/gm02s_at_commands.pdf),
+[1NCE APN settings](https://help.1nce.com/dev-hub/docs/data-services-apn),
+[ETSI TS24.301 ESM causes](https://www.etsi.org/deliver/etsi_TS/124300_124399/124301/12.06.00_60/ts_124301v120600p.pdf),
+[1NCE IMEI lock and event logs](https://help.1nce.com/docs/1nce-portal/portal-sims-sms/).
+
+### NB-IoT result, 19:34-19:39 UTC
+
+- CFUN0 transition, SQNMODEACTIVE2 selection, reset and mode readback succeeded.
+  The active profile remained `standard`; SIM READY and the same APN/CGAUTH
+  settings were accepted.
+- The five-minute window remained searching/unknown, with no registered state1/5.
+  CESQ remained unknown255 and SQNMONI returned no usable cell (CME551/552).
+- Final live CEER reported NO CAUSE RECEIVED for both EMM and ESM. This does not
+  establish NB-IoT coverage or the reason no registration completed.
+- Cleanup restored and read back SQNMODEACTIVE1 (LTE-M), then confirmed CFUN0.
+  The worker returned idle and the serial capture closed COM26. No HTTP occurred.
+
+Latest image:64,212 bytes static RAM and420,117 bytes flash; COM26 flash hash
+verified. Host tests pass, including actual CGAUTH/RAT functions and observed
+CEREG forms; all15 existing web-console tests pass. The raw UART registration
+paths were exercised on the board, not exhaustively mocked in host tests.
+No recurring RF test was left running. Other ports, PCB files, SIM-account settings
+and backend state were not changed by these diagnostics. Keep PR142 draft;
+neither stable registration nor cloud delivery has been established.
+
+Private evidence under `.pio/walter-bench-20260828/`:
+`pap-registration-ltem.log`, `pap-inspect-recovery.log`,
+`pap-registration-ltem-reset.log`, `pap-registration-ltem-optional.log`,
+`explicit-auth-registration-ltem.log`, `explicit-auth-registration-nbiot.log`,
+`explicit-auth-final-status.log`.

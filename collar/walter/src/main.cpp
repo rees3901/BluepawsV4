@@ -21,6 +21,7 @@ std::atomic<bool> inspectRequested{false};
 std::atomic<bool> rawDiagnosticRequested{false};
 std::atomic<bool> gnssInspectionRequested{false};
 std::atomic<bool> lteInspectionRequested{false};
+std::atomic<int> registrationRatRequested{-1};
 std::atomic<bool> offlineBench{true}; // Safe default after every ESP reboot.
 std::atomic<uint32_t> loraTxCount{0}, lteSkippedCount{0};
 std::atomic<uint8_t> selectedProfile{PROFILE_NORMAL};
@@ -66,8 +67,8 @@ bool packetCredentialsReady() {
 }
 bool credentialsReady() {
     return packetCredentialsReady() && safeAtString(WALTER_APN, 99, true) &&
-        safeAtString(WALTER_APN_USER, 63, WALTER_APN_AUTH != 0) &&
-        safeAtString(WALTER_APN_PASSWORD, 63, WALTER_APN_AUTH != 0) &&
+        safeAtString(WALTER_APN_USER, 63, false) &&
+        safeAtString(WALTER_APN_PASSWORD, 63, false) &&
         safeAtString(WALTER_BEARER_TOKEN, 256, true) && strlen(WALTER_BEARER_TOKEN) >= 32 &&
         strstr(WALTER_TLS_CA_PEM, "-----BEGIN CERTIFICATE-----") &&
         strstr(WALTER_TLS_CA_PEM, "-----END CERTIFICATE-----");
@@ -156,29 +157,181 @@ void inspectModem() {
     if (modem.getClock(&rsp)) console.printf("[INSPECT] Modem UTC=%lld\n", (long long)rsp.data.clock.epochTime);
     if (!radioOff()) console.println("[INSPECT] Could not confirm radio off; check board");
 }
+bool buildPdpAuthCommand(char* out, size_t capacity) {
+    if (WALTER_APN_AUTH < 0 || WALTER_APN_AUTH > 2 ||
+        !safeAtString(WALTER_APN_USER, 63, false) || !safeAtString(WALTER_APN_PASSWORD, 63, false)) return false;
+    // Omit optional credential fields when both are empty (Sequans p341).
+    const int n = (!strlen(WALTER_APN_USER) && !strlen(WALTER_APN_PASSWORD))
+        ? snprintf(out, capacity, "AT+CGAUTH=1,%u", unsigned(WALTER_APN_AUTH))
+        : snprintf(out, capacity, "AT+CGAUTH=1,%u,\"%s\",\"%s\"",
+            unsigned(WALTER_APN_AUTH), WALTER_APN_USER, WALTER_APN_PASSWORD);
+    return n > 0 && size_t(n) < capacity;
+}
+bool configurePdpAuth() {
+    // Pinned driver's setter returns early when its cached protocol is NONE,
+    // before assigning the requested protocol. Send explicitly; never log secrets.
+    char command[160]{};
+    return buildPdpAuthCommand(command, sizeof(command)) && modem.sendCmd(command);
+}
+bool selectRat(uint8_t requested) {
+    if (requested > 1 || cancelRequested.load()) return false;
+    WalterModemRsp rsp{};
+    if (!modem.getRAT(&rsp)) return false;
+    if (rsp.data.rat == requested) return true;
+    // Sequans LR8.2 p90: CFUN0 is required before SQNMODEACTIVE, not CFUN4.
+    return radioOff() && !cancelRequested.load() &&
+        modem.setRAT(WalterModemRAT(requested)) && modem.softReset() &&
+        modem.configCMEErrorReports() &&
+        modem.configCEREGReports(WALTER_MODEM_CEREG_REPORTS_ENABLED_UE_PSM_WITH_LOCATION_EMM_CAUSE) &&
+        modem.sendCmd("AT+SQNMODEACTIVE?") && modem.getRAT(&rsp) && rsp.data.rat == requested &&
+        modem.setOpState(WALTER_MODEM_OPSTATE_NO_RF) && waitForSimReady();
+}
+int registrationState(const char* line) {
+    if (strncmp(line, "+CEREG:", 7)) return -1;
+    char* tail = nullptr;
+    const char* first = line + 7;
+    const long value = strtol(first, &tail, 10);
+    if (tail == first) return -1;
+    while (*tail == ' ') ++tail;
+    if (*tail == ',') {
+        ++tail; while (*tail == ' ') ++tail;
+        // Query response has numeric <n>,<stat>; extended URC has quoted TAC.
+        if (*tail >= '0' && *tail <= '9') return int(strtol(tail, nullptr, 10));
+    }
+    return int(value);
+}
+bool rawAt(const char* command, String& response, uint32_t timeoutMs = 4000, bool cleanup = false,
+           bool resetting = false) {
+    response = "";
+    Serial2.print(command); Serial2.print("\r\n");
+    String line;
+    static String lastCereg;
+    const auto deadline = monotonicMs() + timeoutMs;
+    while (monotonicMs() < deadline && (cleanup || !cancelRequested.load())) {
+        if (!Serial2.available()) { vTaskDelay(pdMS_TO_TICKS(10)); continue; }
+        const char c = Serial2.read();
+        if (c != '\n') { if (line.length() < 240) line += c; continue; }
+        line.trim();
+        // Only fixed diagnostic responses: never echo transmitted auth strings.
+        const bool diagnostic = line.startsWith("+CEREG:") || line.startsWith("+CEER:") ||
+            line.startsWith("+SQNMONI:") || line.startsWith("+CESQ:") || line.startsWith("+CSQ:") ||
+            line.startsWith("+CFUN:") || line.startsWith("+CPIN:") || line.startsWith("+SQNCTM:") ||
+            line.startsWith("+SQNMODEACTIVE:") || line.startsWith("+CGATT:") || line.startsWith("+CGPADDR:");
+        if (diagnostic) {
+            if (response.length() + line.length() < 1000) { response += line; response += '\n'; }
+            if (!line.startsWith("+CEREG:") || line != lastCereg) console.printf("[REG-RAW] %s\n", line.c_str());
+            if (line.startsWith("+CEREG:")) lastCereg = line;
+        }
+        if (line == "ERROR" || line.startsWith("+CME ERROR:")) {
+            console.printf("[REG-RAW] %s\n", line.c_str()); return false;
+        }
+        if (resetting ? line == "+SYSSTART" : line == "OK") return true;
+        line = "";
+    }
+    console.println("[REG-RAW] Command cancelled or timed out"); return false;
+}
+void registerOnly(uint8_t rat) {
+    // No library UART tasks may exist here. No TLS, GNSS, packet or cloud calls.
+    if (begun || rat > 1) return;
+    Serial2.begin(115200, SERIAL_8N1, 14, 48);
+    Serial2.setPins(14, 48, 47, 21);
+    Serial2.setHwFlowCtrlMode(UART_HW_FLOWCTRL_CTS_RTS, 64);
+    while (Serial2.available()) Serial2.read();
+    String response;
+    int originalMode = 0;
+    bool changed = false;
+    const bool registered = [&]() {
+        console.printf("[REG] Registration-only %s; APN auth=%u; no GNSS/LoRa/HTTP\n", rat ? "NB-IoT" : "LTE-M", unsigned(WALTER_APN_AUTH));
+        // Same reset pulse/hold as WalterModem::begin/reset, without starting
+        // its UART tasks. A fresh ESP flash does not guarantee an awake modem.
+        gpio_hold_dis(GPIO_NUM_45);
+        gpio_set_direction(GPIO_NUM_45, GPIO_MODE_OUTPUT);
+        gpio_set_pull_mode(GPIO_NUM_45, GPIO_FLOATING);
+        gpio_set_level(GPIO_NUM_45, 0); vTaskDelay(pdMS_TO_TICKS(10));
+        gpio_set_level(GPIO_NUM_45, 1); gpio_hold_en(GPIO_NUM_45);
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        if (!rawAt("", response, 30000, false, true) || !rawAt("ATE0", response) || !rawAt("AT+CMEE=1", response) ||
+            !rawAt("AT+CFUN=0", response, 30000) || !rawAt("AT+SQNMODEACTIVE?", response)) return false;
+        int modeOffset = response.indexOf("+SQNMODEACTIVE:");
+        if (modeOffset < 0 || sscanf(response.c_str() + modeOffset, "+SQNMODEACTIVE: %d", &originalMode) != 1 ||
+            (originalMode != 1 && originalMode != 2)) return false;
+        if (originalMode != rat + 1) {
+            changed = true; // Restore even if the mode command times out ambiguously.
+            const char* mode = rat ? "AT+SQNMODEACTIVE=2" : "AT+SQNMODEACTIVE=1";
+            if (!rawAt(mode, response) || !rawAt("AT^RESET", response, 30000, false, true) ||
+                !rawAt("ATE0", response) || !rawAt("AT+CMEE=1", response)) return false;
+        }
+        if (!rawAt("AT+SQNMODEACTIVE?", response)) return false;
+        int active = 0;
+        modeOffset = response.indexOf("+SQNMODEACTIVE:");
+        if (modeOffset < 0 || sscanf(response.c_str() + modeOffset, "+SQNMODEACTIVE: %d", &active) != 1 || active != rat + 1) return false;
+        if (!rawAt("AT+SQNCTM?", response) || !rawAt("AT+CFUN=4", response, 30000)) return false;
+        bool ready = false;
+        const auto simDeadline = monotonicMs() + 10000;
+        do {
+            if (rawAt("AT+CPIN?", response) && response.indexOf("+CPIN: READY") >= 0) { ready = true; break; }
+            if (response.indexOf("PIN") >= 0 || response.indexOf("PUK") >= 0) break;
+        } while (monotonicMs() < simDeadline && pauseMs(500));
+        if (!ready) return false;
+        char command[180]{};
+        if (!safeAtString(WALTER_APN, 99, true)) return false;
+        snprintf(command, sizeof(command), "AT+CGDCONT=1,\"IP\",\"%s\"", WALTER_APN);
+        if (!modemStep("Registration APN", rawAt(command, response))) return false;
+        if (!buildPdpAuthCommand(command, sizeof(command)) || !modemStep("Registration CGAUTH", rawAt(command, response))) return false;
+        console.println("[REG] Explicit IPv4 APN and CGAUTH accepted by modem");
+        if (!rawAt("AT+CEREG=5", response) || !rawAt("AT+CFUN=1", response, 30000) ||
+            !rawAt("AT+COPS=0", response, 30000)) return false;
+        const auto deadline = monotonicMs() + 300000; // Controlled five-minute test, not a production policy.
+        uint64_t nextMetrics = 0;
+        int previous = -1;
+        while (!cancelRequested.load() && monotonicMs() < deadline) {
+            if (!rawAt("AT+CEREG?", response)) return false;
+            const int offset = response.lastIndexOf("+CEREG:");
+            const int state = offset < 0 ? -1 : registrationState(response.c_str() + offset);
+            if (state == 1 || state == 5) {
+                rawAt("AT+CGATT?", response); rawAt("AT+CGPADDR=1", response);
+                rawAt("AT+CESQ", response); rawAt("AT+SQNMONI=0", response);
+                return true;
+            }
+            if (state == 3 && previous != 3) rawAt("AT+CEER", response);
+            previous = state;
+            if (monotonicMs() >= nextMetrics) {
+                console.printf("[REG] Elapsed=%lus\n", (unsigned long)((monotonicMs() + 300000 - deadline) / 1000));
+                rawAt("AT+CESQ", response); rawAt("AT+SQNMONI=0", response);
+                nextMetrics = monotonicMs() + 30000;
+            }
+            if (!pauseMs(5000)) break;
+        }
+        if (!cancelRequested.load()) { rawAt("AT+CEER", response); rawAt("AT+CESQ", response); rawAt("AT+SQNMONI=0", response); }
+        return false;
+    }();
+    console.printf("[REG] Result=%s; no cloud transmission\n", registered ? "REGISTERED" : "NOT REGISTERED");
+    bool off = rawAt("AT+CFUN=0", response, 30000, true);
+    if (off && changed) {
+        off = rawAt(originalMode == 1 ? "AT+SQNMODEACTIVE=1" : "AT+SQNMODEACTIVE=2", response, 4000, true) &&
+            rawAt("AT^RESET", response, 30000, true, true) && rawAt("AT+CFUN=0", response, 30000, true);
+        int restored = 0;
+        const bool queried = off && rawAt("AT+SQNMODEACTIVE?", response, 4000, true);
+        const int offset = response.indexOf("+SQNMODEACTIVE:");
+        off = queried && offset >= 0 && sscanf(response.c_str() + offset, "+SQNMODEACTIVE: %d", &restored) == 1 && restored == originalMode;
+    }
+    off = off && rawAt("AT+CFUN?", response, 4000, true) && response.indexOf("+CFUN: 0") >= 0;
+    console.printf("[REG] Cleanup=%s; original RAT %s\n", off ? "RF OFF" : "UNCONFIRMED - check board",
+        changed ? (off ? "restored" : "restoration unconfirmed") : "unchanged");
+    Serial2.end();
+}
 bool prepareModem() {
     if (!beginModem()) return false;
     if (configured) return true;
     if (cancelRequested.load()) return false;
     console.println("[WALTER] Configuring SIM, APN and TLS (CA slot12/profile2)");
-    WalterModemRsp rsp{};
     if (!modem.checkComm() || !modem.setOpState(WALTER_MODEM_OPSTATE_NO_RF) ||
         !waitForSimReady()) {
         console.println("[WALTER] SIM/modem not ready; no PIN attempts made"); return false;
     }
-    if (!modem.getRAT(&rsp)) return false;
-    if (rsp.data.rat != WALTER_RAT) {
-        // SQNMODEACTIVE takes effect after a modem restart. Refresh the driver's
-        // cached RAT explicitly rather than trusting its pre-reset value.
-        if (!modem.setRAT(WalterModemRAT(WALTER_RAT)) || !modem.softReset() ||
-            !modem.configCMEErrorReports() ||
-            !modem.configCEREGReports(WALTER_MODEM_CEREG_REPORTS_ENABLED_UE_PSM_WITH_LOCATION_EMM_CAUSE) ||
-            !modem.sendCmd("AT+SQNMODEACTIVE?") || !modem.getRAT(&rsp) || rsp.data.rat != WALTER_RAT ||
-            !modem.setOpState(WALTER_MODEM_OPSTATE_NO_RF) || !waitForSimReady()) return false;
-    }
+    if (!selectRat(WALTER_RAT)) return false;
     if (!modemStep("PDP context", modem.definePDPContext(1, WALTER_APN)) ||
-        !modemStep("PDP authentication", modem.setPDPAuthParams(WalterModemPDPAuthProtocol(WALTER_APN_AUTH),
-                               WALTER_APN_USER, WALTER_APN_PASSWORD, 1)) ||
+        !modemStep("PDP authentication", configurePdpAuth()) ||
         !modemStep("Trusted CA slot", modem.tlsWriteCredential(false, WALTER_CA_SLOT, WALTER_TLS_CA_PEM)) ||
         !modemStep("TLS CA/hostname validation", modem.tlsConfigProfile(WALTER_TLS_PROFILE, WALTER_MODEM_TLS_VALIDATION_URL_AND_CA,
                                WALTER_MODEM_TLS_VERSION_12, WALTER_CA_SLOT)) ||
@@ -394,8 +547,10 @@ void worker(void*) {
             const bool raw = rawDiagnosticRequested.exchange(false);
             const bool gnss = gnssInspectionRequested.exchange(false);
             const bool lte = lteInspectionRequested.exchange(false);
+            const int registrationRat = registrationRatRequested.exchange(-1);
             if (!cancelRequested.load()) {
-                if (raw) diagnoseRaw();
+                if (registrationRat >= 0) registerOnly(uint8_t(registrationRat));
+                else if (raw) diagnoseRaw();
                 else if (gnss) {
                     if (beginModem() && radioOff() && modem.gnssConfig()) {
                         const bool fixed = acquireFix();
@@ -452,6 +607,11 @@ void command(const String& text) {
             (unsigned long)lteSkippedCount.load()); return;
     }
     if (busy.load() || running.load() || oneShot.load() || inspectRequested.load()) { console.println("[WALTER] Stop and wait for Idle before changing settings"); return; }
+    if (text == "register ltem" || text == "register nbiot") {
+        if (begun) { console.println("[REG] Requires fresh ESP boot before library modem initialization"); return; }
+        cancelRequested = false; rawDiagnosticRequested = false; gnssInspectionRequested = false; lteInspectionRequested = false;
+        registrationRatRequested = text == "register nbiot" ? 1 : 0; inspectRequested = true; return;
+    }
     if (text == "bench on" || text == "bench off") {
         offlineBench = text == "bench on";
         console.printf("[BENCH] %s; LoRa always simulated; UTC must be seeded again after ESP reboot\n",
@@ -474,6 +634,7 @@ void command(const String& text) {
             console.println("[LTE] Seed actual UTC with clock <epoch>; APN, bearer, CA and HMAC required"); return;
         }
         cancelRequested = false; rawDiagnosticRequested = text == "diagnose";
+        registrationRatRequested = -1;
         gnssInspectionRequested = text == "gnss"; lteInspectionRequested = text == "lte";
         inspectRequested = true; return;
     }
@@ -489,7 +650,7 @@ void command(const String& text) {
     } else if (text == "home on" || text == "home off") {
         simulatedHome = text == "home on";
         console.println("[WALTER] Home is an explicit simulation, not a received BLE beacon");
-    } else console.println("Commands: status | bench on/off | inspect | diagnose | clock <UTC epoch> | gnss | lte | start | stop | send | profile normal/powersave/active/lost/debug | home on/off");
+    } else console.println("Commands: status | bench on/off | inspect | diagnose | register ltem/nbiot | clock <UTC epoch> | gnss | lte | start | stop | send | profile normal/powersave/active/lost/debug | home on/off");
 }
 } // namespace
 

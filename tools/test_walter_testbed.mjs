@@ -47,6 +47,8 @@ uint8_t hmacKey[32]={1};
 ${firmwareFunction('safeAtString')}
 ${firmwareFunction('packetCredentialsReady')}
 ${firmwareFunction('credentialsReady')}
+${firmwareFunction('buildPdpAuthCommand')}
+${firmwareFunction('registrationState','int')}
 constexpr unsigned WALTER_MODEM_SIM_STATE_READY=0, WALTER_MODEM_RSP_DATA_TYPE_CME_ERROR=1;
 struct WalterModemRsp {unsigned result=0,type=0;struct {unsigned simState=0,cmeError=0;} data;};
 std::atomic<bool> cancelRequested{false};
@@ -157,7 +159,55 @@ void lteOnlyTests(){
     assert(console.log.find("[LORA-STUB]")==std::string::npos);
     assert(console.log.find("No-fix test packet")!=std::string::npos);
 }
+namespace modemSetupTests {
+struct WalterModemRsp {struct {int rat=0;} data;};
+using WalterModemRAT=int;
+constexpr int WALTER_MODEM_OPSTATE_NO_RF=4;
+constexpr int WALTER_MODEM_CEREG_REPORTS_ENABLED_UE_PSM_WITH_LOCATION_EMM_CAUSE=5;
+struct SetupModem {
+    int cached=0,active=0,pending=0,state=4;
+    bool offOk=true,resetOk=true,stale=false,sendOk=true;
+    std::vector<std::string> calls;
+    bool getRAT(WalterModemRsp* r){calls.push_back("getRAT");r->data.rat=cached;return true;}
+    bool setRAT(int r){assert(state==0);calls.push_back("setRAT");pending=r;return true;}
+    bool softReset(){calls.push_back("reset");if(!resetOk)return false;active=pending;return true;}
+    bool configCMEErrorReports(){calls.push_back("CME");return true;}
+    bool configCEREGReports(int){calls.push_back("CEREG");return true;}
+    bool sendCmd(const char* c){calls.push_back(c);if(!strcmp(c,"AT+SQNMODEACTIVE?")&&!stale)cached=active;return sendOk;}
+    bool setOpState(int s){calls.push_back("CFUN4");state=s;return true;}
+} modem;
+bool radioOff(){modem.calls.push_back("CFUN0");if(!modem.offOk)return false;modem.state=0;return true;}
+bool waitForSimReady(){modem.calls.push_back("SIM");return true;}
+${firmwareFunction('configurePdpAuth')}
+${firmwareFunction('selectRat')}
+void run(){
+    cancelRequested=false;
+    assert(selectRat(0) && modem.calls==std::vector<std::string>{"getRAT"});
+    modem={};assert(selectRat(1));
+    const std::vector<std::string> expected={"getRAT","CFUN0","setRAT","reset","CME","CEREG","AT+SQNMODEACTIVE?","getRAT","CFUN4","SIM"};
+    assert(modem.calls==expected && modem.cached==1);
+    modem={};modem.offOk=false;assert(!selectRat(1) && modem.calls.size()==2);
+    modem={};modem.resetOk=false;assert(!selectRat(1) && modem.calls.back()=="reset");
+    modem={};modem.stale=true;assert(!selectRat(1) && modem.calls.back()=="getRAT");
+    modem={};cancelRequested=true;assert(!selectRat(1) && modem.calls.empty());cancelRequested=false;
+    assert(!selectRat(2) && modem.calls.empty());
+    WALTER_APN_AUTH=1;assert(configurePdpAuth() && modem.calls.back()=="AT+CGAUTH=1,1");
+    modem.sendOk=false;assert(!configurePdpAuth());
+    WALTER_APN_AUTH=0;
+}
+}
 int main() {
+    modemSetupTests::run();
+    assert(registrationState("+CEREG: 5,2")==2);
+    assert(registrationState("+CEREG: 5,0,,,,0,19")==0);
+    assert(registrationState("+CEREG: 3,,,,0,15")==3);
+    assert(registrationState("+CEREG: 80")==80);
+    assert(registrationState("+CEREG: 5,3,\"1234\",\"00001234\",7,0,15")==3);
+    assert(registrationState("+CEREG: 3,\"1234\",\"00001234\",7,0,15")==3);
+    assert(registrationState("+CEREG: 5")==5);
+    assert(registrationState("+CEREG: 5, 1")==1);
+    assert(registrationState("+CEREG: ")==-1);
+    assert(registrationState("+CESQ: 99,99")==-1);
     modem.states={-1,-1,0};assert(waitForSimReady() && modem.calls==3);
     modem.calls=0;modem.states={1};assert(!waitForSimReady() && modem.calls==1); // PIN required: no guessing/retry.
     modem.calls=0;modem.states={};fakeMs=0;assert(!waitForSimReady() && fakeMs==10000);
@@ -188,7 +238,16 @@ int main() {
     assert(credentialsReady());
     WALTER_APN="";assert(!credentialsReady() && packetCredentialsReady());WALTER_APN="test.apn";
     hmacKey[0]=0;assert(!credentialsReady());hmacKey[0]=1;
-    WALTER_APN_AUTH=1;assert(!credentialsReady());WALTER_APN_AUTH=0;
+    WALTER_APN_AUTH=1;assert(credentialsReady()); // 1NCE PAP permits empty credentials.
+    char authCommand[160]{};
+    assert(buildPdpAuthCommand(authCommand,sizeof(authCommand)) && !strcmp(authCommand,"AT+CGAUTH=1,1"));
+    WALTER_APN_USER="user";WALTER_APN_PASSWORD="pass";
+    assert(buildPdpAuthCommand(authCommand,sizeof(authCommand)) && !strcmp(authCommand,"AT+CGAUTH=1,1,\"user\",\"pass\""));
+    WALTER_APN_USER="";WALTER_APN_PASSWORD="";
+    assert(!buildPdpAuthCommand(authCommand,8));
+    WALTER_APN_USER="bad\"value";assert(!credentialsReady() && !buildPdpAuthCommand(authCommand,sizeof(authCommand)));WALTER_APN_USER="";
+    WALTER_APN_PASSWORD="bad\r\nvalue";assert(!credentialsReady() && !buildPdpAuthCommand(authCommand,sizeof(authCommand)));WALTER_APN_PASSWORD="";
+    WALTER_APN_AUTH=3;assert(!buildPdpAuthCommand(authCommand,sizeof(authCommand)));WALTER_APN_AUTH=0;
     WALTER_BEARER_TOKEN="bad\r\nAuthorization: injected-token-value";assert(!credentialsReady());
     WALTER_BEARER_TOKEN="synthetic-token-for-offline-tests-only";
     WALTER_TLS_CA_PEM="";assert(!credentialsReady());
@@ -288,4 +347,4 @@ assert.equal(parsed.packet.deviceGuid16,1010);
 assert.deepEqual(Buffer.from(parsed.packet.rawBytes),packet);
 assert.equal(decoded.packet.sha256,createHash('sha256').update(packet).digest('hex'));
 writeFileSync(resolve(dir,'packet-fixture.json'),JSON.stringify({hex,wrapper,decoded},null,2));
-console.log('Walter PASS: actual offline/online cycle, isolated LTE-only diagnostic, TX completion, immutable fallback bytes, stop/no-clock gates, credential gates, NVS reservations/reboots/write failures, five-profile cadence, home/away, boot/forced LTE, GNSS validity/staleness, fault flags, strict receipts, C++ HMAC -> web workbench -> Supabase parser. No network or serial traffic.');
+console.log('Walter PASS: explicit CGAUTH/PAP validation, CFUN0 RAT switching/reset/readback, CEREG parsing, actual offline/online cycle, isolated LTE-only diagnostic, TX completion, immutable fallback bytes, stop/no-clock gates, credential gates, NVS reservations/reboots/write failures, five-profile cadence, home/away, boot/forced LTE, GNSS validity/staleness, fault flags, strict receipts, C++ HMAC -> web workbench -> Supabase parser. No network or serial traffic.');
