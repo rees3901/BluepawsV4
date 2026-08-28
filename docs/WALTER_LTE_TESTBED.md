@@ -200,6 +200,8 @@ which must use a different spare identity.
 | `diagnose` | Before any modem initialization after ESP boot: fixed read-only AT queries for version, operational state, registration, rejection history and bands |
 | `clock <UTC epoch>` | Explicitly seed actual host UTC while idle; no invented GNSS fix |
 | `gnss` | With a valid UTC seed, test real GNSS with LTE off; no packet or upload |
+| `gnss settle` | Diagnostic: repeat cold/warm snapshots within a 60-second budget, log positions/uncertainty/CN0, select a real fresh result; no upload |
+| `gnss hot` | Same diagnostic, switching to hot-start only after a usable snapshot from this session; restore cold/warm configuration afterward |
 | `assist` | With valid UTC and configured modem credentials, inspect GNSS assistance and download missing/due almanac or realtime ephemeris over LTE; verify expiry and return RF-off/idle; no telemetry |
 | `lte` | With actual host UTC and credentials, register on LTE and attempt one signed no-fix upload; no GNSS or LoRa stub; returns to RF-off/idle |
 | `register ltem` / `register nbiot` | Before library initialization: reset modem, apply APN/authentication, compare registration for up to five minutes, capture raw diagnostics, restore original RAT and RF off; no GNSS/LoRa/HTTP |
@@ -366,6 +368,46 @@ and 1000 m validity ceiling are unchanged; there is no 5 m requirement.
 On August 28, an expired almanac was refreshed, followed by 107.3 m and 77.4 m
 receiver uncertainty estimates. This sequence is evidence of recovery, not a
 controlled test proving assistance alone caused the improvement.
+
+### Comparing snapshots with a bounded settling session
+
+The single-fix `gnss` command and normal `send`/`start` telemetry policy remain
+unchanged for comparison. With actual host UTC seeded and the antenna stationary,
+run `gnss`, then `gnss settle`, then `gnss hot`, waiting for `Idle` between commands.
+These are real GNSS operations even in offline bench mode, but do not register
+LTE, refresh assistance, send packets, or consume a telemetry sequence. Use
+`assist` separately if necessary; changing assistance mid-comparison adds another
+variable. Do not reset or move the antenna between comparison sessions.
+
+The settling diagnostic starts in high-reliability, cold/warm acquisition mode.
+It requests up to20 successive snapshots, with a one-second gap, within a shared
+60-second acquisition budget. It can finish early after three consecutive fresh
+snapshots report uncertainty at most50m with successive coordinate separations
+at most25m and increasing timestamps. These are experimental stopping criteria,
+not proven positional accuracy. Disagreement or a coarse/invalid result resets
+the consistency count. A single request may consume the entire budget.
+
+At completion, select the lowest reported uncertainty among this session's
+usable snapshots that are still younger than60 seconds; equal estimates prefer
+the later sample. Coordinates, uncertainty and capture timestamp all come from
+that one snapshot. No averaging, artificial uncertainty reduction, timestamp
+refresh or clock rewind is performed. The1000m validity ceiling still applies;
+a coarse fallback is logged honestly, and no fresh candidate means NO FIX.
+
+`gnss hot` changes only subsequent acquisition modes after a valid session fix;
+it never supplies an assumed home position. This is repeated snapshot acquisition,
+not continuous tracking. The modem remains powered with LTE RF off between
+snapshots. Timeout or `stop` cancels an outstanding acquisition; stop discards
+any candidate, and cancellation failure stops the session with a warning. Vendor
+AT calls and cleanup can extend elapsed wall time beyond the60-second budget.
+The worker restores cold/warm mode after the hot comparison and attempts RF-off
+cleanup before returning idle. Check any configuration/cleanup warning.
+
+Each `GNSS SAMPLE` logs capture time, host wait, modem time-to-fix, coordinates,
+uncertainty, satellite-entry count and count with CN0 at least30. `GNSS CN0` lines
+log individual satellite IDs and signal strengths. Entries are not claimed to
+be satellites used in the navigation solution. Raw serial logs contain location
+data and should remain private.
 
 ## Home-hub distance display
 

@@ -20,6 +20,7 @@ std::atomic<bool> running{false}, busy{false}, cancelRequested{false}, oneShot{f
 std::atomic<bool> inspectRequested{false};
 std::atomic<bool> rawDiagnosticRequested{false};
 std::atomic<bool> gnssInspectionRequested{false};
+std::atomic<uint8_t> gnssInspectionMode{0}; // 0=single, 1=settle, 2=settle with hot starts.
 std::atomic<bool> lteInspectionRequested{false};
 std::atomic<bool> assistanceRequested{false};
 std::atomic<unsigned> assistanceEvents{0};
@@ -417,6 +418,92 @@ bool refreshGnssAssistance() {
     }
     return !cancelRequested.load();
 }
+bool usableGnssSnapshot(const WMGNSSFixEvent& fix) {
+    const auto now = utcNow();
+    return fix.status == WALTER_MODEM_GNSS_FIX_STATUS_READY &&
+        walter::plausibleUtc(fix.timestamp, BLUEPAWS_BUILD_UNIX_TIME) &&
+        now >= fix.timestamp && int64_t(now) - fix.timestamp < GPS_STALE_THRESHOLD_S &&
+        std::isfinite(fix.latitude) && std::isfinite(fix.longitude) &&
+        fabs(fix.latitude) <= 90 && fabs(fix.longitude) <= 180 && fix.satCount >= 4 &&
+        fix.satCount <= WALTER_MODEM_GNSS_MAX_SATS &&
+        std::isfinite(fix.estimatedConfidence) && fix.estimatedConfidence > 0 && fix.estimatedConfidence <= 1000;
+}
+double gnssSeparationM(const walter::Fix& a, const walter::Fix& b) {
+    constexpr double radians = 3.14159265358979323846 / 180.0;
+    const double latA = a.latE7 / 1e7 * radians, latB = b.latE7 / 1e7 * radians;
+    const double dLat = latB - latA, dLon = (double(b.lonE7) - a.lonE7) / 1e7 * radians;
+    const double h = pow(sin(dLat / 2), 2) + cos(latA) * cos(latB) * pow(sin(dLon / 2), 2);
+    return 6371000.0 * 2 * asin(sqrt(fmax(0.0, fmin(1.0, h))));
+}
+bool settleGnss(bool hot) {
+    // Diagnostic only: keep LTE off, retain each real snapshot, never fabricate a refined fix.
+    lastFix = {};
+    if (!utcNow() || cancelRequested.load() || !radioOff() || !modem.gnssConfig()) return false;
+    constexpr unsigned maxAttempts = 20;
+    walter::Fix candidates[maxAttempts]{};
+    double uncertainties[maxAttempts]{};
+    unsigned attempts = 0, count = 0, consistent = 0;
+    walter::Fix previous{};
+    const auto started = monotonicMs(), deadline = started + 60000;
+    console.printf("[GNSS SETTLE] OPEN budget=60000ms mode=%s target=50m consistent=3 max_step=25m\n",
+                   hot ? "hot-after-valid" : "cold-warm");
+    while (!cancelRequested.load() && monotonicMs() < deadline && attempts < maxAttempts) {
+        // Only opt into hot starts after a real fresh fix from this session, never a hardcoded position.
+        if (hot && previous.valid && !modem.gnssConfig(WALTER_MODEM_GNSS_SENS_MODE_HIGH,
+                                                     WALTER_MODEM_GNSS_ACQ_MODE_HOT_START)) break;
+        xQueueReset(gnssEvents);
+        if (!modem.gnssSetUTCTime(utcNow()) || cancelRequested.load() || monotonicMs() >= deadline) break;
+        const auto attemptStarted = monotonicMs();
+        if (!modem.gnssPerformAction()) break;
+        ++attempts;
+        WMGNSSFixEvent fix{};
+        bool received = false;
+        while (!cancelRequested.load() && monotonicMs() < deadline) {
+            if (xQueueReceive(gnssEvents, &fix, pdMS_TO_TICKS(100)) == pdTRUE) { received = true; break; }
+        }
+        if (!received) {
+            if (!modem.gnssPerformAction(WALTER_MODEM_GNSS_ACTION_CANCEL)) {
+                console.println("[GNSS SETTLE] Cancellation unconfirmed; stop session and check modem");
+                running = false; cancelRequested = true; return false;
+            }
+            break;
+        }
+        unsigned strong = 0;
+        const unsigned satCount = unsigned(fix.satCount) < WALTER_MODEM_GNSS_MAX_SATS
+            ? unsigned(fix.satCount) : WALTER_MODEM_GNSS_MAX_SATS;
+        for (unsigned i = 0; i < satCount; ++i) if (fix.sats[i].signalStrength >= 30) ++strong;
+        console.printf("[GNSS SAMPLE] n=%u elapsed_ms=%llu ttf_ms=%lu status=%u uncertainty=%.1fm lat=%.7f lon=%.7f utc=%lld entries=%u cn0_ge30=%u\n",
+            attempts, (unsigned long long)(monotonicMs() - attemptStarted), (unsigned long)fix.timeToFix,
+            unsigned(fix.status), fix.estimatedConfidence, fix.latitude, fix.longitude,
+            (long long)fix.timestamp, unsigned(fix.satCount), strong);
+        for (unsigned i = 0; i < satCount; ++i)
+            console.printf("[GNSS CN0] sample=%u entry=%u satellite=%u cn0=%u\n", attempts, i,
+                           unsigned(fix.sats[i].satNo), unsigned(fix.sats[i].signalStrength));
+        if (usableGnssSnapshot(fix) && !cancelRequested.load()) {
+            walter::Fix candidate{true, int32_t(llround(fix.latitude * 1e7)), int32_t(llround(fix.longitude * 1e7)),
+                                 uint32_t(fix.timestamp), uint16_t(ceil(fix.estimatedConfidence)), fix.satCount};
+            candidates[count] = candidate; uncertainties[count++] = fix.estimatedConfidence;
+            const bool target = fix.estimatedConfidence <= 50;
+            consistent = target ? (previous.valid && candidate.utc > previous.utc &&
+                gnssSeparationM(previous, candidate) <= 25 ? consistent + 1 : 1) : 0;
+            previous = candidate;
+            if (consistent >= 3) break;
+        } else { consistent = 0; previous = {}; }
+        if (monotonicMs() + 1000 >= deadline || !pauseMs(1000)) break;
+    }
+    // Selection uses the original timestamp. Never rewind the host clock to the best earlier snapshot.
+    double best = 1001;
+    if (!cancelRequested.load()) for (unsigned i = 0; i < count; ++i) {
+        const auto now = utcNow();
+        if (now >= candidates[i].utc && now - candidates[i].utc < GPS_STALE_THRESHOLD_S && uncertainties[i] <= best) {
+            lastFix = candidates[i]; best = uncertainties[i];
+        }
+    }
+    console.printf("[GNSS SETTLE] CLOSED elapsed_ms=%llu attempts=%u usable=%u consistent=%u selected=%u uncertainty=%.1fm utc=%lu (no upload)\n",
+        (unsigned long long)(monotonicMs() - started), attempts, count, consistent, lastFix.valid,
+        lastFix.valid ? best : 0, (unsigned long)lastFix.utc);
+    return lastFix.valid && !cancelRequested.load();
+}
 bool acquireFix() {
     // GNSS and LTE share the modem: never operate them concurrently.
     if (!radioOff() || cancelRequested.load()) return false;
@@ -669,7 +756,9 @@ void worker(void*) {
                     if (begun && !radioOff()) console.println("[ASSIST] Could not confirm RF off");
                 } else if (gnss) {
                     if (beginModem() && radioOff() && modem.gnssConfig()) {
-                        const bool fixed = acquireFix();
+                        const auto mode = gnssInspectionMode.load();
+                        const bool fixed = mode ? settleGnss(mode == 2) : acquireFix();
+                        if (mode == 2 && !modem.gnssConfig()) console.println("[GNSS] Could not restore cold/warm configuration; check modem");
                         console.printf("[GNSS] Inspection result=%s (no upload)\n", fixed ? "VALID FIX" : "NO FIX");
                     }
                     if (begun && !radioOff()) console.println("[GNSS] Could not confirm RF off");
@@ -743,15 +832,18 @@ void command(const String& text) {
         setUtc(epoch);
         console.println("[CLOCK] Explicit host UTC seed accepted; no coordinates or GNSS validity fabricated"); return;
     }
-    if (text == "inspect" || text == "diagnose" || text == "gnss" || text == "lte" || text == "assist") {
+    const bool gnssCommand = text == "gnss" || text == "gnss settle" || text == "gnss hot";
+    if (text == "inspect" || text == "diagnose" || gnssCommand || text == "lte" || text == "assist") {
         if (text == "diagnose" && begun) { console.println("[DIAG] Requires a fresh ESP boot before inspect/start/send"); return; }
-        if ((text == "gnss" || text == "assist") && !utcNow()) { console.println("[GNSS] Seed actual UTC with clock <epoch> first"); return; }
+        if ((gnssCommand || text == "assist") && !utcNow()) { console.println("[GNSS] Seed actual UTC with clock <epoch> first"); return; }
         if (text == "lte" && (!utcNow() || !credentialsReady())) {
             console.println("[LTE] Seed actual UTC with clock <epoch>; APN, bearer, CA and HMAC required"); return;
         }
         cancelRequested = false; rawDiagnosticRequested = text == "diagnose";
         registrationRatRequested = -1;
-        gnssInspectionRequested = text == "gnss"; lteInspectionRequested = text == "lte";
+        gnssInspectionRequested = gnssCommand;
+        gnssInspectionMode = text == "gnss hot" ? 2 : text == "gnss settle" ? 1 : 0;
+        lteInspectionRequested = text == "lte";
         assistanceRequested = text == "assist";
         inspectRequested = true; return;
     }
@@ -767,7 +859,7 @@ void command(const String& text) {
     } else if (text == "home on" || text == "home off") {
         simulatedHome = text == "home on";
         console.println("[WALTER] Home is an explicit simulation, not a received BLE beacon");
-    } else console.println("Commands: status | bench on/off | inspect | diagnose | register ltem/nbiot | clock <UTC epoch> | gnss | assist | lte | start | stop | send | profile normal/powersave/active/lost/debug | home on/off");
+    } else console.println("Commands: status | bench on/off | inspect | diagnose | register ltem/nbiot | clock <UTC epoch> | gnss [settle/hot] | assist | lte | start | stop | send | profile normal/powersave/active/lost/debug | home on/off");
 }
 } // namespace
 

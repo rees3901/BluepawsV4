@@ -24,6 +24,7 @@ writeFileSync(source,String.raw`
 #include <atomic>
 #include <vector>
 #include <cstdarg>
+#include <cmath>
 #include "walter_policy.h"
 #include "walter_http.h"
 constexpr uint32_t utc=1787911200;
@@ -298,6 +299,96 @@ void run(){
     nowUtc=0;assert(!refreshGnssAssistance());nowUtc=utc;
 }
 }
+
+namespace settlingTests {
+constexpr unsigned WALTER_MODEM_GNSS_MAX_SATS=32, WALTER_MODEM_GNSS_FIX_STATUS_READY=0;
+constexpr unsigned WALTER_MODEM_GNSS_SENS_MODE_HIGH=3, WALTER_MODEM_GNSS_ACQ_MODE_HOT_START=1;
+constexpr unsigned WALTER_MODEM_GNSS_ACTION_CANCEL=1, BLUEPAWS_BUILD_UNIX_TIME=utc;
+constexpr unsigned pdTRUE=1;
+unsigned pdMS_TO_TICKS(unsigned n){return n;}
+struct Sat {uint8_t satNo=1,signalStrength=35;};
+struct WMGNSSFixEvent {
+    unsigned status=0;int64_t timestamp=utc;uint32_t timeToFix=2000;
+    double estimatedConfidence=80,latitude=51.9,longitude=-2.2;
+    uint8_t satCount=9;Sat sats[32];
+};
+std::vector<WMGNSSFixEvent> events;
+size_t eventIndex=0;
+bool pending=false,automaticTime=true,rfOk=true,configOk=true,clockOk=true,startOk=true,cancelOk=true,noClock=false;
+unsigned cancellations=0,hotStarts=0;uint64_t readyAt=0,cancelAt=UINT64_MAX;
+int gnssEvents=0;
+uint32_t utcNow(){return noClock?0:utc+fakeMs/1000;}
+void xQueueReset(int){}
+unsigned xQueueReceive(int,WMGNSSFixEvent* f,unsigned wait){
+    fakeMs+=wait;
+    if(fakeMs>=cancelAt)cancelRequested=true;
+    if(pending&&fakeMs>=readyAt&&eventIndex<events.size()){
+        *f=events[eventIndex++];if(automaticTime)f->timestamp=utc+(readyAt-f->timeToFix)/1000;
+        pending=false;return pdTRUE;
+    }
+    return 0;
+}
+bool radioOff(){return rfOk;}
+struct Modem {
+    bool gnssConfig(unsigned=3,unsigned hot=0){if(hot)++hotStarts;return configOk;}
+    bool gnssSetUTCTime(uint32_t){return clockOk;}
+    bool gnssPerformAction(unsigned action=0){
+        if(action){++cancellations;pending=false;return cancelOk;}
+        pending=true;readyAt=fakeMs+(eventIndex<events.size()?events[eventIndex].timeToFix:1000);
+        return startOk;
+    }
+}modem;
+${firmwareFunction('usableGnssSnapshot')}
+${firmwareFunction('gnssSeparationM','double')}
+${firmwareFunction('settleGnss')}
+void reset(){
+    fakeMs=0;events.clear();eventIndex=0;pending=false;automaticTime=true;
+    rfOk=configOk=clockOk=startOk=cancelOk=true;noClock=false;
+    cancellations=hotStarts=0;cancelAt=UINT64_MAX;cancelRequested=false;cancelOnPause=false;
+    lastFix={};running=false;
+}
+WMGNSSFixEvent fix(double uncertainty,double lat=51.9){WMGNSSFixEvent f;f.estimatedConfidence=uncertainty;f.latitude=lat;return f;}
+void run(){
+    reset();auto sample=fix(20);assert(usableGnssSnapshot(sample));
+    sample.status=1;assert(!usableGnssSnapshot(sample));sample.status=0;
+    sample.latitude=NAN;assert(!usableGnssSnapshot(sample));sample.latitude=51.9;
+    sample.longitude=181;assert(!usableGnssSnapshot(sample));sample.longitude=-2.2;
+    sample.timestamp=utc-60;assert(!usableGnssSnapshot(sample));
+    reset();events.assign(25,fix(80));for(auto& e:events)e.timeToFix=100;
+    assert(settleGnss(false)&&eventIndex==20&&fakeMs<60000); // Explicit attempt cap.
+    reset();events={fix(40),fix(30),fix(20)};
+    assert(settleGnss(false)&&eventIndex==3&&lastFix.accuracyM==20&&fakeMs==8000&&!hotStarts);
+    assert(lastFix.utc==utc+6); // Never relabel the capture time as selection time.
+    reset();events={fix(40),fix(30),fix(20)};
+    assert(settleGnss(true)&&hotStarts==2); // First shot is cold/warm, subsequent genuine fixes allow hot start.
+    reset();events={fix(80),fix(70),fix(90)};
+    assert(settleGnss(false)&&fakeMs==60000&&cancellations==1&&lastFix.accuracyM==70&&lastFix.utc==utc+3);
+    reset();events={fix(10),fix(40),fix(30),fix(20)};events[0].timeToFix=20000;
+    events[1].timeToFix=20000;events[2].timeToFix=15000;events[3].timeToFix=30000;
+    events[0].estimatedConfidence=80;
+    assert(settleGnss(false)&&fakeMs==60000&&cancellations==1&&lastFix.accuracyM==30);
+    reset();events={fix(10)};
+    assert(!settleGnss(false)&&fakeMs==60000&&!lastFix.valid); // The only fix aged to 60 s: no stale fallback.
+    reset();events={fix(20),fix(20,52.9),fix(20,52.9)};
+    assert(settleGnss(false)&&fakeMs==60000); // Geographic jump prevents early 'consistent' result.
+    reset();events={fix(1500),fix(0),fix(NAN),fix(20)};events[3].satCount=3;
+    assert(!settleGnss(false)&&fakeMs==60000);
+    reset();events={fix(20)};events[0].satCount=255;assert(!settleGnss(false)); // Bound CN0 loop.
+    reset();automaticTime=false;events={fix(20)};events[0].timestamp=utc+100;
+    assert(!settleGnss(false)); // Future timestamp.
+    reset();events={fix(40),fix(30)};cancelAt=3500;
+    assert(!settleGnss(false)&&cancellations==1&&!lastFix.valid);
+    reset();cancelOk=false;assert(!settleGnss(false)&&cancelRequested&&!running);
+    reset();rfOk=false;assert(!settleGnss(false)&&fakeMs==0);
+    reset();configOk=false;assert(!settleGnss(false)&&fakeMs==0);
+    reset();clockOk=false;assert(!settleGnss(false)&&fakeMs==0);
+    reset();startOk=false;assert(!settleGnss(false)&&fakeMs==0);
+    reset();noClock=true;assert(!settleGnss(false)&&fakeMs==0);
+    reset();cancelRequested=true;assert(!settleGnss(false)&&fakeMs==0);
+    reset();
+}
+}
+
 int main() {
     modemSetupTests::run();
     assert(registrationState("+CEREG: 5,2")==2);
@@ -427,6 +518,7 @@ int main() {
     lteOnlyTests();
     commandWindowTests::run();
     assistanceTests::run();
+    settlingTests::run();
     const auto ackLength=walter::buildCommandAck(packet,1010,16,43,17,utc,PROFILE_ACTIVE,false,key);
     for(int i=0;i<ackLength;++i)printf("%02x",packet[i]);puts("");
 }
@@ -456,4 +548,4 @@ assert.equal(parsed.packet.deviceGuid16,1010);
 assert.deepEqual(Buffer.from(parsed.packet.rawBytes),packet);
 assert.equal(decoded.packet.sha256,createHash('sha256').update(packet).digest('hex'));
 writeFileSync(resolve(dir,'packet-fixture.json'),JSON.stringify({hex,wrapper,decoded},null,2));
-console.log('Walter PASS: GNSS assistance cache/refresh/event timeout/cancellation gates, ten-second LTE polling (including final-deadline command), expiry/type/identity rejection, duplicate ACK handling, stop and failed-poll gates, signed ACK decoded by backend, zero-content-length bounded HTTP read, explicit CGAUTH/PAP validation, CFUN0 RAT switching/reset/readback, CEREG parsing, actual offline/online cycle, isolated LTE-only diagnostic, TX completion, immutable fallback bytes, stop/no-clock gates, credential gates, NVS reservations/reboots/write failures, five-profile cadence, home/away, boot/forced LTE, GNSS validity/staleness, fault flags, strict receipts, C++ HMAC -> web workbench -> Supabase parser. No network or serial traffic.');
+console.log('Walter PASS: bounded GNSS settling/consistency/fresh selection/hot-start/cancellation tests, GNSS assistance cache/refresh/event timeout/cancellation gates, ten-second LTE polling (including final-deadline command), expiry/type/identity rejection, duplicate ACK handling, stop and failed-poll gates, signed ACK decoded by backend, zero-content-length bounded HTTP read, explicit CGAUTH/PAP validation, CFUN0 RAT switching/reset/readback, CEREG parsing, actual offline/online cycle, isolated LTE-only diagnostic, TX completion, immutable fallback bytes, stop/no-clock gates, credential gates, NVS reservations/reboots/write failures, five-profile cadence, home/away, boot/forced LTE, GNSS validity/staleness, fault flags, strict receipts, C++ HMAC -> web workbench -> Supabase parser. No network or serial traffic.');
