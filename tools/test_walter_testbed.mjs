@@ -76,6 +76,7 @@ struct SimModem {
 ${firmwareFunction('waitForSimReady')}
 std::atomic<bool> offlineBench{true},simulatedHome{false},running{false};
 std::atomic<uint32_t> loraTxCount{0},lteSkippedCount{0};
+std::atomic<uint32_t> nextWakeUtc{0};
 std::atomic<uint8_t> selectedProfile{PROFILE_NORMAL};
 bool begun=false,cellularFailure=false,setupOk=true,uploadOk=false;
 uint32_t nowUtc=utc;
@@ -93,6 +94,17 @@ int mbedtls_base64_encode(unsigned char* dest,size_t,size_t* n,const uint8_t* da
     sentPacket.assign(data,data+size);strcpy(reinterpret_cast<char*>(dest),"fixture");*n=7;return 0;
 }
 bool upload(const uint8_t* data,uint8_t size){++modemCalls;uploadedPacket.assign(data,data+size);return uploadOk;}
+${firmwareFunction('waitForNextCycle')}
+void scheduleTests(){
+    fakeMs=0;nowUtc=utc;cancelRequested=false;cancelOnPause=false;selectedProfile=PROFILE_NORMAL;
+    assert(waitForNextCycle()&&fakeMs==600000&&!nextWakeUtc);
+    selectedProfile=PROFILE_ACTIVE;fakeMs=0;
+    assert(waitForNextCycle()&&fakeMs==60000&&!nextWakeUtc);
+    selectedProfile=PROFILE_NORMAL;fakeMs=0;
+    assert(waitForNextCycle()&&fakeMs==600000&&!nextWakeUtc);
+    cancelOnPause=true;assert(!waitForNextCycle()&&!nextWakeUtc);
+    cancelOnPause=false;cancelRequested=false;
+}
 ${firmwareFunction('testLteOnly')}
 ${firmwareFunction('transmitLoraStub')}
 ${firmwareFunction('cycle','void')}
@@ -514,6 +526,7 @@ int main() {
     reset();receipt["duplicate"]=true;assert(accepted());
     JsonDocument request;walter::fillRequest(request,"fixture");
     std::string json;serializeJson(request,json);puts(json.c_str());
+    scheduleTests();
     cycleTests();
     lteOnlyTests();
     commandWindowTests::run();
@@ -548,4 +561,4 @@ assert.equal(parsed.packet.deviceGuid16,1010);
 assert.deepEqual(Buffer.from(parsed.packet.rawBytes),packet);
 assert.equal(decoded.packet.sha256,createHash('sha256').update(packet).digest('hex'));
 writeFileSync(resolve(dir,'packet-fixture.json'),JSON.stringify({hex,wrapper,decoded},null,2));
-console.log('Walter PASS: bounded GNSS settling/consistency/fresh selection/hot-start/cancellation tests, GNSS assistance cache/refresh/event timeout/cancellation gates, ten-second LTE polling (including final-deadline command), expiry/type/identity rejection, duplicate ACK handling, stop and failed-poll gates, signed ACK decoded by backend, zero-content-length bounded HTTP read, explicit CGAUTH/PAP validation, CFUN0 RAT switching/reset/readback, CEREG parsing, actual offline/online cycle, isolated LTE-only diagnostic, TX completion, immutable fallback bytes, stop/no-clock gates, credential gates, NVS reservations/reboots/write failures, five-profile cadence, home/away, boot/forced LTE, GNSS validity/staleness, fault flags, strict receipts, C++ HMAC -> web workbench -> Supabase parser. No network or serial traffic.');
+console.log('Walter PASS: applied-profile sleep scheduling/cancellation, bounded GNSS settling/consistency/fresh selection/hot-start/cancellation tests, GNSS assistance cache/refresh/event timeout/cancellation gates, ten-second LTE polling (including final-deadline command), expiry/type/identity rejection, duplicate ACK handling, stop and failed-poll gates, signed ACK decoded by backend, zero-content-length bounded HTTP read, explicit CGAUTH/PAP validation, CFUN0 RAT switching/reset/readback, CEREG parsing, actual offline/online cycle, isolated LTE-only diagnostic, TX completion, immutable fallback bytes, stop/no-clock gates, credential gates, NVS reservations/reboots/write failures, five-profile cadence, home/away, boot/forced LTE, GNSS validity/staleness, fault flags, strict receipts, C++ HMAC -> web workbench -> Supabase parser. No network or serial traffic.');

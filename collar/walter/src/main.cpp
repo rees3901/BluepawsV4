@@ -27,6 +27,7 @@ std::atomic<unsigned> assistanceEvents{0};
 std::atomic<int> registrationRatRequested{-1};
 std::atomic<bool> offlineBench{true}; // Safe default after every ESP reboot.
 std::atomic<uint32_t> loraTxCount{0}, lteSkippedCount{0};
+std::atomic<uint32_t> nextWakeUtc{0};
 std::atomic<uint8_t> selectedProfile{PROFILE_NORMAL};
 std::atomic<bool> simulatedHome{false};
 const uint8_t hmacKey[] = WALTER_HMAC_KEY_BYTES;
@@ -737,6 +738,16 @@ void cycle(bool boot, bool force, bp_profile_t profile, uint32_t count, uint32_t
         if (begun) modem.httpClose(WALTER_HTTP_PROFILE);
     }
 }
+bool waitForNextCycle() {
+    const auto profile = bp_profile_t(selectedProfile.load());
+    const auto seconds = walter::sleepSeconds(profile);
+    nextWakeUtc = utcNow() ? utcNow() + seconds : 0;
+    console.printf("[CYCLE] SLEEP profile=%s seconds=%lu next_wake_utc=%lu mode=freertos_rf_off\n",
+                   bp_profile_name(profile), (unsigned long)seconds, (unsigned long)nextWakeUtc.load());
+    const bool elapsed = pauseMs(seconds * 1000UL);
+    nextWakeUtc = 0;
+    return elapsed;
+}
 void worker(void*) {
     for (;;) {
         if (!running.load() && !oneShot.load() && !inspectRequested.load()) { vTaskDelay(pdMS_TO_TICKS(100)); continue; }
@@ -784,12 +795,18 @@ void worker(void*) {
                 console.println("[WALTER] Lost timeout: switching to Active");
             }
             ++count; if (simulatedHome.load()) ++homeCount;
+            const auto cycleStarted = monotonicMs();
+            console.printf("[CYCLE] START n=%lu profile=%s home=%u offline=%u utc=%lu\n",
+                (unsigned long)count, bp_profile_name(profile), simulatedHome.load(), offlineBench.load(), (unsigned long)utcNow());
             cycle(count == 1 && !single, single, profile, count, homeCount, lastLteMs);
             if (!offlineBench.load() && begun && !radioOff()) {
                 console.println("[WALTER] Could not confirm radio off; session stopped, check board"); running = false;
             }
+            console.printf("[CYCLE] RETURN n=%lu profile=%s elapsed_ms=%llu cancelled=%u\n",
+                (unsigned long)count, bp_profile_name(bp_profile_t(selectedProfile.load())),
+                (unsigned long long)(monotonicMs() - cycleStarted), cancelRequested.load());
             if (single || !running.load() || cancelRequested.load()) break;
-            if (!pauseMs(walter::sleepSeconds(bp_profile_t(selectedProfile.load())) * 1000UL)) break;
+            if (!waitForNextCycle()) break;
         } while (running.load());
         running = false;
         busy = false;
@@ -805,6 +822,7 @@ void command(const String& text) {
         console.printf("[WALTER] device=%u hub=%u busy=%u running=%u profile=%s home_stub=%u credentials=%s\n",
             WALTER_DEVICE_ID, WALTER_HOME_HUB_ID, busy.load(), running.load(),
             bp_profile_name(bp_profile_t(selectedProfile.load())), simulatedHome.load(), credentialsReady() ? "configured" : "missing");
+        console.printf("[SCHEDULE] next_wake_utc=%lu\n", (unsigned long)nextWakeUtc.load());
         console.printf("[WALTER] uptime=%lus reset_reason=%u free_heap=%u\n", (unsigned long)(monotonicMs()/1000),
             unsigned(esp_reset_reason()), unsigned(ESP.getFreeHeap()));
         console.printf("[BENCH] offline=%u utc=%lu lora_tx_complete=%lu lte_skipped=%lu\n",

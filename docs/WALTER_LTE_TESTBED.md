@@ -94,6 +94,57 @@ not a reason to wire the two testbeds together.
 8. Online: close HTTP after an upload attempt, put the modem in minimum mode and wait
    until the next cycle. Stop the session if radio-off cannot be confirmed.
 
+### Repeatability capture
+
+Use `tools/walter_soak.py` with the PlatformIO Python and an ignored run directory:
+
+```powershell
+& "$env:USERPROFILE/.platformio/penv/Scripts/python.exe" tools/walter_soak.py --run-dir .pio/walter-soak --start
+```
+
+The monitor exclusively opens COM26 at 115200, checks for idle configured device
+1010, explicitly seeds host UTC, selects online/away/Normal and starts the normal
+worker. It does not open COM7/23/11, send cloud requests, read credentials, invent
+fixes, or accelerate the profile. Omit `--start` to attach without changing the
+board's state. `serial.log` preserves complete timestamped evidence; `state.json`
+contains a bounded summary and the actual monitor PID. Serial acceptance messages
+still require independent Supabase observation/hash and command-ACK checks.
+
+While the monitor owns the port, request status or cancellation through its
+control file rather than opening another terminal:
+
+```powershell
+& "$env:USERPROFILE/.platformio/penv/Scripts/python.exe" tools/walter_soak.py --run-dir .pio/walter-soak --request status
+& "$env:USERPROFILE/.platformio/penv/Scripts/python.exe" tools/walter_soak.py --run-dir .pio/walter-soak --request stop
+```
+
+Wait for the firmware's Idle message after `stop`. The monitor continues capturing;
+closing the monitor alone does not stop the collar. A stale monitor lock requires
+operator investigation; there is no automatic restart, reflash or recovery that
+could conceal a failure. For unattended Windows capture, launch the same command
+using `Start-Process -WindowStyle Hidden`, redirecting stdout/stderr into the run
+directory. Keep the host awake and connected; the board is not powered by this script.
+
+`[CYCLE] START/RETURN/SLEEP` and `[SCHEDULE] next_wake_utc` expose the real worker
+timing. Sleep uses the profile applied during the preceding LTE command window.
+It is an interruptible FreeRTOS delay with modem RF off, **not ESP deep sleep**.
+GNSS, registration, transmission and both listen windows add to the interval.
+
+Baseline procedure: start Normal, deliver Active through the cloud queue at the
+BOOT LTE check-in, verify its signed ACK, then observe unforced Active cycles and
+the regular cycle-5 LTE report. Queue Normal near that LTE opportunity, verify its
+ACK and the following 600-second wait. Leave Normal running and verify subsequent
+regular LTE uploads against the table below. Command validity must cover the next
+delivery opportunity; do not infer a failure simply from a quiet LTE interval.
+COM7's local command console is a LoRa path, not an LTE proxy for Walter.
+
+Only after multiple real GNSS-bearing scheduled reports, both cloud profile ACKs,
+and correct waits are confirmed should live recovery tests begin. Offline tests
+already cover malformed/expired/duplicate commands, cancellation, failed polls,
+receipts and sequence reservations. Those do not prove recovery on hardware.
+Keep live fault injection scoped to 1010; record any outage and expected recovery
+before acting, and never disturb the hub/1001 network to manufacture a failure.
+
 ### Shared profile policy
 
 | Profile | Wait after cycle | Away LTE attempt | Home LTE heartbeat | Home GNSS refresh |
