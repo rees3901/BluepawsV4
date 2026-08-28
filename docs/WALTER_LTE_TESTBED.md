@@ -459,3 +459,56 @@ reported unconfirmed; fixing receipt-body handling remains outstanding. Separate
 GNSS acquisitions improved from553.2m to68.7m estimated confidence without changing
 the180-second timeout or validity thresholds. See the dated bench record; the
 successful LTE-only packet intentionally contained no position.
+
+## Reusing device1010 credentials and testing the complete path
+
+The canonical local `tools/devices.json` now includes device1010, with its existing
+`bearer_token` and `hmac_key_b64`. The five other collar entries and gateway were
+preserved. Values were checked against the flashed Walter configuration and a
+real signed packet; no key was rotated. The file is plaintext and gitignored.
+Never commit it or use a Supabase service-role key in the collar.
+
+- The bearer authorizes the device's HTTP request (`Authorization: Bearer ...`).
+- The separate32-byte HMAC key authenticates the TLV packet itself.
+- Both are required by the ingestion endpoint. Neither is the 1NCE SIM credential.
+- Device1010's GUI display name is **Walter LTE Testbed**. The underlying ID remains1010.
+
+For a **new, unprovisioned collar only**, inspect the generator and replace the
+placeholders below. Do not run this as a reset/reprovisioning command for1010:
+
+```powershell
+python tools/generate_tlv_credentials.py --help
+python tools/generate_tlv_credentials.py --count 1 --start-device-id '<UNUSED_COLLAR_ID>' --household-id '<FAMILY_UUID>' --key-version 1 --output tools/new-collar.devices.json --sql-output tools/new-collar.provision.sql
+```
+
+Run the generated SQL once in the matching Supabase project's SQL Editor. It
+creates/enables the device, stores a bearer hash and stores the HMAC through Vault.
+The SQL also contains private HMAC material and must remain local. Merge the new
+device entry into the canonical bundle without replacing unrelated entries, then
+flash matching credentials into that device. `--count` controls the number of
+collars, `--start-device-id` the first ID, `--household-id`/`--family-id` the owning
+Family, and `--key-version` the key version. Omit `--gateway-guid16` for LTE-only
+collars. `--force` overwrites local output files; it is not a safe key-rotation
+workflow. Rotation requires a separately planned device/backend rollout.
+
+On COM26 at115200, normal one-shot GNSS-to-LTE testing uses these serial commands
+(calculate current epoch with `[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()`):
+
+```text
+clock <CURRENT_UTC_EPOCH>
+bench off
+send
+```
+
+Wait for `Idle`, then issue `bench on` to restore offline mode. `send` gets a fresh
+GNSS fix, creates one signed packet, simulates local LoRa completion/listening,
+and sends the identical bytes via real LTE. It does not radiate LoRa. The existing
+acceptance ceiling is1000m: **this command does not enforce a5m target**. Use
+GNSS-only `gnss` to inspect accuracy without uploading; do not call a coarse fix
+a precision-test success. A later `send` reacquires and may have different accuracy.
+
+The full-cycle test at20:12 UTC produced sequence1282 with GNSS_VALID and214m
+estimated uncertainty. Serial HMAC/base64/hash matched Supabase observations,
+positions and latest-position projection; ingest_path=cellular_direct/link_type=lte.
+The user confirmed the Walter card appeared in the GUI. This proves the complete
+transport/display path, not5m accuracy or on-device receipt-body handling.
