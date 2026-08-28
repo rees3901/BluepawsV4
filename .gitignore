@@ -5,6 +5,7 @@ tools/*devices*.json
 tools/*.provision.sql
 hub/include/hub_secrets.h
 collar/include/collar_secrets.h
+collar/walter/include/walter_secrets.h
 
 # Python simulator/test artefacts.
 __pycache__/
