@@ -48,6 +48,33 @@ manually edited ACK. No claim is made about testing the dashboard button here.
 
 ## Remaining live gates
 
+### Clock defect found before the unattended run
+
+Cycle 2 woke at 22:45:02 after the real 60-second wait and obtained a valid
+56.5 m reported uncertainty at 22:45:53. Its sample timestamp was 22:45:03.
+The ordinary acquisition handler incorrectly assigned that sample timestamp to
+the current clock, moving UTC back by approximately 50 seconds and advertising
+fix age zero. The monotonic sleep stayed correct, but UTC schedules, fix ages and
+command expiry could become wrong over repeated cycles.
+
+The run was explicitly stopped at **22:46:31 UTC**, Idle confirmed, capture closed
+and Walter alone reflashed. Ordinary acquisition now uses the same freshness and
+validity checks as the settling diagnostic and retains the established UTC
+anchor. It does not relabel the sample time or accept an already stale/future
+sample as a fresh fix. It requires an established UTC source, consistent with
+the existing host seed/network bootstrap flow.
+
+Added actual-function regression cases for a 50-second acquisition retaining
+real fix age, rejection at 60 seconds, future timestamps, missing clock,
+cancellation and timeout. The host suite and firmware build passed; new flash
+size is 436,057 bytes, RAM unchanged at 64,272 bytes. Capture restarts in the same
+append-only serial log; `state.json` describes the latest monitor session.
+Active command 6 (`1743326d-a57c-4bdf-9ca2-dd3420d8be18`) was queued at 22:48:01
+for the restarted Normal BOOT check-in. This is a new baseline, not uninterrupted
+uptime or a completed recovery test.
+
+### Gates after the clock fix
+
 1. Observe unforced Active wake cycles and its scheduled LTE attempt at cycle 5.
 2. Queue Normal near that delivery opportunity; verify a signed cloud ACK and
    the subsequent 600-second wait.

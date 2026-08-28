@@ -167,7 +167,9 @@ Lost falls back to Active after two hours, checked between cycles.
 
 - Fresh GNSS sets `GNSS_VALID`, but does **not** invent `FIX_3D`; the vendor event
   does not provide a confirmed fix-dimension field. A fix aged 60 seconds or more
-  is stale. Invalid/stale fixes do not publish coordinates as valid.
+  is stale. Invalid/stale fixes do not publish coordinates as valid. Ordinary
+  acquisition preserves the established UTC clock and the sample's original
+  timestamp: a delayed GNSS result must not rewind UTC or reset its fix age to zero.
 - Battery `0` means unmeasured on this target. No battery ADC, RF metrics, reset
   reason or boot-loop count is fabricated.
 - GNSS acquisition failure and the previous unconfirmed cellular attempt set the

@@ -316,6 +316,7 @@ namespace settlingTests {
 constexpr unsigned WALTER_MODEM_GNSS_MAX_SATS=32, WALTER_MODEM_GNSS_FIX_STATUS_READY=0;
 constexpr unsigned WALTER_MODEM_GNSS_SENS_MODE_HIGH=3, WALTER_MODEM_GNSS_ACQ_MODE_HOT_START=1;
 constexpr unsigned WALTER_MODEM_GNSS_ACTION_CANCEL=1, BLUEPAWS_BUILD_UNIX_TIME=utc;
+constexpr unsigned WALTER_GNSS_TIMEOUT_MS=180000;
 constexpr unsigned pdTRUE=1;
 unsigned pdMS_TO_TICKS(unsigned n){return n;}
 struct Sat {uint8_t satNo=1,signalStrength=35;};
@@ -327,9 +328,10 @@ struct WMGNSSFixEvent {
 std::vector<WMGNSSFixEvent> events;
 size_t eventIndex=0;
 bool pending=false,automaticTime=true,rfOk=true,configOk=true,clockOk=true,startOk=true,cancelOk=true,noClock=false;
-unsigned cancellations=0,hotStarts=0;uint64_t readyAt=0,cancelAt=UINT64_MAX;
+unsigned cancellations=0,hotStarts=0,clockWrites=0;uint64_t readyAt=0,cancelAt=UINT64_MAX;
 int gnssEvents=0;
 uint32_t utcNow(){return noClock?0:utc+fakeMs/1000;}
+void setUtc(int64_t){++clockWrites;}
 void xQueueReset(int){}
 unsigned xQueueReceive(int,WMGNSSFixEvent* f,unsigned wait){
     fakeMs+=wait;
@@ -353,14 +355,27 @@ struct Modem {
 ${firmwareFunction('usableGnssSnapshot')}
 ${firmwareFunction('gnssSeparationM','double')}
 ${firmwareFunction('settleGnss')}
+${firmwareFunction('acquireFix')}
 void reset(){
     fakeMs=0;events.clear();eventIndex=0;pending=false;automaticTime=true;
     rfOk=configOk=clockOk=startOk=cancelOk=true;noClock=false;
-    cancellations=hotStarts=0;cancelAt=UINT64_MAX;cancelRequested=false;cancelOnPause=false;
+    cancellations=hotStarts=clockWrites=0;cancelAt=UINT64_MAX;cancelRequested=false;cancelOnPause=false;
     lastFix={};running=false;
 }
 WMGNSSFixEvent fix(double uncertainty,double lat=51.9){WMGNSSFixEvent f;f.estimatedConfidence=uncertainty;f.latitude=lat;return f;}
 void run(){
+    reset();events={fix(57)};events[0].timeToFix=50000;
+    assert(acquireFix()&&!clockWrites&&utcNow()==utc+50&&lastFix.utc==utc);
+    uint8_t agedPacket[BP_MAX_PACKET_SIZE]{};
+    assert(walter::buildPacket(agedPacket,1010,16,1,utcNow(),PROFILE_ACTIVE,false,TX_TELEMETRY,lastFix,false,false,50,hmacKey));
+    assert(pkt_fix_age_s(agedPacket)==50); // A 50-second acquisition must not look age zero.
+    reset();events={fix(20)};events[0].timeToFix=60000;
+    assert(!acquireFix()&&!lastFix.valid&&utcNow()==utc+60);
+    reset();automaticTime=false;events={fix(20)};events[0].timestamp=utc+100;
+    assert(!acquireFix()&&!lastFix.valid); // Future sample cannot reset the clock either.
+    reset();noClock=true;assert(!acquireFix()&&fakeMs==0);
+    reset();cancelAt=100;assert(!acquireFix()&&cancellations==1);
+    reset();assert(!acquireFix()&&fakeMs==180000&&cancellations==1);
     reset();auto sample=fix(20);assert(usableGnssSnapshot(sample));
     sample.status=1;assert(!usableGnssSnapshot(sample));sample.status=0;
     sample.latitude=NAN;assert(!usableGnssSnapshot(sample));sample.latitude=51.9;

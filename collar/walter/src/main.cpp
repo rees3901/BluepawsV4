@@ -507,7 +507,7 @@ bool settleGnss(bool hot) {
 }
 bool acquireFix() {
     // GNSS and LTE share the modem: never operate them concurrently.
-    if (!radioOff() || cancelRequested.load()) return false;
+    if (!utcNow() || !radioOff() || cancelRequested.load()) return false;
     console.println("[GNSS] LTE off; requesting a real fix");
     xQueueReset(gnssEvents);
     if (utcNow() && !modem.gnssSetUTCTime(utcNow())) return false;
@@ -524,13 +524,11 @@ bool acquireFix() {
     }
     if (received) console.printf("[GNSS] Event status=%u satellites=%u accuracy=%.1fm UTC=%lld\n",
         unsigned(fix.status), fix.satCount, fix.estimatedConfidence, (long long)fix.timestamp);
-    if (!received || cancelRequested.load() || fix.status != WALTER_MODEM_GNSS_FIX_STATUS_READY ||
-        !walter::plausibleUtc(fix.timestamp, BLUEPAWS_BUILD_UNIX_TIME) || !std::isfinite(fix.latitude) || !std::isfinite(fix.longitude) ||
-        fabs(fix.latitude) > 90 || fabs(fix.longitude) > 180 || fix.satCount < 4 ||
-        !std::isfinite(fix.estimatedConfidence) || fix.estimatedConfidence <= 0 || fix.estimatedConfidence > 1000) {
+    if (!received || cancelRequested.load() || !usableGnssSnapshot(fix)) {
         console.println("[GNSS] No usable fix; not fabricating coordinates"); return false;
     }
-    setUtc(fix.timestamp);
+    // An acquisition result is a timestamped sample, not the current wall clock.
+    // Preserve the established UTC anchor and report the sample's real age.
     lastFix = {true, int32_t(llround(fix.latitude * 1e7)), int32_t(llround(fix.longitude * 1e7)),
                uint32_t(fix.timestamp), uint16_t(ceil(fix.estimatedConfidence)), fix.satCount};
     console.printf("[GNSS] Valid fix: satellites=%u accuracy=%um UTC=%lu\n",
