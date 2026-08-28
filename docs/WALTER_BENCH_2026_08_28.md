@@ -426,3 +426,117 @@ Private evidence: `gnss-lte-full-pipeline.log`, `gnss-lte-full-pipeline-comparis
 `gnss-lte-workbench.json`, `precision-gnss-01.log`, `precision-gnss-02.log`,
 `precision-gnss-03.log`, `precision-gnss-final-rounds.log`,
 `full-pipeline-final-status.log`.
+
+## Full GNSS / LTE / cloud-command round trip, 21:04-21:18 UTC
+
+This section supersedes the earlier outstanding receipt/pipeline checks. PR142
+and PR144 are merged; the test started from main `c442b3a`. Deployed
+`ingest-position` version125 matched all four local function files, and the
+home-hub position view was already present. No backend redeployment was needed.
+
+Only Walter1010 on COM26/115200 was used. Existing private bearer/HMAC, verified
+TLS CA/hostname, IPv4, LTE-M, sensor.net and explicit no-authentication were
+preserved. No Wi-Fi/PC telemetry upload or real LoRa transmission substituted for
+the device's LTE path. Test commands were queued through the authorized backend
+admin connection with `requested_by=NULL`; no user identity was impersonated.
+The available browser was signed out, so the GUI command button and visual ACK
+rendering were **not** separately verified. Database ACK state was read directly.
+
+### Prequeued command and an unsuccessful registration attempt
+
+- Command2 (Active), requested 21:04:05.310933, was delivered after LTE-only
+  packet1537 and applied on Walter. Signed ACK packet1538 changed the command to
+  `acked` at21:04:23.376443. The firmware printed `CLOUD ACK CONFIRMED seq=2`.
+- HTTP201 still advertised zero response bytes. The bounded body read now read
+  and validated the actual receipt; a bare201 was not treated as success.
+- The next LTE-only attempt reserved packet1539 but stayed searching and did
+  not reach the cloud. No command was queued because no receive window opened.
+  That capture ended just before the application's180-second registration limit;
+  it does not contain the timeout/cleanup line. A subsequent status showed idle,
+  and GNSS setup subsequently confirmed RF-off. Later registrations succeeded.
+  This is one demonstrated intermittent registration failure, not a root-cause
+  diagnosis or a claim of reliable coverage.
+
+### Assistance refresh and GNSS recovery
+
+Two GNSS-only snapshots reported2394.5m and2578.9m uncertainty and were rejected
+by the unchanged1000m validity ceiling. No coordinates were uploaded from them.
+Added and flashed an explicit `assist` serial diagnostic using the pinned vendor
+assistance APIs, with bounded event waits, cancellation, expiry checks and
+RF-off cleanup. It emits no telemetry. Build:64,268 bytes static RAM,
+425,649 bytes application flash; COM26 upload hash verified.
+
+Actual assistance status showed almanac available but expired (update/expiry0).
+Realtime ephemeris was still valid. LTE registered after about64 seconds; the
+almanac download completion event arrived at21:13:22.879891. Requery verified
+almanac expiry15547389 seconds and ephemeris expiry6381 seconds, then reported
+READY and returned idle. Only the almanac was downloaded. The modem supplied an
+implausible clock, which was rejected; actual host-seeded UTC remained in use.
+
+A separate GNSS snapshot then returned107.3m uncertainty with9 satellite entries.
+The following full cycle returned77.4m with9 entries. These are receiver estimates,
+not independently measured errors. Refresh preceded improvement, but antenna,
+satellite conditions and repeated acquisition were not isolated as variables.
+The180-second guard remains unchanged; the successful full-cycle fix arrived in
+about3.7 seconds. No5m acceptance requirement was added.
+
+### Full cycle and a command queued inside the LTE window
+
+After `bench off`, one `send` produced the following UTC evidence:
+
+| Event | Time / result |
+| --- | --- |
+| GNSS request | 21:14:41.125724 |
+| Valid GNSS event | 21:14:44.841940;77.4m,9 satellite entries |
+| Simulated LoRa TX complete | 21:14:44.911135;no over-air packet |
+| Cloud received telemetry1793 | 21:15:07.954991 |
+| Matching device receipt accepted | 21:15:08.312197 |
+| LTE command window opened | 21:15:08.322198 |
+| Command3 (Active) queued | 21:15:10.117824;1.795626s after opening |
+| Walter applied Active | 21:15:14.132047 |
+| Command3 database ACK | 21:15:16.159047 |
+| Walter confirmed cloud ACK | 21:15:16.411108 |
+| Window closed | 21:15:19.550146;11.227948s total |
+| Worker idle | 21:15:20.036036 |
+
+Independent cloud reads and the local workbench decoder matched the captured
+telemetry base64 and SHA-256 exactly, and verified its real per-device HMAC.
+Observation6430 / packet1793 carried GNSS_VALID, rounded accuracy78m,9 satellites,
+Normal profile and INTERRUPT reason over `cellular_direct` / `lte`:
+
+`be1f9eb9775886993a0dbe2166a4297083ece10cbd8ae9a5ceeb0d9bddc15e98`
+
+Observation6431 / signed ACK packet1794 carried Active and `acked_msg_seq_id=3`:
+
+`a05b49ef2c3d4b5a52e3bd834af0b727e5e4ea7f57b9001cb5aac3730469da09`
+
+The ACK HMAC also verified independently. ACK packets intentionally carry no
+valid GNSS position. After subsequent ACKs, `device_latest_positions_with_home`
+still retained packet1793's coordinates and resolved home hub16's live coordinates.
+The device's latest profile state, separately, advanced with the acknowledged
+commands. Raw coordinates and authenticated packet bytes remain in private logs.
+
+### Restore and final state
+
+Command4 requested Normal at21:15:31.555804. A final explicit `lte` sent packet1795,
+applied Normal and uploaded signed ACK1796. Supabase marked command4 `acked` at
+21:15:44.902740; Walter printed `CLOUD ACK CONFIRMED seq=4` and confirmed RF-off.
+All three test commands (2,3,4) have one delivery attempt and are acknowledged.
+
+Final serial `bench on` / `status`: device1010, hub16, profileNormal, offline1,
+busy0/running0, no recurring transmissions. COM26 closed. WisMesh/COM23, hub/COM7,
+sniffer/COM11, PCB files, SIM-account settings, credentials and backend schema/
+functions were not changed. This proves the tested GNSS-to-cloud path and both
+prequeued/in-window profile commands; it is not a long-duration reliability,
+battery-life, precise-position or production provisioning certification.
+
+Host tests cover assistance cache reuse, missing/due downloads, event timeout,
+network/query/type failures, cancellation and missing UTC alongside the existing
+LTE deadline, command validation, signed ACK and TLV parser checks. No automated
+test itself opens a serial port or sends network traffic.
+
+Private evidence under `.pio/walter-bench-20260828/`: `live-lte-prequeued.log`,
+`live-lte-during-window.log`, `live-reconnect-status.log`, `live-gnss-settle.log`,
+`live-gnss-settle-02.log`, `live-assistance.log`, `live-gnss-assisted.log`,
+`live-full-pipeline.log`, `live-full-pipeline-decoded.json`,
+`live-restore-normal.log`, `live-final-status.log`.
