@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { homeDistanceMetres, formatHomeDistance } from "@/lib/mapLocation";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DeviceCard, DownloadIcon, type DeviceCardProps } from "@/components/DeviceCard";
@@ -44,7 +45,6 @@ const AvatarEditorModal = dynamic(
   { ssr: false, loading: () => <div className="modal" role="status"><span className="avatar-picker-loading">Loading emoji palette…</span></div> },
 );
 
-const HOME = { lat: 51.5055, lon: -0.09 };
 const TUTORIAL_MODE_STORAGE_KEY = "bp_tutorial_mode";
 const TUTORIAL_COMPLETE_STORAGE_KEY = "bp_tutorial_complete";
 const TUTORIAL_PROMPT_STORAGE_KEY = "bp_tutorial_prompt_seen";
@@ -113,7 +113,11 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
   const { hubs, error: hubError, refresh: refreshHubs } = useHubPresence(hasFamilyContext ? householdId : null);
   const hubPhotos = useHubPhotos(hubs, hasFamilyContext ? householdId : null);
   const mapHubs = useMemo(() => hubs.map(hubMapDevice), [hubs]);
-  const mapDevices = useMemo(() => [...mapHubs, ...devices], [devices, mapHubs]);
+  const mapDevices = useMemo(() => [...mapHubs, ...devices.map(device => {
+    const hub = hubs.find(h => h.gateway_guid16 === device.homeHub?.id);
+    return { ...device, homeHub: hub ? { id: hub.gateway_guid16, lat: hub.latitude,
+      lon: hub.longitude, fixAt: hub.fix_at } : null };
+  })], [devices, mapHubs, hubs]);
   const orderedDeviceIds = useMemo(() => orderDeviceIds(mapDevices.map(device => device.id), cardOrder), [cardOrder, mapDevices]);
 
   const handlePowerProfileCommand = useCallback(async (profile: CustomerPowerProfile) => {
@@ -572,7 +576,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
               followed={followedId === device.id}
               trailVisible={trailIds.has(device.id)}
               portableMode={portableMode}
-              distance={formatDistance(haversine(HOME.lat, HOME.lon, device.lat, device.lon))}
+              distance={formatHomeDistance(homeDistanceMetres(device))}
               ageSeconds={Math.max(0, Math.floor((now - device.lastUpdate) / 1000))}
               awakeSeconds={now ? Math.max(0, Math.ceil(((feedback[device.id]?.rxWindowUntil ?? 0) - now) / 1000)) : 0}
               commandFeedback={commandMessage(feedback[device.id]?.command, now)}
@@ -779,16 +783,6 @@ function Toggle({ label, checked, onChange }: { label: string; checked: boolean;
 function MoonIcon() { return <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z" /></svg>; }
 function SunIcon() { return <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="4" /><path d="M12 1v3m0 16v3M1 12h3m16 0h3M4.2 4.2l2.1 2.1m11.4 11.4l2.1 2.1m0-15.6l-2.1 2.1M6.3 17.7l-2.1 2.1" stroke="currentColor" strokeWidth="2" /></svg>; }
 function SettingsIcon() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7m7.43-2.53c.04-.32.07-.64.07-.97s-.03-.66-.07-1l2.11-1.63c.19-.15.24-.42.12-.64l-2-3.46a.5.5 0 0 0-.61-.22l-2.49 1a8 8 0 0 0-1.69-.98l-.38-2.65A.5.5 0 0 0 14 2h-4a.5.5 0 0 0-.49.42l-.38 2.65c-.61.25-1.17.59-1.69.98l-2.49-1a.5.5 0 0 0-.61.22l-2 3.46a.5.5 0 0 0 .12.64L4.57 11c-.04.34-.07.67-.07 1s.03.65.07.97l-2.11 1.66a.5.5 0 0 0-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1.01c.52.4 1.08.73 1.69.98l.38 2.65c.03.24.24.42.49.42h4c.25 0 .46-.18.49-.42l.38-2.65c.61-.25 1.17-.58 1.69-.98l2.49 1.01c.22.08.49 0 .61-.22l2-3.46a.5.5 0 0 0-.12-.64z" /></svg>; }
-
-function haversine(lat1: number, lon1: number, lat2: number, lon2: number) {
-  const radius = 6371000;
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
-  const value = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
-  return radius * 2 * Math.atan2(Math.sqrt(value), Math.sqrt(1 - value));
-}
-
-function formatDistance(metres: number) { return metres >= 2000 ? `${(metres / 1000).toFixed(1)} km` : `${Math.round(metres)} m`; }
 
 function downloadLog(logs: string[]) {
   const blob = new Blob([["timestamp,message", ...logs.map((line) => `\"${line.replaceAll('"', '""')}\"`)].join("\n")], { type: "text/csv;charset=utf-8" });

@@ -1,6 +1,7 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { handleHubPresence, handleHubSettings } from "./hub-presence.ts";
+import { commandEnvelope, handleDeviceCommands } from "./device-commands.ts";
 import {
   bytesToBase64,
   bytesToHex,
@@ -98,6 +99,10 @@ Deno.serve(async (request: Request) => {
 
   try {
     const supabase = serverClient();
+    if (unknownPayload && typeof unknownPayload === "object" && "format" in unknownPayload
+        && unknownPayload.format === "device_commands") {
+      return await handleDeviceCommands(supabase, unknownPayload, token, requestId);
+    }
     if (unknownPayload && typeof unknownPayload === "object" && "format" in unknownPayload
         && unknownPayload.format === "hub_settings") {
       return await handleHubSettings(supabase, unknownPayload, token, requestId);
@@ -308,13 +313,7 @@ async function handleTlv(
     ingest_path: metadata.ingestPath,
     link_type: metadata.linkType,
     command_pending: pendingCommand !== null,
-    command: pendingCommand === null ? null : {
-      id: pendingCommand.id,
-      sequence_id: pendingCommand.command_sequence_id,
-      type: pendingCommand.command_type,
-      payload: pendingCommand.command_payload,
-      expires_at: pendingCommand.expires_at,
-    },
+    command: commandEnvelope(pendingCommand),
     acked_command: ackedCommand === null ? null : {
       id: ackedCommand.id,
       sequence_id: ackedCommand.command_sequence_id,

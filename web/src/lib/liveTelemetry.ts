@@ -28,8 +28,8 @@ export async function getLiveTelemetrySnapshot(householdId: string): Promise<Liv
 
     const accessVersion = householdResult.data.access_version;
     const positionResult = await supabase
-      .from("device_latest_positions")
-      .select("position_id,device_uid,household_id,message_id,latitude,longitude,battery,battery_mv,status_code,power_profile_code,flags,tx_reason,ingest_path,link_type,link_rssi_dbm,link_snr_db,source,recorded_at,received_at,schema_version")
+      .from("device_latest_positions_with_home")
+      .select("position_id,device_uid,household_id,message_id,latitude,longitude,battery,battery_mv,status_code,power_profile_code,flags,tx_reason,ingest_path,link_type,link_rssi_dbm,link_snr_db,source,recorded_at,received_at,schema_version,home_hub_id,home_latitude,home_longitude,home_fix_at")
       .eq("household_id", householdId);
     const presenceResult = await supabase
       .from("devices")

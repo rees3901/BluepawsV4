@@ -86,4 +86,21 @@ inline uint8_t buildPacket(uint8_t* bytes, uint16_t source, uint16_t destination
     return length;
 }
 
+inline uint8_t buildCommandAck(uint8_t* bytes, uint16_t source, uint16_t destination,
+                              uint16_t sequence, uint16_t commandSequence, uint32_t utc,
+                              bp_profile_t profile, bool home, const uint8_t key[32]) {
+    if (!commandSequence || !bp_is_collar_id(source) || !bp_is_hub_id(destination)
+        || !validUtc(utc) || profile > PROFILE_DEBUG) return 0;
+    // ACK carries the applied profile, not a fabricated new GNSS fix.
+    pkt_init(bytes, source, destination, sequence, utc,
+        profile == PROFILE_LOST ? STATUS_LOST : home ? STATUS_HOME : STATUS_OUT_AND_ABOUT,
+        profile, home ? FLAG_HOME_BEACON_SEEN : 0, TX_ACK);
+    pkt_set_quality(bytes, 0, 0, 65535);
+    pkt_set_sat_count(bytes, 255);
+    pkt_add_tlv_u16(bytes, TLV_ACKED_MSG_SEQ_ID, commandSequence);
+    const uint8_t length = pkt_finalize(bytes);
+    bp_hmac_sha256_truncated8(key, 32, bytes, length - BP_AUTH_TAG_SIZE, bytes + length - BP_AUTH_TAG_SIZE);
+    return length;
+}
+
 } // namespace walter

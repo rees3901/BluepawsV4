@@ -193,6 +193,7 @@ which must use a different spare identity.
 
 | Command | Effect |
 | --- | --- |
+| `help` | List commands while idle (also the fallback for an unrecognised line) |
 | `status` | Identity, profile, busy/running, simulated home and configuration presence; no secrets |
 | `bench on` / `bench off` | Default on after reboot: offline cycles skip all modem access; off explicitly enables real GNSS/LTE in the next cycle |
 | `inspect` | Initialize modem, select RF-off mode and inspect SIM readiness, modem SVN, RAT and raw clock; no telemetry |
@@ -294,11 +295,73 @@ Related upstream reports: [ESP32 HWCDC missing data](https://github.com/espressi
 
 This is a transport/GNSS bench, **not production power validation**: the ESP uses
 interruptible FreeRTOS waits rather than deep sleep, and PSM/eDRX are not enabled.
-There is no BLE scanning, buzzer, geofence engine, battery sampling or command
-execution/ACK path. Cloud pending commands are reported but never falsely ACKed.
+There is no BLE scanning, buzzer, geofence engine or battery sampling. The LTE
+command window supports profile changes and Lost Alert entry/exit, with signed
+TLV ACKs; other command types are deliberately not executed or ACKed.
 Home status, LoRa delivery and battery life therefore cannot be validated with
 Walter alone. End-to-end RF, TLS, modem firmware compatibility, antenna performance
 and actual cloud acceptance remain hardware commissioning checks.
+
+### LTE command window
+
+After a matching upload receipt, Walter keeps LTE available for at least
+`CMD_LISTEN_WINDOW_MS` (10 seconds). It handles a command in that receipt and
+polls the same HTTPS endpoint with `format=device_commands`,
+`ingest_path=cellular_direct`, and its numeric `device_id`. The existing device
+bearer authenticates each poll; no Supabase user/service key is put on the board.
+Polling does not invent observations, refresh last-seen, or ACK a command.
+
+There is a final poll at the deadline. HTTP requests and signed ACK uploads can
+extend the window beyond ten seconds, bounded by existing modem/HTTP timeouts.
+`stop` cancels waits; a blocking vendor AT call may finish before cancellation.
+GNSS stays off throughout. The caller closes HTTP and turns RF off afterward.
+
+Only `set_profile`, `enter_lost_alert`, and `exit_lost_alert` are implemented.
+The target device, command UUID, nonzero 16-bit sequence, type/profile and UTC
+expiry are validated before applying a command. ACKs use a newly reserved
+packet sequence, `TX_ACK`, and `TLV_ACKED_MSG_SEQ_ID`, signed with the existing
+collar HMAC key. A confirmed packet receipt and confirmed command ACK are logged
+separately. Unsupported/expired commands are never falsely acknowledged.
+Duplicate delivery during a boot is re-ACKed without restarting Lost Alert.
+Profiles and duplicate-command memory remain volatile, as with the existing
+serial profile setting; reboot returns to Normal/offline bench mode. This is
+not durable production command execution across power loss.
+
+The pinned modem library caps HTTP reads at 1500 bytes. A zero-length HTTP RING
+event now triggers a bounded body read, because an absent content length is not
+proof of an empty response. Empty, truncated, invalid JSON or mismatched receipts
+still fail. This parser change requires confirmation against a real modem reply.
+
+Deploy the updated `ingest-position` function before flashing this firmware.
+Older endpoints reject the new poll format; telemetry acceptance remains valid,
+but a rejected poll is reported as unavailable command delivery.
+
+For a manual test on COM26 at 115200 (DTR enabled), send `status`, seed actual UTC
+after a reset using `clock <epoch>`, then use `gnss` for position only. PowerShell
+`[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()` supplies the current epoch.
+`bench off` then `send` runs GNSS, simulated LoRa and real LTE; **it still accepts
+estimated accuracy up to 1000 m and does not enforce a 5 m upload threshold**.
+`lte` tests the command window without acquiring/uploading coordinates. Queue a
+profile for device 1010 in the web UI and verify `APPLIED`, a signed ACK upload,
+`CLOUD ACK CONFIRMED`, and the matching database command changing to `acked`.
+Commands queued after the window remain pending until the next LTE check-in.
+
+## Home-hub distance display
+
+The dashboard and shared search map no longer measure from a hardcoded London
+coordinate. The `device_latest_positions_with_home` invoker view joins a report's
+logical destination to the same Family's `hub_presence`. This works regardless
+of whether the immutable packet arrives over LoRa or direct LTE. A legacy,
+cloud-addressed or broadcast packet uses a Family home hub only if there is
+exactly one; an explicit unknown/foreign destination never falls back to another
+hub. No hub/fix or an ambiguous home means `Unknown`, not zero or London.
+
+Distance is calculated from the latest stored coordinates, not inferred from
+the HOME beacon flag. Hub movement updates the dashboard via existing presence
+refreshes and the shared map via its next snapshot. Coordinates and distances
+remain estimates: a nearby physical board with a stale/simulated GNSS coordinate
+can still show a nonzero distance. Apply migration
+`20260828203228_home_hub_distance.sql` before deploying the web application.
 
 ## Official documentation and pinned dependencies
 
