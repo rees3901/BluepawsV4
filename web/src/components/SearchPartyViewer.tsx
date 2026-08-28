@@ -2,6 +2,7 @@
 
 /* eslint-disable @next/next/no-img-element -- Tiny pre-sized emoji artwork is intentionally served directly from the picker CDN. */
 import dynamic from "next/dynamic";
+import { homeDistanceMetres, formatHomeDistance } from "@/lib/mapLocation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { BatteryIndicator, HomeDistance, LastSeen, SignalIndicator } from "@/components/Indicators";
 import { defaultDeviceAvatar } from "@/lib/defaultDeviceAvatar";
@@ -16,7 +17,6 @@ const TrackingMap = dynamic(() => import("@/components/TrackingMap"), {
 });
 
 const REFRESH_INTERVAL_MS = 10_000;
-const HOME = { lat: 51.5055, lon: -0.09 };
 
 const STATUS = {
   home: { emoji: "🏠", label: "Home", css: "status-home" },
@@ -158,7 +158,7 @@ function SearchPartyDeviceRow({ device, avatar, now, onCentre }: { device: Telem
   const profileLower = device.profile.toLowerCase();
   const profileClass = `profile-${profileLower.replace("save", "").replaceAll(" ", "-")}`;
   const profileLabel = profileLower === "powersave" ? "💤 PowerSave" : profileLower === "debug" ? "🧪 Debug" : device.profile;
-  const distance = formatDistance(haversine(HOME.lat, HOME.lon, device.lat, device.lon));
+  const distance = formatHomeDistance(homeDistanceMetres(device));
 
   return (
     <article className={`device-card search-party-device-card${ageSeconds > 600 ? " stale" : ""}`}>
@@ -224,17 +224,4 @@ function formatAge(seconds: number) {
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${minutes}m ago`;
   return `${Math.floor(minutes / 60)}h ago`;
-}
-
-function haversine(lat1: number, lon1: number, lat2: number, lon2: number) {
-  const toRad = (degrees: number) => degrees * Math.PI / 180;
-  const radius = 6371000;
-  const deltaLat = toRad(lat2 - lat1);
-  const deltaLon = toRad(lon2 - lon1);
-  const a = Math.sin(deltaLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(deltaLon / 2) ** 2;
-  return 2 * radius * Math.asin(Math.sqrt(a));
-}
-
-function formatDistance(metres: number) {
-  return metres >= 2000 ? `${(metres / 1000).toFixed(1)} km` : `${Math.round(metres)} m`;
 }

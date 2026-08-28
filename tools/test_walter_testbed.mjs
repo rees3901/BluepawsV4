@@ -196,6 +196,75 @@ void run(){
     WALTER_APN_AUTH=0;
 }
 }
+namespace commandWindowTests {
+char lastCloudCommandId[37]{};
+uint16_t lastCloudCommandSequence=0;
+uint64_t lostProfileStartedMs=0;
+unsigned polls=0,acks=0;
+uint64_t queuedAt=0;
+bool failPoll=false,failAck=false;
+std::vector<uint8_t> ackPacket;
+const char* cloud=R"({"device_id":1010,"command_pending":true,"command":{"id":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","sequence_id":17,"type":"set_profile","payload":{"profile":"active"},"expires_unix":1787911300}})";
+void response(JsonDocument& r){r.clear();r["format"]="device_commands";r["device_id"]=1010;r["command_pending"]=false;}
+bool postJson(JsonDocument& q,JsonDocument& r){
+    ++polls;assert(q["format"]=="device_commands" && q["device_id"]==1010);
+    if(failPoll)return false;
+    response(r);
+    if(fakeMs>=queuedAt && !acks){assert(!deserializeJson(r,cloud));r["format"]="device_commands";}
+    return true;
+}
+bool sendPacket(const uint8_t* packet,uint8_t length,JsonDocument& r){
+    ++acks;ackPacket.assign(packet,packet+length);if(failAck)return false;
+    r["acked_command"]["sequence_id"]=17;r["acked_command"]["status"]="acked";return true;
+}
+${firmwareFunction('applyCloudCommand','void')}
+${firmwareFunction('listenForLteCommands','void')}
+void reset(){
+    polls=acks=0;fakeMs=0;queuedAt=3000;failAck=failPoll=false;cancelRequested=false;
+    cancelOnPause=false;lastCloudCommandId[0]=0;lastCloudCommandSequence=0;
+    sequenceStore.fail=false;selectedProfile=PROFILE_NORMAL;console.log.clear();nowUtc=utc;
+}
+void run(){
+    JsonDocument r;walter::ProfileCommand c;
+    assert(!deserializeJson(r,cloud));assert(walter::parseProfileCommand(r,1010,utc,c));
+    for(const char* field:{"id","sequence_id","expires_unix","type"}){
+        assert(!deserializeJson(r,cloud));r["command"].remove(field);assert(!walter::parseProfileCommand(r,1010,utc,c));
+    }
+    assert(!deserializeJson(r,cloud));assert(!walter::parseProfileCommand(r,1001,utc,c));
+    assert(!walter::parseProfileCommand(r,1010,0,c));
+    for(unsigned seq:{0u,65536u}){r["command"]["sequence_id"]=seq;assert(!walter::parseProfileCommand(r,1010,utc,c));}
+    assert(!deserializeJson(r,cloud));r["command"]["expires_unix"]=utc;assert(!walter::parseProfileCommand(r,1010,utc,c));
+    for(const char* profile:{"normal","power_save","active","lost_alert","debug"}){
+        assert(!deserializeJson(r,cloud));r["command"]["payload"]["profile"]=profile;assert(walter::parseProfileCommand(r,1010,utc,c));
+    }
+    assert(!deserializeJson(r,cloud));r["command"]["type"]="reboot";assert(!walter::parseProfileCommand(r,1010,utc,c));
+    r["command"]["type"]="enter_lost_alert";assert(walter::parseProfileCommand(r,1010,utc,c)&&c.profile==PROFILE_LOST);
+    r["command"]["type"]="exit_lost_alert";assert(walter::parseProfileCommand(r,1010,utc,c)&&c.profile==PROFILE_ACTIVE);
+    r["command"]["payload"]["fallback_profile"]="lost_alert";assert(!walter::parseProfileCommand(r,1010,utc,c));
+    reset();response(r);listenForLteCommands(r);
+    assert(fakeMs==10000 && polls==10 && acks==1 && selectedProfile==PROFILE_ACTIVE);
+    uint16_t acked=0;assert(pkt_tlv_get_u16(ackPacket.data(),TLV_ACKED_MSG_SEQ_ID,&acked)&&acked==17);
+    assert(pkt_tx_reason(ackPacket.data())==TX_ACK && !(pkt_flags(ackPacket.data())&FLAG_GNSS_VALID));
+    assert(pkt_power_profile(ackPacket.data())==PROFILE_ACTIVE);
+    reset();queuedAt=9999;response(r);listenForLteCommands(r);assert(acks==1&&fakeMs==10000);
+    reset();assert(!deserializeJson(r,cloud));applyCloudCommand(r);auto first=lostProfileStartedMs;
+    fakeMs=5000;applyCloudCommand(r);assert(acks==2 && lostProfileStartedMs==first);
+    reset();sequenceNext=sequenceEnd;sequenceStore.fail=true;assert(!deserializeJson(r,cloud));applyCloudCommand(r);
+    assert(!acks && selectedProfile==PROFILE_NORMAL);sequenceStore.fail=false;
+    reset();failAck=true;assert(!deserializeJson(r,cloud));applyCloudCommand(r);assert(acks==1 && selectedProfile==PROFILE_ACTIVE);
+    failAck=false;applyCloudCommand(r);assert(acks==2);
+    reset();failPoll=true;response(r);listenForLteCommands(r);assert(fakeMs==10000 && polls==1 && !acks);
+    reset();cancelOnPause=true;response(r);listenForLteCommands(r);assert(polls==0 && !acks && fakeMs<10000);
+    reset();assert(!deserializeJson(r,cloud));r["command"]["type"]="reboot";applyCloudCommand(r);assert(!acks);
+    const uint8_t body[]={123,125,0};
+    assert(walter::parseHttpBody(r,body,sizeof(body),0)); // zero-length RING still has a body
+    assert(walter::parseHttpBody(r,body,sizeof(body),2));
+    assert(!walter::parseHttpBody(r,body,sizeof(body),1));
+    assert(!walter::parseHttpBody(r,body,2,0)); // full buffer is potentially truncated
+    const uint8_t empty[]={0};assert(!walter::parseHttpBody(r,empty,1,0));
+    const uint8_t invalid[]="oops";assert(!walter::parseHttpBody(r,invalid,sizeof(invalid),0));
+}
+}
 int main() {
     modemSetupTests::run();
     assert(registrationState("+CEREG: 5,2")==2);
@@ -323,6 +392,9 @@ int main() {
     std::string json;serializeJson(request,json);puts(json.c_str());
     cycleTests();
     lteOnlyTests();
+    commandWindowTests::run();
+    const auto ackLength=walter::buildCommandAck(packet,1010,16,43,17,utc,PROFILE_ACTIVE,false,key);
+    for(int i=0;i<ackLength;++i)printf("%02x",packet[i]);puts("");
 }
 `);
 const compiler=process.env.CXX||(process.platform==='win32'?'C:/ProgramData/mingw64/mingw64/bin/g++.exe':'g++');
@@ -333,7 +405,10 @@ function run(command,args) {
 }
 run(compiler,['-std=c++17','-Wall','-Wextra','-Ishared/lib/BluepawsProtocol','-Icollar/walter/include',
     '-I.pio/libdeps/walter/ArduinoJson/src',source,'-o',executable]);
-const [hex,json]=run(executable,[]).trim().split(/\r?\n/);
+const [hex,json,ackHex]=run(executable,[]).trim().split(/\r?\n/);
+const ack=decodeTlvPacket(Buffer.from(ackHex,'hex'),Buffer.from(Array.from({length:32},(_,i)=>i)));
+assert.equal(ack.authentication.valid,true);
+assert.equal(parseTlvRequest({format:'tlv',ingest_path:'cellular_direct',link_type:'lte',payload_b64:Buffer.from(ackHex,'hex').toString('base64')}).packet.tlvs.acked_msg_seq_id,17);
 const packet=Buffer.from(hex,'hex');
 const decoded=decodeTlvPacket(packet,Buffer.from(Array.from({length:32},(_,i)=>i)));
 assert.equal(decoded.authentication.valid,true);
@@ -347,4 +422,4 @@ assert.equal(parsed.packet.deviceGuid16,1010);
 assert.deepEqual(Buffer.from(parsed.packet.rawBytes),packet);
 assert.equal(decoded.packet.sha256,createHash('sha256').update(packet).digest('hex'));
 writeFileSync(resolve(dir,'packet-fixture.json'),JSON.stringify({hex,wrapper,decoded},null,2));
-console.log('Walter PASS: explicit CGAUTH/PAP validation, CFUN0 RAT switching/reset/readback, CEREG parsing, actual offline/online cycle, isolated LTE-only diagnostic, TX completion, immutable fallback bytes, stop/no-clock gates, credential gates, NVS reservations/reboots/write failures, five-profile cadence, home/away, boot/forced LTE, GNSS validity/staleness, fault flags, strict receipts, C++ HMAC -> web workbench -> Supabase parser. No network or serial traffic.');
+console.log('Walter PASS: ten-second LTE polling (including final-deadline command), expiry/type/identity rejection, duplicate ACK handling, stop and failed-poll gates, signed ACK decoded by backend, zero-content-length bounded HTTP read, explicit CGAUTH/PAP validation, CFUN0 RAT switching/reset/readback, CEREG parsing, actual offline/online cycle, isolated LTE-only diagnostic, TX completion, immutable fallback bytes, stop/no-clock gates, credential gates, NVS reservations/reboots/write failures, five-profile cadence, home/away, boot/forced LTE, GNSS validity/staleness, fault flags, strict receipts, C++ HMAC -> web workbench -> Supabase parser. No network or serial traffic.');

@@ -33,6 +33,9 @@ uint32_t sequenceNext = 0, sequenceEnd = 0;
 uint64_t clockAnchorMs = 0;
 uint32_t clockAnchorUtc = 0;
 walter::Fix lastFix;
+char lastCloudCommandId[37]{};
+uint16_t lastCloudCommandSequence = 0;
+uint64_t lostProfileStartedMs = 0;
 
 uint64_t monotonicMs() { return uint64_t(esp_timer_get_time()) / 1000; }
 uint32_t utcNow() {
@@ -423,17 +426,10 @@ bool nextSequence(uint16_t& result) {
     result = uint16_t(sequenceNext++);
     return true;
 }
-bool upload(const uint8_t* packet, uint8_t length) {
-    if (!networkOn()) return false;
-    char b64[89]{};
-    size_t encoded = 0;
-    if (mbedtls_base64_encode(reinterpret_cast<unsigned char*>(b64), sizeof(b64), &encoded, packet, length)) return false;
-    uint8_t digest[32]; char hash[65]{};
-    bp_sha256_ctx_t sha;
-    bp_sha256_init(&sha); bp_sha256_update(&sha, packet, length); bp_sha256_final(&sha, digest);
-    for (size_t i = 0; i < sizeof(digest); ++i) snprintf(hash + i * 2, 3, "%02x", digest[i]);
-    JsonDocument request;
-    walter::fillRequest(request, b64);
+// One bounded HTTPS exchange. Sequans may report zero content length for a
+// chunked response; actually read and strictly parse the bounded body instead
+// of treating HTTP 201 alone (or content-length zero) as an ingestion receipt.
+bool postJson(JsonDocument& request, JsonDocument& response) {
     String body; serializeJson(request, body);
     const String authorization = String("Authorization: Bearer ") + WALTER_BEARER_TOKEN;
     xQueueReset(httpEvents);
@@ -446,17 +442,94 @@ bool upload(const uint8_t* packet, uint8_t length) {
     while (!cancelRequested.load() && monotonicMs() < deadline) {
         if (xQueueReceive(httpEvents, &event, pdMS_TO_TICKS(100)) != pdTRUE) continue;
         console.printf("[LTE] HTTP status=%u response_bytes=%u\n", event.status, event.data_len);
-        if (event.status < 200 || event.status >= 300 || event.data_len == 0 || event.data_len > 1500) return false;
-        uint8_t response[1501]{};
-        if (!modem.httpReceive(WALTER_HTTP_PROFILE, response, 1500)) return false;
-        JsonDocument receipt;
-        if (deserializeJson(receipt, response, event.data_len)) return false;
-        const bool accepted = walter::acceptedReceipt(receipt, WALTER_DEVICE_ID, pkt_msg_seq(packet), hash);
-        if (accepted) console.printf("[LTE] ACCEPTED device=%u seq=%u hash=%s\n", WALTER_DEVICE_ID, pkt_msg_seq(packet), hash);
-        if (receipt["command_pending"] == true) console.println("[LTE] Pending command NOT executed or ACKed by this testbed");
-        return accepted;
+        constexpr size_t capacity = 1500; // Pinned WalterModem receive-buffer limit.
+        if (event.status < 200 || event.status >= 300 || event.data_len >= capacity) return false;
+        uint8_t bytes[capacity + 1]{};
+        if (!modem.httpReceive(WALTER_HTTP_PROFILE, bytes, capacity)) return false;
+        return walter::parseHttpBody(response, bytes, capacity, event.data_len);
     }
     return false;
+}
+bool sendPacket(const uint8_t* packet, uint8_t length, JsonDocument& receipt) {
+    char b64[89]{};
+    size_t encoded = 0;
+    if (mbedtls_base64_encode(reinterpret_cast<unsigned char*>(b64), sizeof(b64), &encoded, packet, length)) return false;
+    uint8_t digest[32]; char hash[65]{};
+    bp_sha256_ctx_t sha;
+    bp_sha256_init(&sha); bp_sha256_update(&sha, packet, length); bp_sha256_final(&sha, digest);
+    for (size_t i = 0; i < sizeof(digest); ++i) snprintf(hash + i * 2, 3, "%02x", digest[i]);
+    JsonDocument request;
+    walter::fillRequest(request, b64);
+    if (!postJson(request, receipt)) return false;
+    const bool accepted = walter::acceptedReceipt(receipt, WALTER_DEVICE_ID, pkt_msg_seq(packet), hash);
+    if (accepted) console.printf("[LTE] ACCEPTED device=%u seq=%u hash=%s\n", WALTER_DEVICE_ID, pkt_msg_seq(packet), hash);
+    return accepted;
+}
+void applyCloudCommand(JsonDocument& receipt) {
+    walter::ProfileCommand command;
+    if (!walter::parseProfileCommand(receipt, WALTER_DEVICE_ID, utcNow(), command)) {
+        if (receipt["command_pending"] == true) console.println("[LTE CMD] Invalid/expired/unsupported command; not ACKed");
+        return;
+    }
+    // Reserve the ACK identity before changing state. A failed reservation
+    // must not consume a command we cannot acknowledge.
+    uint16_t sequence;
+    if (cancelRequested.load() || !nextSequence(sequence)) return;
+    const bool duplicate = strcmp(lastCloudCommandId, command.id) == 0;
+    if (duplicate && lastCloudCommandSequence != command.sequence) return;
+    if (duplicate && selectedProfile.load() != command.profile) {
+        console.println("[LTE CMD] Superseded locally; old command not ACKed"); return;
+    }
+    if (!duplicate) {
+        selectedProfile = command.profile;
+        lostProfileStartedMs = monotonicMs();
+        memcpy(lastCloudCommandId, command.id, sizeof(lastCloudCommandId));
+        lastCloudCommandSequence = command.sequence;
+        console.printf("[LTE CMD] APPLIED seq=%u profile=%s\n", command.sequence, bp_profile_name(command.profile));
+    }
+    uint8_t packet[BP_MAX_PACKET_SIZE]{};
+    const auto length = walter::buildCommandAck(packet, WALTER_DEVICE_ID, WALTER_HOME_HUB_ID,
+        sequence, command.sequence, utcNow(), bp_profile_t(selectedProfile.load()), simulatedHome.load(), hmacKey);
+    JsonDocument acknowledgement;
+    if (!length || !sendPacket(packet, length, acknowledgement)) {
+        console.println("[LTE CMD] Applied; ACK delivery unconfirmed (can retry on next poll)"); return;
+    }
+    if (acknowledgement["acked_command"]["sequence_id"].is<unsigned>()
+        && acknowledgement["acked_command"]["sequence_id"].as<unsigned>() == command.sequence
+        && acknowledgement["acked_command"]["status"] == "acked")
+        console.printf("[LTE CMD] CLOUD ACK CONFIRMED seq=%u\n", command.sequence);
+    // A further command may be claimed by this ACK response. The next poll
+    // redelivers it; do not recursively open another ten-second window.
+}
+void listenForLteCommands(JsonDocument& initialReceipt) {
+    const auto deadline = monotonicMs() + CMD_LISTEN_WINDOW_MS;
+    console.printf("[LTE CMD] Window OPEN minimum=%ums; authenticated polling\n", unsigned(CMD_LISTEN_WINDOW_MS));
+    applyCloudCommand(initialReceipt);
+    // Include a final poll at the deadline, so commands queued near the end
+    // are not missed. In-flight HTTPS/ACKs may extend the window; stop cancels.
+    while (!cancelRequested.load()) {
+        const auto now = monotonicMs();
+        if (now < deadline && !pauseMs(uint32_t(std::min<uint64_t>(1000, deadline - now)))) break;
+        JsonDocument request, receipt;
+        request["format"] = "device_commands";
+        request["ingest_path"] = "cellular_direct";
+        request["device_id"] = WALTER_DEVICE_ID;
+        if (!postJson(request, receipt) || !walter::commandPollReceipt(receipt, WALTER_DEVICE_ID)) {
+            console.println("[LTE CMD] Poll failed; command delivery unavailable");
+            if (monotonicMs() < deadline) pauseMs(uint32_t(deadline - monotonicMs()));
+            break;
+        }
+        applyCloudCommand(receipt);
+        if (monotonicMs() >= deadline) break;
+    }
+    console.println("[LTE CMD] Window CLOSED");
+}
+bool upload(const uint8_t* packet, uint8_t length) {
+    if (!networkOn()) return false;
+    JsonDocument receipt;
+    if (!sendPacket(packet, length, receipt)) return false;
+    listenForLteCommands(receipt);
+    return true; // Telemetry receipt remains valid even if a later poll fails.
 }
 bool testLteOnly() {
     // Explicit diagnostic: independent of bench mode, without GNSS or LoRa.
@@ -571,10 +644,10 @@ void worker(void*) {
         }
         const bool single = oneShot.exchange(false);
         uint32_t count = 0, homeCount = 0;
-        uint64_t lastLteMs = monotonicMs(), lostStartMs = monotonicMs();
+        uint64_t lastLteMs = monotonicMs();
         do {
             auto profile = bp_profile_t(selectedProfile.load());
-            if (profile == PROFILE_LOST && monotonicMs() - lostStartMs >= uint64_t(LOST_MODE_MAX_DURATION_S) * 1000) {
+            if (profile == PROFILE_LOST && monotonicMs() - lostProfileStartedMs >= uint64_t(LOST_MODE_MAX_DURATION_S) * 1000) {
                 profile = LOST_MODE_FALLBACK; selectedProfile = profile;
                 console.println("[WALTER] Lost timeout: switching to Active");
             }
@@ -584,7 +657,7 @@ void worker(void*) {
                 console.println("[WALTER] Could not confirm radio off; session stopped, check board"); running = false;
             }
             if (single || !running.load() || cancelRequested.load()) break;
-            if (!pauseMs(walter::sleepSeconds(profile) * 1000UL)) break;
+            if (!pauseMs(walter::sleepSeconds(bp_profile_t(selectedProfile.load())) * 1000UL)) break;
         } while (running.load());
         running = false;
         busy = false;
@@ -646,7 +719,7 @@ void command(const String& text) {
         if (text == "start") running = true; else oneShot = true;
     } else if (text.startsWith("profile ")) {
         const auto profile = bp_profile_from_name(text.substring(8).c_str());
-        if (profile == PROFILE_UNKNOWN) console.println("[WALTER] Unknown profile"); else selectedProfile = profile;
+        if (profile == PROFILE_UNKNOWN) console.println("[WALTER] Unknown profile"); else { selectedProfile = profile; lostProfileStartedMs = monotonicMs(); }
     } else if (text == "home on" || text == "home off") {
         simulatedHome = text == "home on";
         console.println("[WALTER] Home is an explicit simulation, not a received BLE beacon");

@@ -21,6 +21,10 @@ export interface PositionRow {
   recorded_at: string;
   received_at: string;
   schema_version: number;
+  home_hub_id?: number | null;
+  home_latitude?: number | null;
+  home_longitude?: number | null;
+  home_fix_at?: string | null;
 }
 
 export interface DevicePresenceRow {
@@ -49,6 +53,10 @@ export function positionToTelemetryDevice(row: PositionRow): TelemetryDevice {
     lat: row.latitude,
     lon: row.longitude,
     hasGps: flags === null || (flags & 0x01) !== 0,
+    homeHub: Number.isInteger(row.home_hub_id) ? {
+      id: row.home_hub_id!, lat: row.home_latitude ?? null,
+      lon: row.home_longitude ?? null, fixAt: row.home_fix_at ?? null,
+    } : null,
     batt: row.battery_mv ?? 0,
     batteryPercent: row.battery === null ? null : clamp(row.battery, 0, 100),
     rssi: row.link_rssi_dbm,
