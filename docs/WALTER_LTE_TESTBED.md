@@ -294,3 +294,53 @@ and actual cloud acceptance remain hardware commissioning checks.
 Reviewed 2026-08-28. ArduinoJson is pinned to 7.4.3. Revisit the driver pin when a
 tagged release includes these HTTP changes; rebuild and repeat bench verification
 before upgrading.
+
+## Registration investigation: documentation review, 2026-08-28
+
+Useful primary references:
+
+- [Walter getting started](https://github.com/QuickSpot/walter-documentation/blob/main/guides/getting_started.md)
+- [Walter cellular connectivity guide](https://github.com/QuickSpot/walter-documentation/blob/main/guides/cellular_connectivity.md)
+- [Sequans LR8.2 AT Commands Reference, Rev.3](https://quickspot.io/docs/file/gm02s_at_commands.pdf)
+- [1NCE APN settings](https://help.1nce.com/dev-hub/docs/data-services-apn)
+- [1NCE SIM status/session/IMEI-lock reference](https://help.1nce.com/docs/1nce-portal/portal-sims-sms/)
+
+Sequans' separate EVK material is distributed through its documentation portal;
+[Sequans support reports migration to SharePoint, Mass Market folder](https://forum.sequans.com/t/upgrade-path-for-gm02sp-ue8-2-0-3/433/6).
+No separate publicly accessible GM02SP EVK getting-started manual was verified.
+The full512-page AT manual above was downloaded and the relevant pages rendered
+locally because its embedded text extraction is unreliable. Private working copy:
+`.pio/walter-bench-20260828/gm02s_at_commands.pdf` (not vendored into Git).
+
+Findings against current firmware; these are **not yet implemented or retested**:
+
+1. Walter's cellular guide records poor UK LTE-M coverage reported with Soracom
+   SIMs and suggests NB-IoT. This is a reason for a controlled alternate-RAT test,
+   not proof about this1NCE SIM. 1NCE advertises both technologies in the UK;
+   coverage/roaming for a particular network and location remains unverified.
+2. Sequans printed page90 requires CFUN0 before changing SQNMODEACTIVE. Our
+   `prepareModem()` conditional RAT-change path currently starts from CFUN4 and
+   needs an explicit CFUN0 transition. This path did not run in the last LTE-M
+   attempt, so the discrepancy does not explain that failure by itself.
+3. 1NCE specifies IPv4 and iot.1nce.net, which match our configuration. It recommends
+   PAP if authentication must be selected, with empty username/password. Current
+   firmware selects no authentication, and `credentialsReady()` incorrectly rejects
+   empty PAP credentials. Allow that provider-supported combination before testing
+   it; do not claim the difference caused the registration failure without evidence.
+4. Printed pages315-316 describe optional CEREG rejection fields; our driver enables
+   mode5 but does not retain those causes. Capture an allowlisted raw registration
+   response and CEER/SQNMONI while the failure is live, before CFUN0 cleanup.
+   Printed page40 identifies SQNCTM? as the active operator-profile query; the
+   existing SQNBANDSEL listing alone does not establish which profile is active.
+
+Next controlled checks: read active modem/profile settings; verify the SIM's
+Activated state, allowance and IMEI lock in1NCE; align the APN authentication
+configuration, then compare registration-only LTE-M/NB-IoT attempts one variable
+at a time. Keep GNSS, LoRa and cloud uploads out of this diagnostic comparison.
+Do not repeatedly reset/reconnect: [Walter's communication FAQ](https://github.com/QuickSpot/walter-documentation/blob/main/faq/communication.md)
+warns against more than3-6 reconnections/hour. A three-minute timeout is an
+application limit, not a hardware-failure verdict; the getting-started guide's
+ten-minute demo allowance includes GNSS and must not be presented as an LTE-only
+registration timeout.
+
+This review made no firmware, modem configuration, SIM account or hardware changes.
