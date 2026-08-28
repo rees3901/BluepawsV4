@@ -84,6 +84,17 @@ test('hub and collar share card shell, avatar, expansion and navigation',()=>{
   assert.match(renderCollar(),/btn-cmd/);
 });
 
+test('hub profile badge uses confirmed state and collar styling in both card sizes',()=>{
+  for(const [profile,css,label] of [['power_save','power','Power Save'],['normal','normal','Normal'],['active','active','Active']]) {
+    for(const expanded of [false,true]) {
+      const html=renderHub({reporting_profile:profile,desired_reporting_profile:profile==='active'?'power_save':'active'},{expanded});
+      assert.ok(html.includes(`class="card-profile profile-${css}">${label}</span>`));
+    }
+  }
+  assert.match(renderHub(),/card-profile profile-normal">Normal<\/span>/);
+  assert.match(renderCollar(),/card-profile profile-active">Active<\/span>/);
+});
+
 test('collar stopwatch advances through the ten-second bulb/sleep transition; hubs never sleep',()=>{
   for (const age of [0,1,9,10,11,59,60]) {
     const html=renderCollar({ageSeconds:age,awakeSeconds:Math.max(0,10-age)});

@@ -1077,10 +1077,12 @@
         var lastSeenStr = formatLastSeen(age);
 
         // Profile badge — colour-coded with optional emoji prefix
-        var profileLabel = HubFeedback.profileLabel(data.profile);
+        var profileLabel = isHub
+            ? ({power_save:'Power Save',normal:'Normal',active:'Active'})[data.hub.reporting_profile] || 'Normal'
+            : HubFeedback.profileLabel(data.profile);
         var profileLower = profileLabel.toLowerCase().replace(/ /g, '');
         var profileClass = 'profile-' + (profileLower === 'lostalert' ? 'lost' : profileLower.replace('save', ''));
-        if (profileLower === 'powersave') profileLabel = '\u{1F4A4} PowerSave';
+        if (!isHub && profileLower === 'powersave') profileLabel = '\u{1F4A4} PowerSave';
         if (profileLower === 'debug') profileLabel = '\u{1F9EA} Debug';
 
         // ── Compact summary (always visible) ──
@@ -1095,7 +1097,7 @@
                     '<div class="card-name-row">' +
                         '<span class="card-name">' + escapeHtml(data.name) + '</span>' +
                         '<span class="card-status ' + st.css + '">' + st.emoji + ' ' + st.label + '</span>' +
-                        (isHub ? '' : '<span class="card-profile ' + profileClass + '">' + profileLabel + '</span>') +
+                        '<span class="card-profile ' + profileClass + '">' + profileLabel + '</span>' +
                         (data.verification === 'pending' ? '<span class="verification-badge pending">Locally received — verification pending</span>' : '') +
                         (data.verification === 'rejected' ? '<span class="verification-badge rejected">Rejected by cloud</span>' : '') +
                         (data.errorPresent === true ? '<span class="error-badge" title="The collar set its ERROR_PRESENT flag. Lost Alert alone is not a fault.">Collar reported a fault</span>' : '') +
