@@ -1,3 +1,5 @@
+import type { CollarFaultReport } from "./collarFault";
+
 export interface CommandFeedback {
   id: string;
   device_id: number;
@@ -12,6 +14,7 @@ export interface CollarFeedback {
   device_id: number;
   observation_id: number | null;
   flags: number | null;
+  faultReport?: CollarFaultReport | null;
   rxWindowUntil: number;
   command: CommandFeedback | null;
 }

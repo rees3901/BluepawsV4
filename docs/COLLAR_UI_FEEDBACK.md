@@ -7,6 +7,7 @@
 - New dashboard commands expire ten minutes after submission. Feedback disappears fifteen minutes after submission. Existing cloud commands retain their actual recorded expiry; other database callers still have the legacy default unless they explicitly request ten minutes.
 - Reported power profile changes only when telemetry confirms it. Queueing a command must not optimistically relabel the collar.
 - Lost status and Emergency Lost/Lost Alert power profile are separate from hardware errors. A real `ERROR_PRESENT` header flag remains visible, even in Lost Alert.
+- The badge now includes a concise same-report reason; see [Collar fault summaries](COLLAR_FAULT_REASONS.md) for supported flags, limitations and its separate rollout.
 
 ## Separate sources, shared meaning
 

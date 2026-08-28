@@ -8,6 +8,7 @@ from urllib.parse import parse_qs
 import json
 import mimetypes
 import time
+import sys
 
 ASSETS = Path(__file__).resolve().parents[1] / 'hub' / 'data'
 START = time.monotonic()
@@ -21,12 +22,16 @@ HUB = dict(format='hub_status',ingest_path='hub_self',gateway_guid16='0010',mode
 
 def device():
     age = (time.monotonic() - START) % 20
-    return dict(id=1001, name='Podge · UI test', emoji='🐱', colour='#1d9bf0',
+    data = dict(id=1001, name='Podge · UI test', emoji='🐱', colour='#1d9bf0',
                 seq=1, time=int(time.time()), status='Lost', profile='Lost Alert',
                 errorPresent=False, resetReason=3, lat=51.90597, lon=-2.2394,
                 hasGps=True, batt=3900, rssi=-94, snr=8, age=age,
                 localId=int((time.monotonic()-START)//20)+1,
                 rxWindowMs=max(0,int(10000-age*1000)), verification='pending')
+    if '--faults' in sys.argv:
+        data.update(errorPresent=True, flags=0xc4, txReasonCode=4,
+                    resetReason=2, resetReasonPresent=True)
+    return data
 
 
 def commands():

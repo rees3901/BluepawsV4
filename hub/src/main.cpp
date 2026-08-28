@@ -292,7 +292,10 @@ struct device_state_t {
     uint8_t  status;         // bp_status_t — OK, OUT_AND_ABOUT, LOST, etc.
     uint8_t  profile;        // bp_profile_t — NORMAL, POWERSAVE, ACTIVE, LOST
     bool     error_present; // Header ERROR_PRESENT, never inferred from reset_reason
+    uint8_t  flags;         // Latest packet flags, independent of retained map position
+    uint8_t  tx_reason;
     uint8_t  reset_reason;
+    bool     reset_reason_present;
     bool     heard_this_boot; // Journal restoration is NOT a live RX opportunity
     int16_t  rssi;           // LoRa RSSI when hub received the packet (dBm)
     float    snr;            // LoRa SNR when hub received the packet (dB)
@@ -1324,7 +1327,7 @@ static void handlePacket(const uint8_t *buf, uint8_t len, int16_t rssi, float sn
     }
 
     // Step 7: Push the telemetry as JSON to all connected web browsers via SSE
-    char jsonBuf[640];
+    char jsonBuf[768];
     buildDeviceJson(buf, rssi, snr, record.local_id, record.gateway_rx_time_unix,
                     record.sync_state, jsonBuf, sizeof(jsonBuf));
     sseBroadcast("telemetry", jsonBuf);
@@ -1350,11 +1353,12 @@ static void buildDeviceJson(const uint8_t *buf, int16_t rssi, float snr,
     double lon        = hasGps ? pkt_lon_e7(buf) / 1e7 : 0.0;
     uint8_t profile   = pkt_power_profile(buf);
     uint8_t resetReason = 0;
-    pkt_tlv_get_u8(buf, TLV_RESET_REASON, &resetReason);
+    bool resetReasonPresent = pkt_tlv_get_u8(buf, TLV_RESET_REASON, &resetReason);
 
     snprintf(out, outLen,
         "{\"id\":%u,\"name\":\"%s\",\"emoji\":\"%s\",\"colour\":\"%s\",\"seq\":%u,\"time\":%u,"
         "\"status\":\"%s\",\"profile\":\"%s\",\"errorPresent\":%s,\"resetReason\":%u,\"rxWindowMs\":10000,"
+        "\"flags\":%u,\"txReasonCode\":%u,\"resetReasonPresent\":%s,"
         "\"lat\":%.7f,\"lon\":%.7f,\"hasGps\":%s,"
         "\"batt\":%u,\"acc\":%u,\"fixAge\":%u,"
         "\"rssi\":%d,\"snr\":%.1f,"
@@ -1365,6 +1369,7 @@ static void buildDeviceJson(const uint8_t *buf, int16_t rssi, float snr,
         bp_status_display((bp_status_t)pkt_status(buf)),
         bp_profile_name((bp_profile_t)profile),
         (flags & FLAG_ERROR_PRESENT) ? "true" : "false", resetReason,
+        flags, pkt_tx_reason(buf), resetReasonPresent ? "true" : "false",
         lat, lon, hasGps ? "true" : "false",
         pkt_batt_mV(buf), pkt_acc_m(buf), pkt_fix_age_s(buf),
         rssi, snr,
@@ -1411,8 +1416,10 @@ static void updateDeviceStateFromRecord(const bp_journal_record_t &record, bool 
             }
             dev->profile = pkt_power_profile(buf);
             dev->error_present = (flags & FLAG_ERROR_PRESENT) != 0;
+            dev->flags = flags;
+            dev->tx_reason = pkt_tx_reason(buf);
             dev->reset_reason = 0;
-            pkt_tlv_get_u8(buf, TLV_RESET_REASON, &dev->reset_reason);
+            dev->reset_reason_present = pkt_tlv_get_u8(buf, TLV_RESET_REASON, &dev->reset_reason);
         }
         xSemaphoreGive(deviceMutex);
     }
@@ -1658,10 +1665,11 @@ static void handleEvents() {
     if (xSemaphoreTake(deviceMutex, pdMS_TO_TICKS(100))) {
         for (uint8_t i = 0; i < deviceCount; i++) {
             device_state_t *d = &devices[i];
-            char json[640];
+            char json[768];
             snprintf(json, sizeof(json),
                 "{\"id\":%u,\"name\":\"%s\",\"emoji\":\"%s\",\"colour\":\"%s\",\"seq\":%u,\"time\":%u,"
                 "\"status\":\"%s\",\"profile\":\"%s\",\"errorPresent\":%s,\"resetReason\":%u,\"rxWindowMs\":%lu,"
+                "\"flags\":%u,\"txReasonCode\":%u,\"resetReasonPresent\":%s,"
                 "\"lat\":%.7f,\"lon\":%.7f,\"hasGps\":%s,"
                 "\"batt\":%u,\"acc\":%u,\"fixAge\":%u,"
                 "\"rssi\":%d,\"snr\":%.1f,\"bleHome\":false,\"cellular\":false,"
@@ -1674,6 +1682,7 @@ static void handleEvents() {
                 bp_profile_name((bp_profile_t)d->profile),
                 d->error_present ? "true" : "false", d->reset_reason,
                 (unsigned long)deviceRxWindowMs(*d),
+                d->flags, d->tx_reason, d->reset_reason_present ? "true" : "false",
                 d->has_gps ? d->lat_e7 / 1e7 : 0.0,
                 d->has_gps ? d->lon_e7 / 1e7 : 0.0,
                 d->has_gps ? "true" : "false",
@@ -1700,10 +1709,11 @@ static void handleApiDevices() {
         for (uint8_t i = 0; i < deviceCount; i++) {
             device_state_t *d = &devices[i];
             if (i > 0) json += ",";
-            char buf[640];
+            char buf[768];
             snprintf(buf, sizeof(buf),
                 "{\"id\":%u,\"name\":\"%s\",\"emoji\":\"%s\",\"colour\":\"%s\",\"seq\":%u,\"time\":%u,"
                 "\"status\":\"%s\",\"profile\":\"%s\",\"errorPresent\":%s,\"resetReason\":%u,\"rxWindowMs\":%lu,"
+                "\"flags\":%u,\"txReasonCode\":%u,\"resetReasonPresent\":%s,"
                 "\"lat\":%.7f,\"lon\":%.7f,\"hasGps\":%s,"
                 "\"batt\":%u,\"acc\":%u,\"fixAge\":%u,"
                 "\"rssi\":%d,\"snr\":%.1f,\"age\":%lu,\"stale\":%s,"
@@ -1715,6 +1725,7 @@ static void handleApiDevices() {
                 bp_profile_name((bp_profile_t)d->profile),
                 d->error_present ? "true" : "false", d->reset_reason,
                 (unsigned long)deviceRxWindowMs(*d),
+                d->flags, d->tx_reason, d->reset_reason_present ? "true" : "false",
                 d->has_gps ? d->lat_e7 / 1e7 : 0.0,
                 d->has_gps ? d->lon_e7 / 1e7 : 0.0,
                 d->has_gps ? "true" : "false",

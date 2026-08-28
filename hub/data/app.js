@@ -1047,6 +1047,8 @@
     function renderDeviceCard(dev) {
         var data = dev.data;
         var isHub = data.entity === 'hub';
+        var fault = isHub ? null : HubFeedback.fault({flags: data.flags, txReason: data.txReasonCode,
+            resetReason: data.resetReasonPresent === true ? data.resetReason : null}, data.errorPresent === true);
         var container = document.getElementById('deviceCards');
         var card = document.getElementById('card-' + dev.id);
         var isNew = false;
@@ -1100,8 +1102,8 @@
                         '<span class="card-profile ' + profileClass + '">' + profileLabel + '</span>' +
                         (data.verification === 'pending' ? '<span class="verification-badge pending">Locally received — verification pending</span>' : '') +
                         (data.verification === 'rejected' ? '<span class="verification-badge rejected">Rejected by cloud</span>' : '') +
-                        (data.errorPresent === true ? '<span class="error-badge" title="The collar set its ERROR_PRESENT flag. Lost Alert alone is not a fault.">Collar reported a fault</span>' : '') +
                     '</div>' +
+                    (fault ? '<div class="card-fault-row"><span class="error-badge" title="' + escapeHtml(fault.title) + '" aria-label="' + escapeHtml(fault.title) + '">' + escapeHtml(fault.label) + '</span></div>' : '') +
                     '<div class="card-indicators">' +
                         '<span class="card-indicator-group">' + renderBatteryBars(isHub ? null : data.batt) + '</span>' +
                         '<span class="card-indicator-group">' + (isHub ? hubSignal(data, stale) : renderSignalBars(data.rssi, data.snr)) + '</span>' +
