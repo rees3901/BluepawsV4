@@ -5,10 +5,12 @@ import { createClient } from "@/lib/supabase/client";
 import { DeviceCard, type DeviceCardProps } from "@/components/DeviceCard";
 import { DeviceReportModal } from "@/components/DeviceReportModal";
 import { buildHubReport, hubReportCsv } from "@/lib/hubReports";
+import { HUB_CONTACT_GRACE_SECONDS, hubControlFeedback, type HubControlAttempt } from "@/lib/hubControlFeedback";
 
 export function HubCard({ hub, onSaved, cardProps }: { hub: HubPresence; onSaved: () => void; cardProps: DeviceCardProps }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [attempt, setAttempt] = useState<HubControlAttempt | null>(null);
   const [reportOpen, setReportOpen] = useState(false);
   const [reportLoading, setReportLoading] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
@@ -28,16 +30,24 @@ export function HubCard({ hub, onSaved, cardProps }: { hub: HubPresence; onSaved
     } catch { setReportOpen(true); setReportError("Unable to load this hub’s latest report. Please try again."); }
     finally { setReportLoading(false); }
   };
-  const pending = hub.settings_revision > hub.applied_revision;
-  const save = async (values: object) => {
-    setBusy(true); setError("");
+  const offline = cardProps.ageSeconds >= HUB_CONTACT_GRACE_SECONDS;
+  // Reuse the dashboard's ticking contact age; keep render deterministic.
+  const now = Date.parse(hub.received_at) + cardProps.ageSeconds * 1000;
+  const feedback = hubControlFeedback(hub, attempt, now);
+  const pending = busy || feedback?.state === "pending";
+  const save = async (enabled: boolean) => {
+    setBusy(true); setError(""); setAttempt(null);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
     try {
-      const { data, error: failure } = await createClient().from("hub_presence").update(values)
-        .eq("gateway_guid16", hub.gateway_guid16).eq("household_id", hub.household_id).select("gateway_guid16");
+      const { data, error: failure } = await createClient().from("hub_presence").update({ desired_ble_enabled: enabled })
+        .eq("gateway_guid16", hub.gateway_guid16).eq("household_id", hub.household_id)
+        .select("settings_revision").abortSignal(controller.signal);
       if (failure || !data?.length) throw new Error("Hub settings could not be saved");
+      setAttempt({ enabled, revision: data[0].settings_revision, startedAt: Date.now() });
       onSaved();
-    } catch (e) { setError(e instanceof Error ? e.message : "Unable to save"); }
-    finally { setBusy(false); }
+    } catch { setError("Could not confirm saving the change. Check your connection and refresh the hub status before retrying."); onSaved(); }
+    finally { clearTimeout(timeout); setBusy(false); }
   };
   return <><DeviceCard {...cardProps} onReportLog={() => void loadReport()} onReportExport={() => void loadReport(true)}
     hubDetails={<>
@@ -46,11 +56,13 @@ export function HubCard({ hub, onSaved, cardProps }: { hub: HubPresence; onSaved
       <span className="label">Home beacon</span><span className="value">{hub.ble_advertising ? "Advertising" : "Off"}</span>
     </>}
     hubActions={
-        <button type="button" className="btn-action" disabled={busy} aria-pressed={hub.desired_ble_enabled}
+        <button type="button" className="btn-action" disabled={pending || offline} aria-pressed={hub.ble_enabled}
           title="Home beacon only operates while connected to primary Home Wi-Fi"
-          onClick={() => void save({ desired_ble_enabled: !hub.desired_ble_enabled })}><svg aria-hidden="true" width="14" height="16" viewBox="0 0 16 20"><path d="M4 5l9 10-5 4V1l5 4L4 15" fill="none" stroke="currentColor" strokeWidth="2"/></svg> Bluetooth {hub.desired_ble_enabled ? "On" : "Off"}</button>}
+          onClick={() => void save(!hub.ble_enabled)}><svg aria-hidden="true" width="14" height="16" viewBox="0 0 16 20"><path d="M4 5l9 10-5 4V1l5 4L4 15" fill="none" stroke="currentColor" strokeWidth="2"/></svg> Bluetooth {hub.ble_enabled ? "On" : "Off"}</button>}
     hubFooter={<>
-      {pending && <p role="status">Settings pending — applied on the next hub check-in.</p>}
+      {offline && <p className="hub-control-feedback" role="status">Hub contact lost — last Wi-Fi signal is no longer current. Check hub power and Wi-Fi.</p>}
+      {feedback && <p className={`hub-control-feedback ${feedback.state}`} role={feedback.state === "failed" ? "alert" : "status"}>{feedback.text}</p>}
+      {!attempt && hub.desired_ble_enabled !== hub.ble_enabled && <p className="hub-control-feedback" role="status">Saved Bluetooth setting not yet confirmed by hub.</p>}
       {error && <p role="alert">{error}</p>}
     </>}
   />{reportOpen && <DeviceReportModal deviceName={hub.display_name} entityLabel="Home Hub"

@@ -14,7 +14,7 @@ START = time.monotonic()
 COMMANDS = []
 HUB = dict(format='hub_status',ingest_path='hub_self',gateway_guid16='0010',mode='home',
            latitude=51.907,longitude=-2.240,fix_age_s=3,uptime_s=1000,free_heap=150000,
-           wifi_rssi_dbm=-40,ble_enabled=True,ble_advertising=True,
+           wifi_rssi_dbm=-40,ble_enabled=True,ble_advertising=True,ble_settled=True,
            display_name='Home Hub · UI test',home_emoji='🏡',portable_emoji='📱',marker_colour='#38bdf8')
 
 

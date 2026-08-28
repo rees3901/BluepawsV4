@@ -16,8 +16,17 @@ struct HubSelf {
 static HubSelf hubSelf;
 static SemaphoreHandle_t hubSelfMutex;
 static std::atomic<bool> hubSelfDirty{false};
+static std::atomic<bool> hubSelfReportRequested{false};
 static uint32_t lastSelfPostMs = 0;
 static bool selfPosted = false;
+static uint32_t selfRetryDelayMs = 2000;
+static uint32_t lastSettingsPollMs = 0, settingsPollDelayMs = 5000;
+static bool settingsPolled = false;
+
+static bool hubBleSettled() {
+    const bool shouldAdvertise = !hubProfileUsesBleScanning() && homeBeaconAllowed && hubBeaconEnabled;
+    return hubBeaconAdvertising.load() == shouldAdvertise;
+}
 static bool validHubText(const String &s) {
     if (s.length()==0 || s.length()>64) return false;
     for (unsigned i=0;i<s.length();++i) if ((uint8_t)s[i]<0x20) return false;
@@ -100,6 +109,7 @@ static String hubPresenceJson(bool cloud) {
         doc["latitude"]=s.lat; doc["longitude"]=s.lon; doc["fix_age_s"]=age;
     } else { doc["latitude"]=nullptr; doc["longitude"]=nullptr; doc["fix_age_s"]=nullptr; }
     if (!cloud) {
+        doc["ble_settled"]=hubBleSettled();
         doc["display_name"]=s.name; doc["home_emoji"]=s.homeEmoji;
         doc["portable_emoji"]=s.portableEmoji; doc["marker_colour"]=s.colour;
     }
@@ -134,8 +144,65 @@ static void handleHubPreferences() {
         if (doc["ble_enabled"].is<bool>()) hubBeaconEnabled=doc["ble_enabled"].as<bool>();
         xSemaphoreGive(hubSelfMutex);
         hubSelfDirty=true;
+        hubSelfReportRequested=true;
         httpServer.send(200,"application/json","{\"accepted\":true}");
     } else httpServer.send(503,"application/json","{\"error\":\"busy\"}");
+}
+
+static void applyHubSettings(JsonObject settings) {
+    const uint64_t rev=settings["revision"] | uint64_t(0);
+    if (rev<=copyHubSelf().revision || !settings["ble_enabled"].is<bool>()) return;
+    String name=settings["display_name"] | "";
+    String home=settings["home_emoji"] | "";
+    String portable=settings["portable_emoji"] | "";
+    String colour=settings["marker_colour"] | "";
+    if (!validHubText(name) || !validHubText(home) || !validHubText(portable) || !validMarkerColour(colour)) return;
+    if (xSemaphoreTake(hubSelfMutex,pdMS_TO_TICKS(50))) {
+        strlcpy(hubSelf.name,name.c_str(),sizeof(hubSelf.name));
+        strlcpy(hubSelf.homeEmoji,home.c_str(),sizeof(hubSelf.homeEmoji));
+        strlcpy(hubSelf.portableEmoji,portable.c_str(),sizeof(hubSelf.portableEmoji));
+        strlcpy(hubSelf.colour,colour.c_str(),sizeof(hubSelf.colour));
+        hubSelf.revision=rev; hubBeaconEnabled=settings["ble_enabled"].as<bool>();
+        xSemaphoreGive(hubSelfMutex);
+        hubSelfDirty=true; hubSelfReportRequested=true;
+        Serial.printf("[HUB SETTINGS] revision %llu received; awaiting BLE task then status confirmation\n",
+            (unsigned long long)rev);
+    }
+}
+
+static void pollHubSettings() {
+    // Same outbound gateway-authenticated HTTPS channel, not an inbound LAN call
+    // or a public WebSocket. Run ONLY on the existing cloud worker (one TLS client).
+    if (!hubProfileAllowsCloudRelay() || !staConnected || cloudToken.isEmpty() || cloudEndpoint.isEmpty()
+        || uxQueueMessagesWaiting(cloudQueue)>0) return;
+    const uint32_t now=millis();
+    if (settingsPolled && now-lastSettingsPollMs<settingsPollDelayMs) return;
+    settingsPolled=true; lastSettingsPollMs=now;
+    JsonDocument request;
+    char guid[5]; snprintf(guid,sizeof(guid),"%04X",(unsigned)GATEWAY_GUID16);
+    request["format"]="hub_settings"; request["ingest_path"]="hub_self"; request["gateway_guid16"]=guid;
+    String body; serializeJson(request,body);
+    HTTPClient http;
+    http.setConnectTimeout(2000); http.setTimeout(2000);
+    int code=-1; bool success=false;
+    if (http.begin(cloudEndpoint)) {
+        http.addHeader("Content-Type","application/json");
+        http.addHeader("Authorization","Bearer "+cloudToken);
+        code=http.POST(body);
+        if (code==200 && http.getSize()<4096) {
+            JsonDocument response;
+            if (!deserializeJson(response,http.getString()) &&
+                (response["settings"].is<JsonObject>() || response["settings"].isNull())) {
+                success=true;
+                applyHubSettings(response["settings"].as<JsonObject>());
+            }
+        }
+        http.end();
+    }
+    // A failed settings read is not a new location/heartbeat. Bounded backoff;
+    // normal self reports and collar traffic remain independent.
+    settingsPollDelayMs=success ? 5000 : std::min<uint32_t>(settingsPollDelayMs*2,60000);
+    if (!success) Serial.printf("[HUB SETTINGS] HTTP %d; retry in %lus\n",code,(unsigned long)(settingsPollDelayMs/1000));
 }
 
 static void postHubPresence() {
@@ -144,37 +211,28 @@ static void postHubPresence() {
     // Live collar relay/command responses take priority over hub housekeeping.
     if (uxQueueMessagesWaiting(cloudQueue)>0) return;
     uint32_t now=millis();
-    if (selfPosted && now-lastSelfPostMs<55000) return; // + <=5s queue wait = about one minute
+    const bool requested=hubSelfReportRequested.load();
+    if (requested && !hubBleSettled()) return; // BLE task owns radio changes; never acknowledge ahead of it.
+    if (selfPosted && now-lastSelfPostMs<(requested ? selfRetryDelayMs : 55000u)) return;
     lastSelfPostMs=now; selfPosted=true;
     HTTPClient http;
     http.setConnectTimeout(2000); http.setTimeout(2000);
     if (!http.begin(cloudEndpoint)) return;
+    const bool confirming=hubSelfReportRequested.exchange(false);
     http.addHeader("Content-Type","application/json");
     http.addHeader("Authorization","Bearer "+cloudToken);
     int code=http.POST(hubPresenceJson(true));
     Serial.printf("[HUB SELF] status POST -> HTTP %d\n",code);
+    bool confirmed=false;
     if (code>=200 && code<300 && http.getSize()<4096) {
         JsonDocument response;
         if (!deserializeJson(response,http.getString())) {
-            JsonObject settings=response["settings"].as<JsonObject>();
-            uint64_t rev=settings["revision"] | uint64_t(0);
-            if (rev>copyHubSelf().revision && settings["ble_enabled"].is<bool>()) {
-                String name=settings["display_name"] | "";
-                String home=settings["home_emoji"] | "";
-                String portable=settings["portable_emoji"] | "";
-                String colour=settings["marker_colour"] | "";
-                if (validHubText(name) && validHubText(home) && validHubText(portable) && validMarkerColour(colour)
-                    && xSemaphoreTake(hubSelfMutex,pdMS_TO_TICKS(50))) {
-                    strlcpy(hubSelf.name,name.c_str(),sizeof(hubSelf.name));
-                    strlcpy(hubSelf.homeEmoji,home.c_str(),sizeof(hubSelf.homeEmoji));
-                    strlcpy(hubSelf.portableEmoji,portable.c_str(),sizeof(hubSelf.portableEmoji));
-                    strlcpy(hubSelf.colour,colour.c_str(),sizeof(hubSelf.colour));
-                    hubSelf.revision=rev; hubBeaconEnabled=settings["ble_enabled"].as<bool>();
-                    xSemaphoreGive(hubSelfMutex); hubSelfDirty=true;
-                }
-            }
+            confirmed=response["accepted"] == true;
+            applyHubSettings(response["settings"].as<JsonObject>());
         }
     }
+    if (confirming && !confirmed) hubSelfReportRequested=true;
+    selfRetryDelayMs=confirmed ? 2000 : std::min<uint32_t>(selfRetryDelayMs*2,60000);
     noteCloudPostResult(code);
     http.end();
 }

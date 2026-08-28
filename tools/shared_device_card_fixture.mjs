@@ -23,7 +23,7 @@ function load(name) {
 export const hub = {gateway_guid16:16, household_id:'synthetic-family', mode:'home',
   display_name:'Bluepaws Test Hub',home_emoji:'🏡',portable_emoji:'📱',marker_colour:'#38bdf8',
   received_at:'2026-08-27T12:00:00Z',latitude:51.907,longitude:-2.24,fix_at:'2026-08-27T11:59:57Z',
-  wifi_rssi_dbm:-40,ble_advertising:true,desired_ble_enabled:true,settings_revision:1,applied_revision:1};
+  wifi_rssi_dbm:-40,ble_enabled:true,ble_advertising:true,desired_ble_enabled:true,settings_revision:1,applied_revision:1};
 const noop = () => {};
 export const cardProps = {expanded:true, dragging:false,dragOver:false,followed:false,trailVisible:false,
   portableMode:false,distance:'122 m',ageSeconds:3,onExpand:noop,onAction:noop,onAvatarEdit:noop,

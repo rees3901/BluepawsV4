@@ -346,7 +346,8 @@ body.panel-open .hamburger-btn {
 .card-indicators {
     display: flex;
     align-items: center;
-    gap: 10px;
+    flex-wrap: wrap;
+    gap: 4px 7px;
     margin-top: 4px;
 }
 
@@ -358,13 +359,62 @@ body.panel-open .hamburger-btn {
 .card-indicator-group {
     display: inline-flex;
     align-items: center;
+    flex: 0 0 auto;
+    white-space: nowrap;
     gap: 2px;
 }
 
 .card-indicators .signal-indicator,
 .card-indicators .battery-indicator {
-    transform: scale(0.85);
-    transform-origin: left center;
+    /* Scale actual dimensions, not just paint: avoid invisible reserved width. */
+    gap: 2px;
+    white-space: nowrap;
+}
+
+.card-indicators .sig-label,
+.card-indicators .batt-label {
+    font-size: 0.6rem;
+    margin-left: 2px;
+    letter-spacing: 0;
+}
+
+.card-indicators .sig-bar {
+    width: 3px;
+}
+
+.card-indicators .signal-indicator > svg {
+    width: 13px;
+    height: 17px;
+    flex-shrink: 0;
+}
+
+.card-indicators .battery-indicator > svg {
+    width: 23px;
+    height: 16px;
+    flex-shrink: 0;
+}
+
+.card-indicators .transport-badge {
+    flex: 0 0 auto;
+    white-space: nowrap;
+    padding: 1px 3px;
+    font-size: 0.56rem;
+    min-width: 0;
+}
+
+.hub-control-feedback {
+    margin: 6px 0 0;
+    font-size: 0.72rem;
+    line-height: 1.4;
+    color: var(--text-secondary);
+}
+
+.hub-control-feedback.failed {
+    color: #f59e0b;
+}
+
+.hub-control-feedback.confirmed {
+    color: #22c55e;
 }
 
 .card-dist-group {

@@ -1,3 +1,5 @@
+"use client";
+import { createPortal } from "react-dom";
 import type { DeviceReport } from "@/lib/deviceReports";
 
 interface DeviceReportModalProps {
@@ -13,7 +15,10 @@ interface DeviceReportModalProps {
 export function DeviceReportModal({ deviceName, reports, loading, error, onClose, onDownload, entityLabel = "collar" }: DeviceReportModalProps) {
   const latest = reports[0] ?? null;
 
-  return (
+  // The sidebar animates/transforms: fixed descendants otherwise use its bounds.
+  // Both hub and collar reports belong to the viewport, not to their card.
+  if (typeof document === "undefined") return null;
+  return createPortal(
     <div className="modal" role="dialog" aria-modal="true" aria-labelledby="device-report-title">
       <div className="modal-content device-report-modal">
         <div className="modal-header">
@@ -73,6 +78,7 @@ export function DeviceReportModal({ deviceName, reports, loading, error, onClose
           <button className="btn-secondary" type="button" onClick={onClose}>Close</button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

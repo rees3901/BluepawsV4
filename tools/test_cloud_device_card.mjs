@@ -4,6 +4,7 @@ import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import * as hubControlFeedback from '../web/src/lib/hubControlFeedback.ts';
 const require = createRequire(new URL('../web/package.json',import.meta.url));
 const ts = require('typescript');
 const React = require('react');
@@ -13,6 +14,7 @@ const output=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.Co
 const icons=Object.fromEntries(['BatteryIndicator','BleProximity','HomeDistance','LastSeen','SignalIndicator'].map(name=>[name,({children})=>React.createElement('span',null,children)]));
 const context=vm.createContext({exports:{},require(name){
   if(name==='@/components/Indicators')return icons;
+  if(name==='@/lib/hubControlFeedback')return hubControlFeedback;
   if(name==='@/lib/emoji')return {emojiImageUrl:()=>'/favicon.svg'};
   if(name==='@/lib/mapLocation')return {googleMapsUrl:()=> '#',formatMapCoordinates:()=> '51.9, -2.2'};
   return require(name);

@@ -16,9 +16,10 @@ function fixture(roaming, bleResults = {}) {
         document: {
             getElementById: id => id === 'deviceCards'
                 ? { appendChild: card => cards.set(card.id, card) } : cards.get(id),
-            createElement: () => ({ innerHTML: '', classList: { add() {}, remove() {} }, querySelector: () => null }),
+            createElement: () => ({ innerHTML: '', classList: { add() {}, remove() {} },
+                querySelector: selector => selector === '.card-avatar-edit' ? {} : null }),
         },
-        Date, performance, expandedCardId: null, followedDeviceId: null,
+        Date, performance, expandedCardIds: [], followedDeviceId: null,
         hubPortableMode: roaming, bleResults, deviceLogs: {},
         getCollarStatus: () => ({ css: 'home', emoji: '', label: 'Home' }),
         formatDistFromHub: () => '1 km', formatLastSeen: () => 'just now', formatAge: () => 'just now',
@@ -27,6 +28,8 @@ function fixture(roaming, bleResults = {}) {
         buildActionButtons: () => '', wireActionButtons() {},
     });
     vm.runInContext(readFileSync(new URL('../hub/data/feedback.js', import.meta.url), 'utf8'), context);
+    vm.runInContext(source.slice(source.indexOf('    function escapeHtml(value) {'),
+        source.indexOf('    function hubDetailRows(data) {')), context);
     vm.runInContext(renderer, context);
     const device = id => ({ id, lastUpdate: Date.now(), avatar: {color:'#1d9bf0',emoji:'🐾'},
         data: {id, name:`Device ${id}`,profile:'Normal',status:'Home',hasGps:false,batt:3900,rssi:-94,snr:8,verification:'pending'} });
@@ -61,12 +64,12 @@ test('expanded GPS card can be refreshed and collapsed while Off-Grid', () => {
     const f = fixture(true, {1001:{rssi:-51}});
     const dev = f.device(1001);
     Object.assign(dev.data, {hasGps:true,lat:51.9,lon:-2.2});
-    f.context.expandedCardId = 1001;
+    f.context.expandedCardIds = [1001];
     f.context.renderDeviceCard(dev);
     assert.match(f.cards.get('card-1001').innerHTML, /51\.90000, -2\.20000/);
     assert.match(f.cards.get('card-1001').innerHTML, /Message Log/);
     f.context.renderDeviceCard(dev);
-    f.context.expandedCardId = null;
+    f.context.expandedCardIds = [];
     f.context.renderDeviceCard(dev);
     assert.doesNotMatch(f.cards.get('card-1001').className, /expanded/);
 });

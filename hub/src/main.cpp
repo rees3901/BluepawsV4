@@ -216,6 +216,7 @@ static void initHubPresence();
 static void handleHubPresence();
 static void handleHubPreferences();
 static void postHubPresence();
+static void pollHubSettings();
 static std::atomic<bool> clearOfflineSessions{false};
 static std::atomic<bool> knownWifiAvailable{false};
 static std::atomic<bool> modeChangePending{false};
@@ -3093,7 +3094,8 @@ static void cloudTask(void *param) {
     cloud_entry_t entry;
 
     for (;;) {
-        postHubPresence(); // Independent of collar traffic; at most once per minute.
+        pollHubSettings(); // Small settings-only read; no fabricated presence or command claims.
+        postHubPresence(); // Minute heartbeat, or prompt confirmation after applied settings.
         // Block until a packet is queued (or timeout after 5s for housekeeping)
         if (xQueueReceive(cloudQueue, &entry, pdMS_TO_TICKS(5000)) == pdTRUE) {
             updateConnectivityState();

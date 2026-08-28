@@ -917,14 +917,14 @@
         });
     }
 
-    function hubSignal(data) {
-        var rssi=data.rssi;
+    function hubSignal(data, contactLost) {
+        var rssi=contactLost ? null : data.rssi;
         var level=!Number.isFinite(rssi) ? 0 : rssi>=-50 ? 5 : rssi>=-60 ? 4 : rssi>=-70 ? 3 : rssi>=-80 ? 2 : 1;
-        var label=['No data','Very poor','Poor','Average','Good','Excellent'][level];
+        var label=contactLost ? 'No contact' : ['No Wi-Fi','Very poor','Poor','Average','Good','Excellent'][level];
         var color=['#607d8b','#ef4444','#f97316','#f59e0b','#84cc16','#22c55e'][level];
         var bars='';
         for(var i=1;i<=5;i++) bars+='<span class="sig-bar'+(i<=level ? ' filled' : '')+'" style="height:'+(4+i*3)+'px;'+(i<=level ? 'background:'+color : '')+'"></span>';
-        return '<span class="signal-indicator" title="Wi-Fi '+(Number.isFinite(rssi) ? rssi+' dBm' : 'not connected')+'">'+ICON_ANTENNA+bars+
+        return '<span class="signal-indicator" title="'+(contactLost ? 'Hub contact lost; current Wi-Fi state unknown' : 'Wi-Fi '+(Number.isFinite(rssi) ? rssi+' dBm' : 'not connected'))+'">'+ICON_ANTENNA+bars+
             '<span class="sig-label" style="color:'+color+'">'+label+'</span><span class="transport-badge">Wi-Fi</span></span>';
     }
 
@@ -993,7 +993,7 @@
                 ' Trail' +
             '</button>';
         if (dev.data.entity === 'hub') return html +
-            '<button class="btn-action" data-action="bluetooth" data-id="' + dev.id + '" aria-pressed="' + !!dev.data.hub.ble_enabled +
+            '<button class="btn-action" ' + ((HubPresencePanel.feedback() && HubPresencePanel.feedback().state === 'pending') || Date.now()-dev.lastUpdate>=15000 ? 'disabled ' : '') + 'data-action="bluetooth" data-id="' + dev.id + '" aria-pressed="' + !!dev.data.hub.ble_enabled +
             '" title="Home beacon operates only on primary Home Wi-Fi">ᛒ Bluetooth ' + (dev.data.hub.ble_enabled ? 'On' : 'Off') + '</button>';
         return html + '<button class="btn-action btn-find" data-action="find" data-id="' + dev.id + '" title="Find Alert — trigger buzzer + LED">' +
                 '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a4 4 0 00-4 4c0 1.2.4 2 1 3l-2 5h10l-2-5c.6-1 1-1.8 1-3a4 4 0 00-4-4zm0 13a2 2 0 01-2-2h4a2 2 0 01-2 2z"/></svg>' +
@@ -1058,7 +1058,7 @@
 
         // Calculate time since last update — cards older than 10 minutes get dimmed
         var age = Math.floor((Date.now() - dev.lastUpdate) / 1000);
-        var stale = age >= 600;  // 10 minutes
+        var stale = age >= (isHub ? 15 : 600); // Local hub polled every 5s; collars retain 10 minutes.
         var isExpanded = expandedCardIds.indexOf(dev.id) >= 0;
         card.className = 'device-card' + (stale ? ' stale' : '') + (isExpanded ? ' expanded' : '');
 
@@ -1098,7 +1098,7 @@
                     '</div>' +
                     '<div class="card-indicators">' +
                         '<span class="card-indicator-group">' + renderBatteryBars(isHub ? null : data.batt) + '</span>' +
-                        '<span class="card-indicator-group">' + (isHub ? hubSignal(data) : renderSignalBars(data.rssi, data.snr)) + '</span>' +
+                        '<span class="card-indicator-group">' + (isHub ? hubSignal(data, stale) : renderSignalBars(data.rssi, data.snr)) + '</span>' +
                         (isHub ? '' : '<span class="collar-awake" data-awake="' + dev.id + '" hidden></span>') +
                         (hubPortableMode && bleResults[dev.id] ? '<span class="card-indicator-group">' + renderBleProximity(bleResults[dev.id].rssi) + '</span>' : '') +
                     '</div>' +
@@ -1139,6 +1139,8 @@
                         buildActionButtons(dev, isFollowed) +
                     '</div>' +
                     (isHub ? '' : '<div class="command-feedback" data-command-feedback="' + dev.id + '" role="status" hidden></div>') +
+                    (isHub && stale ? '<p class="hub-control-feedback" role="status">Hub contact lost — reconnect to its Wi-Fi network.</p>' : '') +
+                    (isHub && HubPresencePanel.feedback() ? '<p class="hub-control-feedback ' + escapeHtml(HubPresencePanel.feedback().state) + '" role="status">' + escapeHtml(HubPresencePanel.feedback().text) + '</p>' : '') +
 
                     '<div class="log-btn-row">' +
                         '<button class="btn-device-log btn-secondary" data-logid="' + dev.id + '">Message Log</button>' +
@@ -1273,7 +1275,12 @@
             var dev = devices[id], card = document.getElementById('card-' + dev.id);
             if (!card) continue;
             var age = Math.max(0, Math.floor((Date.now() - dev.lastUpdate) / 1000));
-            card.classList.toggle('stale', age >= 600);
+            var stale = age >= (dev.data.entity === 'hub' ? 15 : 600);
+            if (dev.data.entity === 'hub' && card.classList.contains('stale') !== stale) {
+                renderDeviceCard(dev); // Update signal/buttons once when contact becomes overdue.
+                continue;
+            }
+            card.classList.toggle('stale', stale);
             var seen = card.querySelector('.card-lastseen-value');
             if (seen) seen.textContent = formatLastSeen(age);
             var detailAge = card.querySelector('[data-detail-age]');
@@ -1794,6 +1801,8 @@
         if (typeof HubPresencePanel !== 'undefined') HubPresencePanel.start(protectedFetch, function(data) {
             hubHomeLat=data.hasGps ? data.lat : null; hubHomeLon=data.hasGps ? data.lon : null;
             updateDevice(data); // Shared cards, markers, popups and navigation.
+        }, function(id) {
+            if (devices[id]) renderDeviceCard(devices[id]); // Feedback must not reset last contact.
         });
         connectSSE();    // Open SSE connection for real-time updates
 
