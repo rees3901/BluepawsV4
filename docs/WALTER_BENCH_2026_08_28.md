@@ -540,3 +540,71 @@ Private evidence under `.pio/walter-bench-20260828/`: `live-lte-prequeued.log`,
 `live-gnss-settle-02.log`, `live-assistance.log`, `live-gnss-assisted.log`,
 `live-full-pipeline.log`, `live-full-pipeline-decoded.json`,
 `live-restore-normal.log`, `live-final-status.log`.
+
+## Bounded GNSS snapshot comparison, 22:18-22:23 UTC
+
+Implemented explicit `gnss settle` and `gnss hot` diagnostics from merged main
+`a3caae6`. Normal `gnss`, `send` and `start` acquisition policy is unchanged.
+The new diagnostics repeat snapshots within a60-second shared budget (maximum20
+attempts), log individual CN0 values and retain the lowest-uncertainty fresh real
+snapshot. Three consecutive estimates at most50m with successive position changes
+at most25m permit early completion. These thresholds are experimental, not an
+accuracy certification. `gnss hot` switches mode only after a usable session fix
+and restores cold/warm configuration afterward. No averaging or fabricated
+accuracy/timestamp adjustment is performed.
+
+Build succeeded:64,272 bytes static RAM,435,713 bytes application flash. COM26
+flash hash verified. Host regression suite passed, including the actual settling
+function's attempt/deadline bounds, consistency resets, hot-start gating,
+invalid/stale/future fixes, best-candidate timestamp preservation, cancellation
+and failed-cancellation handling. No production policy or credential changes.
+
+The following tests ran consecutively on Walter1010, with actual host UTC and
+LTE off. No LTE registration, assistance refresh, modem reset between sessions,
+LoRa stub transmission or cloud upload was requested. No antenna movement was
+requested during the comparison; current placement/passive-antenna suitability
+was asked about but not confirmed during these tests.
+
+| Session | Completed snapshots / attempts | Reported uncertainties, metres | Outcome |
+| --- | --- | --- | --- |
+| Baseline `gnss` | 1 / 1 | 57.7 | Valid snapshot after35.8s;9 entries |
+| `gnss settle` | 6 / 7 | 36.3,20.7,20.3,13.4,23.3,17.6 |60.253s;selected13.4m;not consistent |
+| `gnss hot` | 5 / 6 | 33.8,17.6,47.4,2.8,22.5 |60.270s;selected2.8m;not consistent |
+| Repeat `gnss settle` | 2 / 3 | 107.8,66.0 |60.235s;selected66.0m;not consistent |
+
+Each settling session exhausted its budget and cancelled the last outstanding
+request. The selected snapshot retained its original capture timestamp. A
+reported `VALID FIX` means that the ordinary validity checks passed, **not** that
+the three-snapshot consistency test passed. None of these sessions reached that
+criterion. The minimum uncertainty is a diagnostic candidate, not ground truth.
+
+First settling-session positions spanned54.2m; successive separations were
+28.9,31.7,26.1,25.8 and29.1m. Hot-session positions spanned97.8m; the snapshot
+claiming2.8m uncertainty was97.8m from its predecessor and42.3m from its successor.
+It must not be described as proven2.8m accuracy. These separations were calculated
+from the raw coordinates, not from a presumed exact home-hub position.
+
+CN0 logging showed only1-2 entries at or above30 per snapshot. Most remaining
+entries were around17-29. The first settling run had9-10 entries, the hot run9,
+and the final run5. Satellite entries are not assumed to be satellites actually
+used in the solution. This supports investigating weak reception/antenna placement
+and possible reflected signals, but does not establish a defective RF frontend
+or a unique cause. The tests are sequential, not a randomized controlled trial.
+
+Interpretation: repeated acquisition exposed better reported uncertainties than
+the initial single fix, but did not deliver repeatably stable coordinates. Hot
+start did not demonstrate a reliable accuracy advantage. The first-result policy
+may contribute; simply choosing the smallest reported uncertainty can select a
+spatial outlier. Keep production upload policy unchanged until a fixed outdoor
+reference/antenna comparison and a consistency-based selection policy are tested.
+
+A final `gnss settle` was stopped after two seconds: one outstanding acquisition,
+zero usable snapshots, selected0, NO FIX, and idle after2.162s. No cancellation or
+RF-off cleanup warning was emitted. Final status: device1010/hub16, Normal,
+offline1, busy0/running0, LoRa count0/LTE-skipped count0; COM26 closed. Other bench
+ports, cloud state, SIM settings, credentials and the user's PCB work were untouched.
+
+Private logs under `.pio/walter-bench-20260828/`: `gnss-compare-single-before.log`,
+`gnss-compare-settle-01.log`, `gnss-compare-hot-01.log`,
+`gnss-compare-settle-02.log`, `gnss-comparison-summary.json`,
+`gnss-compare-stop-final.log`, `gnss-compare-final-status.log`.
