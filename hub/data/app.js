@@ -1129,6 +1129,7 @@
                     '<div class="card-grid">' +
                         '<span class="label">Coordinates</span><span class="value">' + coordHtml + '</span>' +
                         (isHub ? hubDetailRows(data) :
+                            '<span class="label">Device ID</span><span class="value">' + dev.id + '</span>' +
                             '<span class="label">Power Profile</span><span class="value">' + escapeHtml(data.profile) + '</span>' +
                             '<span class="label">Dist From Hub</span><span class="value">' + distStr + '</span>') +
                         '<span class="label">Last seen</span><span class="value" data-detail-age>' + formatAge(age) + '</span>' +

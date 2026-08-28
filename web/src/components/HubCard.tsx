@@ -7,7 +7,6 @@ import { DeviceReportModal } from "@/components/DeviceReportModal";
 import { buildHubReport, hubReportCsv } from "@/lib/hubReports";
 
 export function HubCard({ hub, onSaved, cardProps }: { hub: HubPresence; onSaved: () => void; cardProps: DeviceCardProps }) {
-  const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [reportOpen, setReportOpen] = useState(false);
@@ -36,7 +35,7 @@ export function HubCard({ hub, onSaved, cardProps }: { hub: HubPresence; onSaved
       const { data, error: failure } = await createClient().from("hub_presence").update(values)
         .eq("gateway_guid16", hub.gateway_guid16).eq("household_id", hub.household_id).select("gateway_guid16");
       if (failure || !data?.length) throw new Error("Hub settings could not be saved");
-      setEditing(false); onSaved();
+      onSaved();
     } catch (e) { setError(e instanceof Error ? e.message : "Unable to save"); }
     finally { setBusy(false); }
   };
@@ -51,15 +50,7 @@ export function HubCard({ hub, onSaved, cardProps }: { hub: HubPresence; onSaved
           title="Home beacon only operates while connected to primary Home Wi-Fi"
           onClick={() => void save({ desired_ble_enabled: !hub.desired_ble_enabled })}><svg aria-hidden="true" width="14" height="16" viewBox="0 0 16 20"><path d="M4 5l9 10-5 4V1l5 4L4 15" fill="none" stroke="currentColor" strokeWidth="2"/></svg> Bluetooth {hub.desired_ble_enabled ? "On" : "Off"}</button>}
     hubFooter={<>
-      <button type="button" className="btn-action" onClick={() => setEditing(!editing)}>Rename hub</button>
       {pending && <p role="status">Settings pending — applied on the next hub check-in.</p>}
-      {editing && <form className="hub-editor" onSubmit={event => {
-        event.preventDefault(); const f = new FormData(event.currentTarget);
-        void save({ display_name: String(f.get("name")).trim() });
-      }}>
-        <label>Name<input name="name" defaultValue={hub.display_name} maxLength={64} required /></label>
-        <button disabled={busy} type="submit">Save name</button>
-      </form>}
       {error && <p role="alert">{error}</p>}
     </>}
   />{reportOpen && <DeviceReportModal deviceName={hub.display_name} entityLabel="Home Hub"

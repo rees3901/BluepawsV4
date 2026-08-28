@@ -26,6 +26,7 @@ export interface PositionRow {
 export interface DevicePresenceRow {
   device_id: number;
   household_id: string;
+  display_name?: string;
   last_seen_at: string | null;
   last_seen_status_code: number | null;
   last_seen_power_profile_code: number | null;
@@ -59,7 +60,11 @@ export function positionToTelemetryDevice(row: PositionRow): TelemetryDevice {
 }
 
 export function applyPresenceToTelemetryDevice(device: TelemetryDevice, row: DevicePresenceRow): TelemetryDevice {
-  if (row.device_id !== device.id || row.household_id.length === 0 || !row.last_seen_at) return device;
+  if (row.device_id !== device.id || row.household_id.length === 0) return device;
+  // A rename is not telemetry. Apply it even when last-seen has not advanced.
+  const name = row.display_name?.trim();
+  if (name && name !== device.name) device = { ...device, name };
+  if (!row.last_seen_at) return device;
   const lastSeenAt = Date.parse(row.last_seen_at);
   if (!Number.isFinite(lastSeenAt) || lastSeenAt <= device.lastUpdate) return device;
 
@@ -111,6 +116,7 @@ export function isDevicePresenceRow(value: unknown): value is DevicePresenceRow 
   return (
     typeof row.device_id === "number" &&
     typeof row.household_id === "string" &&
+    (row.display_name === undefined || typeof row.display_name === "string") &&
     (row.last_seen_at === null || (typeof row.last_seen_at === "string" && Number.isFinite(Date.parse(row.last_seen_at)))) &&
     nullableNumber(row.last_seen_status_code) &&
     nullableNumber(row.last_seen_power_profile_code) &&

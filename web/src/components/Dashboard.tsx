@@ -637,7 +637,14 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
           theme={darkMode ? "dark" : "light"}
           onClose={() => setAvatarDevice(null)}
           saveAppearance={avatarDevice.entity === "hub" ? input => saveHubAppearance(input, avatarDevice.hubMode ?? "home") : undefined}
-          onSaved={avatarDevice.entity === "hub" ? async () => { refreshHubs(); } : refreshAppearances}
+          onSaved={async name => {
+            if (avatarDevice.entity === "hub") { refreshHubs(); return; }
+            setDevices(current => current.map(device => device.id === avatarDevice.id ? { ...device, name } : device));
+            window.dispatchEvent(new CustomEvent("bluepaws:device-renamed", { detail: {
+              householdId, deviceId: avatarDevice.id, name,
+            } }));
+            await refreshAppearances();
+          }}
         />
       )}
       {tutorialOpen && tutorialMode && (

@@ -2,6 +2,16 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { applyPresenceToTelemetryDevice, positionToTelemetryDevice, type DevicePresenceRow, type PositionRow } from "./telemetryRows.ts";
 
+test("rename applies without new telemetry and does not fabricate activity or a new position", () => {
+  const device = {id:1001,name:"Device 1001",lastUpdate:100,time:0,lat:51,lon:-2,seq:12} as ReturnType<typeof positionToTelemetryDevice>;
+  const row = {device_id:1001,household_id:"family",display_name:"Mittens",last_seen_at:null} as DevicePresenceRow;
+  const renamed = applyPresenceToTelemetryDevice(device,row);
+  assert.deepEqual(renamed,{...device,name:"Mittens"});
+  assert.equal(device.name,"Device 1001");
+  assert.deepEqual(applyPresenceToTelemetryDevice(device,{...row,last_seen_at:new Date(50).toISOString()}),renamed);
+  assert.equal(applyPresenceToTelemetryDevice(device,{...row,device_id:2001}),device);
+});
+
 test("maps TLV projection fields into the live dashboard model", () => {
   const row: PositionRow = {
     position_id: 1,

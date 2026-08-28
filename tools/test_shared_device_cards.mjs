@@ -8,6 +8,7 @@ import {nextExpandedDeviceCards} from '../web/src/lib/expandedCards.ts';
 import {buildHubReport,hubReportCsv} from '../web/src/lib/hubReports.ts';
 import {hub} from './shared_device_card_fixture.mjs';
 import {createRequire} from 'node:module';
+import {normalizeDeviceName} from '../web/src/lib/deviceName.ts';
 const require = createRequire(new URL('../web/package.json',import.meta.url));
 
 function appearanceService({uploadError=null,saveError=null,affected=true}={}) {
@@ -21,9 +22,9 @@ function appearanceService({uploadError=null,saveError=null,affected=true}={}) {
   const source=readFileSync(new URL('../web/src/lib/hubAppearances.ts',import.meta.url),'utf8');
   const ts=require('typescript');
   const context=vm.createContext({exports:{},crypto:{randomUUID:()=> '00000000-0000-0000-0000-000000000099'},
-    require(name){assert.equal(name,'@/lib/supabase/client');return {createClient:()=>db};}});
+    require(name){if(name==='./deviceName')return {normalizeDeviceName};assert.equal(name,'@/lib/supabase/client');return {createClient:()=>db};}});
   vm.runInContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,context);
-  return {save:context.exports.saveHubAppearance,calls};
+  return {save:(input,mode)=>context.exports.saveHubAppearance({name:'Test Hub',...input},mode),calls};
 }
 
 test('hub photo upload saves only its Family-scoped preferences then removes the old photo',async()=>{
@@ -34,6 +35,7 @@ test('hub photo upload saves only its Family-scoped preferences then removes the
   assert.equal(uploaded[2].upsert,false);
   assert.equal(uploaded[2].contentType,'image/webp');
   const values=calls.find(c=>c[0]==='update')[1];
+  assert.equal(values.display_name,'Test Hub');
   assert.equal(values.avatar_storage_path,uploaded[1]);
   assert.equal(values.home_emoji,'🏡');
   assert.ok(calls.some(c=>c[0]==='eq'&&c[1]==='gateway_guid16'&&c[2]===16));
