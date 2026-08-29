@@ -181,7 +181,7 @@ export default function TrackingMap(props: TrackingMapProps) {
         button.type = "button";
         button.title = "Fit all markers into view";
         button.setAttribute("aria-label", "Fit all markers into view");
-        button.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4H4v5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg>';
+        button.innerHTML = '<img class="fit-markers-icon" src="/icons/location-fit-markers.png" alt="" aria-hidden="true">';
         L.DomEvent.disableClickPropagation(button);
         L.DomEvent.on(button, "click", () => fitMarkers(map, markersRef.current));
         return button;
@@ -564,7 +564,7 @@ function signalIndicatorHtml(device: TelemetryDevice, isHub: boolean) {
 
 function bluetoothBeaconHtml(advertising: boolean) {
   const label = advertising ? "Home beacon advertising" : "Home beacon not advertising";
-  return `<span class="bluetooth-beacon${advertising ? " active" : ""}" title="${label}" role="img" aria-label="${label}"><svg aria-hidden="true" viewBox="0 0 16 20"><path d="M4 5l9 10-5 4V1l5 4L4 15" fill="none" stroke="currentColor" stroke-width="2"/></svg><span class="bluetooth-beacon-dot"></span></span>`;
+  return `<span class="bluetooth-beacon${advertising ? " active" : ""}" title="${label}" role="img" aria-label="${label}"><svg aria-hidden="true" viewBox="0 0 16 20"><path d="M4 5l9 10-5 4V1l5 4L4 15" fill="none" stroke="currentColor" stroke-width="2"/></svg><span class="bluetooth-beacon-state ${advertising ? "on" : "off"}" aria-hidden="true">${advertising ? "✓" : "×"}</span></span>`;
 }
 
 function wifiQuality(rssi: number | null) {
