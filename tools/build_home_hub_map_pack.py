@@ -16,7 +16,12 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+# The Windows QGIS installer can render without a visible window. Forcing Qt's
+# offscreen platform there prevents it from discovering installed system fonts
+# and turns every map label into missing-glyph boxes. Retain offscreen mode for
+# genuinely headless non-Windows builders only.
+if sys.platform != "win32":
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 # The Windows QGIS Python wrapper adds the core bindings but not the bundled
 # Processing plugin directory to sys.path.
@@ -69,6 +74,13 @@ GLOUCESTERSHIRE_PASSES = (
     RenderPass("Gloucester urban detail", (-2.42, 51.75, -1.98, 52.00), 17, 17),
 )
 
+# The nationwide part is rendered from a deliberately shallow PMTiles extract.
+# Keeping it as a separate profile lets it be merged with the more detailed
+# Gloucestershire render without downloading a Great Britain z17 archive.
+GREAT_BRITAIN_OVERVIEW_PASSES = (
+    RenderPass("Great Britain overview", (-8.82, 49.79, 1.92, 60.95), 5, 11),
+)
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -83,9 +95,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, required=True, help="Destination tile directory")
     parser.add_argument(
         "--profile",
-        choices=("fixture", "pilot", "gloucestershire"),
+        choices=("fixture", "pilot", "great-britain-overview", "gloucestershire"),
         default="fixture",
-        help="fixture is fast; pilot uses OS GB coverage; gloucestershire is the OSM road pack",
+        help=(
+            "fixture is fast; pilot uses OS GB coverage; great-britain-overview "
+            "renders the shallow OSM UK extract; gloucestershire adds local detail"
+        ),
     )
     parser.add_argument("--quality", type=int, default=85, choices=range(40, 96))
     parser.add_argument("--manifest", type=Path, help="Optional manifest output path")
@@ -199,7 +214,7 @@ def render_pass(
 
 
 def write_manifest(path: Path, profile: str, quality: int, osm_attribution: bool) -> None:
-    maximum_zoom = 17
+    maximum_zoom = 11 if profile == "great-britain-overview" else 17
     if profile == "fixture":
         bounds = {
             "west": -2.285,
@@ -216,13 +231,21 @@ def write_manifest(path: Path, profile: str, quality: int, osm_attribution: bool
             "north": 52.044,
             "min_zoom": 12,
         }
-    else:
+    elif profile == "gloucestershire":
         bounds = {
             "west": -2.72,
             "south": 51.55,
             "east": -1.62,
             "north": 52.15,
             "min_zoom": 10,
+        }
+    else:
+        bounds = {
+            "west": -8.82,
+            "south": 49.79,
+            "east": 1.92,
+            "north": 60.95,
+            "min_zoom": 5,
         }
     manifest = {
         "schema_version": 1,
@@ -231,7 +254,11 @@ def write_manifest(path: Path, profile: str, quality: int, osm_attribution: bool
         "projection": "EPSG:3857",
         "tile_scheme": "xyz",
         "tile_size": 256,
-        "min_zoom": 5 if profile == "pilot" else (10 if profile == "gloucestershire" else 12),
+        "min_zoom": (
+            5
+            if profile in ("pilot", "great-britain-overview")
+            else (10 if profile == "gloucestershire" else 12)
+        ),
         "max_zoom": maximum_zoom,
         "format": "jpg",
         "jpeg_quality": quality,
@@ -268,6 +295,7 @@ def main() -> int:
         passes = {
             "fixture": FIXTURE_PASSES,
             "pilot": PILOT_PASSES,
+            "great-britain-overview": GREAT_BRITAIN_OVERVIEW_PASSES,
             "gloucestershire": GLOUCESTERSHIRE_PASSES,
         }[args.profile]
         for render in passes:

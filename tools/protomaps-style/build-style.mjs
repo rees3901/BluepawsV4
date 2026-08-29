@@ -31,7 +31,11 @@ const qgisLayers = layers(sourceName, namedFlavor(flavor), { lang: "en" })
     // that portable field for the offline raster pack and drop sprite-only
     // decoration which is unnecessary at 800 x 480.
     layout["text-field"] = ["get", "name"];
-    layout["text-font"] = ["Noto Sans Regular"];
+    // QGIS resolves Mapbox font stack entries as installed family names.
+    // "Noto Sans Regular" renders as missing-glyph boxes on the Windows LTR
+    // build. QGIS's converter expects the installed family and style together;
+    // Arial Regular is bundled and produces Latin OSM labels reliably.
+    layout["text-font"] = ["Arial Regular"];
     delete layout["icon-image"];
     delete layout["icon-size"];
     delete layout["icon-offset"];
