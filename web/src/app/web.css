@@ -532,6 +532,14 @@ button.bluetooth-beacon:disabled {
   opacity: 0.55;
 }
 
+.collar-awake {
+  display: inline-grid;
+  min-width: 1.5em;
+  place-items: center;
+  font-size: 1.5em;
+  line-height: 1;
+}
+
 #deviceCards {
   min-height: 0;
   overscroll-behavior: contain;
