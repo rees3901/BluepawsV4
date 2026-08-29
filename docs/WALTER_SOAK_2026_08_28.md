@@ -295,3 +295,30 @@ hook; creating one requires reviewed firmware, tests and a reflash, all forbidde
 during this soak. Therefore no live fault has been injected automatically. PR
 #147 remains draft while the longer run continues, and recovery remains explicitly
 unproven rather than inferred from offline fuzzing.
+
+## Follow-up — 01:12 UTC: possible one-second freshness edge
+
+Cycle 21 started at 01:04:26.087 UTC after the eleventh measured Normal wait
+(600.005 seconds). The modem event arrived at 01:05:29.688 with status ready,
+12 satellite entries, 70.7 m reported uncertainty and GNSS epoch **1787965530**.
+From the established cycle clock and wall elapsed time, `utcNow()` at receipt was
+approximately epoch **1787965529**. The event therefore violated the current
+strict `now >= fix.timestamp` condition by about one second and was rejected.
+The ordinary log does not expose latitude/longitude, so this observation cannot
+prove that the timestamp check was the only failing predicate; it does prove that
+the sample violated that predicate. Treat the cause as an evidence-backed
+inference, not a unique diagnosis.
+
+The safe outcome was correct: packet **2327** carried no valid coordinates and
+did not alter the clock. It passed HMAC verification; SHA-256
+`fcfc7e7d62da5874d409e04694bb7fd1cadebb571312bd5e5cd084a8e450dec6`.
+It was LoRa-stub only and not a cloud delivery. Normal scheduling continued,
+both commands remain acked once, and device 1001 checked in at 01:04:12.
+
+This suggests a post-soak improvement: explicitly test and consider a very small
+future-sample tolerance for integer-second clock quantization while still
+preserving the original sample timestamp, reporting age zero, never moving UTC,
+and continuing to reject the observed +472-second anomaly. Do **not** edit or
+reflash firmware during this uninterrupted soak. A tolerance change needs actual-
+function unit tests at the accepted boundary and just outside it, followed by a
+separate hardware run; no claim is made that such a change is already correct.
