@@ -19,8 +19,6 @@
 namespace {
 
 constexpr bluepaws::map::GeoPoint kTestOrigin{51.8642, -2.2382};
-constexpr int32_t kMapWidth = 515;
-constexpr int32_t kMapHeight = 350;
 constexpr int32_t kMapLeft = 10;
 constexpr int32_t kMapTop = 42;
 constexpr int32_t kMarkerSize = 28;
@@ -31,36 +29,64 @@ constexpr uint32_t kMarkerColours[] = {
     0x8E24AA, 0x00897B, 0x6D4C41, 0x546E7A,
 };
 
+struct UiLayout {
+    int32_t map_width;
+    int32_t map_height;
+    int32_t map_panel_width;
+    int32_t map_panel_height;
+    int32_t sidebar_width;
+    int32_t sidebar_height;
+};
+
+constexpr UiLayout kLandscapeLayout{515, 350, 535, 406, 241, 406};
+constexpr UiLayout kPortraitLayout{444, 436, 464, 486, 464, 232};
+
+struct TileCacheEntry {
+    bluepaws::map::TileId id{};
+    lv_image_dsc_t descriptor{};
+    uint8_t *pixels = nullptr;
+    size_t pixel_capacity = 0;
+    uint32_t generation = 0;
+    bool valid = false;
+};
+
 struct UiState {
     bluepaws::CatStore cats;
     bluepaws::CatSimulator simulator{kTestOrigin};
-    bluepaws::map::Viewport viewport{kMapWidth, kMapHeight, kTestOrigin, 15};
+    bluepaws::map::Viewport viewport{
+        kLandscapeLayout.map_width, kLandscapeLayout.map_height, kTestOrigin, 15};
+    lv_display_t *display = nullptr;
+    lv_obj_t *map_view = nullptr;
     std::array<lv_obj_t *, bluepaws::map::kMaximumVisibleTiles> tile_images{};
-    std::array<bluepaws::map::TileId, bluepaws::map::kMaximumVisibleTiles> tile_ids{};
-    std::array<lv_image_dsc_t, bluepaws::map::kMaximumVisibleTiles> tile_descriptors{};
-    std::array<uint8_t *, bluepaws::map::kMaximumVisibleTiles> tile_pixels{};
-    std::array<size_t, bluepaws::map::kMaximumVisibleTiles> tile_pixel_capacities{};
-    std::array<bool, bluepaws::map::kMaximumVisibleTiles> tile_assigned{};
+    std::array<TileCacheEntry, bluepaws::map::kMaximumVisibleTiles> tile_cache{};
     std::array<lv_obj_t *, bluepaws::kMaximumCats> markers{};
     lv_obj_t *cat_list = nullptr;
     lv_obj_t *status = nullptr;
+    lv_timer_t *update_timer = nullptr;
     guition_jc4880p443c_sd_info_t sd{};
     esp_err_t sd_error = ESP_FAIL;
     jpeg_decoder_handle_t jpeg_decoder = nullptr;
     size_t visible_tile_count = 0;
-    size_t loaded_tile_count = 0;
-    uint32_t map_decode_ms = 0;
+    size_t prepared_tile_count = 0;
+    uint32_t map_refresh_ms = 0;
+    uint32_t cache_generation = 0;
+    bool portrait = false;
     bool tiles_dirty = true;
 };
+
+const UiLayout &current_layout(const UiState &ui)
+{
+    return ui.portrait ? kPortraitLayout : kLandscapeLayout;
+}
 
 uint32_t uptime_ms()
 {
     return static_cast<uint32_t>(esp_timer_get_time() / 1000ULL);
 }
 
-bool decode_tile(UiState &ui, size_t slot, const char *path)
+bool decode_tile(UiState &ui, TileCacheEntry &entry, const char *path)
 {
-    if (ui.jpeg_decoder == nullptr || slot >= ui.tile_images.size()) {
+    if (ui.jpeg_decoder == nullptr) {
         return false;
     }
 
@@ -103,13 +129,13 @@ bool decode_tile(UiState &ui, size_t slot, const char *path)
         return false;
     }
 
-    if (ui.tile_pixels[slot] == nullptr) {
+    if (entry.pixels == nullptr) {
         jpeg_decode_memory_alloc_cfg_t output_config{
             .buffer_direction = JPEG_DEC_ALLOC_OUTPUT_BUFFER,
         };
-        ui.tile_pixels[slot] = static_cast<uint8_t *>(jpeg_alloc_decoder_mem(
-            kTilePixelBytes, &output_config, &ui.tile_pixel_capacities[slot]));
-        if (ui.tile_pixels[slot] == nullptr || ui.tile_pixel_capacities[slot] < kTilePixelBytes) {
+        entry.pixels = static_cast<uint8_t *>(jpeg_alloc_decoder_mem(
+            kTilePixelBytes, &output_config, &entry.pixel_capacity));
+        if (entry.pixels == nullptr || entry.pixel_capacity < kTilePixelBytes) {
             heap_caps_free(input);
             ESP_LOGE(kTag, "Could not allocate decoded tile buffer in PSRAM");
             return false;
@@ -127,8 +153,8 @@ bool decode_tile(UiState &ui, size_t slot, const char *path)
                                  &decode_config,
                                  input,
                                  jpeg_size,
-                                 ui.tile_pixels[slot],
-                                 ui.tile_pixel_capacities[slot],
+                                 entry.pixels,
+                                 entry.pixel_capacity,
                                  &output_size);
     const uint32_t elapsed_ms = static_cast<uint32_t>((esp_timer_get_time() - started_us + 999) / 1000);
     heap_caps_free(input);
@@ -137,7 +163,7 @@ bool decode_tile(UiState &ui, size_t slot, const char *path)
         return false;
     }
 
-    lv_image_dsc_t &descriptor = ui.tile_descriptors[slot];
+    lv_image_dsc_t &descriptor = entry.descriptor;
     descriptor = {};
     descriptor.header.magic = LV_IMAGE_HEADER_MAGIC;
     descriptor.header.cf = LV_COLOR_FORMAT_RGB565;
@@ -145,11 +171,47 @@ bool decode_tile(UiState &ui, size_t slot, const char *path)
     descriptor.header.h = bluepaws::map::kTileSize;
     descriptor.header.stride = bluepaws::map::kTileSize * 2;
     descriptor.data_size = kTilePixelBytes;
-    descriptor.data = ui.tile_pixels[slot];
-    ui.map_decode_ms += elapsed_ms;
+    descriptor.data = entry.pixels;
     ESP_LOGI(kTag, "Hardware-decoded map tile in %lu ms: %s",
              static_cast<unsigned long>(elapsed_ms), path);
     return true;
+}
+
+TileCacheEntry *acquire_tile(UiState &ui,
+                             const bluepaws::map::TileId &id,
+                             const char *path)
+{
+    for (TileCacheEntry &entry : ui.tile_cache) {
+        if (entry.valid && entry.id == id) {
+            entry.generation = ui.cache_generation;
+            return &entry;
+        }
+    }
+
+    TileCacheEntry *candidate = nullptr;
+    for (TileCacheEntry &entry : ui.tile_cache) {
+        if (!entry.valid) {
+            candidate = &entry;
+            break;
+        }
+        if (entry.generation != ui.cache_generation &&
+            (candidate == nullptr || entry.generation < candidate->generation)) {
+            candidate = &entry;
+        }
+    }
+    if (candidate == nullptr) {
+        ESP_LOGE(kTag, "No unpinned map tile cache entry is available");
+        return nullptr;
+    }
+
+    candidate->valid = false;
+    if (!decode_tile(ui, *candidate, path)) {
+        return nullptr;
+    }
+    candidate->id = id;
+    candidate->generation = ui.cache_generation;
+    candidate->valid = true;
+    return candidate;
 }
 
 void refresh_map_tiles(UiState &ui)
@@ -159,8 +221,9 @@ void refresh_map_tiles(UiState &ui)
     }
     ui.tiles_dirty = false;
     ui.visible_tile_count = 0;
-    ui.loaded_tile_count = 0;
-    ui.map_decode_ms = 0;
+    ui.prepared_tile_count = 0;
+    ui.map_refresh_ms = 0;
+    const int64_t refresh_started_us = esp_timer_get_time();
 
     if (!ui.sd.mounted) {
         for (lv_obj_t *image : ui.tile_images) {
@@ -168,11 +231,21 @@ void refresh_map_tiles(UiState &ui)
                 lv_obj_add_flag(image, LV_OBJ_FLAG_HIDDEN);
             }
         }
+        ui.map_refresh_ms = static_cast<uint32_t>(
+            (esp_timer_get_time() - refresh_started_us + 999) / 1000);
         return;
     }
 
-    const bluepaws::map::TileGrid grid = ui.viewport.visibleTiles(0);
-    ui.visible_tile_count = grid.count;
+    const bluepaws::map::TileGrid visible_grid = ui.viewport.visibleTiles(0);
+    const bluepaws::map::TileGrid grid = ui.viewport.visibleTiles(1);
+    ui.visible_tile_count = visible_grid.count;
+    ++ui.cache_generation;
+    if (ui.cache_generation == 0) {
+        ++ui.cache_generation;
+        for (TileCacheEntry &entry : ui.tile_cache) {
+            entry.generation = 0;
+        }
+    }
     for (size_t i = 0; i < ui.tile_images.size(); ++i) {
         lv_obj_t *image = ui.tile_images[i];
         if (image == nullptr) {
@@ -180,7 +253,6 @@ void refresh_map_tiles(UiState &ui)
         }
         if (i >= grid.count) {
             lv_obj_add_flag(image, LV_OBJ_FLAG_HIDDEN);
-            ui.tile_assigned[i] = false;
             continue;
         }
 
@@ -192,23 +264,19 @@ void refresh_map_tiles(UiState &ui)
                       placement.id.zoom,
                       static_cast<unsigned long>(placement.id.x),
                       static_cast<unsigned long>(placement.id.y));
-        if (!ui.tile_assigned[i] || !(ui.tile_ids[i] == placement.id)) {
-            if (!decode_tile(ui, i, filesystem_path)) {
-                lv_obj_add_flag(image, LV_OBJ_FLAG_HIDDEN);
-                ui.tile_assigned[i] = false;
-                continue;
-            }
-            lv_image_set_src(image, &ui.tile_descriptors[i]);
-            ui.tile_ids[i] = placement.id;
-            ui.tile_assigned[i] = true;
+        TileCacheEntry *entry = acquire_tile(ui, placement.id, filesystem_path);
+        if (entry == nullptr) {
+            lv_obj_add_flag(image, LV_OBJ_FLAG_HIDDEN);
+            continue;
         }
-        lv_obj_set_pos(image,
-                       kMapLeft + placement.screen_x,
-                       kMapTop + placement.screen_y);
+        lv_image_set_src(image, &entry->descriptor);
+        lv_obj_set_pos(image, placement.screen_x, placement.screen_y);
         lv_obj_remove_flag(image, LV_OBJ_FLAG_HIDDEN);
         lv_obj_invalidate(image);
-        ++ui.loaded_tile_count;
+        ++ui.prepared_tile_count;
     }
+    ui.map_refresh_ms = static_cast<uint32_t>(
+        (esp_timer_get_time() - refresh_started_us + 999) / 1000);
 }
 
 void update_ui(UiState &ui)
@@ -225,14 +293,21 @@ void update_ui(UiState &ui)
             continue;
         }
 
-        const int written = std::snprintf(
-            list_text + used,
-            sizeof(list_text) - used,
-            "%s\n  %u%%   %d dBm%s",
-            cat->name,
-            cat->latest.battery_percent,
-            cat->latest.rssi,
-            i + 1 == ui.cats.size() ? "" : "\n");
+        const int written = ui.portrait
+            ? std::snprintf(list_text + used,
+                            sizeof(list_text) - used,
+                            "%s %u%% %d dBm%s",
+                            cat->name,
+                            cat->latest.battery_percent,
+                            cat->latest.rssi,
+                            i + 1 == ui.cats.size() ? "" : "\n")
+            : std::snprintf(list_text + used,
+                            sizeof(list_text) - used,
+                            "%s\n  %u%%   %d dBm%s",
+                            cat->name,
+                            cat->latest.battery_percent,
+                            cat->latest.rssi,
+                            i + 1 == ui.cats.size() ? "" : "\n");
         if (written > 0) {
             used = std::min(sizeof(list_text) - 1, used + static_cast<size_t>(written));
         }
@@ -248,13 +323,11 @@ void update_ui(UiState &ui)
         const bluepaws::map::ScreenPoint point = ui.viewport.toScreen(position);
         const int32_t x = static_cast<int32_t>(point.x);
         const int32_t y = static_cast<int32_t>(point.y);
-        if (x < 0 || x >= kMapWidth || y < 0 || y >= kMapHeight) {
+        if (x < 0 || x >= ui.viewport.width() || y < 0 || y >= ui.viewport.height()) {
             lv_obj_add_flag(marker, LV_OBJ_FLAG_HIDDEN);
         } else {
             lv_obj_remove_flag(marker, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_set_pos(marker,
-                           kMapLeft + x - kMarkerSize / 2,
-                           kMapTop + y - kMarkerSize / 2);
+            lv_obj_set_pos(marker, x - kMarkerSize / 2, y - kMarkerSize / 2);
         }
     }
 
@@ -263,14 +336,28 @@ void update_ui(UiState &ui)
         constexpr uint64_t kGiB = 1024ULL * 1024ULL * 1024ULL;
         const unsigned volume_gib = static_cast<unsigned>((ui.sd.volume_total_bytes + kGiB / 2) / kGiB);
         const unsigned card_gib = static_cast<unsigned>((ui.sd.card_capacity_bytes + kGiB / 2) / kGiB);
-        lv_label_set_text_fmt(ui.status,
-                              "SIMULATOR | %u cats | SD %u/%u GiB | tiles %u/%u | %lu ms",
-                              static_cast<unsigned>(ui.cats.size()),
-                              volume_gib,
-                              card_gib,
-                              static_cast<unsigned>(ui.loaded_tile_count),
-                              static_cast<unsigned>(ui.visible_tile_count),
-                              static_cast<unsigned long>(ui.map_decode_ms));
+        if (ui.portrait) {
+            lv_label_set_text_fmt(ui.status,
+                                  "%u cats | z%u | SD %u/%u | view %u | %lu ms",
+                                  static_cast<unsigned>(ui.cats.size()),
+                                  static_cast<unsigned>(ui.viewport.zoom()),
+                                  volume_gib,
+                                  card_gib,
+                                  static_cast<unsigned>(ui.visible_tile_count),
+                                  static_cast<unsigned long>(ui.map_refresh_ms));
+        } else {
+            lv_label_set_text_fmt(ui.status,
+                                  "SIM | %u cats | z%u | SD %u/%u GiB | view %u + %u ready | %lu ms",
+                                  static_cast<unsigned>(ui.cats.size()),
+                                  static_cast<unsigned>(ui.viewport.zoom()),
+                                  volume_gib,
+                                  card_gib,
+                                  static_cast<unsigned>(ui.visible_tile_count),
+                                  static_cast<unsigned>(ui.prepared_tile_count -
+                                                        std::min(ui.prepared_tile_count,
+                                                                 ui.visible_tile_count)),
+                                  static_cast<unsigned long>(ui.map_refresh_ms));
+        }
     } else {
         lv_label_set_text_fmt(ui.status,
                               "SIMULATOR  |  %u cats  |  SD unavailable  |  touch ready",
@@ -281,6 +368,64 @@ void update_ui(UiState &ui)
 void update_timer(lv_timer_t *timer)
 {
     auto *ui = static_cast<UiState *>(lv_timer_get_user_data(timer));
+    update_ui(*ui);
+}
+
+void change_zoom(UiState &ui, int delta);
+
+void map_pressing(lv_event_t *event)
+{
+    auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
+    lv_indev_t *indev = lv_indev_active();
+    if (ui == nullptr || indev == nullptr) {
+        return;
+    }
+    const int8_t pinch_steps = guition_jc4880p443c_take_pinch_steps();
+    if (pinch_steps != 0) {
+        change_zoom(*ui, pinch_steps);
+    }
+    if (guition_jc4880p443c_touch_count() > 1) {
+        return;
+    }
+    lv_point_t vector{};
+    lv_indev_get_vect(indev, &vector);
+    if (vector.x == 0 && vector.y == 0) {
+        return;
+    }
+    ui->viewport.panBy(vector.x, vector.y);
+    ui->tiles_dirty = true;
+    update_ui(*ui);
+}
+
+void change_zoom(UiState &ui, int delta)
+{
+    constexpr int kMinimumPackZoom = 12;
+    constexpr int kMaximumPackZoom = 17;
+    const int next_zoom = std::clamp(
+        static_cast<int>(ui.viewport.zoom()) + delta, kMinimumPackZoom, kMaximumPackZoom);
+    if (next_zoom == ui.viewport.zoom()) {
+        return;
+    }
+    ui.viewport.setZoom(static_cast<uint8_t>(next_zoom));
+    ui.tiles_dirty = true;
+    update_ui(ui);
+}
+
+void zoom_in_clicked(lv_event_t *event)
+{
+    change_zoom(*static_cast<UiState *>(lv_event_get_user_data(event)), 1);
+}
+
+void zoom_out_clicked(lv_event_t *event)
+{
+    change_zoom(*static_cast<UiState *>(lv_event_get_user_data(event)), -1);
+}
+
+void home_clicked(lv_event_t *event)
+{
+    auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
+    ui->viewport.setCenter(kTestOrigin);
+    ui->tiles_dirty = true;
     update_ui(*ui);
 }
 
@@ -299,13 +444,39 @@ void fit_all_clicked(lv_event_t *event)
         }
     }
     const auto fit = bluepaws::map::fitPoints(
-        points.data(), count, kMapWidth, kMapHeight, 38, 12, 17);
+        points.data(), count, ui->viewport.width(), ui->viewport.height(), 38, 12, 17);
     if (fit.valid) {
         ui->viewport = bluepaws::map::Viewport(
-            kMapWidth, kMapHeight, fit.center, fit.zoom);
+            ui->viewport.width(), ui->viewport.height(), fit.center, fit.zoom);
         ui->tiles_dirty = true;
         update_ui(*ui);
     }
+}
+
+void create_ui(UiState &ui);
+
+void rebuild_for_orientation(void *user_data)
+{
+    auto *ui = static_cast<UiState *>(user_data);
+    ui->portrait = !ui->portrait;
+    lv_display_set_rotation(
+        ui->display, ui->portrait ? LV_DISPLAY_ROTATION_0 : LV_DISPLAY_ROTATION_90);
+    const UiLayout &layout = current_layout(*ui);
+    ui->viewport.resize(layout.map_width, layout.map_height);
+    ui->tile_images.fill(nullptr);
+    ui->markers.fill(nullptr);
+    ui->map_view = nullptr;
+    ui->cat_list = nullptr;
+    ui->status = nullptr;
+    ui->tiles_dirty = true;
+    lv_obj_clean(lv_screen_active());
+    create_ui(*ui);
+}
+
+void orientation_clicked(lv_event_t *event)
+{
+    auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
+    lv_async_call(rebuild_for_orientation, ui);
 }
 
 lv_obj_t *make_label(lv_obj_t *parent, const char *text, lv_color_t colour)
@@ -316,28 +487,54 @@ lv_obj_t *make_label(lv_obj_t *parent, const char *text, lv_color_t colour)
     return label;
 }
 
-void create_map_grid(lv_obj_t *map_panel)
+lv_obj_t *make_map_control(lv_obj_t *parent,
+                           int32_t x,
+                           int32_t y,
+                           const char *text,
+                           lv_event_cb_t callback,
+                           UiState &ui)
+{
+    lv_obj_t *button = lv_button_create(parent);
+    lv_obj_set_pos(button, x, y);
+    lv_obj_set_size(button, 44, 38);
+    lv_obj_set_style_bg_color(button, lv_color_hex(0x17324D), 0);
+    lv_obj_set_style_bg_opa(button, LV_OPA_90, 0);
+    lv_obj_set_style_border_color(button, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_border_width(button, 1, 0);
+    lv_obj_set_style_radius(button, 6, 0);
+    lv_obj_set_style_pad_all(button, 0, 0);
+    lv_obj_add_event_cb(button, callback, LV_EVENT_CLICKED, &ui);
+    lv_obj_t *label = make_label(button, text, lv_color_hex(0xFFFFFF));
+    lv_obj_set_style_text_font(label, &lv_font_montserrat_14, 0);
+    lv_obj_center(label);
+    return button;
+}
+
+void create_map_grid(lv_obj_t *map_view, int32_t map_width, int32_t map_height)
 {
     for (int i = 1; i < 5; ++i) {
-        lv_obj_t *line = lv_obj_create(map_panel);
-        lv_obj_set_pos(line, kMapLeft + i * kMapWidth / 5, kMapTop);
-        lv_obj_set_size(line, 1, kMapHeight);
+        lv_obj_t *line = lv_obj_create(map_view);
+        lv_obj_set_pos(line, i * map_width / 5, 0);
+        lv_obj_set_size(line, 1, map_height);
         lv_obj_set_style_bg_color(line, lv_color_hex(0xC8D8E4), 0);
         lv_obj_set_style_border_width(line, 0, 0);
         lv_obj_remove_flag(line, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_remove_flag(line, LV_OBJ_FLAG_CLICKABLE);
     }
     for (int i = 1; i < 4; ++i) {
-        lv_obj_t *line = lv_obj_create(map_panel);
-        lv_obj_set_pos(line, kMapLeft, kMapTop + i * kMapHeight / 4);
-        lv_obj_set_size(line, kMapWidth, 1);
+        lv_obj_t *line = lv_obj_create(map_view);
+        lv_obj_set_pos(line, 0, i * map_height / 4);
+        lv_obj_set_size(line, map_width, 1);
         lv_obj_set_style_bg_color(line, lv_color_hex(0xC8D8E4), 0);
         lv_obj_set_style_border_width(line, 0, 0);
         lv_obj_remove_flag(line, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_remove_flag(line, LV_OBJ_FLAG_CLICKABLE);
     }
 }
 
 void create_ui(UiState &ui)
 {
+    const UiLayout &layout = current_layout(ui);
     lv_obj_t *screen = lv_screen_active();
     lv_obj_set_style_bg_color(screen, lv_color_hex(0xEAF1F5), 0);
     lv_obj_set_style_pad_all(screen, 0, 0);
@@ -361,17 +558,18 @@ void create_ui(UiState &ui)
     lv_obj_set_style_text_font(ui.status, &lv_font_montserrat_14, 0);
 
     lv_obj_t *content = lv_obj_create(screen);
-    lv_obj_set_size(content, LV_PCT(100), 422);
+    lv_obj_set_size(content, LV_PCT(100), 0);
+    lv_obj_set_flex_grow(content, 1);
     lv_obj_set_style_bg_opa(content, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(content, 0, 0);
     lv_obj_set_style_radius(content, 0, 0);
     lv_obj_set_style_pad_all(content, 8, 0);
     lv_obj_set_style_pad_gap(content, 8, 0);
-    lv_obj_set_flex_flow(content, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_flow(content, ui.portrait ? LV_FLEX_FLOW_COLUMN : LV_FLEX_FLOW_ROW);
     lv_obj_remove_flag(content, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *map_panel = lv_obj_create(content);
-    lv_obj_set_size(map_panel, 535, LV_PCT(100));
+    lv_obj_set_size(map_panel, layout.map_panel_width, layout.map_panel_height);
     lv_obj_set_style_bg_color(map_panel, lv_color_hex(0xF7FAFC), 0);
     lv_obj_set_style_border_color(map_panel, lv_color_hex(0xAFC3D1), 0);
     lv_obj_set_style_border_width(map_panel, 1, 0);
@@ -379,19 +577,30 @@ void create_ui(UiState &ui)
     lv_obj_set_style_pad_all(map_panel, 0, 0);
     lv_obj_remove_flag(map_panel, LV_OBJ_FLAG_SCROLLABLE);
 
+    ui.map_view = lv_obj_create(map_panel);
+    lv_obj_set_pos(ui.map_view, kMapLeft, kMapTop);
+    lv_obj_set_size(ui.map_view, layout.map_width, layout.map_height);
+    lv_obj_set_style_bg_color(ui.map_view, lv_color_hex(0xE5EFF4), 0);
+    lv_obj_set_style_border_width(ui.map_view, 0, 0);
+    lv_obj_set_style_radius(ui.map_view, 0, 0);
+    lv_obj_set_style_pad_all(ui.map_view, 0, 0);
+    lv_obj_remove_flag(ui.map_view, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(ui.map_view, map_pressing, LV_EVENT_PRESSING, &ui);
+
     for (lv_obj_t *&image : ui.tile_images) {
-        image = lv_image_create(map_panel);
+        image = lv_image_create(ui.map_view);
         lv_obj_add_flag(image, LV_OBJ_FLAG_HIDDEN);
         lv_obj_remove_flag(image, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_remove_flag(image, LV_OBJ_FLAG_CLICKABLE);
     }
 
     lv_obj_t *map_title = make_label(map_panel, "OFFLINE GLOUCESTER TILES", lv_color_hex(0x41657A));
     lv_obj_set_pos(map_title, 12, 12);
     lv_obj_set_style_text_font(map_title, &lv_font_montserrat_14, 0);
-    create_map_grid(map_panel);
+    create_map_grid(ui.map_view, layout.map_width, layout.map_height);
 
     for (size_t i = 0; i < ui.markers.size(); ++i) {
-        lv_obj_t *marker = lv_obj_create(map_panel);
+        lv_obj_t *marker = lv_obj_create(ui.map_view);
         lv_obj_set_size(marker, kMarkerSize, kMarkerSize);
         lv_obj_set_style_radius(marker, LV_RADIUS_CIRCLE, 0);
         lv_obj_set_style_bg_color(marker, lv_color_hex(kMarkerColours[i]), 0);
@@ -399,14 +608,26 @@ void create_ui(UiState &ui)
         lv_obj_set_style_border_width(marker, 2, 0);
         lv_obj_set_style_pad_all(marker, 0, 0);
         lv_obj_remove_flag(marker, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_remove_flag(marker, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_t *number = make_label(marker, "", lv_color_hex(0xFFFFFF));
         lv_label_set_text_fmt(number, "%u", static_cast<unsigned>(i + 1));
         lv_obj_center(number);
         ui.markers[i] = marker;
     }
 
+    make_map_control(ui.map_view, 8, 8, "HOME", home_clicked, ui);
+    make_map_control(ui.map_view, 8, 50, "FIT", fit_all_clicked, ui);
+    make_map_control(ui.map_view, 8, layout.map_height - 88, "+", zoom_in_clicked, ui);
+    make_map_control(ui.map_view, 8, layout.map_height - 46, "-", zoom_out_clicked, ui);
+    make_map_control(ui.map_view,
+                     layout.map_width - 52,
+                     8,
+                     "ROT",
+                     orientation_clicked,
+                     ui);
+
     lv_obj_t *sidebar = lv_obj_create(content);
-    lv_obj_set_size(sidebar, 241, LV_PCT(100));
+    lv_obj_set_size(sidebar, layout.sidebar_width, layout.sidebar_height);
     lv_obj_set_style_bg_color(sidebar, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_border_color(sidebar, lv_color_hex(0xAFC3D1), 0);
     lv_obj_set_style_border_width(sidebar, 1, 0);
@@ -423,15 +644,10 @@ void create_ui(UiState &ui)
     lv_label_set_long_mode(ui.cat_list, LV_LABEL_LONG_WRAP);
     lv_obj_set_flex_grow(ui.cat_list, 1);
 
-    lv_obj_t *fit_button = lv_button_create(sidebar);
-    lv_obj_set_size(fit_button, LV_PCT(100), 42);
-    lv_obj_set_style_bg_color(fit_button, lv_color_hex(0x1976D2), 0);
-    lv_obj_add_event_cb(fit_button, fit_all_clicked, LV_EVENT_CLICKED, &ui);
-    lv_obj_t *fit_label = make_label(fit_button, "Fit all", lv_color_hex(0xFFFFFF));
-    lv_obj_center(fit_label);
-
     update_ui(ui);
-    lv_timer_create(update_timer, 1000, &ui);
+    if (ui.update_timer == nullptr) {
+        ui.update_timer = lv_timer_create(update_timer, 1000, &ui);
+    }
 }
 
 }  // namespace
@@ -445,6 +661,7 @@ extern "C" void app_main(void)
     }
 
     static UiState ui;
+    ui.display = display;
     ui.sd_error = guition_jc4880p443c_sd_mount(&ui.sd);
     if (ui.sd_error != ESP_OK) {
         ESP_LOGE(kTag, "SD card initialization failed: %s", esp_err_to_name(ui.sd_error));

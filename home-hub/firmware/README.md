@@ -7,13 +7,18 @@ LoRa/off-grid testbed.
 
 The initial on-device application starts the screen in 800 x 480 landscape,
 runs eight deterministic simulated cats through `bluepaws_core`, displays their
-positions and telemetry in LVGL, and exposes a touch-operated **Fit all** action.
+positions and telemetry in LVGL, and exposes touch-operated map controls.
 The board mounts the first FAT32 microSD partition through four-bit SDMMC
 without ever auto-formatting it. The testbed resolves visible XYZ tile IDs,
 reads their compact 256-pixel JPEG files and uses the ESP32-P4 hardware JPEG
 engine to decode each newly visible tile into RGB565 PSRAM. LVGL then draws the
-memory-backed tiles below the live cat markers. A background loader and bounded
-LRU cache are still appropriate before interactive panning is added.
+memory-backed tiles below the live cat markers. The interactive testbed now
+supports continuous one-finger panning, **Home**, **Fit**, integer **+/-** zoom,
+direct GT911 two-finger pinch zoom and in-app landscape/portrait rotation. A one-tile
+overscan and 36-entry PSRAM LRU keep already visited tiles available while the
+viewport moves. Moving SD reads to a background loader remains appropriate
+before this becomes the production GUI. These controls are hardware proofs;
+the product UI will place the map inside an app-launcher navigation shell.
 
 ## Toolchain
 
@@ -43,8 +48,8 @@ revision 1.3 hardware with only a grey backlit panel.
   fixed-capacity tile placement, an eight-cat state store and simulator.
 - `components/guition_jc4880p443c` owns only this board's display, backlight,
   touch and SDMMC initialization.
-- `main` is the temporary LVGL testbed UI and first hardware-decoded SD tile
-  proof. Generated LVGL 9 pages and the eventual asynchronous tile loader
+- `main` is the temporary LVGL testbed UI and interactive hardware-decoded SD
+  tile proof. Generated LVGL 9 pages and the eventual asynchronous tile loader
   should move into their own components rather than accumulating here.
 - The SD tile loader, ESP32-C6 networking and SX1262 LoRa will be adapters
   around `CatStore`.

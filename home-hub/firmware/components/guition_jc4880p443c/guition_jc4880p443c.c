@@ -26,6 +26,7 @@
 #include "freertos/task.h"
 #include "sd_pwr_ctrl_by_on_chip_ldo.h"
 #include "sdmmc_cmd.h"
+#include "sdkconfig.h"
 
 #include <string.h>
 
@@ -46,8 +47,14 @@ static const char *TAG = "guition_board";
 static esp_ldo_channel_handle_t dsi_ldo;
 static i2c_master_bus_handle_t touch_i2c;
 static esp_lcd_touch_handle_t touch;
+static volatile uint8_t touch_contact_count;
+static volatile int8_t pending_pinch_steps;
+static uint64_t pinch_reference_squared;
+static bool pinch_tracking;
 static sd_pwr_ctrl_handle_t sd_power;
 static sdmmc_card_t *sd_card;
+
+static uint8_t logged_contact_count = UINT8_MAX;
 
 /* Exact panel sequence recovered from the factory image's matching GUITION tree. */
 static const st7701_lcd_init_cmd_t factory_panel_init[] = {
@@ -284,6 +291,103 @@ static esp_err_t display_panel_new(esp_lcd_panel_handle_t *panel,
     return ESP_OK;
 }
 
+uint8_t guition_jc4880p443c_touch_count(void)
+{
+    return touch_contact_count;
+}
+
+int8_t guition_jc4880p443c_take_pinch_steps(void)
+{
+    const int8_t steps = pending_pinch_steps;
+    pending_pinch_steps = 0;
+    return steps;
+}
+
+static void update_pinch(const esp_lcd_touch_point_data_t *contacts, uint8_t contact_count)
+{
+    if (contact_count < 2) {
+        pinch_tracking = false;
+        pinch_reference_squared = 0;
+        return;
+    }
+
+    const int32_t delta_x = (int32_t)contacts[0].x - (int32_t)contacts[1].x;
+    const int32_t delta_y = (int32_t)contacts[0].y - (int32_t)contacts[1].y;
+    const uint64_t distance_squared =
+        (uint64_t)((int64_t)delta_x * delta_x + (int64_t)delta_y * delta_y);
+    if (!pinch_tracking) {
+        /* Ignore an unrealistically close initial pair, which is usually palm noise. */
+        if (distance_squared >= 400) {
+            pinch_reference_squared = distance_squared;
+            pinch_tracking = true;
+        }
+        return;
+    }
+
+    int8_t step = 0;
+    /* 1.20x separation zooms in; its reciprocal (0.833x) zooms out. */
+    if (distance_squared * 100 >= pinch_reference_squared * 144) {
+        step = 1;
+    } else if (distance_squared * 144 <= pinch_reference_squared * 100) {
+        step = -1;
+    }
+    if (step == 0) {
+        return;
+    }
+
+    int next_steps = (int)pending_pinch_steps + step;
+    if (next_steps > 4) {
+        next_steps = 4;
+    } else if (next_steps < -4) {
+        next_steps = -4;
+    }
+    pending_pinch_steps = (int8_t)next_steps;
+    pinch_reference_squared = distance_squared;
+    ESP_LOGI(TAG, "GT911 pinch step: %s", step > 0 ? "zoom in" : "zoom out");
+}
+
+static void touchpad_read(lv_indev_t *indev, lv_indev_data_t *data)
+{
+    (void)indev;
+    esp_lcd_touch_point_data_t contacts[CONFIG_ESP_LCD_TOUCH_MAX_POINTS] = {0};
+    uint8_t contact_count = 0;
+    esp_err_t result = esp_lcd_touch_read_data(touch);
+    if (result == ESP_OK) {
+        result = esp_lcd_touch_get_data(
+            touch, contacts, &contact_count, CONFIG_ESP_LCD_TOUCH_MAX_POINTS);
+    }
+    if (result != ESP_OK) {
+        ESP_LOGW(TAG, "GT911 sample failed: %s", esp_err_to_name(result));
+        data->state = LV_INDEV_STATE_RELEASED;
+        return;
+    }
+
+    touch_contact_count = contact_count;
+    update_pinch(contacts, contact_count);
+    if (contact_count != logged_contact_count) {
+        if (contact_count >= 2) {
+            ESP_LOGI(TAG,
+                     "GT911 contacts: %u (track IDs %u, %u)",
+                     contact_count,
+                     contacts[0].track_id,
+                     contacts[1].track_id);
+        } else if (contact_count == 1) {
+            ESP_LOGI(TAG, "GT911 contacts: 1 (track ID %u)", contacts[0].track_id);
+        } else {
+            ESP_LOGI(TAG, "GT911 contacts: 0");
+        }
+        logged_contact_count = contact_count;
+    }
+
+    if (contact_count > 0) {
+        data->point.x = contacts[0].x;
+        data->point.y = contacts[0].y;
+        data->state = LV_INDEV_STATE_PRESSED;
+    } else {
+        data->state = LV_INDEV_STATE_RELEASED;
+    }
+}
+
 static esp_err_t touch_new(lv_display_t *display)
 {
     const i2c_master_bus_config_t bus_config = {
@@ -319,11 +423,17 @@ static esp_err_t touch_new(lv_display_t *display)
     ESP_RETURN_ON_ERROR(
         esp_lcd_touch_new_i2c_gt911(touch_io, &touch_config, &touch), TAG, "GT911 touch");
 
-    const lvgl_port_touch_cfg_t lvgl_touch_config = {
-        .disp = display,
-        .handle = touch,
-    };
-    return lvgl_port_add_touch(&lvgl_touch_config) == NULL ? ESP_FAIL : ESP_OK;
+    if (!lvgl_port_lock(0)) {
+        return ESP_ERR_TIMEOUT;
+    }
+    lv_indev_t *indev = lv_indev_create();
+    if (indev != NULL) {
+        lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
+        lv_indev_set_read_cb(indev, touchpad_read);
+        lv_indev_set_display(indev, display);
+    }
+    lvgl_port_unlock();
+    return indev == NULL ? ESP_ERR_NO_MEM : ESP_OK;
 }
 
 lv_display_t *guition_jc4880p443c_display_start(void)
