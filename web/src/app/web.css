@@ -175,13 +175,13 @@ body.light {
 }
 
 .leaflet-map-btn svg {
-  width: 22px;
-  height: 22px;
+  width: 26.4px;
+  height: 26.4px;
 }
 
 .leaflet-map-btn .fit-markers-icon {
-  width: 27px;
-  height: 27px;
+  width: 32.4px;
+  height: 32.4px;
   object-fit: contain;
 }
 
