@@ -458,6 +458,26 @@ body.panel-open .map-loading {
   white-space: nowrap;
 }
 
+@media (max-width: 768px) {
+  #panelHeader {
+    flex-wrap: wrap;
+    gap: 6px 0;
+    padding: 10px 12px;
+  }
+
+  .panel-brand {
+    width: 100%;
+    flex: 0 0 100%;
+  }
+
+  .panel-header-btns {
+    width: 100%;
+    flex: 0 0 100%;
+    align-items: center;
+    justify-content: flex-end;
+  }
+}
+
 .transport-wifi {
   color: var(--text-secondary);
 }
@@ -503,7 +523,13 @@ body.panel-open .map-loading {
 }
 
 .bluetooth-beacon-state.off {
-  background: #dc2626;
+  width: 14px;
+  height: 14px;
+  top: -6px;
+  right: -7px;
+  border: 0;
+  background: transparent;
+  font-size: 13px;
 }
 
 .bluetooth-beacon-state.on {
