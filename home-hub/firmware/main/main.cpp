@@ -33,6 +33,8 @@ struct UiState {
     std::array<lv_obj_t *, bluepaws::kMaximumCats> markers{};
     lv_obj_t *cat_list = nullptr;
     lv_obj_t *status = nullptr;
+    guition_jc4880p443c_sd_info_t sd{};
+    esp_err_t sd_error = ESP_FAIL;
 };
 
 uint32_t uptime_ms()
@@ -87,8 +89,20 @@ void update_ui(UiState &ui)
     }
 
     lv_label_set_text(ui.cat_list, list_text);
-    lv_label_set_text_fmt(ui.status, "SIMULATOR  |  %u cats  |  touch ready",
-                          static_cast<unsigned>(ui.cats.size()));
+    if (ui.sd.mounted) {
+        constexpr uint64_t kGiB = 1024ULL * 1024ULL * 1024ULL;
+        const unsigned volume_gib = static_cast<unsigned>((ui.sd.volume_total_bytes + kGiB / 2) / kGiB);
+        const unsigned card_gib = static_cast<unsigned>((ui.sd.card_capacity_bytes + kGiB / 2) / kGiB);
+        lv_label_set_text_fmt(ui.status,
+                              "SIMULATOR  |  %u cats  |  SD %u/%u GiB  |  touch ready",
+                              static_cast<unsigned>(ui.cats.size()),
+                              volume_gib,
+                              card_gib);
+    } else {
+        lv_label_set_text_fmt(ui.status,
+                              "SIMULATOR  |  %u cats  |  SD unavailable  |  touch ready",
+                              static_cast<unsigned>(ui.cats.size()));
+    }
 }
 
 void update_timer(lv_timer_t *timer)
@@ -252,6 +266,10 @@ extern "C" void app_main(void)
     }
 
     static UiState ui;
+    ui.sd_error = guition_jc4880p443c_sd_mount(&ui.sd);
+    if (ui.sd_error != ESP_OK) {
+        ESP_LOGE(TAG, "SD card initialization failed: %s", esp_err_to_name(ui.sd_error));
+    }
     ui.simulator.reset(kTestOrigin, uptime_ms());
     if (!lvgl_port_lock(0)) {
         ESP_LOGE(TAG, "Could not acquire LVGL lock");

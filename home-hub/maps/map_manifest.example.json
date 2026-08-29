@@ -1,13 +1,25 @@
 {
   "schema_version": 1,
-  "name": "BluePaws offline map sample",
+  "name": "BluePaws Gloucester pilot",
   "version": "2026-08",
   "projection": "EPSG:3857",
   "tile_scheme": "xyz",
   "tile_size": 256,
-  "min_zoom": 10,
+  "min_zoom": 5,
   "max_zoom": 17,
   "format": "jpg",
   "tile_path": "tiles/{z}/{x}/{y}.jpg",
-  "attribution": "Map data © OpenStreetMap contributors"
+  "center": {
+    "latitude": 51.8642,
+    "longitude": -2.2382,
+    "zoom": 14
+  },
+  "high_detail_bounds": {
+    "west": -2.527,
+    "south": 51.684,
+    "east": -1.949,
+    "north": 52.044,
+    "min_zoom": 12
+  },
+  "attribution": "Contains OS data © Crown copyright and database right"
 }
