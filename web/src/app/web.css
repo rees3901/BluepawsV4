@@ -179,6 +179,13 @@ body.light {
   height: 22px;
 }
 
+.leaflet-map-btn .fit-markers-icon {
+  width: 27px;
+  height: 27px;
+  object-fit: contain;
+  filter: invert(1);
+}
+
 .leaflet-control-zoom a {
   width: 41px !important;
   height: 41px !important;
@@ -459,40 +466,78 @@ body.panel-open .map-loading {
 .bluetooth-beacon {
   position: relative;
   display: inline-grid;
-  width: 18px;
-  height: 18px;
-  flex: 0 0 18px;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
   place-items: center;
   margin-left: 2px;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  background: color-mix(in srgb, var(--text-secondary) 8%, transparent);
-  color: var(--text-dim);
+  padding: 0;
+  border: 1px solid #111820;
+  border-radius: 6px;
+  background: #252b31;
+  color: #aeb6bd;
+  font: inherit;
+  line-height: 1;
+  vertical-align: middle;
+  appearance: none;
 }
 
 .bluetooth-beacon svg {
-  width: 9px;
-  height: 12px;
+  width: 11px;
+  height: 15px;
 }
 
-.bluetooth-beacon-dot {
+.bluetooth-beacon-state {
   position: absolute;
-  top: 2px;
-  right: 2px;
-  width: 4px;
-  height: 4px;
+  top: -5px;
+  right: -6px;
+  display: grid;
+  width: 12px;
+  height: 12px;
+  place-items: center;
+  border: 1px solid var(--bg-card);
   border-radius: 50%;
-  background: var(--text-dim);
+  color: white;
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.bluetooth-beacon-state.off {
+  background: #dc2626;
+}
+
+.bluetooth-beacon-state.on {
+  background: #16a34a;
 }
 
 .bluetooth-beacon.active {
-  border-color: color-mix(in srgb, var(--success) 50%, var(--border));
-  color: var(--accent);
+  border-color: color-mix(in srgb, var(--success) 70%, var(--accent));
+  background: color-mix(in srgb, var(--accent) 72%, #08213a);
+  color: white;
 }
 
-.bluetooth-beacon.active .bluetooth-beacon-dot {
-  background: var(--success);
-  box-shadow: 0 0 4px color-mix(in srgb, var(--success) 65%, transparent);
+button.bluetooth-beacon:not(:disabled) {
+  cursor: pointer;
+}
+
+button.bluetooth-beacon:not(:disabled):hover,
+button.bluetooth-beacon:not(:disabled):focus-visible {
+  transform: scale(1.08);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+button.bluetooth-beacon:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.collar-awake {
+  display: inline-grid;
+  min-width: 1.5em;
+  place-items: center;
+  font-size: 1.5em;
+  line-height: 1;
 }
 
 #deviceCards {
