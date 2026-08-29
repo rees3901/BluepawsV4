@@ -44,6 +44,12 @@ lv_display_t *guition_jc4880p443c_display_start(void);
 /** Set the PWM backlight from 0 to 100 percent. */
 esp_err_t guition_jc4880p443c_backlight_set(int brightness_percent);
 
+/** Return the number of contacts reported by the most recent GT911 sample. */
+uint8_t guition_jc4880p443c_touch_count(void);
+
+/** Consume accumulated pinch steps: positive zooms in, negative zooms out. */
+int8_t guition_jc4880p443c_take_pinch_steps(void);
+
 /**
  * Mount the first FAT partition through the board's four-bit SDMMC slot.
  * The function never formats a card when mounting fails.

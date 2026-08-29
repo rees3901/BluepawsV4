@@ -87,10 +87,13 @@ portable library. It contains:
 - `guition_jc4880p443c`: a focused ST7701/GT911/backlight adapter derived from
   the vendor's Apache-2.0 BSP, plus the board's LDO-powered four-bit SDMMC
   interface, without its camera, audio and demo bulk.
-- `main`: a landscape 800 x 480 LVGL test screen displaying eight simulated
-  cats through the same `CatStore` intended for LoRa and restored telemetry.
-- A touch-operated **Fit all** action, proving the GUI consumes the portable
-  map/state layer rather than maintaining a second model.
+- `main`: a responsive 800 x 480 landscape / 480 x 800 portrait LVGL test
+  screen displaying eight simulated cats through the same `CatStore` intended
+  for LoRa and restored telemetry.
+- Touch map navigation with continuous drag panning, **Home**, **Fit**, **+/-**
+  zoom, two-finger pinch zoom and an in-app orientation control. All actions
+  consume the portable viewport/state layer rather than maintaining a second
+  GUI-only model.
 
 ```text
 Simulator ─┐
@@ -101,9 +104,9 @@ SD restore ┘
 GT911 touch ──> LVGL ──> Viewport ──> XYZ tile requests ──> SD loader
 ```
 
-The first screen deliberately uses a map-grid placeholder. It proves display,
-touch, landscape rotation and live state flow without embedding unlicensed map
-artwork or pretending SD tile loading exists.
+The grid remains as a diagnostic overlay beneath real, licensed OS Open
+Zoomstack Gloucester tiles loaded from SD. It helps reveal missing or misplaced
+tiles during map-engine development.
 
 ## LoRa boundary
 
@@ -199,5 +202,50 @@ App-only flashing at `0x10000` completed with hash verification; the factory
 backup and all other flash regions remain untouched. On the first monitored
 boot the SD card mounted at 40 MHz in four-bit mode and all six tiles hardware
 decoded in approximately 1 ms each, with roughly 100 ms elapsed across SD reads
-and map preparation. The next architectural step is an asynchronous loader and
-bounded LRU cache before touch panning is introduced.
+and map preparation.
+
+The next interaction build adds a clipped viewport, one-tile overscan and a
+36-entry decoded-tile LRU in PSRAM. The map can be dragged continuously in both
+axes and exposes web-style overlay buttons for **Home**, **Fit**, **+**, **-**
+and rotation. The pilot pack constrains the viewport to zoom levels 12-17, and
+the same viewport centre survives orientation changes between 800x480 and
+480x800.
+
+The GT911 was physically confirmed to report two simultaneous contacts with
+stable track IDs 0 and 1. Espressif's pinned `esp_lvgl_port` 2.7.2 nevertheless
+passes a fixed two-record array to LVGL's recognizer even when only one record
+is valid; the zero-filled release record cancels the real contact. The board
+adapter therefore measures the squared distance between the two raw GT911
+contacts directly. A 20 percent separation change emits a discrete zoom step
+and rebases the reference distance, allowing several steps in one continuous
+pinch without orientation-dependent coordinate transforms.
+
+The final 915,696-byte interaction application has SHA-256
+`3766143D85760A3A579990B635210E1446768406D7C5113FB5A8FE6D47731925`.
+It was flashed only to the application region at `0x10000`; esptool verified
+the written hash. Its monitored boot again reports revision 1.3, 16 MB flash,
+32 MB PSRAM, the 480 GiB physical card with the FAT32 volume mounted at 40 MHz,
+and 1 ms hardware JPEG decodes without panic or reset looping. Physical testing
+confirmed two-axis panning, **Home**, **Fit**, **+/-**, landscape/portrait
+rotation with aligned touch, and multi-step pinch zoom in both directions.
+These controls are an engineering proof rather than the intended final visual
+design; smooth animated zoom still depends on asynchronous tile loading and a
+later presentation layer.
+
+## Next UI architecture
+
+The hub should behave like a small appliance launcher, not one ever-growing
+map screen. The next UI boundary is an LVGL app shell with a home tile grid and
+a navigation manager that owns screen transitions. Initial app modules are:
+
+- **Live Map**: positions, trails, geofences, layers and map tools.
+- **Cat Summary**: last report, age, battery, radio quality and alert state.
+- **Settings**: primary/secondary SSIDs, fallback AP identity, regional and
+  display preferences, and update controls.
+- **Diagnostics**: C6, LoRa, SD, GNSS/time, memory and firmware health.
+
+These are LVGL screens/components inside one firmware image, not independent
+executables. Shared services own `CatStore`, settings persistence, networking,
+radio and storage; app pages observe those services and must not initialize
+hardware themselves. The launcher and app contracts should be extracted from
+the temporary `main.cpp` testbed before adding more map features.

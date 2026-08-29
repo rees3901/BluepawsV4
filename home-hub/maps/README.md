@@ -70,3 +70,11 @@ ESP32-P4 hardware JPEG engine directly into RGB565 PSRAM, and presents that
 buffer to LVGL as a memory image. On the first device boot each of the six
 visible tiles decoded in approximately 1 ms; SD reads and UI setup brought the
 whole initial map preparation to roughly 100 ms.
+
+The interaction testbed prepares one extra tile around every visible edge and
+retains up to 36 decoded RGB565 tiles in PSRAM. Landscape uses a 515 x 350 map
+viewport and portrait uses 444 x 436; the visible tile count therefore follows
+the actual pixel viewport rather than a hard-coded tile grid. The overscan is
+clipped, so it exists only to make short drags immediate. Cache misses are
+still loaded synchronously in this proof and should move to a worker task
+before large packs and free-form navigation are treated as production-ready.
