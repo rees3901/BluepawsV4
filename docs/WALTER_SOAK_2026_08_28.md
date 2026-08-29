@@ -333,3 +333,21 @@ verification (`69a667c9562549a4a0e47435037600068093f8d06ba631f41255ed030b34d008`
 was not due for LTE, and Normal scheduling continued. Twelve Normal waits now
 measure 600.005–600.006 seconds. The post-soak boundary-test recommendation and
 the prohibition on modifying the live soak remain unchanged.
+
+Cycle 24 produced the strongest practical example of the same edge. It started
+at 01:38:40.150 UTC; the event arrived 43.751 seconds later with status ready,
+five entries, reported uncertainty **9.0 m** and epoch **1787967564**, while the
+anchored whole-second clock was approximately 1787967563. The event was rejected
+and packet **2330** omitted coordinates. Its HMAC passed; SHA-256
+`ebc0be3591bd19cd222f97a4d795ec09a95b32e1ba463b0977b3fde192b680bf`.
+It was not due for LTE and did not reach Supabase.
+
+This third occurrence makes the one-second-boundary hypothesis substantially
+more credible and shows that the current predicate can discard a sample with a
+good modem-reported uncertainty. It still does not prove actual 9 m positional
+error or establish that all hidden coordinates were valid, because ordinary logs
+do not expose them. Prioritize a tightly bounded tolerance test after the soak:
+accept only the chosen integer-second boundary, keep the original sample time,
+emit age zero without moving UTC, and retain rejection immediately outside the
+boundary and for the observed +472-second anomaly. Fourteen Normal waits remain
+at 600.005–600.006 seconds; Walter is otherwise stable and unmodified.
