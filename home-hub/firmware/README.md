@@ -8,7 +8,9 @@ LoRa/off-grid testbed.
 The initial on-device application starts the screen in 800 x 480 landscape,
 runs eight deterministic simulated cats through `bluepaws_core`, displays their
 positions and telemetry in LVGL, and exposes a touch-operated **Fit all** action.
-The grid is a temporary map layer; SD tile decoding is the next firmware slice.
+The grid is a temporary map layer. The board now mounts the first FAT32 microSD
+partition through four-bit SDMMC without ever auto-formatting it; asynchronous
+JPEG tile decoding is the next firmware slice.
 
 ## Toolchain
 
@@ -36,11 +38,19 @@ revision 1.3 hardware with only a grey backlit panel.
 
 - `components/bluepaws_core` is portable C++17: Web Mercator/XYZ calculations,
   fixed-capacity tile placement, an eight-cat state store and simulator.
-- `components/guition_jc4880p443c` owns only this board's display, backlight and
-  touch initialization.
+- `components/guition_jc4880p443c` owns only this board's display, backlight,
+  touch and SDMMC initialization.
 - `main` is the temporary LVGL testbed UI. Generated LVGL 9 pages should move
   into their own component rather than accumulating here.
-- SD, ESP32-C6 networking and SX1262 LoRa will be adapters around `CatStore`.
+- The SD tile loader, ESP32-C6 networking and SX1262 LoRa will be adapters
+  around `CatStore`.
+
+The SD adapter mounts `/sdcard` at 40 MHz in four-bit mode, uses the board's
+on-chip LDO channel 4 and selects the first FAT partition. A mount failure is
+reported in the boot log and on the LVGL status line; firmware does not format
+or modify an unreadable card. The present card can therefore keep a FAT32 first
+partition for the hub and an optional PC-only second partition in another
+format.
 
 Arduino-ESP32 supports the P4 and GUITION supplies Arduino examples. If an
 Arduino-only library becomes useful, add Arduino as an ESP-IDF component; do

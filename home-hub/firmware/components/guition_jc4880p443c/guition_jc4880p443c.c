@@ -11,6 +11,7 @@
 
 #include "driver/i2c_master.h"
 #include "driver/ledc.h"
+#include "driver/sdmmc_host.h"
 #include "esp_check.h"
 #include "esp_lcd_mipi_dsi.h"
 #include "esp_lcd_panel_io.h"
@@ -20,8 +21,13 @@
 #include "esp_ldo_regulator.h"
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
+#include "esp_vfs_fat.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "sd_pwr_ctrl_by_on_chip_ldo.h"
+#include "sdmmc_cmd.h"
+
+#include <string.h>
 
 #define LCD_H_RES 480
 #define LCD_V_RES 800
@@ -34,11 +40,14 @@
 #define LCD_BACKLIGHT_CHANNEL LEDC_CHANNEL_1
 #define TOUCH_I2C_PORT I2C_NUM_1
 #define TOUCH_I2C_FREQUENCY_HZ 400000
+#define SD_POWER_LDO_CHANNEL 4
 
 static const char *TAG = "guition_board";
 static esp_ldo_channel_handle_t dsi_ldo;
 static i2c_master_bus_handle_t touch_i2c;
 static esp_lcd_touch_handle_t touch;
+static sd_pwr_ctrl_handle_t sd_power;
+static sdmmc_card_t *sd_card;
 
 /* Exact panel sequence recovered from the factory image's matching GUITION tree. */
 static const st7701_lcd_init_cmd_t factory_panel_init[] = {
@@ -124,6 +133,80 @@ esp_err_t guition_jc4880p443c_backlight_set(int brightness_percent)
     ESP_RETURN_ON_ERROR(
         ledc_set_duty(LEDC_LOW_SPEED_MODE, LCD_BACKLIGHT_CHANNEL, duty), TAG, "backlight duty");
     return ledc_update_duty(LEDC_LOW_SPEED_MODE, LCD_BACKLIGHT_CHANNEL);
+}
+
+esp_err_t guition_jc4880p443c_sd_mount(guition_jc4880p443c_sd_info_t *info)
+{
+    if (info == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    memset(info, 0, sizeof(*info));
+
+    if (sd_card == NULL) {
+        const esp_vfs_fat_sdmmc_mount_config_t mount_config = {
+            .format_if_mount_failed = false,
+            .max_files = 12,
+            .allocation_unit_size = 32 * 1024,
+        };
+
+        sdmmc_host_t host = SDMMC_HOST_DEFAULT();
+        host.slot = SDMMC_HOST_SLOT_0;
+        host.max_freq_khz = SDMMC_FREQ_HIGHSPEED;
+
+        const sd_pwr_ctrl_ldo_config_t power_config = {
+            .ldo_chan_id = SD_POWER_LDO_CHANNEL,
+        };
+        esp_err_t result = sd_pwr_ctrl_new_on_chip_ldo(&power_config, &sd_power);
+        if (result != ESP_OK) {
+            ESP_LOGE(TAG, "SD power LDO failed: %s", esp_err_to_name(result));
+            return result;
+        }
+        host.pwr_ctrl_handle = sd_power;
+
+        const sdmmc_slot_config_t slot_config = {
+            .cd = SDMMC_SLOT_NO_CD,
+            .wp = SDMMC_SLOT_NO_WP,
+            .width = 4,
+            .flags = 0,
+        };
+        result = esp_vfs_fat_sdmmc_mount(
+            GUITION_JC4880P443C_SD_MOUNT_POINT,
+            &host,
+            &slot_config,
+            &mount_config,
+            &sd_card);
+        if (result != ESP_OK) {
+            ESP_LOGE(TAG, "SD FAT mount failed: %s", esp_err_to_name(result));
+            sd_pwr_ctrl_del_on_chip_ldo(sd_power);
+            sd_power = NULL;
+            return result;
+        }
+    }
+
+    info->mounted = true;
+    info->sector_size_bytes = (uint32_t)sd_card->csd.sector_size;
+    info->card_capacity_bytes =
+        (uint64_t)sd_card->csd.capacity * (uint64_t)sd_card->csd.sector_size;
+    info->frequency_khz = (uint32_t)sd_card->real_freq_khz;
+    memcpy(info->product_name, sd_card->cid.name, sizeof(sd_card->cid.name));
+    info->product_name[sizeof(info->product_name) - 1] = '\0';
+
+    const esp_err_t info_result = esp_vfs_fat_info(
+        GUITION_JC4880P443C_SD_MOUNT_POINT,
+        &info->volume_total_bytes,
+        &info->volume_free_bytes);
+    if (info_result != ESP_OK) {
+        ESP_LOGW(TAG, "Could not read FAT capacity: %s", esp_err_to_name(info_result));
+    }
+
+    sdmmc_card_print_info(stdout, sd_card);
+    ESP_LOGI(TAG,
+             "SD mounted: product=%s card=%llu bytes FAT=%llu bytes free=%llu bytes",
+             info->product_name,
+             info->card_capacity_bytes,
+             info->volume_total_bytes,
+             info->volume_free_bytes);
+    return ESP_OK;
 }
 
 static esp_err_t display_panel_new(esp_lcd_panel_handle_t *panel,

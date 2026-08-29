@@ -85,7 +85,8 @@ portable library. It contains:
 
 - `bluepaws_core`: bounded Web Mercator, tile layout, cat state and simulator.
 - `guition_jc4880p443c`: a focused ST7701/GT911/backlight adapter derived from
-  the vendor's Apache-2.0 BSP, without its camera, audio and demo bulk.
+  the vendor's Apache-2.0 BSP, plus the board's LDO-powered four-bit SDMMC
+  interface, without its camera, audio and demo bulk.
 - `main`: a landscape 800 x 480 LVGL test screen displaying eight simulated
   cats through the same `CatStore` intended for LoRa and restored telemetry.
 - A touch-operated **Fit all** action, proving the GUI consumes the portable
@@ -142,7 +143,7 @@ Before programming, the complete 16 MB factory flash was retained as
 Only the application region at `0x10000` was overwritten during the final
 diagnostic iterations.
 
-The final 785,312-byte application image has SHA-256
+The display/touch validation's 785,312-byte application image has SHA-256
 `130CB50BDDD636D7E81E37FE98EAB4D7E577A2014F399F395D9D523B8D408182`.
 COM27 programming and read-back verification completed successfully. The boot
 log reports ESP32-P4 revision 1.3, 16 MB flash, 32 MB PSRAM and a passing PSRAM
@@ -150,3 +151,22 @@ test, with no panic or reset loop. The panel displays the 800x480 landscape
 BluePaws map testbed, eight simulated cats and the nearby-cat table; GT911
 touch and **Fit all** were exercised successfully. C6 networking, SD maps and
 LoRa remain outside this first physical validation.
+
+## SDMMC bring-up result — 2026-08-29
+
+The inserted card mounted successfully from its first FAT32 partition using
+SDMMC slot 0, four-bit width and a measured 40.00 MHz bus clock. The boot log
+reported:
+
+- Product name `APPSD`, type SDHC and 512-byte sectors.
+- Physical capacity 515,396,075,520 bytes (480 GiB).
+- FAT volume 33,537,654,784 bytes (about 31.24 GiB).
+- Free space 33,537,622,016 bytes at the time of the test.
+
+The LVGL status line now reports approximately `SD 31/480 GiB`. The board
+continued running the display, touch and simulator without a panic or reset
+loop. The SD-enabled 872,624-byte application image has SHA-256
+`B599D8CEE6B342956A946F6D2C4CF5659DEDA16620860033B731FDE3ED273680`.
+Only the application region was overwritten, and the factory backup remains
+untouched. This completes the physical SD interface check; JPEG decoding,
+tile caching and filesystem error handling remain to be implemented.

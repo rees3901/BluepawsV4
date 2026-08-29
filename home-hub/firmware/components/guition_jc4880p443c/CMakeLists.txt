@@ -6,4 +6,7 @@ idf_component_register(
         esp_driver_ledc
         esp_hw_support
         esp_lcd
+        esp_driver_sdmmc
+        fatfs
+        sdmmc
 )
