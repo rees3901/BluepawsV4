@@ -15,3 +15,7 @@ The converter crops and downsamples the artwork with alpha-aware Lanczos
 filtering. Monochrome controls become compact LVGL A8 masks so dark/light themes
 can recolour them without storing duplicates. The coloured map artwork becomes
 an ARGB8888 image.
+
+The magnifying-glass artwork supplied for zooming out is retained as
+`zoom-out.png`; its filename describes its BluePaws control role rather than
+the generic source artwork name.

@@ -26,13 +26,15 @@ The first real-card proof is deliberately bounded to roughly 4 GB:
 - Land/water, roads, footpaths, buildings from zoom 15, parks/woodland and
   place/road labels. Cats, trails and geofences stay as live LVGL overlays.
 
-The preferred source is OS Open Zoomstack vector MBTiles rendered locally with
-QGIS LTR. Its approximately 2.6 GB download provides Great Britain coverage
-down to street level and permits offline use under the OS OpenData terms. It
-does not cover Northern Ireland; a coarse UK outline may use a separately
-licensed open dataset, and a later full-UK pack will need an explicit NI source.
-Do not bulk-download `tile.openstreetmap.org`, whose usage policy prohibits
-offline prefetching.
+The first hardware proof used OS Open Zoomstack vector MBTiles rendered locally
+with QGIS LTR. It remains a useful reference pack, but its Outdoor cartography
+is not the intended BluePaws visual style.
+
+The preferred road-map source is now a bounded Protomaps PMTiles extract made
+from current OpenStreetMap data, with the open-source Protomaps `light` style.
+The PC renders that vector source to the same hardware-friendly JPEG XYZ layout;
+the P4 does not need to parse PMTiles or run a map server. Do not bulk-download
+`tile.openstreetmap.org`, whose usage policy prohibits offline prefetching.
 
 The FAT32 volume is about 31.24 GiB. Keep normal map payloads below 20-24 GiB
 to leave room for update staging, indexes, telemetry and filesystem headroom.
@@ -55,6 +57,58 @@ On Windows, render a quick fixture through the installed QGIS LTR environment:
 Use `--profile pilot` only after the small fixture has rendered and displayed
 correctly. The renderer refuses to write into a non-empty output directory so
 an accidental rerun cannot silently mix or overwrite packs.
+
+## OpenStreetMap-style Gloucestershire pack
+
+Large source archives and rendered packs belong under the ignored
+`home-hub/maps/work/` directory. Using the current Protomaps CLI, extract the
+county rather than downloading the approximately 120 GB planet archive:
+
+```powershell
+pmtiles extract https://build.protomaps.com/20260829.pmtiles `
+  home-hub/maps/work/sources/gloucestershire-20260829.pmtiles `
+  --bbox=-2.72,51.55,-1.62,52.15 --maxzoom=15 --download-threads=8
+pmtiles verify home-hub/maps/work/sources/gloucestershire-20260829.pmtiles
+pmtiles serve home-hub/maps/work/sources --interface=127.0.0.1 --port=8077 `
+  --public-url=http://127.0.0.1:8077
+```
+
+In another terminal, generate the QGIS-compatible style and render a fixture:
+
+```powershell
+npm --prefix tools/protomaps-style install
+node tools/protomaps-style/build-style.mjs `
+  '--output=home-hub/maps/work/styles/osm-light.json' `
+  '--tile-url=http://127.0.0.1:8077/gloucestershire-20260829/{z}/{x}/{y}.mvt'
+
+& 'C:\Program Files\QGIS 3.44.13\bin\python-qgis-ltr.bat' `
+  tools/build_home_hub_map_pack.py `
+  '--tile-url=http://127.0.0.1:8077/gloucestershire-20260829/{z}/{x}/{y}.mvt' `
+  --mapbox-style home-hub/maps/work/styles/osm-light.json `
+  --output home-hub/maps/work/osm-fixture/tiles `
+  --manifest home-hub/maps/work/osm-fixture/map_manifest.json `
+  --profile fixture
+```
+
+After visual approval, change the output directory and use
+`--profile gloucestershire`. That profile renders county-wide z10-16 plus z17
+around the Gloucester/Cheltenham corridor. OpenStreetMap attribution must stay
+in the manifest and the eventual map information panel.
+
+## Aerial layer
+
+The preferred close-detail aerial source is the Environment Agency Vertical
+Aerial Photography collection. It is Open Government Licence data, supplied as
+5 km British National Grid ECW downloads at roughly 10-50 cm resolution where
+surveys exist. QGIS/GDAL can mosaic and reproject selected Gloucester coverage
+before rendering it to a separate JPEG XYZ layer.
+
+Copernicus Sentinel-2 true-colour imagery is the open gap-filler where no EA
+survey exists. Its best RGB bands are 10 m per pixel, so it is useful for broad
+landscape context but not cat-scale or house-scale detail. Google, Bing and
+similar consumer basemaps are not offline-pack sources. Road and aerial tiles
+will remain separate layer directories so switching layers never requires
+duplicating cat markers or interaction overlays.
 
 The first generated fixture uses the official June 2026 OS Open Zoomstack
 Vector Tiles database (2,852,712,448 bytes, SHA-256

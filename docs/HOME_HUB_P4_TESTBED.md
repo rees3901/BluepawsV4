@@ -288,3 +288,18 @@ The icon/drawer build is 956,576 bytes with SHA-256
 It was flashed app-only at `0x10000` with esptool hash verification. Its first
 monitored boot again mounted the card and completed display/touch startup with
 no panic or reset loop.
+
+The next display-control pass adds the supplied brightness and zoom-out artwork.
+Brightness opens a themed vertical 10-100 percent slider and drives the existing
+5 kHz PWM backlight directly; retaining a 10 percent floor prevents an accidental
+black screen during testbed use. The selected value survives page and orientation
+rebuilds for the current boot. The light application palette is now warm grey
+instead of full white, while the map's text minus control is replaced by the
+matching zoom-out image.
+
+That application is 959,904 bytes with SHA-256
+`9A69035C64BF0EF5BEF3943C3880E390DC799822A55397970AF2E60870AB820A`.
+It was flashed app-only at `0x10000`; esptool verified the written hash. The
+monitored clean reset reported ESP32-P4 revision 1.3, 16 MB flash, 32 MB PSRAM,
+800x480 display, GT911 touch and the 32 GB FAT volume on the 480 GB physical card,
+then started the UI without a panic or reset loop.
