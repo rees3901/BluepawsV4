@@ -26,8 +26,11 @@ interface TrackingMapProps {
   followedId: number | null;
   trailIds: Set<number>;
   trailHistory: Record<number, TrailPoint[]>;
+  allTrailsVisible?: boolean;
+  trailsAvailable?: boolean;
   command: MapCommand | null;
   onAction: (device: TelemetryDevice, action: DeviceAction) => void;
+  onAllTrailsToggle?: () => void;
   onNotice?: (message: string) => void;
   readOnly?: boolean;
 }
@@ -37,7 +40,7 @@ const MARKER_SLIDE_DURATION_MS = 750;
 const MAX_ANIMATED_MARKER_DISTANCE_METRES = 2_000;
 
 export default function TrackingMap(props: TrackingMapProps) {
-  const { devices, avatars, sidebarOpen, followedId, trailIds, trailHistory, command, onAction, onNotice, readOnly = false } = props;
+  const { devices, avatars, sidebarOpen, followedId, trailIds, trailHistory, allTrailsVisible = false, trailsAvailable = false, command, onAction, onAllTrailsToggle, onNotice, readOnly = false } = props;
   const mapRef = useRef<L.Map | null>(null);
   const markersRef = useRef(new Map<number, L.Marker>());
   const markerAnimationsRef = useRef(new Map<number, number>());
@@ -47,15 +50,31 @@ export default function TrackingMap(props: TrackingMapProps) {
   const avatarsRef = useRef(avatars);
   const trailIdsRef = useRef(trailIds);
   const actionRef = useRef(onAction);
+  const allTrailsToggleRef = useRef(onAllTrailsToggle);
+  const allTrailsVisibleRef = useRef(allTrailsVisible);
+  const trailsAvailableRef = useRef(trailsAvailable);
   const noticeRef = useRef(onNotice);
+  const allTrailsButtonRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     devicesRef.current = devices;
     avatarsRef.current = avatars;
     trailIdsRef.current = trailIds;
     actionRef.current = onAction;
+    allTrailsToggleRef.current = onAllTrailsToggle;
+    allTrailsVisibleRef.current = allTrailsVisible;
+    trailsAvailableRef.current = trailsAvailable;
     noticeRef.current = onNotice;
-  }, [avatars, devices, onAction, onNotice, trailIds]);
+    const trailButton = allTrailsButtonRef.current;
+    if (trailButton) {
+      const label = allTrailsVisible ? "Hide all breadcrumb trails" : "Show all breadcrumb trails";
+      trailButton.classList.toggle("active", allTrailsVisible);
+      trailButton.disabled = !trailsAvailable;
+      trailButton.title = label;
+      trailButton.setAttribute("aria-label", label);
+      trailButton.setAttribute("aria-pressed", String(allTrailsVisible));
+    }
+  }, [allTrailsVisible, avatars, devices, onAction, onAllTrailsToggle, onNotice, trailIds, trailsAvailable]);
 
   useEffect(() => {
     const markers = markersRef.current;
@@ -188,6 +207,26 @@ export default function TrackingMap(props: TrackingMapProps) {
       },
     });
     new FitControl().addTo(map);
+
+    const TrailsControl = L.Control.extend({
+      options: { position: "topleft" },
+      onAdd() {
+        const button = L.DomUtil.create("button", "leaflet-map-btn global-trails-btn") as HTMLButtonElement;
+        const label = allTrailsVisibleRef.current ? "Hide all breadcrumb trails" : "Show all breadcrumb trails";
+        allTrailsButtonRef.current = button;
+        button.type = "button";
+        button.title = label;
+        button.disabled = !trailsAvailableRef.current;
+        button.classList.toggle("active", allTrailsVisibleRef.current);
+        button.setAttribute("aria-label", label);
+        button.setAttribute("aria-pressed", String(allTrailsVisibleRef.current));
+        button.innerHTML = '<span class="global-trails-icon" aria-hidden="true"></span>';
+        L.DomEvent.disableClickPropagation(button);
+        L.DomEvent.on(button, "click", () => allTrailsToggleRef.current?.());
+        return button;
+      },
+    });
+    if (allTrailsToggleRef.current) new TrailsControl().addTo(map);
 
     const measureLayers: L.Layer[] = [];
     const measurePoints: L.LatLng[] = [];
@@ -358,6 +397,7 @@ export default function TrackingMap(props: TrackingMapProps) {
       markerAnimations.clear();
       map.remove();
       mapRef.current = null;
+      allTrailsButtonRef.current = null;
       markers.clear();
       trails.clear();
       trailPoints.clear();

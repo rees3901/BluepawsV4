@@ -185,6 +185,26 @@ body.light {
   object-fit: contain;
 }
 
+body.light .leaflet-map-btn .fit-markers-icon {
+  filter: invert(1);
+}
+
+body.light .leaflet-map-btn:hover .fit-markers-icon,
+body.light .leaflet-map-btn:focus-visible .fit-markers-icon {
+  filter: none;
+}
+
+.leaflet-map-btn.global-trails-btn.active {
+  border-color: var(--warning);
+  background: var(--warning);
+  color: #000;
+}
+
+.leaflet-map-btn .global-trails-icon {
+  width: 26.4px;
+  height: 26.4px;
+}
+
 .leaflet-control-zoom a {
   width: 41px !important;
   height: 41px !important;
@@ -540,6 +560,18 @@ body.panel-open .map-loading {
   border-color: color-mix(in srgb, var(--success) 70%, var(--accent));
   background: color-mix(in srgb, var(--accent) 72%, #08213a);
   color: white;
+}
+
+body.light .bluetooth-beacon {
+  border-color: #9aa1a7;
+  background: #ddd9d1;
+  color: #46515b;
+}
+
+body.light .bluetooth-beacon.active {
+  border-color: color-mix(in srgb, var(--success) 65%, #8ba3b5);
+  background: #d8eaf6;
+  color: #175f8f;
 }
 
 button.bluetooth-beacon:not(:disabled) {
