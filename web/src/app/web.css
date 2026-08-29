@@ -777,17 +777,93 @@ body.panel-open .map-loading {
 
 .popup-avatar {
   display: grid;
-  width: 78px;
-  height: 78px;
-  flex: 0 0 78px;
+  width: 42px;
+  height: 42px;
+  min-width: 42px;
+  flex: 0 0 42px;
   place-items: center;
+  overflow: hidden;
   border-radius: 50%;
-  font-size: 60px;
+  background: var(--bg-primary);
+  font-size: 30px;
   object-fit: cover;
 }
 
-.popup-avatar.avatar-emoji-image {
+.popup-avatar-image {
+  display: block;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
+}
+
+.device-marker-popup .leaflet-popup-content-wrapper {
+  min-width: min(350px, calc(100vw - 52px));
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.device-marker-popup .leaflet-popup-content {
+  width: auto !important;
+  margin: 0 !important;
+}
+
+.device-marker-popup .leaflet-popup-close-button {
+  z-index: 2;
+  top: 5px !important;
+  right: 5px !important;
+  width: 25px !important;
+  height: 25px !important;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--bg-card) !important;
+  font-size: 19px !important;
+  line-height: 21px !important;
+}
+
+.map-device-card {
+  min-width: 0;
+  cursor: default;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.map-device-card:hover {
+  border-color: transparent;
+  transform: none;
+  box-shadow: none;
+}
+
+.map-popup-summary {
+  align-items: flex-start;
+  padding: 11px 34px 10px 12px;
+}
+
+.map-popup-summary .card-name-row {
+  flex-wrap: wrap;
+}
+
+.map-popup-detail {
+  padding: 0 12px 12px;
+}
+
+.map-popup-detail .card-grid {
+  margin-bottom: 6px;
+}
+
+.map-popup-detail .popup-actions {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.map-device-card .btn-action {
+  padding: 4px 8px;
+  font-size: 0.68rem;
+}
+
+.map-device-card .signal-indicator,
+.map-device-card .battery-indicator {
+  transform: none;
 }
 
 .avatar-editor-content {

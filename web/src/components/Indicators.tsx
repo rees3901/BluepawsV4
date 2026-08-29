@@ -30,6 +30,13 @@ function batteryPercentLevel(percent: number) {
   return { level: 1, label: "Nearly Empty", color: "#ef4444" };
 }
 
+export function batteryPresentation(millivolts: number | null, percent?: number | null) {
+  const hasPercent = percent !== undefined && percent !== null;
+  const quality = hasPercent ? batteryPercentLevel(percent) : millivolts === null ? { level: 0, label: "No data", color: "#607d8b" } : batteryLevel(millivolts);
+  const measurement = hasPercent ? `${percent}%` : millivolts === null ? "Battery not reported" : `${(millivolts / 1000).toFixed(2)} V`;
+  return { ...quality, measurement };
+}
+
 export function SignalIndicator({ rssi, snr, ingestPath }: { rssi: number | null; snr: number | null; ingestPath: IngestPath | null }) {
   const transport = transportPresentation(ingestPath);
   if (rssi === null || snr === null) {
@@ -86,11 +93,9 @@ function TransportBadge({ ingestPath }: { ingestPath: IngestPath | null }) {
 }
 
 export function BatteryIndicator({ millivolts, percent }: { millivolts: number | null; percent?: number | null }) {
-  const hasPercent = percent !== undefined && percent !== null;
-  const battery = hasPercent ? batteryPercentLevel(percent) : millivolts === null ? {level:0,label:"No data",color:"#607d8b"} : batteryLevel(millivolts);
-  const measurement = hasPercent ? `${percent}%` : millivolts === null ? "Battery not reported" : `${(millivolts / 1000).toFixed(2)} V`;
+  const battery = batteryPresentation(millivolts, percent);
   return (
-    <span className="battery-indicator" title={`${measurement} — ${battery.label}`}>
+    <span className="battery-indicator" title={`${battery.measurement} — ${battery.label}`}>
       <svg className="indicator-icon icon-battery" viewBox="0 0 28 18" fill="none">
         <rect x="1" y="1" width="23" height="16" rx="3" stroke="#607d8b" strokeWidth="2" />
         <rect x="24" y="5.5" width="3" height="7" rx="1.2" fill="#607d8b" />
