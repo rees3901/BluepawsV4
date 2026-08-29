@@ -322,3 +322,14 @@ and continuing to reject the observed +472-second anomaly. Do **not** edit or
 reflash firmware during this uninterrupted soak. A tolerance change needs actual-
 function unit tests at the accepted boundary and just outside it, followed by a
 separate hardware run; no claim is made that such a change is already correct.
+
+Cycle 22 independently repeated the apparent one-second edge. It started at
+01:15:39.822 UTC; the event arrived 79.995 seconds later with epoch 1787966220,
+status ready, 12 entries and 66.5 m uncertainty, while elapsed whole seconds put
+the anchored device clock at 1787966219. It was rejected without coordinates.
+This repetition strengthens—but still does not uniquely prove—the quantization
+inference because ordinary logs omit coordinates. Packet 2328 passed HMAC
+verification (`69a667c9562549a4a0e47435037600068093f8d06ba631f41255ed030b34d008`),
+was not due for LTE, and Normal scheduling continued. Twelve Normal waits now
+measure 600.005–600.006 seconds. The post-soak boundary-test recommendation and
+the prohibition on modifying the live soak remain unchanged.
