@@ -351,3 +351,31 @@ accept only the chosen integer-second boundary, keep the original sample time,
 emit age zero without moving UTC, and retain rejection immediately outside the
 boundary and for the observed +472-second anomaly. Fourteen Normal waits remain
 at 600.005–600.006 seconds; Walter is otherwise stable and unmodified.
+
+## Capture stopped at 02:28 UTC
+
+The persistent COM26 monitor stopped at **2026-08-29 02:28:45 UTC** after its
+atomic `state.tmp` to `state.json` replacement failed with Windows error 5
+(`PermissionError: Access is denied`). The process recorded PID 14096 no longer
+exists. It was not restarted, so COM26 was not reopened and the board was not
+reset or otherwise changed. The soak heartbeat was paused because subsequent
+serial behaviour can no longer be observed under the required single-owner
+capture arrangement.
+
+Before the capture failure, cycle 28 completed normally. Its GNSS event reported
+12 entries but unusable 20,000,000 m uncertainty and a timestamp four seconds
+older than the cycle start, so firmware correctly omitted coordinates. Packet
+2334 completed only through the simulated LoRa stub, followed by the full
+10-second window. The cycle returned after 54.035 seconds and began another
+600-second Normal sleep. Nineteen Normal sleeps had been logged, with the final
+three beginning at 02:01:25, 02:12:22 and 02:23:16 UTC. The last captured status
+showed profile Normal, no offline mode, 13,227 seconds uptime, 298,964 bytes free
+heap and 28 simulated LoRa completions.
+
+Supabase remained unchanged at the stop: the latest genuine device 1010 cloud
+observation was still scheduled Normal LTE packet 2326 / observation 6536 at
+00:54:15 UTC, with valid GNSS, one cellular-direct receipt and the previously
+verified payload hash. Command sequences 6 and 7 remained acknowledged once;
+no command state was edited. Device 1001 last checked in at 02:04:54 UTC. This is
+an honest early end to the uninterrupted capture, not evidence of a board,
+firmware or network failure, and live recovery testing remains unproven.
