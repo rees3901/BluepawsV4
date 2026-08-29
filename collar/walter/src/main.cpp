@@ -32,7 +32,7 @@ std::atomic<uint8_t> selectedProfile{PROFILE_NORMAL};
 std::atomic<bool> simulatedHome{false};
 const uint8_t hmacKey[] = WALTER_HMAC_KEY_BYTES;
 static_assert(sizeof(hmacKey) == 32, "HMAC key must contain exactly 32 bytes");
-bool begun = false, configured = false, sequenceReady = false, cellularFailure = false;
+bool begun = false, configured = false, stateStoreReady = false, sequenceReady = false, cellularFailure = false;
 uint32_t sequenceNext = 0, sequenceEnd = 0;
 uint64_t clockAnchorMs = 0;
 uint32_t clockAnchorUtc = 0;
@@ -40,6 +40,16 @@ walter::Fix lastFix;
 char lastCloudCommandId[37]{};
 uint16_t lastCloudCommandSequence = 0;
 uint64_t lostProfileStartedMs = 0;
+
+constexpr uint32_t WALTER_COMMAND_STATE_MAGIC = 0x4250434dUL; // "BPCM"
+struct WalterCommandState {
+    uint32_t magic;
+    uint16_t sequence;
+    uint8_t profile;
+    uint8_t reserved;
+    char id[37];
+    uint32_t checksum;
+};
 
 uint64_t monotonicMs() { return uint64_t(esp_timer_get_time()) / 1000; }
 uint32_t utcNow() {
@@ -535,9 +545,48 @@ bool acquireFix() {
                   lastFix.satellites, lastFix.accuracyM, (unsigned long)lastFix.utc);
     return true;
 }
+bool ensureStateStore() {
+    if (stateStoreReady) return true;
+    stateStoreReady = sequenceStore.begin("bp-walter", false);
+    return stateStoreReady;
+}
+uint32_t commandStateChecksum(WalterCommandState state) {
+    state.checksum = 0;
+    const auto* bytes = reinterpret_cast<const uint8_t*>(&state);
+    uint32_t hash = 2166136261UL;
+    for (size_t i = 0; i < sizeof(state); ++i) {
+        hash ^= bytes[i];
+        hash *= 16777619UL;
+    }
+    return hash;
+}
+bool restoreCommandState() {
+    if (!ensureStateStore() || sequenceStore.getBytesLength("last-cmd") != sizeof(WalterCommandState)) return false;
+    WalterCommandState state{};
+    if (sequenceStore.getBytes("last-cmd", &state, sizeof(state)) != sizeof(state)
+        || state.magic != WALTER_COMMAND_STATE_MAGIC || !state.sequence
+        || state.profile > PROFILE_DEBUG || state.id[36] != '\0'
+        || state.checksum != commandStateChecksum(state)) return false;
+    memcpy(lastCloudCommandId, state.id, sizeof(lastCloudCommandId));
+    lastCloudCommandSequence = state.sequence;
+    selectedProfile = state.profile;
+    lostProfileStartedMs = monotonicMs();
+    return true;
+}
+bool persistCommandState(const walter::ProfileCommand& command) {
+    if (!ensureStateStore()) return false;
+    WalterCommandState state{};
+    state.magic = WALTER_COMMAND_STATE_MAGIC;
+    state.sequence = command.sequence;
+    state.profile = command.profile;
+    memcpy(state.id, command.id, sizeof(state.id));
+    state.id[36] = '\0';
+    state.checksum = commandStateChecksum(state);
+    return sequenceStore.putBytes("last-cmd", &state, sizeof(state)) == sizeof(state);
+}
 bool nextSequence(uint16_t& result) {
     if (!sequenceReady) {
-        if (!sequenceStore.begin("bp-walter", false)) return false;
+        if (!ensureStateStore()) return false;
         sequenceNext = sequenceEnd = sequenceStore.getUInt("next", 1);
         sequenceReady = true;
     }
@@ -600,11 +649,20 @@ void applyCloudCommand(JsonDocument& receipt) {
     uint16_t sequence;
     if (cancelRequested.load() || !nextSequence(sequence)) return;
     const bool duplicate = strcmp(lastCloudCommandId, command.id) == 0;
-    if (duplicate && lastCloudCommandSequence != command.sequence) return;
+    if ((duplicate && lastCloudCommandSequence != command.sequence)
+        || (!duplicate && lastCloudCommandSequence == command.sequence)) {
+        console.println("[LTE CMD] Command identity conflict; not applied or ACKed"); return;
+    }
     if (duplicate && selectedProfile.load() != command.profile) {
         console.println("[LTE CMD] Superseded locally; old command not ACKed"); return;
     }
     if (!duplicate) {
+        // Persist the applied identity and resulting profile before changing
+        // runtime state. A reboot or a delivery over another path can then
+        // re-ACK the command without applying it twice.
+        if (!persistCommandState(command)) {
+            console.println("[LTE CMD] NVS command reservation failed; not applied or ACKed"); return;
+        }
         selectedProfile = command.profile;
         lostProfileStartedMs = monotonicMs();
         memcpy(lastCloudCommandId, command.id, sizeof(lastCloudCommandId));
@@ -884,6 +942,10 @@ void setup() {
     Serial.setTxTimeoutMs(1000);
     Serial.begin(115200);
     if (!console.begin()) for (;;) delay(1000);
+    if (restoreCommandState()) {
+        console.printf("[LTE CMD] Restored seq=%u profile=%s for duplicate protection\n",
+            lastCloudCommandSequence, bp_profile_name(bp_profile_t(selectedProfile.load())));
+    }
     gnssEvents = xQueueCreate(1, sizeof(WMGNSSFixEvent));
     httpEvents = xQueueCreate(1, sizeof(WMHTTPEventData));
     if (!gnssEvents || !httpEvents || xTaskCreate(worker, "walter-test", 16384, nullptr, 1, nullptr) != pdPASS) {
