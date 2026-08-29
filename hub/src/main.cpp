@@ -2214,6 +2214,8 @@ static void handleNotFound() {
     bool publicAsset = path == "/leaflet.js" || path == "/leaflet.css"
         || path == "/basemap.json" || path == "/images/marker-icon.png"
         || path == "/images/marker-icon-2x.png" || path == "/images/marker-shadow.png"
+        || path == "/brand-favicon.ico" || path == "/brand-mascot.avif"
+        || path == "/location-fit-markers.png" || path == "/map-location.png"
         || path == "/welcome.js" || path == "/feedback.js"
         || path == "/hub-presence.js" || path == "/hub-presence.css";
     if (httpServer.method() == HTTP_GET && publicAsset && LittleFS.exists(path)) {
@@ -2226,6 +2228,7 @@ static void handleNotFound() {
         else if (path.endsWith(".json"))  contentType = "application/json";
         else if (path.endsWith(".png"))   contentType = "image/png";
         else if (path.endsWith(".ico"))   contentType = "image/x-icon";
+        else if (path.endsWith(".avif"))  contentType = "image/avif";
         if (path == "/welcome.js") httpServer.sendHeader("Cache-Control", "no-store");
         httpServer.streamFile(f, contentType);
         f.close();

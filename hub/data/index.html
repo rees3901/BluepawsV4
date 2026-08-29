@@ -38,7 +38,11 @@
     <!-- Sidebar Panel — contains device cards and header controls -->
     <div id="panel" class="open">
         <div id="panelHeader">
-            <span class="panel-title">Bluepaws V4</span>
+            <div class="panel-brand" aria-label="Bluepaws V4">
+                <span class="panel-brand-mark" aria-hidden="true"></span>
+                <span class="panel-title">Bluepaws V4</span>
+                <span class="panel-brand-mascot" aria-hidden="true"></span>
+            </div>
             <div class="panel-header-btns">
                 <span id="statusBanner" class="disconnected">
                     <span id="statusIcon">&#9679;</span>
@@ -219,6 +223,8 @@
         <strong>Connection available</strong>
         <span>A known Wi-Fi network is reachable. Off-Grid remains active until you choose to leave it.</span>
     </div>
+
+    <div id="uiToast" class="ui-toast hidden" role="status" aria-live="polite"></div>
 
     <!-- Locally bundled mapping library. -->
     <script src="leaflet.js"></script>

@@ -21,6 +21,8 @@ export interface DeviceCardProps {
   expanded: boolean;
   dragging: boolean;
   dragOver: boolean;
+  first: boolean;
+  pinned: boolean;
   followed: boolean;
   trailVisible: boolean;
   portableMode: boolean;
@@ -36,7 +38,7 @@ export interface DeviceCardProps {
   onDragOver: () => void;
   onDrop: () => void;
   onDragEnd: () => void;
-  onPinTop: () => void;
+  onPinToggle: () => void;
   onReportLog: () => void;
   onReportExport: () => void;
   onAvatarEdit?: () => void;
@@ -49,7 +51,7 @@ export interface DeviceCardProps {
 }
 
 export function DeviceCard(props: DeviceCardProps) {
-  const { device, avatar, expanded, dragging, dragOver, followed, trailVisible, portableMode, distance, ageSeconds, onExpand, onAction, onDragStart, onDragOver, onDrop, onDragEnd, onPinTop, onReportLog, onReportExport, onAvatarEdit } = props;
+  const { device, avatar, expanded, dragging, dragOver, first, pinned, followed, trailVisible, portableMode, distance, ageSeconds, onExpand, onAction, onDragStart, onDragOver, onDrop, onDragEnd, onPinToggle, onReportLog, onReportExport, onAvatarEdit } = props;
   const isHub = device.entity === "hub";
   const hasGps = !isHub || device.hasGps;
   const status = isHub
@@ -70,8 +72,12 @@ export function DeviceCard(props: DeviceCardProps) {
 
   return (
     <article
+      data-device-card-id={device.id}
       className={`device-card${(isHub ? ageSeconds >= hubContactGrace(device.hubReportingProfile) : ageSeconds > 600) ? " stale" : ""}${expanded ? " expanded" : ""}${dragging ? " dragging" : ""}${dragOver ? " drag-over" : ""}`}
       onDragOver={(event) => {
+        event.preventDefault();
+      }}
+      onDragEnter={(event) => {
         event.preventDefault();
         onDragOver();
       }}
@@ -87,13 +93,18 @@ export function DeviceCard(props: DeviceCardProps) {
       <div className="card-summary">
         <button
           type="button"
-          className="card-reorder-handle"
-          title={`Drag to reorder ${device.name}`}
-          aria-label={`Drag to reorder ${device.name}`}
-          draggable
-          onClick={(event) => { event.stopPropagation(); }}
+          className={`card-reorder-handle${pinned ? " pinned" : first ? " can-pin" : ""}`}
+          title={pinned ? `Unpin ${device.name}` : first ? `Pin ${device.name} to the first position` : `Drag to reorder ${device.name}`}
+          aria-label={pinned ? `Unpin ${device.name}` : first ? `Pin ${device.name} to the first position` : `Drag to reorder ${device.name}`}
+          aria-pressed={first || pinned ? pinned : undefined}
+          draggable={!pinned && !first}
+          onClick={(event) => { event.stopPropagation(); if (first || pinned) onPinToggle(); }}
           onDragStart={(event) => {
             event.stopPropagation();
+            if (pinned || first) {
+              event.preventDefault();
+              return;
+            }
             event.dataTransfer.effectAllowed = "move";
             event.dataTransfer.setData("text/plain", String(device.id));
             onDragStart();
@@ -103,7 +114,8 @@ export function DeviceCard(props: DeviceCardProps) {
             onDragEnd();
           }}
         >
-          <span aria-hidden="true">⋮⋮</span>
+          <span className="reorder-grip" aria-hidden="true"><GripIcon /></span>
+          <span className="reorder-pin" aria-hidden="true"><PinIcon /></span>
         </button>
         <div className="card-avatar-wrap">
           <div
@@ -114,23 +126,12 @@ export function DeviceCard(props: DeviceCardProps) {
               <img className="avatar-emoji-image" src={emojiImageUrl(avatar.emoji)} alt={avatar.emoji} draggable={false} />
             )}
           </div>
-          <button
-            type="button"
-            className="card-pin-button"
-            title={`Pin ${device.name} to the top`}
-            aria-label={`Pin ${device.name} to the top`}
-            onClick={(event) => { event.stopPropagation(); onPinTop(); }}
-          >
-            <PinIcon />
-          </button>
           {onAvatarEdit && (
             <button
               type="button"
               className="card-avatar-edit"
               title={`Customise ${device.name}'s marker`}
               aria-label={`Customise ${device.name}'s marker`}
-              aria-hidden={!expanded}
-              tabIndex={expanded ? 0 : -1}
               onClick={(event) => { event.stopPropagation(); onAvatarEdit(); }}
             >+</button>
           )}
@@ -209,6 +210,14 @@ function PinIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">
       <path d="M14.9 3.6 20.4 9l-1.9 1.9-1.2-1.2-4.1 4.1.3 3.1-1 1-3.4-3.4-4.1 4.1-1.4-1.4 4.1-4.1-3.4-3.4 1-1 3.1.3 4.1-4.1-1.2-1.2 1.9-1.9 1.7 1.8Z" />
+    </svg>
+  );
+}
+
+function GripIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+      <path d="M4 7h16M4 12h16M4 17h16" />
     </svg>
   );
 }

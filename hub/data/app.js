@@ -34,6 +34,12 @@
     let measureMarkers = [];       // Circle markers at each measure point
     let darkMode = true;           // Current theme (persisted to localStorage)
     let followedDeviceId = null;   // Device ID being auto-followed on map (null = none)
+    var deviceCardOrder = [];
+    var pinnedDeviceId = null;
+    var draggingDeviceId = null;
+    var allTrailsVisible = true;
+    var allTrailsButton = null;
+    var toastTimer = null;
     var hubMode = 'home';          // home | portable | off_grid
     var hubPortableMode = false;   // true when hub scans for BLE find beacons
     var fallbackPollingTimer = null;
@@ -378,18 +384,39 @@
         // Zoom control (bottom-left to avoid hamburger overlap)
         L.control.zoom({ position: 'bottomleft' }).addTo(map);
 
+        // Center on the Home Hub. This retains the familiar target symbol while
+        // giving it the action users expect from that icon.
+        var HomeControl = L.Control.extend({
+            options: { position: 'topleft' },
+            onAdd: function () {
+                var btn = L.DomUtil.create('button', 'leaflet-map-btn');
+                btn.type = 'button';
+                btn.title = 'Center on Home Hub';
+                btn.setAttribute('aria-label', 'Center map on Home Hub');
+                btn.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="5"/><path d="M8 1v3m0 8v3M1 8h3m8 0h3"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/></svg>';
+                L.DomEvent.disableClickPropagation(btn);
+                L.DomEvent.on(btn, 'click', function () {
+                    var hub = Object.keys(devices).map(function (id) { return devices[id]; }).find(function (dev) {
+                        return dev.data.entity === 'hub' && dev.marker;
+                    });
+                    if (!hub) { showToast('Home Hub location is not available yet'); return; }
+                    map.setView(hub.marker.getLatLng(), Math.max(map.getZoom(), 17), { animate: true });
+                });
+                return btn;
+            }
+        });
+        new HomeControl().addTo(map);
+
         // Fit All Markers button (map overlay)
         var FitAllControl = L.Control.extend({
             options: { position: 'topleft' },
             onAdd: function () {
-                var btn = L.DomUtil.create('div', 'leaflet-map-btn');
+                var btn = L.DomUtil.create('button', 'leaflet-map-btn');
+                btn.type = 'button';
                 btn.id = 'btnFitAllMap';
                 btn.title = 'Fit all markers into view';
-                btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">' +
-                    '<circle cx="8" cy="8" r="5"/>' +
-                    '<path d="M8 1v3m0 8v3M1 8h3m8 0h3"/>' +
-                    '<circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/>' +
-                    '</svg>';
+                btn.setAttribute('aria-label', 'Fit all markers into view');
+                btn.innerHTML = '<img class="fit-markers-icon" src="/location-fit-markers.png" alt="" aria-hidden="true">';
                 L.DomEvent.disableClickPropagation(btn);
                 L.DomEvent.on(btn, 'click', function () { fitAllMarkers(); });
                 return btn;
@@ -397,14 +424,30 @@
         });
         new FitAllControl().addTo(map);
 
+        var TrailsControl = L.Control.extend({
+            options: { position: 'topleft' },
+            onAdd: function () {
+                var btn = L.DomUtil.create('button', 'leaflet-map-btn global-trails-btn active');
+                btn.type = 'button';
+                btn.innerHTML = '<span class="global-trails-icon" aria-hidden="true"></span>';
+                allTrailsButton = btn;
+                updateAllTrailsButton();
+                L.DomEvent.disableClickPropagation(btn);
+                L.DomEvent.on(btn, 'click', function () { setAllTrailsVisible(!allTrailsVisible); });
+                return btn;
+            }
+        });
+        new TrailsControl().addTo(map);
+
         // Measure tool (ruler icon)
         var MeasureControl = L.Control.extend({
             options: { position: 'topleft' },
             onAdd: function () {
-                var btn = L.DomUtil.create('div', 'leaflet-map-btn');
+                var btn = L.DomUtil.create('button', 'leaflet-map-btn');
+                btn.type = 'button';
                 btn.id = 'btnMeasure';
                 btn.title = 'Measure distance (click points on map)';
-                btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">' +
+                btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">' +
                     '<rect x="1" y="7" width="22" height="10" rx="1"/>' +
                     '<line x1="5" y1="7" x2="5" y2="12"/>' +
                     '<line x1="9" y1="7" x2="9" y2="10"/>' +
@@ -427,8 +470,11 @@
             options: { position: 'bottomright' },
             onAdd: function () {
                 var div = L.DomUtil.create('div', 'leaflet-cursor-coords');
-                div.id = 'cursorCoords';
-                div.innerHTML = '--';
+                div.tabIndex = 0;
+                div.setAttribute('aria-label', 'Map cursor coordinates. Hover or focus to reveal.');
+                div.innerHTML = '<span class="leaflet-cursor-coords-tab" aria-hidden="true">⌖</span><span id="cursorCoords" class="leaflet-cursor-coords-value">Move over map</span>';
+                L.DomEvent.disableClickPropagation(div);
+                L.DomEvent.disableScrollPropagation(div);
                 return div;
             }
         });
@@ -442,6 +488,15 @@
             var lon = e.latlng.lng;
             el.innerHTML = lat.toFixed(6) + ', ' + lon.toFixed(6) +
                 '<br>' + toDMS(lat, 'N', 'S') + ' ' + toDMS(lon, 'E', 'W');
+        });
+
+        map.on('contextmenu', function (e) {
+            var coordinates = e.latlng.lat.toFixed(6) + ', ' + e.latlng.lng.toFixed(6);
+            copyText(coordinates).then(function () {
+                showToast('Coordinates copied to clipboard');
+            }).catch(function () {
+                showToast('Unable to copy coordinates');
+            });
         });
 
         // Click handler for measurement mode
@@ -994,8 +1049,8 @@
                 ' Trail' +
             '</button>';
         if (dev.data.entity === 'hub') return html +
-            '<button class="btn-action" ' + ((HubPresencePanel.feedback() && HubPresencePanel.feedback().state === 'pending') || Date.now()-dev.lastUpdate>=15000 ? 'disabled ' : '') + 'data-action="bluetooth" data-id="' + dev.id + '" aria-pressed="' + !!dev.data.hub.ble_enabled +
-            '" title="Home beacon operates only on primary Home Wi-Fi">ᛒ Bluetooth ' + (dev.data.hub.ble_enabled ? 'On' : 'Off') + '</button>' +
+            '<button class="btn-action btn-bluetooth' + (dev.data.hub.ble_enabled ? ' active' : '') + '" ' + ((HubPresencePanel.feedback() && HubPresencePanel.feedback().state === 'pending') || Date.now()-dev.lastUpdate>=15000 ? 'disabled ' : '') + 'data-action="bluetooth" data-id="' + dev.id + '" aria-pressed="' + !!dev.data.hub.ble_enabled +
+            '" title="Home beacon operates only on primary Home Wi-Fi"><span class="bluetooth-action-icon" aria-hidden="true">ᛒ<span class="bluetooth-action-state">' + (dev.data.hub.ble_enabled ? '✅' : '❌') + '</span></span> Bluetooth ' + (dev.data.hub.ble_enabled ? 'On' : 'Off') + '</button>' +
             '<button class="btn-action btn-cmd" ' + ((HubPresencePanel.feedback() && HubPresencePanel.feedback().state === 'pending') || Date.now()-dev.lastUpdate>=15000 ? 'disabled ' : '') +
             'data-action="hub-profile" data-id="' + dev.id + '" title="Hub reporting profile">⌘ Cmd</button>';
         return html + '<button class="btn-action btn-find" data-action="find" data-id="' + dev.id + '" title="Find Alert — trigger buzzer + LED">' +
@@ -1034,6 +1089,110 @@
 
     var expandedCardIds = []; // Shared four-card limit, including the hub.
 
+    function loadDeviceCardPreferences() {
+        try {
+            var savedOrder = JSON.parse(localStorage.getItem('bp_offline_device_order') || '[]');
+            deviceCardOrder = Array.isArray(savedOrder) ? savedOrder.map(Number).filter(Number.isFinite) : [];
+            var savedPin = localStorage.getItem('bp_offline_pinned_device');
+            pinnedDeviceId = savedPin === null ? null : Number(savedPin);
+            if (!Number.isFinite(pinnedDeviceId)) pinnedDeviceId = null;
+        } catch (e) {
+            deviceCardOrder = [];
+            pinnedDeviceId = null;
+        }
+    }
+
+    function saveDeviceCardPreferences() {
+        try {
+            localStorage.setItem('bp_offline_device_order', JSON.stringify(deviceCardOrder));
+            if (pinnedDeviceId === null) localStorage.removeItem('bp_offline_pinned_device');
+            else localStorage.setItem('bp_offline_pinned_device', String(pinnedDeviceId));
+        } catch (e) {}
+    }
+
+    function normalizedDeviceOrder() {
+        var known = Object.keys(devices).map(Number);
+        var order = deviceCardOrder.filter(function (id, index) {
+            return known.indexOf(id) >= 0 && deviceCardOrder.indexOf(id) === index;
+        });
+
+        known.forEach(function (id) { if (order.indexOf(id) < 0) order.push(id); });
+        if (pinnedDeviceId !== null && order.indexOf(pinnedDeviceId) >= 0) {
+            order = [pinnedDeviceId].concat(order.filter(function (id) { return id !== pinnedDeviceId; }));
+        }
+        deviceCardOrder = order;
+        return order;
+    }
+
+    function animateCardOrder(container, previousTops) {
+        if (!window.matchMedia || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+        Array.prototype.forEach.call(container.children, function (card) {
+            var previous = previousTops[card.id];
+            if (previous === undefined) return;
+            var delta = previous - card.getBoundingClientRect().top;
+            if (!delta) return;
+            card.animate([{ transform: 'translateY(' + delta + 'px)' }, { transform: 'translateY(0)' }], {
+                duration: 280, easing: 'cubic-bezier(.22,1,.36,1)'
+            });
+        });
+    }
+
+    function applyDeviceCardOrder(animate) {
+        var container = document.getElementById('deviceCards');
+        if (!container) return;
+        var previousTops = {};
+        if (animate) Array.prototype.forEach.call(container.children, function (card) {
+            previousTops[card.id] = card.getBoundingClientRect().top;
+        });
+        normalizedDeviceOrder().forEach(function (id) {
+            var card = document.getElementById('card-' + id);
+            if (card) container.appendChild(card);
+        });
+        if (animate) animateCardOrder(container, previousTops);
+    }
+
+    function moveDraggedCardBefore(targetId) {
+        if (draggingDeviceId === null || draggingDeviceId === targetId || draggingDeviceId === pinnedDeviceId) return;
+        var order = normalizedDeviceOrder();
+        var from = order.indexOf(draggingDeviceId);
+        var target = order.indexOf(targetId);
+        if (from < 0 || target < 0) return;
+        order.splice(from, 1);
+        target = order.indexOf(targetId);
+        if (pinnedDeviceId !== null) target = Math.max(1, target);
+        order.splice(target, 0, draggingDeviceId);
+        deviceCardOrder = order;
+        applyDeviceCardOrder(true);
+        saveDeviceCardPreferences();
+        refreshCardOrderControls();
+    }
+
+    function refreshCardOrderControls() {
+        var order = normalizedDeviceOrder();
+        order.forEach(function (id, index) {
+            var card = document.getElementById('card-' + id);
+            var handle = card && card.querySelector('.card-reorder-handle');
+            if (!handle) return;
+            var pinned = id === pinnedDeviceId;
+            var first = index === 0;
+            handle.classList.toggle('pinned', pinned);
+            handle.classList.toggle('can-pin', first && !pinned);
+            handle.draggable = !pinned && !first;
+            handle.setAttribute('aria-pressed', pinned ? 'true' : 'false');
+            handle.title = pinned ? 'Unpin ' + devices[id].data.name : first ? 'Pin ' + devices[id].data.name + ' to the first position' : 'Drag to reorder ' + devices[id].data.name;
+        });
+    }
+
+    function togglePinnedCard(deviceId) {
+        var order = normalizedDeviceOrder();
+        if (deviceId !== pinnedDeviceId && order[0] !== deviceId) return;
+        pinnedDeviceId = pinnedDeviceId === deviceId ? null : deviceId;
+        applyDeviceCardOrder(true);
+        saveDeviceCardPreferences();
+        refreshCardOrderControls();
+        showToast(pinnedDeviceId === deviceId ? devices[deviceId].data.name + ' pinned to the top' : devices[deviceId].data.name + ' unpinned');
+    }
+
     function toggleCardExpand(deviceId) {
         expandedCardIds = expandedCardIds.indexOf(deviceId) >= 0
             ? expandedCardIds.filter(function (id) { return id !== deviceId; })
@@ -1059,6 +1218,7 @@
             card.id = 'card-' + dev.id;
             card.className = 'device-card';
             container.appendChild(card);
+            if (deviceCardOrder.indexOf(dev.id) < 0) deviceCardOrder.push(dev.id);
             isNew = true;
         }
 
@@ -1093,6 +1253,10 @@
         // Row 3: distance from home | last seen
         var html =
             '<div class="card-summary">' +
+                '<button type="button" class="card-reorder-handle" aria-label="Reorder ' + escapeHtml(data.name) + '">' +
+                    '<span class="reorder-grip" aria-hidden="true"><svg viewBox="0 0 18 18"><path d="M3 5h12M3 9h12M3 13h12"/></svg></span>' +
+                    '<span class="reorder-pin" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="M7 2h6l-1 5 3 3v2H5v-2l3-3-1-5zm3 10v6"/></svg></span>' +
+                '</button>' +
                 '<div class="card-avatar-wrap"><div class="card-avatar" style="border-color:' + escapeHtml(dev.avatar.color) + '">' + escapeHtml(dev.avatar.emoji) + '</div>' +
                 '<button type="button" class="card-avatar-edit" title="Customise marker" aria-label="Customise marker">+</button></div>' +
                 '<div class="card-identity">' +
@@ -1162,10 +1326,43 @@
         }
 
         card.innerHTML = html;
+        applyDeviceCardOrder(false);
+        refreshCardOrderControls();
         updateCardFeedback(dev);
         card.querySelector('.card-avatar-edit').onclick = function(e) {
             e.stopPropagation(); editLocalAppearance(dev.id);
         };
+        var reorderHandle = card.querySelector('.card-reorder-handle');
+        reorderHandle.addEventListener('click', function (e) {
+            e.stopPropagation();
+            togglePinnedCard(dev.id);
+        });
+        reorderHandle.addEventListener('dragstart', function (e) {
+            e.stopPropagation();
+            var order = normalizedDeviceOrder();
+            if (dev.id === pinnedDeviceId || order[0] === dev.id) { e.preventDefault(); return; }
+            draggingDeviceId = dev.id;
+            card.classList.add('dragging');
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', String(dev.id));
+        });
+        card.ondragenter = function (e) {
+            if (draggingDeviceId === null) return;
+            e.preventDefault();
+            moveDraggedCardBefore(dev.id);
+        };
+        card.ondragover = function (e) {
+            if (draggingDeviceId === null) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+        };
+        card.ondrop = function (e) { e.preventDefault(); };
+        reorderHandle.addEventListener('dragend', function () {
+            draggingDeviceId = null;
+            card.classList.remove('dragging');
+            saveDeviceCardPreferences();
+            refreshCardOrderControls();
+        });
 
         // Wire up action buttons and message log toggle (only present when expanded)
         if (isExpanded) {
@@ -1218,6 +1415,7 @@
                 toggleCardExpand(dev.id);
             });
         }
+        updateAllTrailsButton();
     }
 
     // Feedback changes in place; timers must not rebuild controls or animations.
@@ -1344,6 +1542,62 @@
         }
 
         renderDeviceCard(dev);
+        var tracked = Object.keys(devices).map(function (id) { return devices[id]; }).filter(function (item) { return item.data.entity !== 'hub'; });
+        allTrailsVisible = tracked.length === 0 || tracked.every(function (item) { return item.showTrail; });
+        updateAllTrailsButton();
+    }
+
+    function updateAllTrailsButton() {
+        if (!allTrailsButton) return;
+        var tracked = Object.keys(devices).some(function (id) { return devices[id].data.entity !== 'hub'; });
+        var label = allTrailsVisible ? 'Hide all breadcrumb trails' : 'Show all breadcrumb trails';
+        allTrailsButton.disabled = !tracked;
+        allTrailsButton.classList.toggle('active', allTrailsVisible);
+        allTrailsButton.title = label;
+        allTrailsButton.setAttribute('aria-label', label);
+        allTrailsButton.setAttribute('aria-pressed', String(allTrailsVisible));
+    }
+
+    function setAllTrailsVisible(visible) {
+        allTrailsVisible = visible;
+        Object.keys(devices).forEach(function (id) {
+            var dev = devices[id];
+            if (dev.data.entity === 'hub') return;
+            dev.showTrail = visible;
+            if (!visible && dev.trailLine) {
+                map.removeLayer(dev.trailLine);
+                dev.trailLine = null;
+            } else if (visible && !dev.trailLine && dev.trail.length > 1) {
+                dev.trailLine = L.polyline(dev.trail, { color: dev.trailColor, weight: 2, opacity: 0.6, dashArray: '4 4' }).addTo(map);
+            }
+            renderDeviceCard(dev);
+        });
+        updateAllTrailsButton();
+    }
+
+    function showToast(message) {
+        var toast = document.getElementById('uiToast');
+        if (!toast) return;
+        window.clearTimeout(toastTimer);
+        toast.textContent = message;
+        toast.classList.remove('hidden');
+        toastTimer = window.setTimeout(function () { toast.classList.add('hidden'); }, 2200);
+    }
+
+    function copyText(value) {
+        if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(value);
+        return new Promise(function (resolve, reject) {
+            var input = document.createElement('textarea');
+            input.value = value;
+            input.setAttribute('readonly', '');
+            input.style.position = 'fixed';
+            input.style.opacity = '0';
+            document.body.appendChild(input);
+            input.select();
+            try { if (!document.execCommand('copy')) throw new Error('copy failed'); resolve(); }
+            catch (error) { reject(error); }
+            finally { document.body.removeChild(input); }
+        });
     }
 
     // ═══════════════════════════════════════════════
@@ -1804,6 +2058,7 @@
     // ═══════════════════════════════════════════════
     function init() {
         refreshHubStatus();
+        loadDeviceCardPreferences();
         loadTheme();     // Restore dark/light preference from localStorage
         initMap();       // Create Leaflet map with tile layers
         if (typeof HubPresencePanel !== 'undefined') HubPresencePanel.start(protectedFetch, function(data) {
@@ -1818,6 +2073,9 @@
         if (window.innerWidth >= 768) {
             document.getElementById('panel').classList.add('open');
             document.body.classList.add('panel-open');
+        } else {
+            document.getElementById('panel').classList.remove('open');
+            document.body.classList.remove('panel-open');
         }
 
         // Fetch the current device list via REST (in case SSE snapshot was missed)
@@ -1834,6 +2092,9 @@
 
         // Wire up all UI button event handlers
         document.getElementById('btnHamburger').addEventListener('click', toggleSidebar);
+        document.getElementById('panel').addEventListener('click', function (event) {
+            if (event.target === event.currentTarget || event.target === document.getElementById('deviceCards')) toggleSidebar();
+        });
         document.getElementById('btnTheme').addEventListener('click', toggleTheme);
         document.getElementById('btnSettings').addEventListener('click', openSettings);
         document.getElementById('btnCloseSettings').addEventListener('click', closeSettings);

@@ -623,22 +623,36 @@ button.bluetooth-beacon:disabled {
 
 .card-reorder-handle {
   display: grid;
-  width: 18px;
-  min-width: 18px;
+  width: 24px;
+  min-width: 24px;
   height: 36px;
   place-items: center;
-  margin: 0 -2px 0 -5px;
+  margin: 0 -2px 0 -7px;
   padding: 0;
   border: 0;
+  border-radius: 5px;
   background: transparent;
   color: var(--text-dim);
   cursor: grab;
-  font-size: 0.9rem;
-  line-height: 0.7;
 }
 
-.card-reorder-handle span {
+.card-reorder-handle .reorder-grip,
+.card-reorder-handle .reorder-pin {
+  display: grid;
+  grid-area: 1 / 1;
+  place-items: center;
   pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.card-reorder-handle svg {
+  width: 17px;
+  height: 17px;
+}
+
+.card-reorder-handle .reorder-pin {
+  opacity: 0;
+  transform: scale(0.65) rotate(-12deg);
 }
 
 .card-reorder-handle:active {
@@ -649,6 +663,31 @@ button.bluetooth-beacon:disabled {
 .card-reorder-handle:focus-visible {
   color: var(--accent);
   outline: 0;
+}
+
+.card-reorder-handle.can-pin:hover,
+.card-reorder-handle.can-pin:focus-visible,
+.card-reorder-handle.pinned {
+  cursor: pointer;
+}
+
+.card-reorder-handle.can-pin:hover .reorder-grip,
+.card-reorder-handle.can-pin:focus-visible .reorder-grip,
+.card-reorder-handle.pinned .reorder-grip {
+  opacity: 0;
+  transform: scale(0.72);
+}
+
+.card-reorder-handle.can-pin:hover .reorder-pin,
+.card-reorder-handle.can-pin:focus-visible .reorder-pin,
+.card-reorder-handle.pinned .reorder-pin {
+  opacity: 1;
+  transform: scale(1) rotate(0);
+}
+
+.card-reorder-handle.pinned {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
 }
 
 .card-detail-reveal {
@@ -821,86 +860,53 @@ button.bluetooth-beacon:disabled {
 
 .card-avatar-edit {
   position: absolute;
-  right: -5px;
-  bottom: -5px;
+  inset: 0;
+  z-index: 3;
   display: grid;
-  width: 18px;
-  height: 18px;
+  width: 100%;
+  height: 100%;
   place-items: center;
-  padding: 0 0 1px;
-  border: 2px solid var(--bg-card);
+  padding: 0 0 3px;
+  border: 0;
   border-radius: 50%;
-  background: var(--accent);
+  background: rgb(69 76 83 / 72%);
   color: #fff;
   cursor: pointer;
-  font-size: 14px;
-  font-weight: 800;
+  font-size: 30px;
+  font-weight: 500;
   line-height: 1;
-  box-shadow: 0 2px 6px rgb(0 0 0 / 35%);
+  text-shadow: 0 1px 3px rgb(0 0 0 / 35%);
   opacity: 0;
   pointer-events: none;
-  transform: scale(0.7);
-  transition: opacity 0.24s ease, transform 0.24s ease;
+  transform: scale(0.88);
+  transition: opacity 0.32s ease, transform 0.38s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.card-pin-button {
-  position: absolute;
-  left: -5px;
-  bottom: -5px;
-  z-index: 2;
-  display: grid;
-  width: 19px;
-  height: 19px;
-  place-items: center;
-  padding: 0;
-  border: 2px solid var(--bg-card);
-  border-radius: 50%;
-  background: var(--bg-primary);
-  color: var(--text-secondary);
-  cursor: pointer;
-  box-shadow: 0 2px 6px rgb(0 0 0 / 35%);
-  opacity: 0.82;
-  transform: scale(0.96);
-  transition: opacity 0.2s ease, color 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
-}
-
-.card-pin-button svg {
-  width: 11px;
-  height: 11px;
-}
-
-.card-pin-button:hover,
-.card-pin-button:focus-visible {
-  border-color: var(--accent);
-  color: var(--accent);
-  opacity: 1;
-  outline: 0;
-  transform: scale(1.06);
-}
-
-.device-card.expanded .card-pin-button {
-  opacity: 1;
-}
-
-.device-card.expanded .card-avatar-edit {
+.card-avatar-wrap:hover .card-avatar-edit,
+.card-avatar-wrap:focus-within .card-avatar-edit,
+.card-avatar-edit:focus-visible {
   opacity: 1;
   pointer-events: auto;
   transform: scale(1);
-  transition-delay: 0.16s;
+}
+
+.device-card.expanded .card-avatar-edit {
+  font-size: 42px;
 }
 
 .card-avatar-edit:hover,
 .card-avatar-edit:focus-visible {
-  transform: scale(1.08);
-  outline: 2px solid color-mix(in srgb, var(--accent) 35%, transparent);
-  outline-offset: 1px;
+  background: rgb(58 64 70 / 80%);
+  outline: 2px solid rgb(255 255 255 / 72%);
+  outline-offset: -3px;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .card-avatar-wrap,
   .card-avatar,
   .card-detail-reveal,
-  .card-pin-button,
+  .card-reorder-handle .reorder-grip,
+  .card-reorder-handle .reorder-pin,
   .card-avatar-edit {
     transition-duration: 0.01ms;
     transition-delay: 0s;
