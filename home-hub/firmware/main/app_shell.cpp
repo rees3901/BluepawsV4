@@ -25,11 +25,11 @@ lv_obj_t *make_header_button(lv_obj_t *header,
     lv_obj_set_size(button, 42, 42);
     lv_obj_align(button, LV_ALIGN_RIGHT_MID, right_offset, 0);
     lv_obj_set_style_bg_color(button,
-                              dark_mode ? lv_color_hex(0x243444) : lv_color_hex(0xFFFFFF),
+                              dark_mode ? lv_color_hex(0x243444) : lv_color_hex(0xE4E0D7),
                               0);
     lv_obj_set_style_bg_opa(button, dark_mode ? LV_OPA_50 : LV_OPA_70, 0);
     lv_obj_set_style_border_color(button,
-                                  dark_mode ? lv_color_hex(0x60788C) : lv_color_hex(0xB5C7D3),
+                                  dark_mode ? lv_color_hex(0x60788C) : lv_color_hex(0xAAA69E),
                                   0);
     lv_obj_set_style_border_width(button, 1, 0);
     lv_obj_set_style_radius(button, 11, 0);
@@ -53,8 +53,8 @@ lv_obj_t *create_page_frame(lv_obj_t *screen,
                             const PageActions &actions,
                             lv_obj_t **status_label)
 {
-    const lv_color_t screen_colour = dark_mode ? lv_color_hex(0x0B1118) : lv_color_hex(0xEAF1F5);
-    const lv_color_t header_colour = dark_mode ? lv_color_hex(0x101B25) : lv_color_hex(0xE5EEF4);
+    const lv_color_t screen_colour = dark_mode ? lv_color_hex(0x0B1118) : lv_color_hex(0xD8D4CB);
+    const lv_color_t header_colour = dark_mode ? lv_color_hex(0x101B25) : lv_color_hex(0xCCC8BF);
     const lv_color_t text_colour = dark_mode ? lv_color_hex(0xF3F8FB) : lv_color_hex(0x17324D);
     const lv_color_t secondary_colour = dark_mode ? lv_color_hex(0x80C9F2) : lv_color_hex(0x28709A);
 
@@ -68,7 +68,7 @@ lv_obj_t *create_page_frame(lv_obj_t *screen,
     lv_obj_set_size(header, LV_PCT(100), 58);
     lv_obj_set_style_bg_color(header, header_colour, 0);
     lv_obj_set_style_border_color(header,
-                                  dark_mode ? lv_color_hex(0x263A4A) : lv_color_hex(0xC0D0DA),
+                                  dark_mode ? lv_color_hex(0x263A4A) : lv_color_hex(0xAAA69E),
                                   0);
     lv_obj_set_style_border_width(header, 1, 0);
     lv_obj_set_style_border_side(header, LV_BORDER_SIDE_BOTTOM, 0);
@@ -108,6 +108,16 @@ lv_obj_t *create_page_frame(lv_obj_t *screen,
                            icon_colour,
                            dark_mode,
                            actions.rotate,
+                           actions.user_data);
+        right_offset -= 48;
+    }
+    if (actions.brightness != nullptr) {
+        make_header_button(header,
+                           right_offset,
+                           icon_brightness,
+                           icon_colour,
+                           dark_mode,
+                           actions.brightness,
                            actions.user_data);
         right_offset -= 48;
     }
@@ -161,11 +171,11 @@ lv_obj_t *create_app_tile(lv_obj_t *parent,
     lv_obj_align(plate, LV_ALIGN_TOP_MID, 0, 0);
     lv_obj_set_style_bg_color(plate, lv_color_hex(colour), 0);
     lv_obj_set_style_bg_grad_color(plate,
-                                   dark_mode ? lv_color_hex(0x162532) : lv_color_hex(0xFFFFFF),
+                                   dark_mode ? lv_color_hex(0x162532) : lv_color_hex(0xE7E2D8),
                                    0);
     lv_obj_set_style_bg_grad_dir(plate, LV_GRAD_DIR_VER, 0);
     lv_obj_set_style_border_color(plate,
-                                  dark_mode ? lv_color_hex(0x71899B) : lv_color_hex(0xFFFFFF),
+                                  dark_mode ? lv_color_hex(0x71899B) : lv_color_hex(0xF0ECE4),
                                   0);
     lv_obj_set_style_border_width(plate, 1, 0);
     lv_obj_set_style_radius(plate, 22, 0);

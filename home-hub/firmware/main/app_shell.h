@@ -8,6 +8,7 @@ struct PageActions {
     lv_event_cb_t home = nullptr;
     lv_event_cb_t rotate = nullptr;
     lv_event_cb_t theme = nullptr;
+    lv_event_cb_t brightness = nullptr;
     void *user_data = nullptr;
 };
 

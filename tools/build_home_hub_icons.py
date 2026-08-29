@@ -13,7 +13,9 @@ ALPHA_ICONS = {
     "home": ("home.png", 30),
     "rotate": ("rotate.png", 30),
     "night_mode": ("night-mode.png", 30),
+    "brightness": ("brightness.png", 30),
     "zoom_in": ("zoom-in.png", 30),
+    "zoom_out": ("zoom-out.png", 30),
     "settings": ("settings.png", 64),
     "diagnostic": ("diagnostic.png", 64),
 }

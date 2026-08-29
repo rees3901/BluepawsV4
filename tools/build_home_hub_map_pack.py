@@ -2,8 +2,9 @@
 """Render the BluePaws offline-map tile pack with an installed QGIS LTR.
 
 Run this script through QGIS's ``python-qgis-ltr.bat`` wrapper so the PyQGIS
-modules and native processing algorithms are available. The input is the
-official OS Open Zoomstack vector MBTiles file and its QGIS QML stylesheet.
+modules and native processing algorithms are available. It accepts either a
+local vector MBTiles file or an XYZ vector-tile URL, plus a QGIS QML or
+Mapbox/MapLibre JSON style.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from qgis.core import (  # noqa: E402
     QgsApplication,
     QgsCoordinateReferenceSystem,
     QgsDataSourceUri,
+    QgsMapBoxGlStyleConverter,
     QgsProcessingContext,
     QgsProcessingFeedback,
     QgsProject,
@@ -59,19 +61,31 @@ PILOT_PASSES = (
     RenderPass("Gloucester high detail", (-2.527, 51.684, -1.949, 52.044), 12, 17),
 )
 
+# County-wide navigation through z16, with z17 detail around the Gloucester /
+# Cheltenham urban corridor. This provides substantially more room to pan while
+# keeping the first OSM-style pack comfortably below the FAT32 card budget.
+GLOUCESTERSHIRE_PASSES = (
+    RenderPass("Gloucestershire", (-2.72, 51.55, -1.62, 52.15), 10, 16),
+    RenderPass("Gloucester urban detail", (-2.42, 51.75, -1.98, 52.00), 17, 17),
+)
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Render OS Open Zoomstack into BluePaws 256px JPEG XYZ tiles."
+        description="Render vector maps into BluePaws 256px JPEG XYZ tiles."
     )
-    parser.add_argument("--mbtiles", type=Path, required=True, help="OS_Open_Zoomstack.mbtiles")
-    parser.add_argument("--style", type=Path, required=True, help="OS vector-tile QML style")
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--mbtiles", type=Path, help="Local vector MBTiles source")
+    source.add_argument("--tile-url", help="XYZ vector URL containing {z}, {x}, and {y}")
+    style = parser.add_mutually_exclusive_group(required=True)
+    style.add_argument("--style", type=Path, help="QGIS vector-tile QML style")
+    style.add_argument("--mapbox-style", type=Path, help="Mapbox/MapLibre JSON style")
     parser.add_argument("--output", type=Path, required=True, help="Destination tile directory")
     parser.add_argument(
         "--profile",
-        choices=("fixture", "pilot"),
+        choices=("fixture", "pilot", "gloucestershire"),
         default="fixture",
-        help="fixture is fast; pilot adds GB z5-11 and Gloucester z12-17",
+        help="fixture is fast; pilot uses OS GB coverage; gloucestershire is the OSM road pack",
     )
     parser.add_argument("--quality", type=int, default=85, choices=range(40, 96))
     parser.add_argument("--manifest", type=Path, help="Optional manifest output path")
@@ -79,36 +93,62 @@ def parse_args() -> argparse.Namespace:
 
 
 def validate_inputs(args: argparse.Namespace) -> None:
-    if not args.mbtiles.is_file():
+    if args.mbtiles is not None and not args.mbtiles.is_file():
         raise ValueError(f"MBTiles input does not exist: {args.mbtiles}")
-    if not args.style.is_file():
+    if args.style is not None and not args.style.is_file():
         raise ValueError(f"QGIS style does not exist: {args.style}")
+    if args.mapbox_style is not None and not args.mapbox_style.is_file():
+        raise ValueError(f"Mapbox style does not exist: {args.mapbox_style}")
+    if args.tile_url is not None and not all(token in args.tile_url for token in ("{z}", "{x}", "{y}")):
+        raise ValueError("Tile URL must contain {z}, {x}, and {y}")
     if args.output.exists() and any(args.output.iterdir()):
         raise ValueError(f"Output directory is not empty: {args.output}")
     if args.manifest and args.manifest.exists():
         raise ValueError(f"Manifest already exists: {args.manifest}")
 
 
-def vector_tile_source(path: Path) -> str:
+def vector_tile_source(path: Path | None, tile_url: str | None) -> str:
     uri = QgsDataSourceUri()
-    uri.setParam("type", "mbtiles")
-    uri.setParam("url", str(path.resolve()))
+    if path is not None:
+        uri.setParam("type", "mbtiles")
+        uri.setParam("url", str(path.resolve()))
+    else:
+        uri.setParam("type", "xyz")
+        uri.setParam("url", tile_url)
+        uri.setParam("zmin", "0")
+        uri.setParam("zmax", "15")
     encoded = uri.encodedUri()
     return bytes(encoded).decode("utf-8")
 
 
-def create_project(mbtiles: Path, style: Path) -> QgsProject:
+def create_project(args: argparse.Namespace) -> QgsProject:
     project = QgsProject.instance()
     project.clear()
     project.setCrs(QgsCoordinateReferenceSystem("EPSG:3857"))
 
-    layer = QgsVectorTileLayer(vector_tile_source(mbtiles), "OS Open Zoomstack")
+    layer = QgsVectorTileLayer(vector_tile_source(args.mbtiles, args.tile_url), "BluePaws basemap")
     if not layer.isValid():
-        raise RuntimeError(f"QGIS could not open vector MBTiles: {mbtiles}")
+        raise RuntimeError("QGIS could not open the vector-tile source")
 
-    style_message, style_ok = layer.loadNamedStyle(str(style.resolve()))
-    if not style_ok:
-        raise RuntimeError(f"QGIS could not load style {style}: {style_message}")
+    if args.style is not None:
+        style_message, style_ok = layer.loadNamedStyle(str(args.style.resolve()))
+        if not style_ok:
+            raise RuntimeError(f"QGIS could not load style {args.style}: {style_message}")
+    else:
+        style_json = args.mapbox_style.read_text(encoding="utf-8")
+        converter = QgsMapBoxGlStyleConverter()
+        if converter.convert(style_json) != QgsMapBoxGlStyleConverter.Success:
+            raise RuntimeError(f"QGIS could not convert Mapbox style: {converter.errorMessage()}")
+        renderer = converter.renderer()
+        if renderer is None:
+            raise RuntimeError("Converted Mapbox style did not contain a vector renderer")
+        layer.setRenderer(renderer)
+        labeling = converter.labeling()
+        if labeling is not None:
+            layer.setLabeling(labeling)
+            layer.setLabelsEnabled(True)
+        for warning in converter.warnings():
+            print(f"style warning: {warning}", flush=True)
     project.addMapLayer(layer)
     return project
 
@@ -119,6 +159,7 @@ def render_pass(
     quality: int,
     context: QgsProcessingContext,
     feedback: QgsProcessingFeedback,
+    osm_attribution: bool,
 ) -> None:
     west, south, east, north = render.bounds_wgs84
     extent = f"{west},{east},{south},{north} [EPSG:4326]"
@@ -134,7 +175,7 @@ def render_pass(
             "ZOOM_MIN": render.minimum_zoom,
             "ZOOM_MAX": render.maximum_zoom,
             "DPI": 96,
-            "BACKGROUND_COLOR": "#A9DDEF",
+            "BACKGROUND_COLOR": "#F2EFE9",
             "ANTIALIAS": True,
             "TILE_FORMAT": 1,
             "QUALITY": quality,
@@ -143,8 +184,12 @@ def render_pass(
             "TILE_HEIGHT": 256,
             "TMS_CONVENTION": False,
             "HTML_TITLE": "BluePaws Gloucester offline map",
-            "HTML_ATTRIBUTION": "Contains OS data © Crown copyright and database right 2026",
-            "HTML_OSM": False,
+            "HTML_ATTRIBUTION": (
+                "© OpenStreetMap contributors"
+                if osm_attribution
+                else "Contains OS data © Crown copyright and database right 2026"
+            ),
+            "HTML_OSM": osm_attribution,
             "OUTPUT_DIRECTORY": str(output),
         },
         context=context,
@@ -153,7 +198,7 @@ def render_pass(
     )
 
 
-def write_manifest(path: Path, profile: str, quality: int) -> None:
+def write_manifest(path: Path, profile: str, quality: int, osm_attribution: bool) -> None:
     maximum_zoom = 17
     if profile == "fixture":
         bounds = {
@@ -163,7 +208,7 @@ def write_manifest(path: Path, profile: str, quality: int) -> None:
             "north": 51.891,
             "min_zoom": 12,
         }
-    else:
+    elif profile == "pilot":
         bounds = {
             "west": -2.527,
             "south": 51.684,
@@ -171,21 +216,33 @@ def write_manifest(path: Path, profile: str, quality: int) -> None:
             "north": 52.044,
             "min_zoom": 12,
         }
+    else:
+        bounds = {
+            "west": -2.72,
+            "south": 51.55,
+            "east": -1.62,
+            "north": 52.15,
+            "min_zoom": 10,
+        }
     manifest = {
         "schema_version": 1,
-        "name": f"BluePaws Gloucester {profile}",
+        "name": f"BluePaws {profile}",
         "version": "2026-08",
         "projection": "EPSG:3857",
         "tile_scheme": "xyz",
         "tile_size": 256,
-        "min_zoom": 5 if profile == "pilot" else 12,
+        "min_zoom": 5 if profile == "pilot" else (10 if profile == "gloucestershire" else 12),
         "max_zoom": maximum_zoom,
         "format": "jpg",
         "jpeg_quality": quality,
         "tile_path": "tiles/{z}/{x}/{y}.jpg",
         "center": {"latitude": 51.8642, "longitude": -2.2382, "zoom": 14},
         "high_detail_bounds": bounds,
-        "attribution": "Contains OS data © Crown copyright and database right 2026",
+        "attribution": (
+            "© OpenStreetMap contributors"
+            if osm_attribution
+            else "Contains OS data © Crown copyright and database right 2026"
+        ),
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
@@ -203,16 +260,32 @@ def main() -> int:
     qgis.initQgis()
     Processing.initialize()
     try:
-        project = create_project(args.mbtiles, args.style)
+        project = create_project(args)
         context = QgsProcessingContext()
         context.setProject(project)
         feedback = QgsProcessingFeedback()
         args.output.mkdir(parents=True, exist_ok=True)
-        passes = FIXTURE_PASSES if args.profile == "fixture" else PILOT_PASSES
+        passes = {
+            "fixture": FIXTURE_PASSES,
+            "pilot": PILOT_PASSES,
+            "gloucestershire": GLOUCESTERSHIRE_PASSES,
+        }[args.profile]
         for render in passes:
-            render_pass(render, args.output, args.quality, context, feedback)
+            render_pass(
+                render,
+                args.output,
+                args.quality,
+                context,
+                feedback,
+                osm_attribution=args.tile_url is not None,
+            )
         if args.manifest:
-            write_manifest(args.manifest, args.profile, args.quality)
+            write_manifest(
+                args.manifest,
+                args.profile,
+                args.quality,
+                osm_attribution=args.tile_url is not None,
+            )
         print(f"Tile rendering complete: {args.output}", flush=True)
         return 0
     finally:

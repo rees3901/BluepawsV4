@@ -72,6 +72,9 @@ struct UiState {
     lv_obj_t *cat_list = nullptr;
     lv_obj_t *diagnostics_text = nullptr;
     lv_obj_t *map_drawer = nullptr;
+    lv_obj_t *brightness_popup = nullptr;
+    lv_obj_t *brightness_slider = nullptr;
+    lv_obj_t *brightness_label = nullptr;
     lv_obj_t *status = nullptr;
     lv_timer_t *update_timer = nullptr;
     guition_jc4880p443c_sd_info_t sd{};
@@ -86,6 +89,7 @@ struct UiState {
     bool drawer_open = false;
     bool portrait = false;
     bool tiles_dirty = true;
+    int brightness_percent = 80;
 };
 
 const UiLayout &current_layout(const UiState &ui)
@@ -447,6 +451,7 @@ void update_timer(lv_timer_t *timer)
 }
 
 void change_zoom(UiState &ui, int delta);
+lv_obj_t *make_label(lv_obj_t *parent, const char *text, lv_color_t colour);
 
 void map_pressing(lv_event_t *event)
 {
@@ -568,6 +573,89 @@ void rebuild_for_theme(void *user_data)
 void theme_clicked(lv_event_t *event)
 {
     lv_async_call(rebuild_for_theme, lv_event_get_user_data(event));
+}
+
+void brightness_changed(lv_event_t *event)
+{
+    auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
+    auto *slider = static_cast<lv_obj_t *>(lv_event_get_target(event));
+    if (ui == nullptr || slider == nullptr) {
+        return;
+    }
+    ui->brightness_percent = lv_slider_get_value(slider);
+    if (ui->brightness_label != nullptr) {
+        lv_label_set_text_fmt(ui->brightness_label, "%d%%", ui->brightness_percent);
+    }
+    const esp_err_t error = guition_jc4880p443c_backlight_set(ui->brightness_percent);
+    if (error != ESP_OK) {
+        ESP_LOGE(kTag, "Backlight update failed: %s", esp_err_to_name(error));
+    }
+}
+
+void create_brightness_popup(UiState &ui)
+{
+    lv_obj_t *popup = lv_obj_create(lv_screen_active());
+    lv_obj_set_size(popup, 78, 270);
+    lv_obj_align(popup, LV_ALIGN_TOP_RIGHT, -12, 64);
+    lv_obj_set_style_bg_color(popup,
+                              ui.dark_mode ? lv_color_hex(0x15232E) : lv_color_hex(0xE7E2D8),
+                              0);
+    lv_obj_set_style_bg_opa(popup, LV_OPA_90, 0);
+    lv_obj_set_style_border_color(popup,
+                                  ui.dark_mode ? lv_color_hex(0x60788C) : lv_color_hex(0xAAA69E),
+                                  0);
+    lv_obj_set_style_border_width(popup, 1, 0);
+    lv_obj_set_style_radius(popup, 12, 0);
+    lv_obj_set_style_pad_all(popup, 10, 0);
+    lv_obj_remove_flag(popup, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *icon = lv_image_create(popup);
+    lv_image_set_src(icon, &bluepaws::ui::icon_brightness);
+    lv_obj_set_style_image_recolor(
+        icon, ui.dark_mode ? lv_color_hex(0xFFFFFF) : lv_color_hex(0x17324D), 0);
+    lv_obj_set_style_image_recolor_opa(icon, LV_OPA_COVER, 0);
+    lv_obj_align(icon, LV_ALIGN_TOP_MID, 0, 0);
+
+    ui.brightness_slider = lv_slider_create(popup);
+    lv_obj_set_size(ui.brightness_slider, 20, 172);
+    lv_obj_align(ui.brightness_slider, LV_ALIGN_CENTER, 0, 2);
+    lv_slider_set_range(ui.brightness_slider, 10, 100);
+    lv_slider_set_value(ui.brightness_slider, ui.brightness_percent, LV_ANIM_OFF);
+    lv_obj_set_style_bg_color(ui.brightness_slider, lv_color_hex(0x586873), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(ui.brightness_slider, lv_color_hex(0x1E88D2), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(ui.brightness_slider, lv_color_hex(0xF3F8FB), LV_PART_KNOB);
+    lv_obj_set_style_pad_all(ui.brightness_slider, 4, LV_PART_KNOB);
+    lv_obj_add_event_cb(
+        ui.brightness_slider, brightness_changed, LV_EVENT_VALUE_CHANGED, &ui);
+
+    ui.brightness_label = make_label(
+        popup,
+        "",
+        ui.dark_mode ? lv_color_hex(0xF3F8FB) : lv_color_hex(0x17324D));
+    lv_label_set_text_fmt(ui.brightness_label, "%d%%", ui.brightness_percent);
+    lv_obj_set_style_text_font(ui.brightness_label, &lv_font_montserrat_14, 0);
+    lv_obj_align(ui.brightness_label, LV_ALIGN_BOTTOM_MID, 0, 0);
+
+    ui.brightness_popup = popup;
+    lv_obj_move_foreground(popup);
+}
+
+void brightness_clicked(lv_event_t *event)
+{
+    auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
+    if (ui == nullptr) {
+        return;
+    }
+    if (ui->brightness_popup == nullptr) {
+        create_brightness_popup(*ui);
+        return;
+    }
+    if (lv_obj_has_flag(ui->brightness_popup, LV_OBJ_FLAG_HIDDEN)) {
+        lv_obj_remove_flag(ui->brightness_popup, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(ui->brightness_popup);
+    } else {
+        lv_obj_add_flag(ui->brightness_popup, LV_OBJ_FLAG_HIDDEN);
+    }
 }
 
 void navigate_to(UiState &ui, AppPage page)
@@ -751,6 +839,7 @@ bluepaws::ui::PageActions page_actions(UiState &ui, bool show_home)
         .home = show_home ? launcher_clicked : nullptr,
         .rotate = orientation_clicked,
         .theme = theme_clicked,
+        .brightness = brightness_clicked,
         .user_data = &ui,
     };
 }
@@ -883,14 +972,19 @@ void create_map_page(UiState &ui)
                           bluepaws::ui::icon_zoom_in,
                           zoom_in_clicked,
                           ui);
-    make_map_control(ui.map_view, 8, layout.map_height - 46, "-", zoom_out_clicked, ui);
+    make_map_icon_control(ui.map_view,
+                          8,
+                          layout.map_height - 46,
+                          bluepaws::ui::icon_zoom_out,
+                          zoom_out_clicked,
+                          ui);
 
     const int32_t drawer_width = ui.portrait ? 360 : 280;
     ui.map_drawer = lv_obj_create(map_panel);
     lv_obj_set_pos(ui.map_drawer, 0, 0);
     lv_obj_set_size(ui.map_drawer, drawer_width, layout.map_height);
     lv_obj_set_style_bg_color(ui.map_drawer,
-                              ui.dark_mode ? lv_color_hex(0x101B25) : lv_color_hex(0xF7FAFC),
+                              ui.dark_mode ? lv_color_hex(0x101B25) : lv_color_hex(0xE7E2D8),
                               0);
     lv_obj_set_style_bg_opa(ui.map_drawer, LV_OPA_90, 0);
     lv_obj_set_style_border_color(ui.map_drawer,
@@ -942,7 +1036,7 @@ void create_map_page(UiState &ui)
 void style_card(lv_obj_t *card, bool dark_mode)
 {
     lv_obj_set_style_bg_color(card,
-                              dark_mode ? lv_color_hex(0x15232E) : lv_color_hex(0xFFFFFF),
+                              dark_mode ? lv_color_hex(0x15232E) : lv_color_hex(0xE7E2D8),
                               0);
     lv_obj_set_style_border_color(card,
                                   dark_mode ? lv_color_hex(0x486274) : lv_color_hex(0xAFC3D1),
@@ -1079,6 +1173,9 @@ void create_ui(UiState &ui)
     ui.cat_list = nullptr;
     ui.diagnostics_text = nullptr;
     ui.map_drawer = nullptr;
+    ui.brightness_popup = nullptr;
+    ui.brightness_slider = nullptr;
+    ui.brightness_label = nullptr;
     ui.status = nullptr;
 
     switch (ui.active_page) {
