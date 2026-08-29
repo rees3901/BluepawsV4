@@ -563,17 +563,6 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
               <span id="statusIcon">●</span><span id="statusText">{statusText}</span>
             </span>
             <AccountMenu email={userEmail} familyName={familyName} familyRole={familyRole} onSignOut={handleSignOut} />
-            <button
-              className={`ctrl-btn global-trails-btn${allTrailsVisible ? " active" : ""}`}
-              type="button"
-              title={allTrailsVisible ? "Hide all breadcrumb trails" : "Show all breadcrumb trails"}
-              aria-label={allTrailsVisible ? "Hide all breadcrumb trails" : "Show all breadcrumb trails"}
-              aria-pressed={allTrailsVisible}
-              disabled={mapDevices.length === 0}
-              onClick={handleAllTrailsToggle}
-            >
-              <span className="global-trails-icon" aria-hidden="true" />
-            </button>
             <button className="ctrl-btn" data-tour="settings" title="Settings" aria-label="Settings" onClick={() => setSettingsOpen(true)}><SettingsIcon /></button>
           </div>
         </div>
@@ -626,7 +615,9 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
         </div>
       </aside>
 
-      <TrackingMap devices={mapDevices} avatars={mapAvatars} sidebarOpen={sidebarOpen} followedId={followedId} trailIds={trailIds} trailHistory={trailHistory} command={mapCommand} onAction={handleAction} onNotice={setMapNotice} />
+      <TrackingMap devices={mapDevices} avatars={mapAvatars} sidebarOpen={sidebarOpen} followedId={followedId} trailIds={trailIds} trailHistory={trailHistory}
+        allTrailsVisible={allTrailsVisible} trailsAvailable={mapDevices.length > 0} command={mapCommand} onAction={handleAction}
+        onAllTrailsToggle={handleAllTrailsToggle} onNotice={setMapNotice} />
 
       {settingsOpen && (
         <SettingsModal
