@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { alternatePreviewMapLayer, MAP_LAYER_DEFINITIONS, previewMapZoom, type MapLayerName } from "./mapLayers.ts";
+import { alternatePreviewMapLayer, MAP_LAYER_DEFINITIONS, MAP_LAYER_PICKER_NAMES, previewMapZoom, type MapLayerName } from "./mapLayers.ts";
+
+test("picker hides unreliable layers without deleting their provider definitions", () => {
+  assert.deepEqual(MAP_LAYER_PICKER_NAMES, ["Street", "Satellite", "Topographic"]);
+  for (const hiddenName of ["Satellite HD", "Humanitarian", "Esri Topo"] as const) {
+    assert.ok(MAP_LAYER_DEFINITIONS[hiddenName]);
+    assert.equal((MAP_LAYER_PICKER_NAMES as readonly MapLayerName[]).includes(hiddenName), false);
+  }
+});
 
 test("hard-caps layers that become blank beyond their reliable UK coverage", () => {
   const expectedLimits: Partial<Record<MapLayerName, number>> = {

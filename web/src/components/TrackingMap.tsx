@@ -6,7 +6,7 @@ import { batteryPresentation, signalQuality } from "@/components/Indicators";
 import { collarFault } from "@/lib/collarFault";
 import { emojiImageUrl } from "@/lib/emoji";
 import { formatHomeDistance, formatMapCoordinates, googleMapsUrl, homeDistanceMetres } from "@/lib/mapLocation";
-import { alternatePreviewMapLayer, MAP_LAYER_DEFINITIONS, previewMapZoom, type MapLayerName } from "@/lib/mapLayers";
+import { alternatePreviewMapLayer, MAP_LAYER_DEFINITIONS, MAP_LAYER_PICKER_NAMES, previewMapZoom, type MapLayerName, type MapLayerPickerName } from "@/lib/mapLayers";
 import { EMPTY_MAP_CENTER, EMPTY_MAP_ZOOM } from "@/lib/mapViewport";
 import { normalizeMarkerColor } from "@/lib/markerColor";
 import { transportPresentation } from "@/lib/transportPath";
@@ -74,11 +74,11 @@ export default function TrackingMap(props: TrackingMapProps) {
       });
     };
     const baseLayers = Object.fromEntries(
-      (Object.keys(MAP_LAYER_DEFINITIONS) as MapLayerName[]).map((name) => [
+      MAP_LAYER_PICKER_NAMES.map((name) => [
         name,
         createTileLayer(name),
       ]),
-    ) as Record<MapLayerName, L.TileLayer>;
+    ) as Record<MapLayerPickerName, L.TileLayer>;
     baseLayers.Street.addTo(map);
     let currentLayerName: MapLayerName = "Street";
     let layerPreviewMap: L.Map | null = null;
