@@ -37,11 +37,31 @@ class PublicAssetTests(unittest.TestCase):
             '/leaflet.js', '/leaflet.css', '/basemap.json',
             '/images/marker-icon.png', '/images/marker-icon-2x.png',
             '/images/marker-shadow.png',
+            '/brand-favicon.ico', '/brand-mascot.avif',
+            '/location-fit-markers.png', '/map-location.png',
             '/welcome.js', '/feedback.js', '/hub-presence.js', '/hub-presence.css',
         })
         self.assertIn('HTTP_GET && publicAsset && LittleFS.exists(path)', handler)
         for path in allowed:
             self.assertTrue((ROOT / 'hub/data' / path.lstrip('/')).is_file())
+        self.assertIn('path.endsWith(".avif")', handler)
+
+    def test_offgrid_dashboard_keeps_practical_web_ux_parity(self):
+        html = (ROOT / 'hub/data/index.html').read_text(encoding='utf-8')
+        js = (ROOT / 'hub/data/app.js').read_text(encoding='utf-8')
+        css = (ROOT / 'hub/data/style.css').read_text(encoding='utf-8')
+        for asset in ['/brand-favicon.ico', '/brand-mascot.avif', '/location-fit-markers.png']:
+            self.assertIn(asset, html + js + css)
+        init_map = js.split('function initMap() {', 1)[1].split('// Theme Toggle', 1)[0]
+        self.assertIn("map.on('contextmenu'", init_map)
+        self.assertEqual(js.count("map.on('contextmenu'"), 1)
+        self.assertIn("showToast('Coordinates copied to clipboard')", js)
+        self.assertNotIn('Temporary meeting point', js)
+        self.assertIn('bp_offline_pinned_device', js)
+        self.assertIn('bp_offline_device_order', js)
+        self.assertIn('global-trails-btn', js)
+        self.assertIn('.card-avatar-wrap:hover .card-avatar-edit', css)
+        self.assertIn('@media (max-width: 768px)', css)
 
     def test_mdns_hostname_is_not_redirected_as_foreign(self):
         source = (ROOT / 'hub/src/main.cpp').read_text(encoding='utf-8')

@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 import { homeDistanceMetres, formatHomeDistance } from "@/lib/mapLocation";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { DeviceCard, DownloadIcon, type DeviceCardProps } from "@/components/DeviceCard";
 import { DeviceReportModal } from "@/components/DeviceReportModal";
 import { GuidedTour } from "@/components/GuidedTour";
@@ -18,7 +18,7 @@ import { useHubPhotos } from "@/lib/useHubPhotos";
 import { saveHubAppearance } from "@/lib/hubAppearances";
 import { commandMessage } from "@/lib/collarFeedback";
 import { CUSTOMER_POWER_PROFILES, powerProfileLabel, type CustomerPowerProfile } from "@/lib/powerProfiles";
-import { deviceCardOrderStorageKey, moveDeviceBefore, orderDeviceIds, pinDeviceFirst } from "@/lib/deviceCardOrder";
+import { deviceCardOrderStorageKey, deviceCardPinStorageKey, moveDeviceToHoverTarget, orderDeviceIds, pinDeviceFirst } from "@/lib/deviceCardOrder";
 import { buildCurrentDeviceReport, deviceReportsToCsv, loadDeviceReports, type DeviceReport } from "@/lib/deviceReports";
 import { loadDeviceAppearances, revokeAvatarUrls } from "@/lib/deviceAppearances";
 import { nextExpandedDeviceCards } from "@/lib/expandedCards";
@@ -94,6 +94,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
   const [customAvatars, setCustomAvatars] = useState<Record<number, DeviceAvatar>>({});
   const [avatarDevice, setAvatarDevice] = useState<TelemetryDevice | null>(null);
   const [cardOrder, setCardOrder] = useState<number[]>([]);
+  const [pinnedDeviceId, setPinnedDeviceId] = useState<number | null>(null);
   const [cardOrderLoadedKey, setCardOrderLoadedKey] = useState<string | null>(null);
   const [draggingDeviceId, setDraggingDeviceId] = useState<number | null>(null);
   const [dragOverDeviceId, setDragOverDeviceId] = useState<number | null>(null);
@@ -104,8 +105,11 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
   const [deviceReports, setDeviceReports] = useState<DeviceReport[]>([]);
   const sequences = useRef(new Map<number, number>());
   const trailsCustomized = useRef(false);
+  const lastDragTargetRef = useRef<number | null>(null);
+  const cardPositionsRef = useRef(new Map<number, number>());
   const customAvatarsRef = useRef<Record<number, DeviceAvatar>>({});
   const cardOrderKey = useMemo(() => deviceCardOrderStorageKey(userEmail, householdId), [householdId, userEmail]);
+  const cardPinKey = useMemo(() => deviceCardPinStorageKey(userEmail, householdId), [householdId, userEmail]);
   const hasFamilyContext = !tutorialMode && householdId !== null && householdAccessVersion !== null;
   const familyContextMissing = !tutorialMode && (householdId === null || householdAccessVersion === null);
   const familyHydrating = familyContextMissing && (!preferencesReady || familyRetryCount < FAMILY_HYDRATION_RETRY_DELAYS_MS.length);
@@ -120,7 +124,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
     return { ...device, homeHub: hub ? { id: hub.gateway_guid16, lat: hub.latitude,
       lon: hub.longitude, fixAt: hub.fix_at } : null };
   })], [devices, mapHubs, hubs]);
-  const orderedDeviceIds = useMemo(() => orderDeviceIds(mapDevices.map(device => device.id), cardOrder), [cardOrder, mapDevices]);
+  const orderedDeviceIds = useMemo(() => orderDeviceIds(mapDevices.map(device => device.id), cardOrder, pinnedDeviceId), [cardOrder, mapDevices, pinnedDeviceId]);
 
   const handlePowerProfileCommand = useCallback(async (profile: CustomerPowerProfile) => {
     if (!commandDevice || commandSending) return;
@@ -150,6 +154,30 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
       return device ? [device] : [];
     });
   }, [mapDevices, orderedDeviceIds]);
+
+  useLayoutEffect(() => {
+    const nextPositions = new Map<number, number>();
+    const elements = document.querySelectorAll<HTMLElement>("#deviceCards [data-device-card-id]");
+    elements.forEach((element) => {
+      const deviceId = Number(element.dataset.deviceCardId);
+      if (Number.isInteger(deviceId)) nextPositions.set(deviceId, element.getBoundingClientRect().top);
+    });
+    if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      elements.forEach((element) => {
+        const deviceId = Number(element.dataset.deviceCardId);
+        const previousTop = cardPositionsRef.current.get(deviceId);
+        const nextTop = nextPositions.get(deviceId);
+        if (previousTop === undefined || nextTop === undefined) return;
+        const delta = previousTop - nextTop;
+        if (Math.abs(delta) < 1) return;
+        element.animate(
+          [{ transform: `translateY(${delta}px)` }, { transform: "translateY(0)" }],
+          { duration: 280, easing: "cubic-bezier(0.22, 1, 0.36, 1)" },
+        );
+      });
+    }
+    cardPositionsRef.current = nextPositions;
+  }, [orderedDeviceIds]);
 
   const avatars = useMemo<Record<number, DeviceAvatar>>(() => Object.fromEntries(orderedDevices.map((device) => [
     device.id,
@@ -223,14 +251,18 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
         const saved = localStorage.getItem(cardOrderKey);
         const parsed: unknown = saved ? JSON.parse(saved) : [];
         setCardOrder(Array.isArray(parsed) ? parsed.filter((value): value is number => Number.isInteger(value)) : []);
+        const savedPin = localStorage.getItem(cardPinKey);
+        const parsedPin = savedPin === null ? Number.NaN : Number(savedPin);
+        setPinnedDeviceId(Number.isInteger(parsedPin) ? parsedPin : null);
       } catch {
         setCardOrder([]);
+        setPinnedDeviceId(null);
       }
       setCardOrderLoadedKey(cardOrderKey);
     }, 0);
 
     return () => window.clearTimeout(loadTimer);
-  }, [cardOrderKey]);
+  }, [cardOrderKey, cardPinKey]);
 
   useEffect(() => {
     if (cardOrderLoadedKey !== cardOrderKey) return;
@@ -239,6 +271,14 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
       else localStorage.setItem(cardOrderKey, JSON.stringify(cardOrder));
     } catch { /* non-critical preference */ }
   }, [cardOrder, cardOrderKey, cardOrderLoadedKey]);
+
+  useEffect(() => {
+    if (cardOrderLoadedKey !== cardOrderKey) return;
+    try {
+      if (pinnedDeviceId === null) localStorage.removeItem(cardPinKey);
+      else localStorage.setItem(cardPinKey, String(pinnedDeviceId));
+    } catch { /* non-critical preference */ }
+  }, [cardOrderKey, cardOrderLoadedKey, cardPinKey, pinnedDeviceId]);
 
   useEffect(() => {
     if (!familyContextMissing || tutorialMode) {
@@ -393,16 +433,45 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
     setSidebarOpen(false);
   }, []);
 
-  const handleCardDrop = useCallback((targetId: number) => {
-    setDragOverDeviceId(null);
-    setCardOrder((current) => moveDeviceBefore(orderDeviceIds(mapDevices.map((device) => device.id), current), draggingDeviceId ?? targetId, targetId));
-    setDraggingDeviceId(null);
-  }, [mapDevices, draggingDeviceId]);
+  const handleCardDragStart = useCallback((deviceId: number) => {
+    lastDragTargetRef.current = null;
+    setDraggingDeviceId(deviceId);
+  }, []);
 
-  const handleCardPin = useCallback((deviceId: number) => {
-    setCardOrder((current) => pinDeviceFirst(orderDeviceIds(mapDevices.map((device) => device.id), current), deviceId));
-    setToast("Device pinned to the top of this browser");
-  }, [mapDevices]);
+  const handleCardDragOver = useCallback((targetId: number) => {
+    if (draggingDeviceId === null || draggingDeviceId === targetId || lastDragTargetRef.current === targetId) return;
+    lastDragTargetRef.current = targetId;
+    setDragOverDeviceId(targetId);
+    setCardOrder((current) => moveDeviceToHoverTarget(
+      orderDeviceIds(mapDevices.map((device) => device.id), current, pinnedDeviceId),
+      draggingDeviceId,
+      targetId,
+      pinnedDeviceId,
+    ));
+  }, [draggingDeviceId, mapDevices, pinnedDeviceId]);
+
+  const handleCardDrop = useCallback(() => {
+    lastDragTargetRef.current = null;
+    setDragOverDeviceId(null);
+    setDraggingDeviceId(null);
+  }, []);
+
+  const handleCardDragEnd = useCallback(() => {
+    lastDragTargetRef.current = null;
+    setDragOverDeviceId(null);
+    setDraggingDeviceId(null);
+  }, []);
+
+  const handleCardPinToggle = useCallback((deviceId: number) => {
+    if (pinnedDeviceId === deviceId) {
+      setPinnedDeviceId(null);
+      setToast("Device unpinned; other cards can now take the first position");
+      return;
+    }
+    setCardOrder((current) => pinDeviceFirst(orderDeviceIds(mapDevices.map((device) => device.id), current, pinnedDeviceId), deviceId));
+    setPinnedDeviceId(deviceId);
+    setToast("Device pinned to the first position in this browser");
+  }, [mapDevices, pinnedDeviceId]);
 
   const fetchReportsForDevice = useCallback(async (device: TelemetryDevice) => {
     if (tutorialMode) return [buildCurrentDeviceReport(device)];
@@ -581,7 +650,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
               </div>
             </div>
           )}
-          {orderedDevices.map((device) => {
+          {orderedDevices.map((device, index) => {
             const hub = device.entity === "hub" ? hubs.find(h => h.gateway_guid16 === -device.id) : undefined;
             return <DashboardDeviceCard
               hub={hub}
@@ -592,6 +661,8 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
               expanded={expandedIds.includes(device.id)}
               dragging={draggingDeviceId === device.id}
               dragOver={dragOverDeviceId === device.id && draggingDeviceId !== device.id}
+              first={index === 0}
+              pinned={pinnedDeviceId === device.id}
               followed={followedId === device.id}
               trailVisible={trailIds.has(device.id)}
               portableMode={portableMode}
@@ -604,11 +675,11 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
               onExpand={() => setExpandedIds((current) => nextExpandedDeviceCards(current, device.id))}
               onAction={(action) => handleAction(device, action)}
               onAvatarEdit={tutorialMode ? undefined : () => setAvatarDevice(device)}
-              onDragStart={() => setDraggingDeviceId(device.id)}
-              onDragOver={() => setDragOverDeviceId(device.id)}
-              onDrop={() => handleCardDrop(device.id)}
-              onDragEnd={() => { setDraggingDeviceId(null); setDragOverDeviceId(null); }}
-              onPinTop={() => handleCardPin(device.id)}
+              onDragStart={() => handleCardDragStart(device.id)}
+              onDragOver={() => handleCardDragOver(device.id)}
+              onDrop={handleCardDrop}
+              onDragEnd={handleCardDragEnd}
+              onPinToggle={() => handleCardPinToggle(device.id)}
               onReportLog={() => handleReportLog(device)}
               onReportExport={() => handleReportExport(device)}
             />; })}

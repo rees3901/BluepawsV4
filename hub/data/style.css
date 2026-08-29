@@ -47,27 +47,27 @@
     --border: #2f3e4e;
     --radius: 8px;
     --shadow: 0 2px 8px rgba(0,0,0,0.3);
-    --panel-width: 340px;
+    --panel-width: 390px;
 }
 
 /* ── Light Theme ──
    Toggle via body.light class. Only overrides the colour variables;
    all component styles remain the same. */
 body.light {
-    --bg-primary: #f0f2f5;
-    --bg-card: #ffffff;
-    --bg-panel: #f8f9fa;
-    --bg-hover: #e5e7eb;
-    --text-primary: #1a1a2e;
-    --text-secondary: #6b7280;
-    --text-dim: #9ca3af;
+    --bg-primary: #eee9df;
+    --bg-card: #fbf8f1;
+    --bg-panel: #f5f0e7;
+    --bg-hover: #e8e0d4;
+    --text-primary: #273039;
+    --text-secondary: #66706f;
+    --text-dim: #8a918e;
     --accent: #1d9bf0;
     --accent-hover: #1a8cd8;
     --success: #16a34a;
     --warning: #d97706;
     --danger: #dc2626;
-    --border: #d1d5db;
-    --shadow: 0 2px 8px rgba(0,0,0,0.1);
+    --border: #d4cabb;
+    --shadow: 0 2px 9px rgb(86 71 48 / 14%);
 }
 
 html, body {
@@ -134,7 +134,7 @@ body {
     display: flex;
     flex-direction: column;
     transform: translateX(-100%);
-    transition: transform 0.25s ease;
+    transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
     overflow: hidden;
 }
 
@@ -886,7 +886,7 @@ body.light .measure-label {
    Panel width shrinks to 280px. */
 @media (max-width: 768px) {
     :root {
-        --panel-width: 280px;
+        --panel-width: min(322px, calc(100vw - 48px));
     }
 
     /* On mobile, panel overlays the map */
@@ -1081,6 +1081,187 @@ body.light .leaflet-control-scale-line {
     font-weight: 600;
     margin-left: 4px;
     letter-spacing: 0.02em;
+}
+
+/* ── Web/off-grid interaction parity ── */
+.panel-brand {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 3px;
+}
+
+.panel-brand-mark,
+.panel-brand-mascot {
+    display: block;
+    flex: 0 0 auto;
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: contain;
+}
+
+.panel-brand-mark {
+    width: 37px;
+    height: 37px;
+    background-image: url('/brand-favicon.ico');
+}
+
+.panel-brand-mascot {
+    width: 56px;
+    height: 56px;
+    background-image: url('/brand-mascot.avif');
+}
+
+.panel-brand .panel-title { white-space: nowrap; }
+
+#statusBanner.connected #statusIcon {
+    animation: live-breathe 4.8s ease-in-out infinite;
+}
+
+@keyframes live-breathe {
+    0%, 100% { opacity: .65; transform: scale(.9); }
+    50% { opacity: 1; transform: scale(1.15); }
+}
+
+.hamburger-btn { width: 53px; height: 53px; }
+.hamburger-btn svg { width: 28px; height: 28px; }
+.leaflet-top.leaflet-left { top: 72px; }
+
+.leaflet-map-btn {
+    width: 47px;
+    height: 47px;
+    margin-bottom: 8px;
+    padding: 0;
+}
+
+.leaflet-map-btn svg { width: 26.4px; height: 26.4px; }
+.leaflet-map-btn .fit-markers-icon { width: 32.4px; height: 32.4px; object-fit: contain; }
+body.light .leaflet-map-btn .fit-markers-icon { filter: invert(1); }
+body.light .leaflet-map-btn:hover .fit-markers-icon,
+body.light .leaflet-map-btn:focus-visible .fit-markers-icon { filter: none; }
+.leaflet-map-btn.global-trails-btn.active { border-color: var(--warning); background: var(--warning); color: #000; }
+.global-trails-icon {
+    display: block;
+    width: 26.4px;
+    height: 26.4px;
+    background: currentColor;
+    -webkit-mask: url('/map-location.png') center / contain no-repeat;
+    mask: url('/map-location.png') center / contain no-repeat;
+}
+.leaflet-control-zoom a { width: 41px !important; height: 41px !important; line-height: 41px !important; font-size: 25px !important; }
+
+.card-summary { padding-left: 6px; }
+.card-reorder-handle {
+    position: relative;
+    display: grid;
+    width: 24px;
+    height: 36px;
+    flex: 0 0 24px;
+    place-items: center;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-dim);
+    cursor: grab;
+}
+.card-reorder-handle:active { cursor: grabbing; }
+.card-reorder-handle:hover,
+.card-reorder-handle:focus-visible { color: var(--accent); background: var(--bg-hover); outline: 0; }
+.reorder-grip,
+.reorder-pin { position: absolute; display: grid; place-items: center; transition: opacity .18s ease, transform .18s ease; }
+.reorder-grip svg,
+.reorder-pin svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.reorder-pin { opacity: 0; transform: scale(.65) rotate(-12deg); }
+.card-reorder-handle.can-pin:hover .reorder-grip,
+.card-reorder-handle.can-pin:focus-visible .reorder-grip,
+.card-reorder-handle.pinned .reorder-grip { opacity: 0; transform: scale(.65); }
+.card-reorder-handle.can-pin:hover .reorder-pin,
+.card-reorder-handle.can-pin:focus-visible .reorder-pin,
+.card-reorder-handle.pinned .reorder-pin { opacity: 1; transform: scale(1) rotate(0); }
+.card-reorder-handle.pinned { color: var(--accent); background: rgb(29 155 240 / 13%); cursor: pointer; }
+.device-card.dragging { opacity: .62; border-color: var(--accent); box-shadow: 0 8px 22px rgb(0 0 0 / 25%); }
+
+.card-avatar-wrap { position: relative; flex-shrink: 0; }
+.card-avatar-edit {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    width: 100%;
+    height: 100%;
+    place-items: center;
+    border: 0;
+    border-radius: 50%;
+    background: rgb(63 70 77 / 68%);
+    color: #fff;
+    font-size: 30px;
+    font-weight: 300;
+    line-height: 1;
+    opacity: 0;
+    transform: scale(.82);
+    cursor: pointer;
+    pointer-events: none;
+    transition: opacity .32s ease, transform .38s cubic-bezier(.22,1,.36,1);
+}
+.card-avatar-wrap:hover .card-avatar-edit,
+.card-avatar-wrap:focus-within .card-avatar-edit { opacity: 1; transform: scale(1); pointer-events: auto; }
+.device-card.expanded .card-avatar-edit { display: grid; font-size: 42px; }
+
+.collar-awake { display: inline-grid; min-width: 1.5em; place-items: center; font-size: 1.5em; line-height: 1; }
+
+.btn-bluetooth { position: relative; min-height: 32px; }
+.btn-bluetooth:not(.active) { border-color: #111820; background: #252b31; color: #d4d8dc; }
+.btn-bluetooth.active { border-color: var(--success); background: rgb(29 155 240 / 28%); color: #fff; }
+body.light .btn-bluetooth:not(.active) { border-color: #9aa1a7; background: #ddd9d1; color: #46515b; }
+body.light .btn-bluetooth.active { border-color: #64a978; background: #d8eaf6; color: #175f8f; }
+.bluetooth-action-icon { position: relative; display: inline-grid; width: 20px; height: 20px; place-items: center; font-size: 18px; }
+.bluetooth-action-state { position: absolute; top: -7px; right: -10px; font-size: 11px; line-height: 1; }
+
+.leaflet-cursor-coords {
+    display: flex;
+    width: auto;
+    max-width: 30px;
+    min-height: 30px;
+    align-items: center;
+    overflow: hidden;
+    padding: 0;
+    border-radius: 6px 0 0 6px;
+    pointer-events: auto;
+    transition: max-width 180ms ease, box-shadow 180ms ease;
+}
+.leaflet-cursor-coords-tab { display: grid; width: 30px; min-width: 30px; min-height: 30px; place-items: center; color: var(--accent); font: 1rem system-ui,sans-serif; }
+.leaflet-cursor-coords-value { min-width: 205px; padding: 4px 8px 4px 2px; opacity: 0; white-space: nowrap; transition: opacity 120ms ease; }
+.leaflet-cursor-coords:hover,
+.leaflet-cursor-coords:focus,
+.leaflet-cursor-coords:focus-within { max-width: 245px; outline: 0; border-color: var(--accent); box-shadow: 0 0 0 2px rgb(29 155 240 / 18%); }
+.leaflet-cursor-coords:hover .leaflet-cursor-coords-value,
+.leaflet-cursor-coords:focus .leaflet-cursor-coords-value,
+.leaflet-cursor-coords:focus-within .leaflet-cursor-coords-value { opacity: 1; }
+
+.ui-toast {
+    position: fixed;
+    left: 50%;
+    bottom: 22px;
+    z-index: 1800;
+    max-width: min(90vw, 420px);
+    padding: 10px 14px;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    background: var(--bg-card);
+    color: var(--text-primary);
+    box-shadow: 0 8px 28px rgb(0 0 0 / 30%);
+    transform: translateX(-50%);
+    font-size: .78rem;
+}
+
+@media (max-width: 768px) {
+    #panelHeader { flex-wrap: wrap; gap: 6px 0; padding: 10px 12px; }
+    .panel-brand { width: 100%; flex: 0 0 100%; }
+    .panel-header-btns { width: 100%; flex: 0 0 100%; align-items: center; justify-content: flex-end; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #statusBanner.connected #statusIcon { animation: none; }
+    .card-avatar-edit, .reorder-grip, .reorder-pin { transition: none; }
 }
 
 /* ── Scrollbar ── */

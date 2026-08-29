@@ -230,8 +230,6 @@ export default function TrackingMap(props: TrackingMapProps) {
 
     const measureLayers: L.Layer[] = [];
     const measurePoints: L.LatLng[] = [];
-    const temporaryPins = new Map<number, L.Marker>();
-    let nextTemporaryPinId = 1;
     let measureButton: HTMLButtonElement | null = null;
     let measuring = false;
 
@@ -312,35 +310,12 @@ export default function TrackingMap(props: TrackingMapProps) {
       addMeasurementPoint(event.latlng);
     });
 
-    const showMapNotice = (point: L.LatLng, message: string) => {
-      const notice = L.tooltip({ className: "map-action-notice", direction: "top", opacity: 1 })
-        .setLatLng(point)
-        .setContent(message)
-        .addTo(map);
-      window.setTimeout(() => {
-        if (map.hasLayer(notice)) map.removeLayer(notice);
-      }, 1800);
-    };
-
-    const addTemporaryPin = (point: L.LatLng) => {
-      const pinId = nextTemporaryPinId++;
-      const marker = L.marker(point, {
-        alt: "Temporary meeting point",
-        icon: temporaryPinIcon(),
-        keyboard: true,
-        title: "Temporary meeting point",
-        zIndexOffset: 900,
-      }).addTo(map);
-      marker.bindPopup(temporaryPinPopupHtml(point, pinId));
-      temporaryPins.set(pinId, marker);
-      marker.openPopup();
-    };
-
     map.on("contextmenu", (event) => {
-      L.popup({ className: "map-context-popup", closeButton: true, maxWidth: 290 })
-        .setLatLng(event.latlng)
-        .setContent(contextMenuHtml(event.latlng))
-        .openOn(map);
+      event.originalEvent.preventDefault();
+      const coordinates = formatMapCoordinates(event.latlng.lat, event.latlng.lng, 6);
+      void copyTextToClipboard(coordinates).then((copied) => {
+        noticeRef.current?.(copied ? "Coordinates copied to clipboard" : "Unable to copy coordinates");
+      });
     });
 
     const mapContainer = map.getContainer();
@@ -353,39 +328,6 @@ export default function TrackingMap(props: TrackingMapProps) {
         return;
       }
 
-      const locationAction = eventTarget.closest<HTMLElement>("[data-location-action]");
-      if (!locationAction) return;
-      event.preventDefault();
-
-      const action = locationAction.dataset.locationAction;
-      const pinId = Number(locationAction.dataset.pinId);
-      if (action === "remove-pin" && Number.isInteger(pinId)) {
-        const marker = temporaryPins.get(pinId);
-        if (marker) map.removeLayer(marker);
-        temporaryPins.delete(pinId);
-        map.closePopup();
-        return;
-      }
-
-      const latitude = Number(locationAction.dataset.latitude);
-      const longitude = Number(locationAction.dataset.longitude);
-      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return;
-      const point = L.latLng(latitude, longitude);
-
-      if (action === "drop-pin") {
-        const coordinates = formatMapCoordinates(point.lat, point.lng, 6);
-        const copyResult = copyTextToClipboard(coordinates);
-        addTemporaryPin(point);
-        void copyResult.then((copied) => {
-          noticeRef.current?.(copied ? "Coordinates copied to clipboard" : "Pin dropped, but coordinates could not be copied");
-        });
-      } else if (action === "measure") {
-        map.closePopup();
-        clearMeasurement();
-        setMeasuring(true);
-        addMeasurementPoint(point);
-        showMapNotice(point, "Choose the next measurement point");
-      }
     };
     mapContainer.addEventListener("click", handleMapAction);
 
@@ -401,7 +343,6 @@ export default function TrackingMap(props: TrackingMapProps) {
       markers.clear();
       trails.clear();
       trailPoints.clear();
-      temporaryPins.clear();
     };
   }, []);
 
@@ -635,39 +576,6 @@ function formatAge(seconds: number) {
   if (seconds < 60) return `${seconds}s ago`;
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
   return `${Math.floor(seconds / 3600)}h ago`;
-}
-
-function contextMenuHtml(point: L.LatLng) {
-  const locationData = locationDataAttributes(point);
-  return `<div class="map-context-menu"><div class="map-context-heading">Map location</div>${coordinateActionRow(point)}<div class="map-context-actions"><button type="button" data-location-action="drop-pin" ${locationData}>📍 Drop temporary pin</button><button type="button" data-location-action="measure" ${locationData}>↔ Measure from here</button></div><p class="map-context-hint">Right-click or long-press another point for more options.</p></div>`;
-}
-
-function temporaryPinPopupHtml(point: L.LatLng, pinId: number) {
-  const locationData = locationDataAttributes(point);
-  return `<div class="map-context-menu temporary-pin-card"><div class="map-context-heading">Temporary meeting point</div>${coordinateActionRow(point)}<div class="map-context-actions"><button type="button" data-location-action="measure" ${locationData}>↔ Measure from here</button><button type="button" class="danger" data-location-action="remove-pin" data-pin-id="${pinId}">× Remove pin</button></div><p class="map-context-hint">This pin stays only for this browser session.</p></div>`;
-}
-
-function coordinateActionRow(point: L.LatLng) {
-  const mapsUrl = googleMapsUrl(point.lat, point.lng);
-  return `<div class="map-context-coordinate-row"><a class="map-context-coordinates" href="${mapsUrl}" target="_blank" rel="noopener noreferrer" title="Open this location in Google Maps">${formatMapCoordinates(point.lat, point.lng, 6)}</a><a class="map-context-icon-action" href="${mapsUrl}" target="_blank" rel="noopener noreferrer" title="Open in Google Maps" aria-label="Open this location in Google Maps in a new tab">${openInNewTabIcon()}</a></div>`;
-}
-
-function openInNewTabIcon() {
-  return '<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3h7v7"/><path d="M10 14 21 3"/><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/></svg>';
-}
-
-function locationDataAttributes(point: L.LatLng) {
-  return `data-latitude="${point.lat.toFixed(6)}" data-longitude="${point.lng.toFixed(6)}"`;
-}
-
-function temporaryPinIcon() {
-  return L.divIcon({
-    className: "temporary-map-pin-icon",
-    html: '<span class="temporary-map-pin-emoji" aria-hidden="true">📍</span>',
-    iconSize: [36, 42],
-    iconAnchor: [18, 40],
-    popupAnchor: [0, -36],
-  });
 }
 
 function avatarHtml(avatar: DeviceAvatar, className: string) {
