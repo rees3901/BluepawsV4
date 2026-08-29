@@ -15,5 +15,11 @@ __pycache__/
 # PlatformIO build artefacts.
 .pio/
 
+# ESP-IDF Home Hub build artefacts and generated configuration.
+home-hub/firmware/build/
+home-hub/firmware/managed_components/
+home-hub/firmware/sdkconfig
+home-hub/firmware/sdkconfig.old
+
 # Local Supabase CLI link and runtime state.
 supabase/.temp/

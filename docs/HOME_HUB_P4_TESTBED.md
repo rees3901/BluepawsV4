@@ -1,83 +1,125 @@
 # ESP32-P4 Home Hub testbed
 
-Status: first portable firmware slice; hardware binding pending.
+Status: GUITION hardware target confirmed; first display/touch application
+cross-builds successfully. Physical-board flashing is still pending.
 
-## Decisions in force
+## Confirmed target
 
-The Home Hub target is an ESP32-P4 application processor with ESP32-C6
-connectivity, a roughly four-inch touch display, SD storage, fully offline map
-operation and LoRa collar communication. The implementation brief's suggestion
-to defer the physical LoRa daughterboard does not remove LoRa from the product
-architecture: simulation is only the bring-up input until the radio wiring is
-known.
+The testbed board is the GUITION/Shenzhen Jingcai Intelligent
+`JC4880P443C_I_W`. The `_Y` suffix used in one mechanical drawing denotes the
+version supplied with an enclosure; it is not a different electrical target.
 
-The existing `hub/` firmware remains the working Heltec ESP32-S3 LoRa/off-grid
-testbed. The P4 work lives under `home-hub/` and will reuse the shared BluePaws
-TLV protocol and the proven Home/Portable/Off-Grid policy without coupling the
-touchscreen to the current web UI or Arduino monolith.
+The vendor download linked from the product listing was reconstructed from its
+seven published shards and verified before inspection:
 
-## Still required from the selected board
+- Download: `http://pan.jczn1688.com/directlink/1/HMI%20display/JC4880P443C_I_W.zip`
+- Archive size: 309,232,242 bytes.
+- SHA-256: `7CEA2154667033A639B62A42D1952066CA55C78E187846351F5FACB0C3F5232F`.
+- All shard hashes in the download manifest passed.
+- No executable from the package was run.
 
-Do not choose a BSP, pin map or display driver until these are recorded from the
-board label, schematic and vendor example:
+The public [GUITION P4-series repository](https://github.com/guitionofficial/P4-series)
+contains the same product family, but its checked-in ESP-IDF example is older
+than the download package. The archive's `ESP-IDF_5.5.4` example and modified
+BSP 5.2.3 are therefore the implementation baseline.
 
-- Manufacturer, exact product/SKU and board revision.
-- Native panel resolution and display interface/controller.
-- Touch controller, bus, reset and interrupt pins.
-- Flash and PSRAM sizes and interfaces.
-- SDMMC/SPI mode and pins.
-- P4-to-C6 transport and the vendor's supported ESP-IDF/ESP-Hosted version.
-- Free expansion bus/pins for the SX1262, plus radio reset, busy and DIO1.
-- Backlight control, USB/debug route and power budget.
+## Hardware facts in force
 
-Photographs of both sides and a link or copy of the vendor schematic are enough
-to begin this discovery pass.
+| Function | Confirmed configuration |
+| --- | --- |
+| Application processor | ESP32-P4, dual-core RISC-V |
+| Connectivity companion | On-module ESP32-C6 for Wi-Fi/Bluetooth |
+| Display | 4.3-inch IPS, native portrait 480 x 800 |
+| Display controller/bus | ST7701S over two-lane MIPI-DSI |
+| Touch | GT911 capacitive touch on I2C |
+| Memory | 16 MB flash and 32 MB PSRAM |
+| Backlight/reset | PWM GPIO23; panel reset GPIO5 |
+| Shared I2C | SDA GPIO7; SCL GPIO8; 400 kHz in the vendor BSP |
+| Touch control pins | Reset and interrupt are `GPIO_NUM_NC` in the vendor BSP |
+| microSD | 4-bit SDMMC: D0 39, D1 40, D2 41, D3 42, CMD 44, CLK 43 |
+| Audio I2S | MCLK 13, BCLK 12, WS 10, DOUT 9, DIN 48, amplifier enable 11 |
+| Supply | 5 V; vendor typical current approximately 320 mA without added LoRa |
 
-Two current Waveshare products match the description but are not electrically
-interchangeable:
+The active display area is 93.60 x 56.16 mm and the bare board is approximately
+117.01 x 69.41 mm. The board also exposes USB, UART, RS-485, camera, speaker,
+battery and 2 x 13 expansion connections. These extra interfaces are not yet
+claimed by BluePaws.
 
-- `ESP32-P4-WIFI6-Touch-LCD-4B` (SKU 31416) is a 4.0-inch, 720 x 720 MIPI-DSI
-  board with GT911 touch, 32 MB PSRAM, 32 MB flash, SDIO-connected ESP32-C6 and
-  an SDIO 3.0 TF slot.
-- `ESP32-P4-WIFI6-Touch-LCD-4.3` (SKU 33874; `33875` adds a camera) is a
-  4.3-inch, 480 x 800 MIPI-DSI/ST7701 board with GT911 touch, the same headline
-  memory and C6 arrangement, an SDIO 3.0 TF slot and a 40-pin expansion header.
+## Framework decision
 
-Official references: [4B documentation](https://docs.waveshare.com/ESP32-P4-WIFI6-Touch-LCD-4B)
-and [4.3 documentation](https://docs.waveshare.com/ESP32-P4-WIFI6-Touch-LCD-4.3).
-The board silkscreen/SKU must decide between them; the implementation brief's
-4.3-inch wording alone is not confirmation.
+ESP-IDF 5.5.4 is the foundation, with LVGL pinned to 9.5.0. GUITION ships both
+Arduino and ESP-IDF examples, and current Arduino-ESP32 supports ESP32-P4, but
+an all-Arduino firmware is not the best ownership boundary for this product.
+MIPI-DSI, SDMMC map I/O, PSRAM, ESP-Hosted and radio task scheduling need direct
+IDF control.
 
-## First implemented boundary
+This does not prevent Arduino libraries later. Arduino can be included as an
+ESP-IDF component if a library materially helps. Generated LVGL screens must be
+kept in a separate UI component and target LVGL 9; they should not call the
+board adapter or transport tasks directly. The risk to generated pages is an
+LVGL v8/v9 mismatch, not the choice of Arduino-style `setup()`/`loop()`.
 
-`home-hub/firmware/components/bluepaws_core` is the shared application model for
-the touchscreen, local web service and telemetry transports. It uses bounded
-arrays for eight cat records and 36 visible tile placements, so tile layout and
-marker updates do not allocate memory during interaction.
+The dependency lock also pins `esp_lvgl_port` 2.7.2. Version 2.9.0 expects a
+DPI callback newer than the ESP-IDF 5.5.4 baseline, so allowing an unbounded
+2.x upgrade would make an otherwise reproducible checkout fail to compile.
+
+## Implemented boundary
+
+`home-hub/firmware` is now a complete ESP-IDF project rather than only a
+portable library. It contains:
+
+- `bluepaws_core`: bounded Web Mercator, tile layout, cat state and simulator.
+- `guition_jc4880p443c`: a focused ST7701/GT911/backlight adapter derived from
+  the vendor's Apache-2.0 BSP, without its camera, audio and demo bulk.
+- `main`: a landscape 800 x 480 LVGL test screen displaying eight simulated
+  cats through the same `CatStore` intended for LoRa and restored telemetry.
+- A touch-operated **Fit all** action, proving the GUI consumes the portable
+  map/state layer rather than maintaining a second model.
 
 ```text
 Simulator ─┐
-SX1262 TLV ├──> CatStore ──> map marker layer / cat list / local API
+SX1262 TLV ├──> CatStore ──> LVGL pages / map markers / local API
 Cloud      │
 SD restore ┘
 
-Touch drag ──> Viewport ──> XYZ tile requests ──> async SD loader ──> LVGL pool
+GT911 touch ──> LVGL ──> Viewport ──> XYZ tile requests ──> SD loader
 ```
 
-The native test covers projection round trips, tile selection, pan direction,
-fit-all padding, last-known-position retention, eight simulated cats and fixed
-capacity. It can be verified without pretending that display, touch, SD, C6 or
-LoRa hardware has been brought up.
+The first screen deliberately uses a map-grid placeholder. It proves display,
+touch, landscape rotation and live state flow without embedding unlicensed map
+artwork or pretending SD tile loading exists.
 
-## Next hardware-backed slice
+## LoRa boundary
 
-Once the exact board is known:
+LoRa remains required. The intended radio is an SX1262-class transceiver using
+the existing BluePaws TLV protocol. No expansion-header pin assignment has been
+committed yet. The schematic exposes several P4 GPIOs, but the exact header
+orientation, boot-strapping constraints and any board-revision differences
+must be checked on the delivered unit before choosing SPI SCK/MOSI/MISO, NSS,
+reset, busy and DIO1. Display, touch, SDMMC, audio and C6 pins listed above are
+reserved and must not be reused.
 
-1. Pin its recommended ESP-IDF release and vendor BSP.
-2. Build the untouched vendor display/touch/SD/C6 example.
-3. Record a bring-up report and measured PSRAM/free heap.
-4. Add the P4 project shell and board adapter.
-5. Bind LVGL to a reusable 3 x 3 raster tile pool and a marker overlay.
-6. Load a 9-tile licensed test fixture from SD in a background task.
-7. Feed the current simulator through `CatStore`, then port the existing
-   SX1262 TLV receive path behind the same API.
+## Bring-up sequence
+
+1. Install ESP-IDF 5.5.4 and build the project without changing component pins.
+2. Flash through the high-speed USB connector and record the P4 revision,
+   boot log, PSRAM size, free heap and display/touch result.
+3. Mount a FAT32 microSD card and validate the six documented SDMMC signals.
+4. Record the C6 firmware version and exercise the vendor Wi-Fi scan before
+   adding BluePaws networking.
+5. Photograph both sides of the delivered board and continuity-check the
+   expansion header before assigning the SX1262.
+6. Add a licensed nine-tile SD fixture and an asynchronous tile loader.
+7. Port the proven SX1262 TLV receive path behind `CatStore`; simulation remains
+   selectable as a deterministic bench mode.
+
+Host-side core verification remains available with:
+
+```powershell
+node tools/test_home_hub_core.mjs
+```
+
+The initial ESP32-P4 cross-build produced a 0xC09A0-byte application image,
+leaving 91% of the 8 MB factory-app partition free. That verifies compilation
+and linking, not the electrical display, touch, PSRAM or C6 behaviour; those
+remain explicit hardware bring-up checks.
