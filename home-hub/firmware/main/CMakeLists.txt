@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "main.cpp" "app_shell.cpp"
+    SRCS "main.cpp" "app_shell.cpp" "ui_icons.cpp"
     INCLUDE_DIRS "."
     REQUIRES
         bluepaws_core

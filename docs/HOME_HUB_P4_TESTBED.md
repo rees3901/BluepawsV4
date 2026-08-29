@@ -266,3 +266,25 @@ monitored boot again reported revision 1.3, 16 MB flash, 32 MB PSRAM and the
 mounted SD volume without a panic or reset loop. The hardware touch trace
 confirmed launcher-to-map navigation, hardware decoding of the cached map
 tiles, and return to the launcher through the shell navigation control.
+
+The follow-up visual pass replaces text-only navigation with the selected Home,
+rotate, night-mode, map, settings, diagnostics and zoom artwork. The launcher
+defaults to a dark, compact appliance-style app grid and can rebuild every page
+in a light theme without restarting shared services. Source PNGs live under
+`firmware/assets/icons`; the reproducible converter emits alpha-only LVGL masks
+for monochrome artwork and ARGB8888 data for the coloured map icon.
+
+Live Map now consumes the full content area in both orientations. Its hamburger
+control slides a themed nearby-cat drawer above the existing map object; opening
+and closing the drawer does not recreate the viewport, invalidate the decoded
+tile cache or request another SD read. Map-centre, Fit and zoom remain separate
+overlay controls, while the translucent header Home icon returns to the app
+grid. The raster pack itself remains the licensed daylight OS style in both UI
+themes; only application chrome changes until a separately rendered night tile
+pack is available.
+
+The icon/drawer build is 956,576 bytes with SHA-256
+`CA2F6626692DB0ED9791184036B4ECACBC1B0529FD62F20996A84078422B5AD5`.
+It was flashed app-only at `0x10000` with esptool hash verification. Its first
+monitored boot again mounted the card and completed display/touch startup with
+no panic or reset loop.
