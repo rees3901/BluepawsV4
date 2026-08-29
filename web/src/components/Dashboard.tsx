@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 import { homeDistanceMetres, formatHomeDistance } from "@/lib/mapLocation";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { DeviceCard, DownloadIcon, type DeviceCardProps } from "@/components/DeviceCard";
 import { DeviceReportModal } from "@/components/DeviceReportModal";
 import { GuidedTour } from "@/components/GuidedTour";
@@ -102,6 +102,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
   const [reportError, setReportError] = useState<string | null>(null);
   const [deviceReports, setDeviceReports] = useState<DeviceReport[]>([]);
   const sequences = useRef(new Map<number, number>());
+  const trailsCustomized = useRef(false);
   const customAvatarsRef = useRef<Record<number, DeviceAvatar>>({});
   const cardOrderKey = useMemo(() => deviceCardOrderStorageKey(userEmail, householdId), [householdId, userEmail]);
   const hasFamilyContext = !tutorialMode && householdId !== null && householdAccessVersion !== null;
@@ -333,6 +334,16 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
     });
   }, [trailHistory, tutorialMode]);
 
+  useEffect(() => {
+    if (trailsCustomized.current || mapDevices.length === 0) return;
+    const deviceIds = mapDevices.map((device) => device.id);
+    setTrailIds((current) => {
+      if (current.size === deviceIds.length && deviceIds.every((deviceId) => current.has(deviceId))) return current;
+      return new Set(deviceIds);
+    });
+    requestTrailHistory(deviceIds);
+  }, [mapDevices, requestTrailHistory]);
+
   const handleAction = useCallback((device: TelemetryDevice, action: DeviceAction) => {
     if (device.entity === "hub" && (action === "find" || action === "command")) return;
     if (action === "jump") {
@@ -343,6 +354,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
       setFollowedId((current) => followedDeviceAfterAction(current, device.id, "follow"));
     }
     if (action === "trail") {
+      trailsCustomized.current = true;
       const trailVisible = trailIds.has(device.id);
       setTrailIds((current) => {
         const next = new Set(current);
@@ -357,6 +369,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
   }, [requestTrailHistory, trailIds]);
 
   const handleAllTrailsToggle = useCallback(() => {
+    trailsCustomized.current = true;
     if (allTrailsVisible) {
       setTrailIds(new Set());
       return;
@@ -366,6 +379,12 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
     setTrailIds(new Set(deviceIds));
     requestTrailHistory(deviceIds);
   }, [allTrailsVisible, mapDevices, requestTrailHistory]);
+
+  const handlePanelBlankClick = useCallback((event: MouseEvent<HTMLElement>) => {
+    const target = event.target as HTMLElement;
+    if (target.closest("button, a, input, select, textarea, [role='button'], .device-card, .telemetry-empty-state, [data-panel-static]")) return;
+    setSidebarOpen(false);
+  }, []);
 
   const handleCardDrop = useCallback((targetId: number) => {
     setDragOverDeviceId(null);
@@ -525,11 +544,15 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
         <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor"><rect x="2" y="4" width="16" height="2" rx="1" /><rect x="2" y="9" width="16" height="2" rx="1" /><rect x="2" y="14" width="16" height="2" rx="1" /></svg>
       </button>
 
-      <aside id="panel" className={sidebarOpen ? "open" : ""}>
+      <aside id="panel" className={sidebarOpen ? "open" : ""} onClick={handlePanelBlankClick}>
         <div id="panelHeader">
-          <span className="panel-title">Bluepaws V4</span>
+          <div className="panel-brand" aria-label="Bluepaws V4">
+            <span className="panel-brand-mark" aria-hidden="true" />
+            <span className="panel-title">Bluepaws V4</span>
+            <span className="panel-brand-mascot" aria-hidden="true" />
+          </div>
           <div className="panel-header-btns">
-            <span id="statusBanner" className={statusClass}>
+            <span id="statusBanner" className={statusClass} data-panel-static>
               <span id="statusIcon">●</span><span id="statusText">{statusText}</span>
             </span>
             <AccountMenu email={userEmail} familyName={familyName} familyRole={familyRole} onSignOut={handleSignOut} />
@@ -539,7 +562,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
               title={allTrailsVisible ? "Hide all breadcrumb trails" : "Show all breadcrumb trails"}
               aria-label={allTrailsVisible ? "Hide all breadcrumb trails" : "Show all breadcrumb trails"}
               aria-pressed={allTrailsVisible}
-              disabled={devices.length === 0}
+              disabled={mapDevices.length === 0}
               onClick={handleAllTrailsToggle}
             >
               <span className="global-trails-icon" aria-hidden="true" />
