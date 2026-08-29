@@ -1,6 +1,6 @@
 /* eslint-disable @next/next/no-img-element -- Tiny pre-sized emoji artwork is intentionally served directly from the picker CDN. */
 import type { ReactNode } from "react";
-import { BatteryIndicator, BleProximity, HomeDistance, LastSeen, SignalIndicator, WifiIndicator } from "@/components/Indicators";
+import { BatteryIndicator, BleProximity, BluetoothBeaconIndicator, HomeDistance, LastSeen, SignalIndicator, WifiIndicator } from "@/components/Indicators";
 import { HUB_REPORTING, hubContactGrace } from "@/lib/hubReporting";
 import { emojiImageUrl } from "@/lib/emoji";
 import { formatMapCoordinates, googleMapsUrl } from "@/lib/mapLocation";
@@ -141,7 +141,7 @@ export function DeviceCard(props: DeviceCardProps) {
           {fault && <div className="card-fault-row"><span className="error-badge" title={fault.title} aria-label={fault.title}>{fault.label}</span></div>}
           <div className="card-indicators">
             <span className="card-indicator-group"><BatteryIndicator millivolts={isHub ? null : device.batt} percent={device.batteryPercent} /></span>
-            <span className="card-indicator-group">{isHub ? <WifiIndicator rssi={device.rssi} contactLost={ageSeconds >= hubContactGrace(device.hubReportingProfile)} /> : <SignalIndicator rssi={device.rssi} snr={device.snr} ingestPath={device.ingestPath} />}</span>
+            <span className="card-indicator-group">{isHub ? <><WifiIndicator rssi={device.rssi} contactLost={ageSeconds >= hubContactGrace(device.hubReportingProfile)} /><BluetoothBeaconIndicator advertising={device.bleHome} /></> : <SignalIndicator rssi={device.rssi} snr={device.snr} ingestPath={device.ingestPath} />}</span>
             {!isHub && <span className="collar-awake" title={(props.awakeSeconds ?? 0) > 0 ? "Fresh packet received — expected ten-second command receive window, not guaranteed delivery" : "Receive window ended — collar probably sleeping; sleep is not directly confirmed"} aria-label={(props.awakeSeconds ?? 0) > 0 ? `Collar recently heard; ${props.awakeSeconds} seconds remaining` : "Collar probably sleeping"}>{(props.awakeSeconds ?? 0) > 0 ? "💡" : "💤"}</span>}
             {!isHub && portableMode && <span className="card-indicator-group"><BleProximity rssi={device.rssi === null ? null : device.rssi + 28} /></span>}
           </div>

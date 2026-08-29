@@ -74,7 +74,15 @@ export function WifiIndicator({ rssi, contactLost = false }: { rssi: number | nu
     <AntennaIcon />
     {[1,2,3,4,5].map(bar => <span key={bar} className={`sig-bar${bar <= level ? " filled" : ""}`} style={{height:4+bar*3, backgroundColor:bar <= level ? color : undefined}} />)}
     <span className="sig-label" style={{color}}>{label}</span>
-    <span className="transport-badge" title="Home Hub Wi-Fi uplink" aria-label="Wi-Fi">Wi-Fi</span>
+    <span className="transport-badge transport-wifi" title="Home Hub Wi-Fi uplink" aria-label="Wi-Fi">Wi-Fi</span>
+  </span>;
+}
+
+export function BluetoothBeaconIndicator({ advertising }: { advertising: boolean }) {
+  const label = advertising ? "Home beacon advertising" : "Home beacon not advertising";
+  return <span className={`bluetooth-beacon${advertising ? " active" : ""}`} title={label} role="img" aria-label={label}>
+    <svg aria-hidden="true" viewBox="0 0 16 20"><path d="M4 5l9 10-5 4V1l5 4L4 15" fill="none" stroke="currentColor" strokeWidth="2" /></svg>
+    <span className="bluetooth-beacon-dot" />
   </span>;
 }
 

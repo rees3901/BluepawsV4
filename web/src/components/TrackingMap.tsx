@@ -28,6 +28,7 @@ interface TrackingMapProps {
   trailHistory: Record<number, TrailPoint[]>;
   command: MapCommand | null;
   onAction: (device: TelemetryDevice, action: DeviceAction) => void;
+  onNotice?: (message: string) => void;
   readOnly?: boolean;
 }
 
@@ -36,7 +37,7 @@ const MARKER_SLIDE_DURATION_MS = 750;
 const MAX_ANIMATED_MARKER_DISTANCE_METRES = 2_000;
 
 export default function TrackingMap(props: TrackingMapProps) {
-  const { devices, avatars, sidebarOpen, followedId, trailIds, trailHistory, command, onAction, readOnly = false } = props;
+  const { devices, avatars, sidebarOpen, followedId, trailIds, trailHistory, command, onAction, onNotice, readOnly = false } = props;
   const mapRef = useRef<L.Map | null>(null);
   const markersRef = useRef(new Map<number, L.Marker>());
   const markerAnimationsRef = useRef(new Map<number, number>());
@@ -46,13 +47,15 @@ export default function TrackingMap(props: TrackingMapProps) {
   const avatarsRef = useRef(avatars);
   const trailIdsRef = useRef(trailIds);
   const actionRef = useRef(onAction);
+  const noticeRef = useRef(onNotice);
 
   useEffect(() => {
     devicesRef.current = devices;
     avatarsRef.current = avatars;
     trailIdsRef.current = trailIds;
     actionRef.current = onAction;
-  }, [avatars, devices, onAction, trailIds]);
+    noticeRef.current = onNotice;
+  }, [avatars, devices, onAction, onNotice, trailIds]);
 
   useEffect(() => {
     const markers = markersRef.current;
@@ -148,13 +151,37 @@ export default function TrackingMap(props: TrackingMapProps) {
     map.on("moveend zoomend", scheduleLayerPreviewUpdate);
     L.control.zoom({ position: "bottomleft" }).addTo(map);
 
+    const HomeControl = L.Control.extend({
+      options: { position: "topleft" },
+      onAdd() {
+        const button = L.DomUtil.create("button", "leaflet-map-btn") as HTMLButtonElement;
+        button.type = "button";
+        button.title = "Center on Home Hub";
+        button.setAttribute("aria-label", "Center map on Home Hub");
+        button.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="5"/><path d="M8 1v3m0 8v3M1 8h3m8 0h3"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/></svg>';
+        L.DomEvent.disableClickPropagation(button);
+        L.DomEvent.on(button, "click", () => {
+          const homeHub = devicesRef.current.find((device) => device.entity === "hub" && device.hasGps);
+          if (!homeHub) {
+            noticeRef.current?.("Home Hub location is not available yet");
+            return;
+          }
+          map.closePopup();
+          map.setView([homeHub.lat, homeHub.lon], Math.max(map.getZoom(), JUMP_TO_ZOOM), { animate: true });
+        });
+        return button;
+      },
+    });
+    new HomeControl().addTo(map);
+
     const FitControl = L.Control.extend({
       options: { position: "topleft" },
       onAdd() {
         const button = L.DomUtil.create("button", "leaflet-map-btn") as HTMLButtonElement;
         button.type = "button";
         button.title = "Fit all markers into view";
-        button.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="5"/><path d="M8 1v3m0 8v3M1 8h3m8 0h3"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/></svg>';
+        button.setAttribute("aria-label", "Fit all markers into view");
+        button.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4H4v5M15 4h5v5M20 15v5h-5M9 20H4v-5"/></svg>';
         L.DomEvent.disableClickPropagation(button);
         L.DomEvent.on(button, "click", () => fitMarkers(map, markersRef.current));
         return button;
@@ -307,7 +334,12 @@ export default function TrackingMap(props: TrackingMapProps) {
       const point = L.latLng(latitude, longitude);
 
       if (action === "drop-pin") {
+        const coordinates = formatMapCoordinates(point.lat, point.lng, 6);
+        const copyResult = copyTextToClipboard(coordinates);
         addTemporaryPin(point);
+        void copyResult.then((copied) => {
+          noticeRef.current?.(copied ? "Coordinates copied to clipboard" : "Pin dropped, but coordinates could not be copied");
+        });
       } else if (action === "measure") {
         map.closePopup();
         clearMeasurement();
@@ -336,7 +368,7 @@ export default function TrackingMap(props: TrackingMapProps) {
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    window.setTimeout(() => map.invalidateSize(), 280);
+    window.setTimeout(() => map.invalidateSize(), 340);
   }, [sidebarOpen]);
 
   useEffect(() => {
@@ -524,9 +556,15 @@ function signalIndicatorHtml(device: TelemetryDevice, isHub: boolean) {
   const label = quality?.label ?? (isHub ? "No Wi-Fi" : "Not reported");
   const bars = [1, 2, 3, 4, 5].map((bar) => `<span class="sig-bar${bar <= level ? " filled" : ""}" style="height:${4 + bar * 3}px${bar <= level ? `;background:${color}` : ""}"></span>`).join("");
   const badge = isHub ? "Wi-Fi" : transport.badge;
-  const badgeClass = isHub ? "" : transport.cssClass;
+  const badgeClass = isHub ? "transport-wifi" : transport.cssClass;
   const title = isHub ? `Wi-Fi ${device.rssi == null ? "not connected" : `${device.rssi} dBm`} — ${label}` : `${transport.label}; ${device.rssi === null || device.snr === null ? "radio signal was not included in this report" : `RSSI: ${device.rssi} dBm / SNR: ${device.snr} dB — ${label}`}`;
-  return `<span class="signal-indicator" title="${escapeHtml(title)}">${antennaIcon()}${bars}<span class="sig-label" style="color:${color}">${label}</span><span class="transport-badge ${badgeClass}">${badge}</span></span>`;
+  const bluetooth = isHub ? bluetoothBeaconHtml(device.bleHome) : "";
+  return `<span class="signal-indicator" title="${escapeHtml(title)}">${antennaIcon()}${bars}<span class="sig-label" style="color:${color}">${label}</span><span class="transport-badge ${badgeClass}">${badge}</span></span>${bluetooth}`;
+}
+
+function bluetoothBeaconHtml(advertising: boolean) {
+  const label = advertising ? "Home beacon advertising" : "Home beacon not advertising";
+  return `<span class="bluetooth-beacon${advertising ? " active" : ""}" title="${label}" role="img" aria-label="${label}"><svg aria-hidden="true" viewBox="0 0 16 20"><path d="M4 5l9 10-5 4V1l5 4L4 15" fill="none" stroke="currentColor" stroke-width="2"/></svg><span class="bluetooth-beacon-dot"></span></span>`;
 }
 
 function wifiQuality(rssi: number | null) {
@@ -690,4 +728,25 @@ function isMapLayerName(value: unknown): value is MapLayerName {
 
 function escapeHtml(value: string) {
   return value.replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character] ?? character);
+}
+
+async function copyTextToClipboard(value: string) {
+  // Keep the synchronous path inside the user's click gesture. Some browsers
+  // reject the async Clipboard API while still allowing the legacy copy action.
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.append(textarea);
+  textarea.select();
+  const copiedSynchronously = document.execCommand("copy");
+  textarea.remove();
+  if (copiedSynchronously) return true;
+
+  try {
+    await navigator.clipboard.writeText(value);
+    return true;
+  } catch {
+    return false;
+  }
 }
