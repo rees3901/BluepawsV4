@@ -1207,6 +1207,7 @@ body.light .leaflet-map-btn:focus-visible .fit-markers-icon { filter: none; }
 .device-card.expanded .card-avatar-edit { display: grid; font-size: 42px; }
 
 .collar-awake { display: inline-grid; min-width: 1.5em; place-items: center; font-size: 1.5em; line-height: 1; }
+.device-card.stale .collar-awake { opacity: .32; filter: grayscale(1) saturate(.15); }
 
 .btn-bluetooth { position: relative; min-height: 32px; }
 .btn-bluetooth:not(.active) { border-color: #111820; background: #252b31; color: #d4d8dc; }
@@ -1253,10 +1254,38 @@ body.light .btn-bluetooth.active { border-color: #64a978; background: #d8eaf6; c
     font-size: .78rem;
 }
 
+.map-context-popup .leaflet-popup-content-wrapper { min-width: 250px; }
+.map-context-menu { min-width: 226px; }
+.map-context-heading { margin-bottom: 2px; color: var(--text-primary); font-size: .82rem; font-weight: 700; }
+.map-context-coordinate-row { display: flex; align-items: center; gap: 5px; margin-bottom: 8px; }
+.map-context-coordinates { display: block; flex: 1; min-width: 0; color: var(--accent); font-family: 'SF Mono','Fira Code',monospace; font-size: .68rem; overflow-wrap: anywhere; }
+.map-context-actions { display: grid; gap: 4px; }
+.map-context-actions button {
+    display: flex;
+    width: 100%;
+    min-height: 32px;
+    align-items: center;
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    cursor: pointer;
+    font-family: inherit;
+    font-size: .7rem;
+    line-height: 1.25;
+    text-align: left;
+}
+.map-context-actions button:hover { border-color: var(--accent); background: rgb(29 155 240 / 10%); color: var(--accent); }
+.map-context-actions .danger:hover { border-color: var(--danger); background: rgb(255 23 68 / 10%); color: var(--danger); }
+.map-context-hint { margin: 7px 0 0; color: var(--text-secondary); font-size: .62rem; line-height: 1.35; }
+.temporary-map-pin-emoji { display: block; width: 36px; height: 42px; filter: drop-shadow(0 2px 3px rgb(0 0 0 / 55%)); font-family: 'Apple Color Emoji','Segoe UI Emoji','Noto Color Emoji',sans-serif; font-size: 34px; line-height: 40px; text-align: center; }
+
 @media (max-width: 768px) {
     #panelHeader { flex-wrap: wrap; gap: 6px 0; padding: 10px 12px; }
     .panel-brand { width: 100%; flex: 0 0 100%; }
     .panel-header-btns { width: 100%; flex: 0 0 100%; align-items: center; justify-content: flex-end; }
+    .map-context-actions button { min-height: 42px; padding: 9px 10px; font-size: .76rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {

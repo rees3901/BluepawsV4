@@ -48,7 +48,7 @@ const TOUR_STEPS: TourStep[] = [
   {
     selector: ".leaflet-control-layers",
     title: "Choose the best map view",
-    description: "Use Layers to switch between street, satellite, and topographic maps. Right-click the map—or long-press on mobile—to copy that point's coordinates to your clipboard.",
+    description: "Use Layers to switch between street, satellite, and topographic maps. Right-click the map—or long-press on mobile—to open location tools; the coordinates are copied as the menu opens.",
   },
   {
     selector: "[data-tour='settings']",

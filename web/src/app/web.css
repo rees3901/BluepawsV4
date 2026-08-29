@@ -597,6 +597,11 @@ button.bluetooth-beacon:disabled {
   line-height: 1;
 }
 
+.device-card.stale .collar-awake {
+  opacity: 0.32;
+  filter: grayscale(1) saturate(0.15);
+}
+
 #deviceCards {
   min-height: 0;
   overscroll-behavior: contain;

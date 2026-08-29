@@ -40,6 +40,8 @@
     var allTrailsVisible = true;
     var allTrailsButton = null;
     var toastTimer = null;
+    var temporaryPins = new Map();
+    var nextTemporaryPinId = 1;
     var hubMode = 'home';          // home | portable | off_grid
     var hubPortableMode = false;   // true when hub scans for BLE find beacons
     var fallbackPollingTimer = null;
@@ -497,6 +499,10 @@
             }).catch(function () {
                 showToast('Unable to copy coordinates');
             });
+            L.popup({ className: 'map-context-popup', closeButton: true, maxWidth: 290 })
+                .setLatLng(e.latlng)
+                .setContent(contextMenuHtml(e.latlng))
+                .openOn(map);
         });
 
         // Click handler for measurement mode
@@ -505,7 +511,10 @@
         // Wire action buttons inside popups when they open
         map.on('popupopen', function (e) {
             var container = e.popup.getElement();
-            if (container) wireActionButtons(container);
+            if (container) {
+                wireActionButtons(container);
+                wireMapLocationActions(container);
+            }
         });
     }
 
@@ -1254,11 +1263,11 @@
         var html =
             '<div class="card-summary">' +
                 '<button type="button" class="card-reorder-handle" aria-label="Reorder ' + escapeHtml(data.name) + '">' +
-                    '<span class="reorder-grip" aria-hidden="true"><svg viewBox="0 0 18 18"><path d="M3 5h12M3 9h12M3 13h12"/></svg></span>' +
+                    '<span class="reorder-grip" aria-hidden="true"><svg viewBox="0 0 18 18"><path d="M3 6h12M3 12h12"/></svg></span>' +
                     '<span class="reorder-pin" aria-hidden="true"><svg viewBox="0 0 20 20"><path d="M7 2h6l-1 5 3 3v2H5v-2l3-3-1-5zm3 10v6"/></svg></span>' +
                 '</button>' +
                 '<div class="card-avatar-wrap"><div class="card-avatar" style="border-color:' + escapeHtml(dev.avatar.color) + '">' + escapeHtml(dev.avatar.emoji) + '</div>' +
-                '<button type="button" class="card-avatar-edit" title="Customise marker" aria-label="Customise marker">+</button></div>' +
+                (isExpanded ? '<button type="button" class="card-avatar-edit" title="Customise marker" aria-label="Customise marker">+</button>' : '') + '</div>' +
                 '<div class="card-identity">' +
                     '<div class="card-name-row">' +
                         '<span class="card-name">' + escapeHtml(data.name) + '</span>' +
@@ -1329,7 +1338,8 @@
         applyDeviceCardOrder(false);
         refreshCardOrderControls();
         updateCardFeedback(dev);
-        card.querySelector('.card-avatar-edit').onclick = function(e) {
+        var avatarEdit = card.querySelector('.card-avatar-edit');
+        if (avatarEdit) avatarEdit.onclick = function(e) {
             e.stopPropagation(); editLocalAppearance(dev.id);
         };
         var reorderHandle = card.querySelector('.card-reorder-handle');
@@ -1597,6 +1607,81 @@
             try { if (!document.execCommand('copy')) throw new Error('copy failed'); resolve(); }
             catch (error) { reject(error); }
             finally { document.body.removeChild(input); }
+        });
+    }
+
+    function locationDataAttributes(point) {
+        return 'data-latitude="' + point.lat.toFixed(6) + '" data-longitude="' + point.lng.toFixed(6) + '"';
+    }
+
+    function coordinateActionRow(point) {
+        return '<div class="map-context-coordinate-row"><span class="map-context-coordinates">' +
+            point.lat.toFixed(6) + ', ' + point.lng.toFixed(6) + '</span></div>';
+    }
+
+    function contextMenuHtml(point) {
+        var locationData = locationDataAttributes(point);
+        return '<div class="map-context-menu"><div class="map-context-heading">Map location</div>' +
+            coordinateActionRow(point) + '<div class="map-context-actions">' +
+            '<button type="button" data-location-action="drop-pin" ' + locationData + '>📍 Drop temporary pin</button>' +
+            '<button type="button" data-location-action="measure" ' + locationData + '>↔ Measure from here</button>' +
+            '</div><p class="map-context-hint">Coordinates were copied when this menu opened.</p></div>';
+    }
+
+    function temporaryPinPopupHtml(point, pinId) {
+        var locationData = locationDataAttributes(point);
+        return '<div class="map-context-menu"><div class="map-context-heading">Temporary meeting point</div>' +
+            coordinateActionRow(point) + '<div class="map-context-actions">' +
+            '<button type="button" data-location-action="measure" ' + locationData + '>↔ Measure from here</button>' +
+            '<button type="button" class="danger" data-location-action="remove-pin" data-pin-id="' + pinId + '">× Remove pin</button>' +
+            '</div><p class="map-context-hint">This pin stays only for this browser session.</p></div>';
+    }
+
+    function addTemporaryPin(point) {
+        var pinId = nextTemporaryPinId++;
+        var icon = L.divIcon({
+            className: 'temporary-map-pin-icon',
+            html: '<span class="temporary-map-pin-emoji" aria-hidden="true">📍</span>',
+            iconSize: [36, 42], iconAnchor: [18, 40], popupAnchor: [0, -36]
+        });
+        var marker = L.marker(point, { icon: icon, title: 'Temporary meeting point', zIndexOffset: 900 }).addTo(map);
+        marker.bindPopup(temporaryPinPopupHtml(point, pinId));
+        temporaryPins.set(pinId, marker);
+        marker.openPopup();
+    }
+
+    function wireMapLocationActions(container) {
+        Array.prototype.forEach.call(container.querySelectorAll('[data-location-action]'), function (button) {
+            button.addEventListener('click', function (event) {
+                event.preventDefault();
+                event.stopPropagation();
+                var action = button.getAttribute('data-location-action');
+                var pinId = Number(button.getAttribute('data-pin-id'));
+                if (action === 'remove-pin' && Number.isInteger(pinId)) {
+                    var marker = temporaryPins.get(pinId);
+                    if (marker) map.removeLayer(marker);
+                    temporaryPins.delete(pinId);
+                    map.closePopup();
+                    return;
+                }
+                var lat = Number(button.getAttribute('data-latitude'));
+                var lon = Number(button.getAttribute('data-longitude'));
+                if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+                var point = L.latLng(lat, lon);
+                if (action === 'drop-pin') {
+                    addTemporaryPin(point);
+                    showToast('Temporary pin dropped');
+                } else if (action === 'measure') {
+                    map.closePopup();
+                    clearMeasure();
+                    measuring = true;
+                    var measureButton = document.getElementById('btnMeasure');
+                    if (measureButton) measureButton.classList.add('active');
+                    map.getContainer().style.cursor = 'crosshair';
+                    onMapClick({ latlng: point });
+                    showToast('Choose the next measurement point');
+                }
+            });
         });
     }
 
