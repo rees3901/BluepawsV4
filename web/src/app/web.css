@@ -183,7 +183,6 @@ body.light {
   width: 27px;
   height: 27px;
   object-fit: contain;
-  filter: invert(1);
 }
 
 .leaflet-control-zoom a {
