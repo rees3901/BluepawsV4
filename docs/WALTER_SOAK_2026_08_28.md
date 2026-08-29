@@ -232,3 +232,22 @@ The Normal wait gate is now verified. Multiple GNSS-bearing scheduled LTE
 uploads, including one under Normal, remain outstanding; cycle 20 is the next
 expected LTE opportunity. Leave capture and monitoring running without fault
 injection, profile changes or hardware access.
+
+## Follow-up — 00:39 UTC: future GNSS sample rejected
+
+Eight Normal waits have now completed at 600.005–600.006 seconds. Cycle 18
+started at 00:31:33.262 UTC, but the modem's GNSS event at 00:32:12 reported
+timestamp epoch **1787964004**, approximately **472 seconds ahead** of the
+established device clock at receipt, together with an unusable 20,000,000 m
+uncertainty. The firmware rejected it, did not rewind or advance UTC, and emitted
+packet **2324** without valid GNSS coordinates. This is live confirmation that
+the post-fix timestamp/freshness gate contains an anomalous future modem sample;
+it is not a successful GNSS fix and does not establish its root cause.
+
+Packet 2324 passed independent HMAC verification; SHA-256
+`775380bb429aeb05a3ef3b7f7668344c045bff95d5221f4eb43727a56e616425`.
+It was simulated LoRa only and is not claimed as a cloud delivery. The LTE cadence
+remained quiet as expected, both commands remain acked once, and device 1001
+checked in at 00:33:52 in PowerSave. Walter remains online/running Normal with
+stable free heap and no reset. Continue the baseline; do not treat this contained
+bad sample as authorization to begin fault injection.
