@@ -232,11 +232,11 @@ These controls are an engineering proof rather than the intended final visual
 design; smooth animated zoom still depends on asynchronous tile loading and a
 later presentation layer.
 
-## Next UI architecture
+## LVGL app-shell architecture
 
-The hub should behave like a small appliance launcher, not one ever-growing
-map screen. The next UI boundary is an LVGL app shell with a home tile grid and
-a navigation manager that owns screen transitions. Initial app modules are:
+The hub behaves like a small appliance launcher, not one ever-growing map
+screen. It now boots to an LVGL home tile grid, with a navigation manager that
+owns screen transitions. Initial app modules are:
 
 - **Live Map**: positions, trails, geofences, layers and map tools.
 - **Cat Summary**: last report, age, battery, radio quality and alert state.
@@ -247,5 +247,22 @@ a navigation manager that owns screen transitions. Initial app modules are:
 These are LVGL screens/components inside one firmware image, not independent
 executables. Shared services own `CatStore`, settings persistence, networking,
 radio and storage; app pages observe those services and must not initialize
-hardware themselves. The launcher and app contracts should be extracted from
-the temporary `main.cpp` testbed before adding more map features.
+hardware themselves.
+
+The reusable header, Apps/rotation controls and launcher tiles live in
+`main/app_shell.cpp`; page-specific rendering remains in the testbed entry
+point while its interfaces settle. **Live Map** retains the proven SD tile
+cache, drag, pinch, Home, Fit and zoom behaviour. **Cat Summary** and
+**Diagnostics** update once per second from the existing shared store and board
+state. **Settings** intentionally labels its values as a non-persistent preview
+until the C6 networking and settings-storage service is implemented. Rotation
+rebuilds the current page without recreating the shared cat, SD, JPEG or display
+services.
+
+The first app-shell application is 921,056 bytes with SHA-256
+`5220BF6B2411EF51B23B9AEE909F4064AEFF2C5D85E9C32135F2C86ABB7D2A3E`.
+It was flashed app-only at `0x10000` with esptool hash verification. The
+monitored boot again reported revision 1.3, 16 MB flash, 32 MB PSRAM and the
+mounted SD volume without a panic or reset loop. The hardware touch trace
+confirmed launcher-to-map navigation, hardware decoding of the cached map
+tiles, and return to the launcher through the shell navigation control.

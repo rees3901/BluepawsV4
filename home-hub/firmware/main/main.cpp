@@ -2,6 +2,7 @@
 #include "bluepaws/cat_store.h"
 #include "bluepaws/map_engine.h"
 #include "guition_jc4880p443c.h"
+#include "app_shell.h"
 
 #include "driver/jpeg_decode.h"
 #include "esp_heap_caps.h"
@@ -27,6 +28,14 @@ constexpr char kTag[] = "bluepaws_home_hub";
 constexpr uint32_t kMarkerColours[] = {
     0x1E88E5, 0xE53935, 0x43A047, 0xFB8C00,
     0x8E24AA, 0x00897B, 0x6D4C41, 0x546E7A,
+};
+
+enum class AppPage : uint8_t {
+    Launcher,
+    Map,
+    Summary,
+    Settings,
+    Diagnostics,
 };
 
 struct UiLayout {
@@ -60,7 +69,9 @@ struct UiState {
     std::array<lv_obj_t *, bluepaws::map::kMaximumVisibleTiles> tile_images{};
     std::array<TileCacheEntry, bluepaws::map::kMaximumVisibleTiles> tile_cache{};
     std::array<lv_obj_t *, bluepaws::kMaximumCats> markers{};
+    std::array<lv_obj_t *, bluepaws::kMaximumCats> summary_rows{};
     lv_obj_t *cat_list = nullptr;
+    lv_obj_t *diagnostics_text = nullptr;
     lv_obj_t *status = nullptr;
     lv_timer_t *update_timer = nullptr;
     guition_jc4880p443c_sd_info_t sd{};
@@ -70,6 +81,7 @@ struct UiState {
     size_t prepared_tile_count = 0;
     uint32_t map_refresh_ms = 0;
     uint32_t cache_generation = 0;
+    AppPage active_page = AppPage::Launcher;
     bool portrait = false;
     bool tiles_dirty = true;
 };
@@ -281,9 +293,12 @@ void refresh_map_tiles(UiState &ui)
 
 void update_ui(UiState &ui)
 {
-    refresh_map_tiles(ui);
     const uint32_t now_ms = uptime_ms();
     ui.simulator.update(now_ms, ui.cats);
+
+    if (ui.active_page == AppPage::Map && ui.map_view != nullptr) {
+        refresh_map_tiles(ui);
+    }
 
     char list_text[640]{};
     size_t used = 0;
@@ -312,33 +327,89 @@ void update_ui(UiState &ui)
             used = std::min(sizeof(list_text) - 1, used + static_cast<size_t>(written));
         }
 
-        lv_obj_t *marker = ui.markers[i];
-        if (marker == nullptr || !cat->has_position) {
-            continue;
+        if (ui.summary_rows[i] != nullptr) {
+            const uint32_t age_seconds = (now_ms - cat->latest.received_at_ms) / 1000U;
+            lv_label_set_text_fmt(ui.summary_rows[i],
+                                  "%s\nID %u  |  %u%%  |  %d dBm  |  %lus ago",
+                                  cat->name,
+                                  static_cast<unsigned>(cat->device_id),
+                                  static_cast<unsigned>(cat->latest.battery_percent),
+                                  static_cast<int>(cat->latest.rssi),
+                                  static_cast<unsigned long>(age_seconds));
         }
-        const bluepaws::map::GeoPoint position{
-            static_cast<double>(cat->last_valid_latitude_e7) / 1.0e7,
-            static_cast<double>(cat->last_valid_longitude_e7) / 1.0e7,
-        };
-        const bluepaws::map::ScreenPoint point = ui.viewport.toScreen(position);
-        const int32_t x = static_cast<int32_t>(point.x);
-        const int32_t y = static_cast<int32_t>(point.y);
-        if (x < 0 || x >= ui.viewport.width() || y < 0 || y >= ui.viewport.height()) {
-            lv_obj_add_flag(marker, LV_OBJ_FLAG_HIDDEN);
-        } else {
-            lv_obj_remove_flag(marker, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_set_pos(marker, x - kMarkerSize / 2, y - kMarkerSize / 2);
+
+        lv_obj_t *marker = ui.markers[i];
+        if (marker != nullptr && cat->has_position) {
+            const bluepaws::map::GeoPoint position{
+                static_cast<double>(cat->last_valid_latitude_e7) / 1.0e7,
+                static_cast<double>(cat->last_valid_longitude_e7) / 1.0e7,
+            };
+            const bluepaws::map::ScreenPoint point = ui.viewport.toScreen(position);
+            const int32_t x = static_cast<int32_t>(point.x);
+            const int32_t y = static_cast<int32_t>(point.y);
+            if (x < 0 || x >= ui.viewport.width() || y < 0 || y >= ui.viewport.height()) {
+                lv_obj_add_flag(marker, LV_OBJ_FLAG_HIDDEN);
+            } else {
+                lv_obj_remove_flag(marker, LV_OBJ_FLAG_HIDDEN);
+                lv_obj_set_pos(marker, x - kMarkerSize / 2, y - kMarkerSize / 2);
+            }
         }
     }
 
-    lv_label_set_text(ui.cat_list, list_text);
-    if (ui.sd.mounted) {
-        constexpr uint64_t kGiB = 1024ULL * 1024ULL * 1024ULL;
-        const unsigned volume_gib = static_cast<unsigned>((ui.sd.volume_total_bytes + kGiB / 2) / kGiB);
-        const unsigned card_gib = static_cast<unsigned>((ui.sd.card_capacity_bytes + kGiB / 2) / kGiB);
-        if (ui.portrait) {
+    if (ui.cat_list != nullptr) {
+        lv_label_set_text(ui.cat_list, list_text);
+    }
+
+    constexpr uint64_t kGiB = 1024ULL * 1024ULL * 1024ULL;
+    const unsigned volume_gib = static_cast<unsigned>((ui.sd.volume_total_bytes + kGiB / 2) / kGiB);
+    const unsigned card_gib = static_cast<unsigned>((ui.sd.card_capacity_bytes + kGiB / 2) / kGiB);
+
+    if (ui.diagnostics_text != nullptr) {
+        const unsigned internal_kib = static_cast<unsigned>(
+            heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024U);
+        const unsigned psram_kib = static_cast<unsigned>(
+            heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024U);
+        size_t cached_tiles = 0;
+        for (const TileCacheEntry &entry : ui.tile_cache) {
+            cached_tiles += entry.valid ? 1U : 0U;
+        }
+        lv_label_set_text_fmt(ui.diagnostics_text,
+                              "BOARD\nESP32-P4 rev 1.3  |  800 x 480 RGB display\n\n"
+                              "RUNTIME\nUptime: %lu s\nOrientation: %s\nTouch contacts: %u\n\n"
+                              "STORAGE + MAP\nSD: %s  |  FAT volume %u GiB  |  card %u GiB\n"
+                              "Map zoom: %u  |  decoded cache: %u/%u tiles\n\n"
+                              "MEMORY\nInternal free: %u KiB\nPSRAM free: %u KiB\n\n"
+                              "SERVICES\nCat simulator: %u active\nC6 networking: not started\nLoRa receiver: not started",
+                              static_cast<unsigned long>(now_ms / 1000U),
+                              ui.portrait ? "portrait" : "landscape",
+                              static_cast<unsigned>(guition_jc4880p443c_touch_count()),
+                              ui.sd.mounted ? "mounted" : "unavailable",
+                              volume_gib,
+                              card_gib,
+                              static_cast<unsigned>(ui.viewport.zoom()),
+                              static_cast<unsigned>(cached_tiles),
+                              static_cast<unsigned>(ui.tile_cache.size()),
+                              internal_kib,
+                              psram_kib,
+                              static_cast<unsigned>(ui.cats.size()));
+    }
+
+    if (ui.status == nullptr) {
+        return;
+    }
+    switch (ui.active_page) {
+    case AppPage::Launcher:
+        lv_label_set_text_fmt(ui.status,
+                              "%u cats online  |  SD %s  |  touch ready",
+                              static_cast<unsigned>(ui.cats.size()),
+                              ui.sd.mounted ? "ready" : "unavailable");
+        break;
+    case AppPage::Map:
+        if (ui.sd.mounted) {
             lv_label_set_text_fmt(ui.status,
-                                  "%u cats | z%u | SD %u/%u | view %u | %lu ms",
+                                  ui.portrait
+                                      ? "%u cats | z%u | SD %u/%u | view %u | %lu ms"
+                                      : "SIM | %u cats | z%u | SD %u/%u GiB | view %u | %lu ms",
                                   static_cast<unsigned>(ui.cats.size()),
                                   static_cast<unsigned>(ui.viewport.zoom()),
                                   volume_gib,
@@ -346,22 +417,24 @@ void update_ui(UiState &ui)
                                   static_cast<unsigned>(ui.visible_tile_count),
                                   static_cast<unsigned long>(ui.map_refresh_ms));
         } else {
-            lv_label_set_text_fmt(ui.status,
-                                  "SIM | %u cats | z%u | SD %u/%u GiB | view %u + %u ready | %lu ms",
-                                  static_cast<unsigned>(ui.cats.size()),
-                                  static_cast<unsigned>(ui.viewport.zoom()),
-                                  volume_gib,
-                                  card_gib,
-                                  static_cast<unsigned>(ui.visible_tile_count),
-                                  static_cast<unsigned>(ui.prepared_tile_count -
-                                                        std::min(ui.prepared_tile_count,
-                                                                 ui.visible_tile_count)),
-                                  static_cast<unsigned long>(ui.map_refresh_ms));
+            lv_label_set_text(ui.status, "SIMULATOR | SD unavailable | touch ready");
         }
-    } else {
+        break;
+    case AppPage::Summary:
         lv_label_set_text_fmt(ui.status,
-                              "SIMULATOR  |  %u cats  |  SD unavailable  |  touch ready",
+                              "%u reporting  |  live simulator data  |  updates every second",
                               static_cast<unsigned>(ui.cats.size()));
+        break;
+    case AppPage::Settings:
+        lv_label_set_text(ui.status, "Configuration preview | values are not persisted yet");
+        break;
+    case AppPage::Diagnostics:
+        lv_label_set_text_fmt(ui.status,
+                              "Uptime %lu s | SD %s | %u cats",
+                              static_cast<unsigned long>(now_ms / 1000U),
+                              ui.sd.mounted ? "mounted" : "unavailable",
+                              static_cast<unsigned>(ui.cats.size()));
+        break;
     }
 }
 
@@ -455,6 +528,13 @@ void fit_all_clicked(lv_event_t *event)
 
 void create_ui(UiState &ui);
 
+void rebuild_current_page(void *user_data)
+{
+    auto *ui = static_cast<UiState *>(user_data);
+    lv_obj_clean(lv_screen_active());
+    create_ui(*ui);
+}
+
 void rebuild_for_orientation(void *user_data)
 {
     auto *ui = static_cast<UiState *>(user_data);
@@ -463,20 +543,47 @@ void rebuild_for_orientation(void *user_data)
         ui->display, ui->portrait ? LV_DISPLAY_ROTATION_0 : LV_DISPLAY_ROTATION_90);
     const UiLayout &layout = current_layout(*ui);
     ui->viewport.resize(layout.map_width, layout.map_height);
-    ui->tile_images.fill(nullptr);
-    ui->markers.fill(nullptr);
-    ui->map_view = nullptr;
-    ui->cat_list = nullptr;
-    ui->status = nullptr;
     ui->tiles_dirty = true;
-    lv_obj_clean(lv_screen_active());
-    create_ui(*ui);
+    ESP_LOGI(kTag, "UI orientation changed to %s", ui->portrait ? "portrait" : "landscape");
+    rebuild_current_page(ui);
 }
 
 void orientation_clicked(lv_event_t *event)
 {
     auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
     lv_async_call(rebuild_for_orientation, ui);
+}
+
+void navigate_to(UiState &ui, AppPage page)
+{
+    ui.active_page = page;
+    ESP_LOGI(kTag, "Opening app page %u", static_cast<unsigned>(page));
+    lv_async_call(rebuild_current_page, &ui);
+}
+
+void launcher_clicked(lv_event_t *event)
+{
+    navigate_to(*static_cast<UiState *>(lv_event_get_user_data(event)), AppPage::Launcher);
+}
+
+void map_app_clicked(lv_event_t *event)
+{
+    navigate_to(*static_cast<UiState *>(lv_event_get_user_data(event)), AppPage::Map);
+}
+
+void summary_app_clicked(lv_event_t *event)
+{
+    navigate_to(*static_cast<UiState *>(lv_event_get_user_data(event)), AppPage::Summary);
+}
+
+void settings_app_clicked(lv_event_t *event)
+{
+    navigate_to(*static_cast<UiState *>(lv_event_get_user_data(event)), AppPage::Settings);
+}
+
+void diagnostics_app_clicked(lv_event_t *event)
+{
+    navigate_to(*static_cast<UiState *>(lv_event_get_user_data(event)), AppPage::Diagnostics);
 }
 
 lv_obj_t *make_label(lv_obj_t *parent, const char *text, lv_color_t colour)
@@ -532,41 +639,75 @@ void create_map_grid(lv_obj_t *map_view, int32_t map_width, int32_t map_height)
     }
 }
 
-void create_ui(UiState &ui)
+bluepaws::ui::PageActions page_actions(UiState &ui, bool show_home)
+{
+    return {
+        .home = show_home ? launcher_clicked : nullptr,
+        .rotate = orientation_clicked,
+        .user_data = &ui,
+    };
+}
+
+void create_launcher(UiState &ui)
+{
+    lv_obj_t *content = bluepaws::ui::create_page_frame(
+        lv_screen_active(),
+        "BluePaws Home Hub",
+        "Starting services...",
+        page_actions(ui, false),
+        &ui.status);
+    lv_obj_set_flex_flow(content, LV_FLEX_FLOW_ROW_WRAP);
+    lv_obj_set_flex_align(content,
+                          LV_FLEX_ALIGN_SPACE_EVENLY,
+                          LV_FLEX_ALIGN_SPACE_EVENLY,
+                          LV_FLEX_ALIGN_CENTER);
+
+    const int32_t tile_width = ui.portrait ? 448 : 374;
+    const int32_t tile_height = ui.portrait ? 160 : 184;
+    bluepaws::ui::create_app_tile(content,
+                                  tile_width,
+                                  tile_height,
+                                  "Live Map",
+                                  "Offline Gloucester tiles, live cat positions, pan and zoom",
+                                  0x1976A3,
+                                  map_app_clicked,
+                                  &ui);
+    bluepaws::ui::create_app_tile(content,
+                                  tile_width,
+                                  tile_height,
+                                  "Cat Summary",
+                                  "See every collar, battery level, signal and last report",
+                                  0x2E7D5B,
+                                  summary_app_clicked,
+                                  &ui);
+    bluepaws::ui::create_app_tile(content,
+                                  tile_width,
+                                  tile_height,
+                                  "Settings",
+                                  "Wi-Fi priorities, fallback access point and hub preferences",
+                                  0x7A5A9E,
+                                  settings_app_clicked,
+                                  &ui);
+    bluepaws::ui::create_app_tile(content,
+                                  tile_width,
+                                  tile_height,
+                                  "Diagnostics",
+                                  "Display, touch, SD, map cache, memory and service status",
+                                  0xB65E36,
+                                  diagnostics_app_clicked,
+                                  &ui);
+}
+
+void create_map_page(UiState &ui)
 {
     const UiLayout &layout = current_layout(ui);
-    lv_obj_t *screen = lv_screen_active();
-    lv_obj_set_style_bg_color(screen, lv_color_hex(0xEAF1F5), 0);
-    lv_obj_set_style_pad_all(screen, 0, 0);
-    lv_obj_set_style_pad_gap(screen, 0, 0);
-    lv_obj_set_flex_flow(screen, LV_FLEX_FLOW_COLUMN);
-    lv_obj_remove_flag(screen, LV_OBJ_FLAG_SCROLLABLE);
-
-    lv_obj_t *header = lv_obj_create(screen);
-    lv_obj_set_size(header, LV_PCT(100), 58);
-    lv_obj_set_style_bg_color(header, lv_color_hex(0x17324D), 0);
-    lv_obj_set_style_border_width(header, 0, 0);
-    lv_obj_set_style_radius(header, 0, 0);
-    lv_obj_set_style_pad_hor(header, 18, 0);
-    lv_obj_set_style_pad_ver(header, 8, 0);
-    lv_obj_set_flex_flow(header, LV_FLEX_FLOW_COLUMN);
-    lv_obj_remove_flag(header, LV_OBJ_FLAG_SCROLLABLE);
-
-    lv_obj_t *title = make_label(header, "BluePaws Home Hub", lv_color_hex(0xFFFFFF));
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_22, 0);
-    ui.status = make_label(header, "Starting hardware...", lv_color_hex(0x9FD8FF));
-    lv_obj_set_style_text_font(ui.status, &lv_font_montserrat_14, 0);
-
-    lv_obj_t *content = lv_obj_create(screen);
-    lv_obj_set_size(content, LV_PCT(100), 0);
-    lv_obj_set_flex_grow(content, 1);
-    lv_obj_set_style_bg_opa(content, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(content, 0, 0);
-    lv_obj_set_style_radius(content, 0, 0);
-    lv_obj_set_style_pad_all(content, 8, 0);
-    lv_obj_set_style_pad_gap(content, 8, 0);
+    lv_obj_t *content = bluepaws::ui::create_page_frame(
+        lv_screen_active(),
+        "BluePaws | Live Map",
+        "Loading offline map...",
+        page_actions(ui, true),
+        &ui.status);
     lv_obj_set_flex_flow(content, ui.portrait ? LV_FLEX_FLOW_COLUMN : LV_FLEX_FLOW_ROW);
-    lv_obj_remove_flag(content, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *map_panel = lv_obj_create(content);
     lv_obj_set_size(map_panel, layout.map_panel_width, layout.map_panel_height);
@@ -619,12 +760,6 @@ void create_ui(UiState &ui)
     make_map_control(ui.map_view, 8, 50, "FIT", fit_all_clicked, ui);
     make_map_control(ui.map_view, 8, layout.map_height - 88, "+", zoom_in_clicked, ui);
     make_map_control(ui.map_view, 8, layout.map_height - 46, "-", zoom_out_clicked, ui);
-    make_map_control(ui.map_view,
-                     layout.map_width - 52,
-                     8,
-                     "ROT",
-                     orientation_clicked,
-                     ui);
 
     lv_obj_t *sidebar = lv_obj_create(content);
     lv_obj_set_size(sidebar, layout.sidebar_width, layout.sidebar_height);
@@ -643,6 +778,142 @@ void create_ui(UiState &ui)
     lv_obj_set_width(ui.cat_list, LV_PCT(100));
     lv_label_set_long_mode(ui.cat_list, LV_LABEL_LONG_WRAP);
     lv_obj_set_flex_grow(ui.cat_list, 1);
+}
+
+void style_card(lv_obj_t *card)
+{
+    lv_obj_set_style_bg_color(card, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_border_color(card, lv_color_hex(0xAFC3D1), 0);
+    lv_obj_set_style_border_width(card, 1, 0);
+    lv_obj_set_style_radius(card, 10, 0);
+    lv_obj_set_style_pad_all(card, 12, 0);
+    lv_obj_remove_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+}
+
+void create_summary_page(UiState &ui)
+{
+    lv_obj_t *content = bluepaws::ui::create_page_frame(
+        lv_screen_active(),
+        "BluePaws | Cat Summary",
+        "Waiting for collar reports...",
+        page_actions(ui, true),
+        &ui.status);
+    lv_obj_set_flex_flow(content, LV_FLEX_FLOW_ROW_WRAP);
+    lv_obj_set_flex_align(content,
+                          LV_FLEX_ALIGN_SPACE_EVENLY,
+                          LV_FLEX_ALIGN_SPACE_EVENLY,
+                          LV_FLEX_ALIGN_CENTER);
+
+    const int32_t card_width = ui.portrait ? 448 : 374;
+    const int32_t card_height = ui.portrait ? 76 : 88;
+    for (size_t i = 0; i < ui.summary_rows.size(); ++i) {
+        lv_obj_t *card = lv_obj_create(content);
+        lv_obj_set_size(card, card_width, card_height);
+        style_card(card);
+        lv_obj_set_style_border_color(card, lv_color_hex(kMarkerColours[i]), 0);
+        lv_obj_set_style_border_width(card, 3, 0);
+        ui.summary_rows[i] = make_label(card, "Waiting for report...", lv_color_hex(0x17324D));
+        lv_obj_set_width(ui.summary_rows[i], LV_PCT(100));
+        lv_obj_set_style_text_font(ui.summary_rows[i], &lv_font_montserrat_14, 0);
+    }
+}
+
+lv_obj_t *create_setting_card(lv_obj_t *parent,
+                              const char *title_text,
+                              const char *value,
+                              lv_color_t accent)
+{
+    lv_obj_t *card = lv_obj_create(parent);
+    lv_obj_set_size(card, LV_PCT(100), 78);
+    style_card(card);
+    lv_obj_set_style_border_color(card, accent, 0);
+    lv_obj_set_style_border_width(card, 2, 0);
+    lv_obj_t *title = make_label(card, title_text, lv_color_hex(0x41657A));
+    lv_obj_set_pos(title, 2, 0);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_14, 0);
+    lv_obj_t *value_label = make_label(card, value, lv_color_hex(0x17324D));
+    lv_obj_set_pos(value_label, 2, 28);
+    lv_obj_set_style_text_font(value_label, &lv_font_montserrat_18, 0);
+    return card;
+}
+
+void create_settings_page(UiState &ui)
+{
+    lv_obj_t *content = bluepaws::ui::create_page_frame(
+        lv_screen_active(),
+        "BluePaws | Settings",
+        "Configuration preview",
+        page_actions(ui, true),
+        &ui.status);
+    lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(content, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_hor(content, ui.portrait ? 12 : 80, 0);
+
+    create_setting_card(content, "PRIMARY WI-FI", "Not configured", lv_color_hex(0x1976A3));
+    create_setting_card(content, "SECONDARY WI-FI", "Not configured", lv_color_hex(0x2E7D5B));
+    create_setting_card(content, "FALLBACK ACCESS POINT", "BluePaws-Hub", lv_color_hex(0x7A5A9E));
+
+    lv_obj_t *notice = lv_obj_create(content);
+    lv_obj_set_size(notice, LV_PCT(100), 92);
+    style_card(notice);
+    lv_obj_set_style_bg_color(notice, lv_color_hex(0xFFF4D6), 0);
+    lv_obj_set_style_border_color(notice, lv_color_hex(0xD29B29), 0);
+    lv_obj_t *notice_text = make_label(
+        notice,
+        "TESTBED ONLY\nEditing and persistent storage arrive with the C6 networking/settings service.",
+        lv_color_hex(0x654A10));
+    lv_obj_set_width(notice_text, LV_PCT(100));
+    lv_label_set_long_mode(notice_text, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_font(notice_text, &lv_font_montserrat_14, 0);
+}
+
+void create_diagnostics_page(UiState &ui)
+{
+    lv_obj_t *content = bluepaws::ui::create_page_frame(
+        lv_screen_active(),
+        "BluePaws | Diagnostics",
+        "Reading hardware state...",
+        page_actions(ui, true),
+        &ui.status);
+    lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
+
+    lv_obj_t *panel = lv_obj_create(content);
+    lv_obj_set_size(panel, LV_PCT(100), LV_PCT(100));
+    style_card(panel);
+    lv_obj_set_style_pad_all(panel, 16, 0);
+    ui.diagnostics_text = make_label(panel, "Collecting diagnostics...", lv_color_hex(0x17324D));
+    lv_obj_set_width(ui.diagnostics_text, LV_PCT(100));
+    lv_label_set_long_mode(ui.diagnostics_text, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_font(ui.diagnostics_text, &lv_font_montserrat_14, 0);
+}
+
+void create_ui(UiState &ui)
+{
+    ui.tile_images.fill(nullptr);
+    ui.markers.fill(nullptr);
+    ui.summary_rows.fill(nullptr);
+    ui.map_view = nullptr;
+    ui.cat_list = nullptr;
+    ui.diagnostics_text = nullptr;
+    ui.status = nullptr;
+
+    switch (ui.active_page) {
+    case AppPage::Launcher:
+        create_launcher(ui);
+        break;
+    case AppPage::Map:
+        create_map_page(ui);
+        break;
+    case AppPage::Summary:
+        create_summary_page(ui);
+        break;
+    case AppPage::Settings:
+        create_settings_page(ui);
+        break;
+    case AppPage::Diagnostics:
+        create_diagnostics_page(ui);
+        break;
+    }
 
     update_ui(ui);
     if (ui.update_timer == nullptr) {
