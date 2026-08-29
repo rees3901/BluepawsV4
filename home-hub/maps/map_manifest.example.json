@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "name": "BluePaws offline map sample",
+  "version": "2026-08",
+  "projection": "EPSG:3857",
+  "tile_scheme": "xyz",
+  "tile_size": 256,
+  "min_zoom": 10,
+  "max_zoom": 17,
+  "format": "jpg",
+  "tile_path": "tiles/{z}/{x}/{y}.jpg",
+  "attribution": "Map data © OpenStreetMap contributors"
+}
