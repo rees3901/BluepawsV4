@@ -27,7 +27,7 @@ BSP 5.2.3 are therefore the implementation baseline.
 
 | Function | Confirmed configuration |
 | --- | --- |
-| Application processor | ESP32-P4, dual-core RISC-V |
+| Application processor | ESP32-P4 revision 1.3, dual-core RISC-V |
 | Connectivity companion | On-module ESP32-C6 for Wi-Fi/Bluetooth |
 | Display | 4.3-inch IPS, native portrait 480 x 800 |
 | Display controller/bus | ST7701S over two-lane MIPI-DSI |
@@ -62,6 +62,19 @@ LVGL v8/v9 mismatch, not the choice of Arduino-style `setup()`/`loop()`.
 The dependency lock also pins `esp_lvgl_port` 2.7.2. Version 2.9.0 expects a
 DPI callback newer than the ESP-IDF 5.5.4 baseline, so allowing an unbounded
 2.x upgrade would make an otherwise reproducible checkout fail to compile.
+
+The delivered board identifies as ESP32-P4 revision 1.3. ESP-IDF treats the
+pre-v3 and v3 P4 hardware families as mutually exclusive, so the checked-in
+defaults explicitly select pre-v3 support with revision 1.0 as the minimum.
+LVGL's optional fast-memory placement is disabled to stay within the smaller
+pre-v3 internal RAM map. Do not use this firmware image on a revision 3.x P4
+board.
+
+The GUITION package patches the upstream ST7701 `480x360` preset with the
+actual 480x800 panel timing (28 MHz pixel clock and GUITION porch values).
+BluePaws keeps the registry component pristine and applies those values in the
+board adapter. LVGL draw and rotation buffers live in the 32 MB PSRAM so the
+P4 DMA2D engine can perform valid cache synchronization.
 
 ## Implemented boundary
 

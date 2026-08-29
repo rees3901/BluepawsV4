@@ -103,6 +103,21 @@ static esp_err_t display_panel_new(esp_lcd_panel_handle_t *panel,
 
     esp_lcd_dpi_panel_config_t dpi_config =
         ST7701_480_360_PANEL_60HZ_DPI_CONFIG(LCD_COLOR_PIXEL_FORMAT_RGB565);
+    /*
+     * GUITION ships a locally patched ST7701 component whose unfortunately
+     * named 480x360 preset contains the timings for this board's 480x800
+     * glass. Keep the registry component pristine and apply those
+     * board-specific timings here instead.
+     */
+    dpi_config.dpi_clock_freq_mhz = 28;
+    dpi_config.video_timing.h_size = LCD_H_RES;
+    dpi_config.video_timing.v_size = LCD_V_RES;
+    dpi_config.video_timing.hsync_back_porch = 42;
+    dpi_config.video_timing.hsync_pulse_width = 12;
+    dpi_config.video_timing.hsync_front_porch = 42;
+    dpi_config.video_timing.vsync_back_porch = 8;
+    dpi_config.video_timing.vsync_pulse_width = 2;
+    dpi_config.video_timing.vsync_front_porch = 166;
     dpi_config.num_fbs = 1;
 
     const st7701_vendor_config_t vendor_config = {
@@ -209,7 +224,8 @@ lv_display_t *guition_jc4880p443c_display_start(void)
         .color_format = LV_COLOR_FORMAT_RGB565,
         .flags = {
             .buff_dma = false,
-            .buff_spiram = false,
+            /* DMA2D requires cacheable memory; use the board's 32 MB PSRAM. */
+            .buff_spiram = true,
             .swap_bytes = false,
             .sw_rotate = true,
         },
