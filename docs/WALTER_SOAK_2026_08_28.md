@@ -251,3 +251,47 @@ remained quiet as expected, both commands remain acked once, and device 1001
 checked in at 00:33:52 in PowerSave. Walter remains online/running Normal with
 stable free heap and no reset. Continue the baseline; do not treat this contained
 bad sample as authorization to begin fault injection.
+
+## Follow-up — 01:00 UTC: scheduled Normal LTE baseline
+
+After nine completed Normal waits of 600.005–600.006 seconds, cycle 20 started
+at **00:53:16.552 UTC**. GNSS returned a valid sample with encoded uncertainty
+78 m. Packet **2326** was accepted as Supabase observation **6536** at
+**00:54:15.360931 UTC**, `cellular_direct`, profile Normal, `gnss_valid=true`,
+fix age 0 seconds. The serial packet independently passed HMAC verification and
+its SHA-256 matched the cloud row:
+`8a2861742392a511087f1679fbdb1361bb52543aa1219cced014de86095120c3`.
+
+The LTE receive window ran 00:54:15.479–00:54:25.598 (**10.12 seconds**) and
+correctly found no command. No duplicate observation, command or ACK was invented.
+The worker returned to a 600-second Normal wait. Walter last-seen advanced to
+00:54:15.349 UTC with profile Normal. Commands 6 and 7 remain acked once. The
+latest read-only 1001 control last-seen was 00:33:52.853 UTC in PowerSave.
+
+This supplies two genuine GNSS-bearing **scheduled** LTE reports after the clock
+fix: Active cycle 10 / observation 6531 and Normal cycle 20 / observation 6536.
+Normal → Active → Normal ACKs, nine Active one-minute waits, ten Normal ten-minute
+waits, scheduled LTE cadence, receive windows and packet/cloud correlation have
+all passed. The sunny-day **transport/scheduling gate is passed**. It does not
+mean GNSS quality is consistently good: uncertainty has ranged widely, invalid
+samples occurred, and only the rejection behavior—not a GNSS root cause—is proven.
+
+Re-ran non-hardware recovery/fuzz coverage while COM26 remained exclusively owned
+by the monitor: the actual Walter host contract/policy suite passed, all four LTE
+poll tests passed, and both soak evidence-parser tests passed. Coverage includes
+malformed, expired and duplicate commands, failed polls, cancellation, bounded
+timeouts, credential/receipt gates and sequence reservation failures. These are
+not live modem/network recovery evidence.
+
+### Bounded live recovery plan—not started
+
+Keep this uninterrupted soak unchanged through its planned 10:45 UTC summary.
+A separate later operator-window experiment should be scoped to device 1010 and
+record a pre-fault cloud/serial baseline, one precisely defined failure, expected
+RF-off/error behavior, the removal time, and the next natural recovery receipt.
+Do not disturb COM7/23/11, device 1001, cloud authentication, SIM service or the
+physical antennas. With the current image there is no safe one-shot serial fault
+hook; creating one requires reviewed firmware, tests and a reflash, all forbidden
+during this soak. Therefore no live fault has been injected automatically. PR
+#147 remains draft while the longer run continues, and recovery remains explicitly
+unproven rather than inferred from offline fuzzing.
