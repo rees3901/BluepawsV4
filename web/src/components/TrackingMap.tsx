@@ -564,7 +564,7 @@ function signalIndicatorHtml(device: TelemetryDevice, isHub: boolean) {
 
 function bluetoothBeaconHtml(advertising: boolean) {
   const label = advertising ? "Home beacon advertising" : "Home beacon not advertising";
-  return `<span class="bluetooth-beacon${advertising ? " active" : ""}" title="${label}" role="img" aria-label="${label}"><svg aria-hidden="true" viewBox="0 0 16 20"><path d="M4 5l9 10-5 4V1l5 4L4 15" fill="none" stroke="currentColor" stroke-width="2"/></svg><span class="bluetooth-beacon-state ${advertising ? "on" : "off"}" aria-hidden="true">${advertising ? "✓" : "×"}</span></span>`;
+  return `<span class="bluetooth-beacon${advertising ? " active" : ""}" title="${label}" role="img" aria-label="${label}"><svg aria-hidden="true" viewBox="0 0 16 20"><path d="M4 5l9 10-5 4V1l5 4L4 15" fill="none" stroke="currentColor" stroke-width="2"/></svg><span class="bluetooth-beacon-state ${advertising ? "on" : "off"}" aria-hidden="true">${advertising ? "✓" : "❌"}</span></span>`;
 }
 
 function wifiQuality(rssi: number | null) {

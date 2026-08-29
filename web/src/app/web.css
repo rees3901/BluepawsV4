@@ -523,7 +523,13 @@ body.panel-open .map-loading {
 }
 
 .bluetooth-beacon-state.off {
-  background: #dc2626;
+  width: 14px;
+  height: 14px;
+  top: -6px;
+  right: -7px;
+  border: 0;
+  background: transparent;
+  font-size: 13px;
 }
 
 .bluetooth-beacon-state.on {
