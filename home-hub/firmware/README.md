@@ -28,6 +28,9 @@ idf.py -p COMx flash monitor
 
 Do not copy a generated `sdkconfig` between unrelated P4 boards. The checked-in
 `sdkconfig.defaults` and `guition_jc4880p443c` adapter are specific to this SKU.
+The adapter deliberately uses the factory-proven ST7701 command sequence and
+34 MHz 480x800 timing; replacing it with a generic or newer preset can leave
+revision 1.3 hardware with only a grey backlit panel.
 
 ## Architecture boundary
 
