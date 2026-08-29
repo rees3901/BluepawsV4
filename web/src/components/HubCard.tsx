@@ -63,6 +63,8 @@ export function HubCard({ hub, onSaved, cardProps }: { hub: HubPresence; onSaved
     finally { clearTimeout(timeout); setBusy(false); }
   };
   return <><DeviceCard {...cardProps} onReportLog={() => void loadReport()} onReportExport={() => void loadReport(true)}
+    bluetoothEnabled={hub.ble_enabled} bluetoothToggleDisabled={pending || offline}
+    onBluetoothToggle={() => void save({enabled: !hub.ble_enabled})}
     hubDetails={<>
       <span className="label">Hub ID</span><span className="value">{hub.gateway_guid16.toString(16).padStart(4, "0")}</span>
       <span className="label">GPS fix</span><span className="value">{hub.fix_at ? new Date(hub.fix_at).toLocaleString() : "Not acquired"}</span>
