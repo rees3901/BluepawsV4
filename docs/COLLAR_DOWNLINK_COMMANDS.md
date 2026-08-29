@@ -26,6 +26,27 @@ Backend marks the command acknowledged
 
 ## LTE-direct delivery
 
+### Use the path the collar opens
+
+There is one device command queue, not independent LTE and LoRa copies. The
+authenticated check-in determines the return path: `cellular_direct` returns a
+command to the collar; `lora_hub` returns it to the receiving hub for immediate
+LoRa downlink. Queueing a command must not wake the LTE modem, open an unsolicited
+connection, or send a speculative copy through every hub.
+
+An unacknowledged command may be redelivered on a later check-in, including on the
+other transport, with the same command identity. Concurrent check-ins are not an
+exactly-once execution guarantee. A future collar containing both radios must
+share duplicate-command state across both receive handlers and re-ACK duplicates
+without reapplying them. Walter currently exercises LTE only; its duplicate cache
+is volatile. Separate Walter/WisMesh tests do not prove combined-radio deduplication
+or durable execution across resets.
+
+Expiry is independent of transport. A ten-minute dashboard command can expire
+before a slow-profile collar next uses LTE. Show that as expired, not delivered;
+do not wake LTE or silently extend expiry. Longer command validity or an explicit
+"until next check-in" option is a separate product decision.
+
 For `ingest_path = cellular_direct`, the collar sends the normal HTTPS JSON wrapper containing the base64 TLV payload.
 
 If a pending command exists, the Edge Function includes it in the JSON response:
