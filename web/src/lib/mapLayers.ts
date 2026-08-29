@@ -55,6 +55,11 @@ export const MAP_LAYER_DEFINITIONS: Record<MapLayerName, MapLayerDefinition> = {
   },
 };
 
+// Keep all providers configured so they can be restored without reconstructing
+// URLs or zoom limits, while exposing only the dependable customer-facing set.
+export const MAP_LAYER_PICKER_NAMES = ["Street", "Satellite", "Topographic"] as const satisfies readonly MapLayerName[];
+export type MapLayerPickerName = (typeof MAP_LAYER_PICKER_NAMES)[number];
+
 export function alternatePreviewMapLayer(activeLayer: MapLayerName): MapLayerName {
   if (activeLayer === "Satellite" || activeLayer === "Satellite HD") return "Street";
   return "Satellite";
