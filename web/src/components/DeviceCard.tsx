@@ -126,7 +126,7 @@ export function DeviceCard(props: DeviceCardProps) {
               <img className="avatar-emoji-image" src={emojiImageUrl(avatar.emoji)} alt={avatar.emoji} draggable={false} />
             )}
           </div>
-          {onAvatarEdit && (
+          {expanded && onAvatarEdit && (
             <button
               type="button"
               className="card-avatar-edit"
@@ -217,7 +217,7 @@ function PinIcon() {
 function GripIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
-      <path d="M4 7h16M4 12h16M4 17h16" />
+      <path d="M4 8h16M4 16h16" />
     </svg>
   );
 }
