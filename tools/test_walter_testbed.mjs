@@ -34,9 +34,22 @@ struct FakePreferences {
     bool begin(const char*,bool) {return !fail;}
     uint32_t getUInt(const char*,uint32_t) {return stored;}
     size_t putUInt(const char*,uint32_t value) {if(fail)return 0;stored=value;return sizeof(value);}
+    std::vector<uint8_t> bytes;
+    size_t getBytesLength(const char*) {return bytes.size();}
+    size_t getBytes(const char*,void* out,size_t size) {
+        if(fail||size!=bytes.size())return 0;memcpy(out,bytes.data(),size);return size;
+    }
+    size_t putBytes(const char*,const void* data,size_t size) {
+        if(fail)return 0;bytes.assign((const uint8_t*)data,(const uint8_t*)data+size);return size;
+    }
 } sequenceStore;
+bool stateStoreReady=false;
 bool sequenceReady=false;
 uint32_t sequenceNext=0,sequenceEnd=0;
+constexpr uint32_t WALTER_COMMAND_STATE_MAGIC=0x4250434dUL;
+struct WalterCommandState {uint32_t magic;uint16_t sequence;uint8_t profile,reserved;char id[37];uint32_t checksum;};
+${firmwareFunction('ensureStateStore')}
+${firmwareFunction('commandStateChecksum','uint32_t')}
 ${firmwareFunction('nextSequence')}
 const char* WALTER_APN="test.apn";
 const char* WALTER_APN_USER="";
@@ -230,12 +243,14 @@ bool sendPacket(const uint8_t* packet,uint8_t length,JsonDocument& r){
     ++acks;ackPacket.assign(packet,packet+length);if(failAck)return false;
     r["acked_command"]["sequence_id"]=17;r["acked_command"]["status"]="acked";return true;
 }
+${firmwareFunction('restoreCommandState')}
+${firmwareFunction('persistCommandState')}
 ${firmwareFunction('applyCloudCommand','void')}
 ${firmwareFunction('listenForLteCommands','void')}
 void reset(){
     polls=acks=0;fakeMs=0;queuedAt=3000;failAck=failPoll=false;cancelRequested=false;
     cancelOnPause=false;lastCloudCommandId[0]=0;lastCloudCommandSequence=0;
-    sequenceStore.fail=false;selectedProfile=PROFILE_NORMAL;console.log.clear();nowUtc=utc;
+    sequenceStore.fail=false;sequenceStore.bytes.clear();selectedProfile=PROFILE_NORMAL;console.log.clear();nowUtc=utc;
 }
 void run(){
     JsonDocument r;walter::ProfileCommand c;
@@ -262,6 +277,15 @@ void run(){
     reset();queuedAt=9999;response(r);listenForLteCommands(r);assert(acks==1&&fakeMs==10000);
     reset();assert(!deserializeJson(r,cloud));applyCloudCommand(r);auto first=lostProfileStartedMs;
     fakeMs=5000;applyCloudCommand(r);assert(acks==2 && lostProfileStartedMs==first);
+    // Simulate a reboot: durable identity/profile restores and the same command
+    // is re-ACKed without applying it again.
+    lastCloudCommandId[0]=0;lastCloudCommandSequence=0;selectedProfile=PROFILE_NORMAL;
+    assert(restoreCommandState() && selectedProfile==PROFILE_ACTIVE && lastCloudCommandSequence==17);
+    auto restoredAt=lostProfileStartedMs;applyCloudCommand(r);
+    assert(acks==3 && selectedProfile==PROFILE_ACTIVE && lostProfileStartedMs==restoredAt);
+    // A different UUID reusing the same sequence is an identity conflict.
+    r["command"]["id"]="bbbbbbbb-cccc-dddd-eeee-ffffffffffff";applyCloudCommand(r);
+    assert(acks==3 && console.log.find("identity conflict")!=std::string::npos);
     reset();sequenceNext=sequenceEnd;sequenceStore.fail=true;assert(!deserializeJson(r,cloud));applyCloudCommand(r);
     assert(!acks && selectedProfile==PROFILE_NORMAL);sequenceStore.fail=false;
     reset();failAck=true;assert(!deserializeJson(r,cloud));applyCloudCommand(r);assert(acks==1 && selectedProfile==PROFILE_ACTIVE);

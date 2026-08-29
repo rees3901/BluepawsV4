@@ -160,7 +160,7 @@ static volatile bp_error_t lastError = BP_ERROR_NONE;
 // We store the last processed command sequence number and ignore
 // any duplicates, so the collar doesn't execute the same command twice.
 static uint32_t lastProcessedCmdSeq = 0;
-static uint16_t lastCommandSourceId = BP_DEFAULT_HUB_ID;
+static uint16_t lastProcessedCmdType = 0;
 
 // ── Lost Mode Tracking ──
 static volatile bool     inLostMode      = false;  // true = currently in emergency lost mode
@@ -271,6 +271,7 @@ static bool     collarStateLoad();
 static void     collarStateSave(const char *reason, bool noisy = true);
 static void     collarStateCheckpoint(const char *reason);
 static void     collarStateRememberFix();
+static void     collarStateRememberCommand(uint16_t sequence, uint16_t type);
 static uint32_t collarStateChecksum(collar_persisted_state_t state);
 static uint8_t  captureResetReason();
 
@@ -364,6 +365,9 @@ void setup() {
             messageSeq = persistedState.message_seq_checkpoint;
             cycleCount = persistedState.runtime_counter_checkpoint;
             homeCycleCount = persistedState.home_cycle_checkpoint;
+            lastProcessedCmdSeq = uint16_t(persistedState.reserved0[0])
+                | (uint16_t(persistedState.reserved0[1]) << 8);
+            lastProcessedCmdType = persistedState.reserved0[2];
             if (persistedState.has_last_fix) {
                 gnssLat = persistedState.last_lat_e7 / 1e7;
                 gnssLon = persistedState.last_lon_e7 / 1e7;
@@ -1013,6 +1017,16 @@ static void collarStateRememberFix() {
     }
 }
 
+static void collarStateRememberCommand(uint16_t sequence, uint16_t type) {
+    lastProcessedCmdSeq = sequence;
+    lastProcessedCmdType = type;
+    // These bytes were reserved in state version 1, so durable command
+    // deduplication does not invalidate existing collar state on upgrade.
+    persistedState.reserved0[0] = uint8_t(sequence & 0xFF);
+    persistedState.reserved0[1] = uint8_t(sequence >> 8);
+    persistedState.reserved0[2] = uint8_t(type & 0xFF);
+}
+
 // ═══════════════════════════════════════════════
 // User Button
 // ═══════════════════════════════════════════════
@@ -1461,38 +1475,47 @@ static void handleReceivedCommand(const uint8_t *buf, uint8_t len) {
 
     // ── Deduplication ──
     // The hub retries commands up to 3 times if it doesn't get an ACK.
-    // We track the last processed sequence number to avoid executing
-    // the same command multiple times (e.g. switching profile twice).
-    if (cmdSeq != 0 && cmdSeq == lastProcessedCmdSeq) {
-        // The original ACK may have been lost. Do not apply the command twice,
-        // but repeat the correct ACK so hub/cloud delivery can converge.
-        Serial.printf("[RX] Duplicate cmd seq %lu — re-ACKing\n", cmdSeq);
-        if (pktType == PKT_CMD_MODE) sendModeAck(cmdSeq, lastCommandSourceId);
-        else if (pktType == PKT_CMD_STATUS) sendStatusResponse(cmdSeq, lastCommandSourceId);
-        else if (pktType == PKT_CMD_FIND) sendFindAck(cmdSeq, lastCommandSourceId);
+    // We persist the last successfully processed sequence and command type to
+    // avoid executing the same command twice, including after a reboot.
+    if (cmdSeq == 0) {
+        Serial.println("[RX] Command sequence zero is invalid — dropping");
         return;
     }
-    lastProcessedCmdSeq = cmdSeq;
-    lastCommandSourceId = sourceId;
+    if (cmdSeq != 0 && cmdSeq == lastProcessedCmdSeq) {
+        if (pktType != lastProcessedCmdType) {
+            Serial.printf("[RX] Command identity conflict for seq %lu — dropping\n", cmdSeq);
+            return;
+        }
+        // The original ACK may have been lost. Do not apply the command twice,
+        // but repeat the correct ACK to the path that delivered this copy.
+        Serial.printf("[RX] Duplicate cmd seq %lu — re-ACKing\n", cmdSeq);
+        if (pktType == PKT_CMD_MODE) sendModeAck(cmdSeq, sourceId);
+        else if (pktType == PKT_CMD_STATUS) sendStatusResponse(cmdSeq, sourceId);
+        else if (pktType == PKT_CMD_FIND) sendFindAck(cmdSeq, sourceId);
+        return;
+    }
 
     switch (pktType) {
     case PKT_CMD_MODE: {
         // Hub is telling us to switch to a different operating profile.
         // Extract the target profile from TLV_PROFILE in the packet payload.
         uint8_t newProfile;
-        if (pkt_tlv_get_u8(buf, TLV_PROFILE, &newProfile)) {
+        if (pkt_tlv_get_u8(buf, TLV_PROFILE, &newProfile) && newProfile <= BP_MAX_POWER_PROFILE) {
             Serial.printf("[RX] CMD_MODE → %s (seq %lu)\n",
                           bp_profile_name((bp_profile_t)newProfile), cmdSeq);
+            collarStateRememberCommand(uint16_t(cmdSeq), pktType);
             applyProfile((bp_profile_t)newProfile);  // Apply new settings (TX power, sleep time, etc.)
             sendModeAck(cmdSeq, sourceId);           // ACK back to the originating hub
         } else {
-            Serial.println("[RX] CMD_MODE missing TLV_PROFILE");
+            Serial.println("[RX] CMD_MODE missing or invalid TLV_PROFILE");
         }
         break;
     }
     case PKT_CMD_STATUS:
         // Hub wants a status report — send back current config details
         Serial.printf("[RX] CMD_STATUS (seq %lu)\n", cmdSeq);
+        collarStateRememberCommand(uint16_t(cmdSeq), pktType);
+        collarStateSave("command", false);
         sendStatusResponse(cmdSeq, sourceId);
         break;
     case PKT_CMD_FIND: {
@@ -1502,13 +1525,15 @@ static void handleReceivedCommand(const uint8_t *buf, uint8_t len) {
         // Extract LED flash count from TLV (default: 5)
         uint8_t flashCount = 5;
         pkt_tlv_get_u8(buf, TLV_LED_FLASH, &flashCount);
-        if (flashCount > 0) {
-            ledFlicker(flashCount, 80, 80);  // Visible blink to help locate the pet
-        }
-
         // Extract buzzer pattern from TLV (default: chirp)
         uint8_t pattern = BUZZER_CHIRP;
         pkt_tlv_get_u8(buf, TLV_BUZZER_PATTERN, &pattern);
+        // Reserve the identity before producing repeatable physical effects.
+        collarStateRememberCommand(uint16_t(cmdSeq), pktType);
+        collarStateSave("command", false);
+        if (flashCount > 0) {
+            ledFlicker(flashCount, 80, 80);  // Visible blink to help locate the pet
+        }
         if (pattern != BUZZER_OFF) {
             buzzerPlayPattern((bp_buzzer_pattern_t)pattern);  // Audible alert
         }

@@ -117,5 +117,32 @@ try {
     assert.equal(row.anon_execute, false);
     assert.deepEqual(row.proconfig, ['search_path=""']);
   }
-  console.log('PASS: owner/member queue, NULL/missing/revoked/guest/cross-Family denial, owner-only controls, expiry, supersession and least privilege');
+
+  // A sent-but-unacknowledged command remains available to either authenticated
+  // return path. Both transports receive the same identity; the first valid ACK
+  // closes it, and a late duplicate ACK cannot apply or reopen anything.
+  await db.exec('set role service_role');
+  try {
+    const cellular = (await db.query("select * from public.bluepaws_claim_next_device_command($1,'cellular_direct')", [1001])).rows[0];
+    const lora = (await db.query("select * from public.bluepaws_claim_next_device_command($1,'lora_hub')", [1001])).rows[0];
+    assert.equal(cellular.id, second.id);
+    assert.equal(lora.id, second.id);
+    assert.equal(cellular.command_sequence_id, second.command_sequence_id);
+    assert.equal(lora.command_sequence_id, second.command_sequence_id);
+    // PGlite's synthetic service_role does not carry PostgreSQL BYPASSRLS, so
+    // inspect the row as the test owner between privileged RPC calls.
+    await db.exec('reset role');
+    const offered = (await db.query('select status, attempts from device_commands where id=$1', [second.id])).rows[0];
+    assert.equal(offered.status, 'sent');
+    assert.equal(offered.attempts, 2);
+    await db.exec('set role service_role');
+    const acknowledged = (await db.query('select * from public.bluepaws_ack_device_command($1,$2)',
+      [1001, second.command_sequence_id])).rows[0];
+    assert.equal(acknowledged.status, 'acked');
+    assert.equal((await db.query('select * from public.bluepaws_ack_device_command($1,$2)',
+      [1001, second.command_sequence_id])).rows.length, 0, 'late duplicate ACK is idempotent');
+    await denied(db.query("select * from public.bluepaws_claim_next_device_command(1001,'sms')"),
+      /Unsupported command transport/, '22023');
+  } finally { await db.exec('reset role'); }
+  console.log('PASS: queue permissions, expiry/supersession, least privilege and cross-path command/ACK convergence');
 } finally { await db.close(); }

@@ -28,19 +28,22 @@ Backend marks the command acknowledged
 
 ### Use the path the collar opens
 
-There is one device command queue, not independent LTE and LoRa copies. The
-authenticated check-in determines the return path: `cellular_direct` returns a
-command to the collar; `lora_hub` returns it to the receiving hub for immediate
-LoRa downlink. Queueing a command must not wake the LTE modem, open an unsolicited
-connection, or send a speculative copy through every hub.
+There is one device command queue, not independent LTE and LoRa copies. Every
+authenticated collar check-in is a delivery opportunity: `cellular_direct`
+returns the command to the collar, while `lora_hub` returns the same command
+identity to the receiving hub for immediate LoRa downlink. If both check-ins
+occur before an ACK, both paths may receive the command. Queueing alone must not
+wake the LTE modem, open an unsolicited connection, or send a speculative copy
+through every hub.
 
 An unacknowledged command may be redelivered on a later check-in, including on the
-other transport, with the same command identity. Concurrent check-ins are not an
-exactly-once execution guarantee. A future collar containing both radios must
-share duplicate-command state across both receive handlers and re-ACK duplicates
-without reapplying them. Walter currently exercises LTE only; its duplicate cache
-is volatile. Separate Walter/WisMesh tests do not prove combined-radio deduplication
-or durable execution across resets.
+other transport, with the same command identity. The first authenticated ACK
+closes the queue row; later duplicate ACKs are harmless. Concurrent check-ins are
+not an exactly-once transport guarantee, so the collar persists the last applied
+identity and re-ACKs a matching duplicate without reapplying it. Walter currently
+exercises LTE only and WisMesh exercises LoRa only. Their durable duplicate guards
+cover reset/retry behaviour on each board, but separate-board tests still do not
+prove that both receivers share one store in a future combined-radio collar.
 
 Expiry is independent of transport. A ten-minute dashboard command can expire
 before a slow-profile collar next uses LTE. Show that as expired, not delivered;
