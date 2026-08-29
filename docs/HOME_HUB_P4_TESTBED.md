@@ -1,7 +1,7 @@
 # ESP32-P4 Home Hub testbed
 
-Status: GUITION hardware target confirmed; first display/touch application
-cross-builds successfully. Physical-board flashing is still pending.
+Status: GUITION hardware target confirmed; the first display/touch application
+is running on the physical revision 1.3 board.
 
 ## Confirmed target
 
@@ -70,11 +70,13 @@ LVGL's optional fast-memory placement is disabled to stay within the smaller
 pre-v3 internal RAM map. Do not use this firmware image on a revision 3.x P4
 board.
 
-The GUITION package patches the upstream ST7701 `480x360` preset with the
-actual 480x800 panel timing (28 MHz pixel clock and GUITION porch values).
-BluePaws keeps the registry component pristine and applies those values in the
-board adapter. LVGL draw and rotation buffers live in the 32 MB PSRAM so the
-P4 DMA2D engine can perform valid cache synchronization.
+The factory application uses GUITION's ST7701 command sequence, a 34 MHz pixel
+clock and its 480x800 porch values. The newer package's 28 MHz/default command
+combination produced only a backlit grey panel on this revision 1.3 unit.
+BluePaws keeps the registry component pristine and applies the factory-proven
+values in the board adapter. LVGL draw and rotation buffers live in the 32 MB
+PSRAM; synchronous copying is retained until DMA2D is separately validated on
+pre-v3 ESP32-P4 silicon.
 
 ## Implemented boundary
 
@@ -132,7 +134,19 @@ Host-side core verification remains available with:
 node tools/test_home_hub_core.mjs
 ```
 
-The initial ESP32-P4 cross-build produced a 0xC09A0-byte application image,
-leaving 91% of the 8 MB factory-app partition free. That verifies compilation
-and linking, not the electrical display, touch, PSRAM or C6 behaviour; those
-remain explicit hardware bring-up checks.
+## Physical bring-up result — 2026-08-29
+
+Before programming, the complete 16 MB factory flash was retained as
+`JC4880P443C_I_W_factory_2026-08-29.bin` with SHA-256
+`12B6E82FC39CBC936101DD5EE048E7E12F00B0AD0D2E38396882611260CAA1B7`.
+Only the application region at `0x10000` was overwritten during the final
+diagnostic iterations.
+
+The final 785,312-byte application image has SHA-256
+`130CB50BDDD636D7E81E37FE98EAB4D7E577A2014F399F395D9D523B8D408182`.
+COM27 programming and read-back verification completed successfully. The boot
+log reports ESP32-P4 revision 1.3, 16 MB flash, 32 MB PSRAM and a passing PSRAM
+test, with no panic or reset loop. The panel displays the 800x480 landscape
+BluePaws map testbed, eight simulated cats and the nearby-cat table; GT911
+touch and **Fit all** were exercised successfully. C6 networking, SD maps and
+LoRa remain outside this first physical validation.

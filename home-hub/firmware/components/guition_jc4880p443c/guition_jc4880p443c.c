@@ -20,6 +20,8 @@
 #include "esp_ldo_regulator.h"
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 #define LCD_H_RES 480
 #define LCD_V_RES 800
@@ -37,6 +39,56 @@ static const char *TAG = "guition_board";
 static esp_ldo_channel_handle_t dsi_ldo;
 static i2c_master_bus_handle_t touch_i2c;
 static esp_lcd_touch_handle_t touch;
+
+/* Exact panel sequence recovered from the factory image's matching GUITION tree. */
+static const st7701_lcd_init_cmd_t factory_panel_init[] = {
+    {0xFF, (uint8_t[]){0x77, 0x01, 0x00, 0x00, 0x13}, 5, 0},
+    {0xEF, (uint8_t[]){0x08}, 1, 0},
+    {0xFF, (uint8_t[]){0x77, 0x01, 0x00, 0x00, 0x10}, 5, 0},
+    {0xC0, (uint8_t[]){0x63, 0x00}, 2, 0},
+    {0xC1, (uint8_t[]){0x0D, 0x02}, 2, 0},
+    {0xC2, (uint8_t[]){0x10, 0x08}, 2, 0},
+    {0xCC, (uint8_t[]){0x10}, 1, 0},
+    {0xB0, (uint8_t[]){0x80, 0x09, 0x53, 0x0C, 0xD0, 0x07, 0x0C, 0x09,
+                       0x09, 0x28, 0x06, 0xD4, 0x13, 0x69, 0x2B, 0x71}, 16, 0},
+    {0xB1, (uint8_t[]){0x80, 0x94, 0x5A, 0x10, 0xD3, 0x06, 0x0A, 0x08,
+                       0x08, 0x25, 0x03, 0xD3, 0x12, 0x66, 0x6A, 0x0D}, 16, 0},
+    {0xFF, (uint8_t[]){0x77, 0x01, 0x00, 0x00, 0x11}, 5, 0},
+    {0xB0, (uint8_t[]){0x5D}, 1, 0},
+    {0xB1, (uint8_t[]){0x58}, 1, 0},
+    {0xB2, (uint8_t[]){0x87}, 1, 0},
+    {0xB3, (uint8_t[]){0x80}, 1, 0},
+    {0xB5, (uint8_t[]){0x4E}, 1, 0},
+    {0xB7, (uint8_t[]){0x85}, 1, 0},
+    {0xB8, (uint8_t[]){0x21}, 1, 0},
+    {0xB9, (uint8_t[]){0x10, 0x1F}, 2, 0},
+    {0xBB, (uint8_t[]){0x03}, 1, 0},
+    {0xBC, (uint8_t[]){0x00}, 1, 0},
+    {0xC1, (uint8_t[]){0x78}, 1, 0},
+    {0xC2, (uint8_t[]){0x78}, 1, 0},
+    {0xD0, (uint8_t[]){0x88}, 1, 0},
+    {0xE0, (uint8_t[]){0x00, 0x3A, 0x02}, 3, 0},
+    {0xE1, (uint8_t[]){0x04, 0xA0, 0x00, 0xA0, 0x05, 0xA0,
+                       0x00, 0xA0, 0x00, 0x40, 0x40}, 11, 0},
+    {0xE2, (uint8_t[]){0x30, 0x00, 0x40, 0x40, 0x32, 0xA0, 0x00,
+                       0xA0, 0x00, 0xA0, 0x00, 0xA0, 0x00}, 13, 0},
+    {0xE3, (uint8_t[]){0x00, 0x00, 0x33, 0x33}, 4, 0},
+    {0xE4, (uint8_t[]){0x44, 0x44}, 2, 0},
+    {0xE5, (uint8_t[]){0x09, 0x2E, 0xA0, 0xA0, 0x0B, 0x30, 0xA0, 0xA0,
+                       0x05, 0x2A, 0xA0, 0xA0, 0x07, 0x2C, 0xA0, 0xA0}, 16, 0},
+    {0xE6, (uint8_t[]){0x00, 0x00, 0x33, 0x33}, 4, 0},
+    {0xE7, (uint8_t[]){0x44, 0x44}, 2, 0},
+    {0xE8, (uint8_t[]){0x08, 0x2D, 0xA0, 0xA0, 0x0A, 0x2F, 0xA0, 0xA0,
+                       0x04, 0x29, 0xA0, 0xA0, 0x06, 0x2B, 0xA0, 0xA0}, 16, 0},
+    {0xEB, (uint8_t[]){0x00, 0x00, 0x4E, 0x4E, 0x00, 0x00, 0x00}, 7, 0},
+    {0xEC, (uint8_t[]){0x08, 0x01}, 2, 0},
+    {0xED, (uint8_t[]){0xB0, 0x2B, 0x98, 0xA4, 0x56, 0x7F, 0xFF, 0xFF,
+                       0xFF, 0xFF, 0xF7, 0x65, 0x4A, 0x89, 0xB2, 0x0B}, 16, 0},
+    {0xEF, (uint8_t[]){0x08, 0x08, 0x08, 0x45, 0x3F, 0x54}, 6, 0},
+    {0xFF, (uint8_t[]){0x77, 0x01, 0x00, 0x00, 0x00}, 5, 0},
+    {0x11, (uint8_t[]){0x00}, 1, 120},
+    {0x29, (uint8_t[]){0x00}, 1, 20},
+};
 
 static esp_err_t backlight_init(void)
 {
@@ -109,7 +161,7 @@ static esp_err_t display_panel_new(esp_lcd_panel_handle_t *panel,
      * glass. Keep the registry component pristine and apply those
      * board-specific timings here instead.
      */
-    dpi_config.dpi_clock_freq_mhz = 28;
+    dpi_config.dpi_clock_freq_mhz = 34;
     dpi_config.video_timing.h_size = LCD_H_RES;
     dpi_config.video_timing.v_size = LCD_V_RES;
     dpi_config.video_timing.hsync_back_porch = 42;
@@ -119,8 +171,12 @@ static esp_err_t display_panel_new(esp_lcd_panel_handle_t *panel,
     dpi_config.video_timing.vsync_pulse_width = 2;
     dpi_config.video_timing.vsync_front_porch = 166;
     dpi_config.num_fbs = 1;
+    /* Use synchronous CPU copying until pre-v3 DMA2D is validated on hardware. */
+    dpi_config.flags.use_dma2d = false;
 
     const st7701_vendor_config_t vendor_config = {
+        .init_cmds = factory_panel_init,
+        .init_cmds_size = sizeof(factory_panel_init) / sizeof(factory_panel_init[0]),
         .mipi_config = {
             .dsi_bus = dsi_bus,
             .dpi_config = &dpi_config,
@@ -139,7 +195,10 @@ static esp_err_t display_panel_new(esp_lcd_panel_handle_t *panel,
     ESP_RETURN_ON_ERROR(
         esp_lcd_new_panel_st7701(*panel_io, &panel_config, panel), TAG, "ST7701 panel");
     ESP_RETURN_ON_ERROR(esp_lcd_panel_reset(*panel), TAG, "ST7701 reset");
-    return esp_lcd_panel_init(*panel);
+    vTaskDelay(pdMS_TO_TICKS(120));
+    ESP_RETURN_ON_ERROR(esp_lcd_panel_init(*panel), TAG, "ST7701 init");
+    ESP_RETURN_ON_ERROR(esp_lcd_panel_disp_on_off(*panel, true), TAG, "ST7701 display on");
+    return ESP_OK;
 }
 
 static esp_err_t touch_new(lv_display_t *display)
@@ -239,6 +298,15 @@ lv_display_t *guition_jc4880p443c_display_start(void)
     if (display == NULL || touch_new(display) != ESP_OK) {
         return NULL;
     }
+
+    if (!lvgl_port_lock(0)) {
+        return NULL;
+    }
+    lv_display_set_rotation(display, LV_DISPLAY_ROTATION_90);
+    ESP_LOGI(TAG, "LVGL display resolution: %" LV_PRId32 "x%" LV_PRId32,
+             lv_display_get_horizontal_resolution(display),
+             lv_display_get_vertical_resolution(display));
+    lvgl_port_unlock();
 
     if (guition_jc4880p443c_backlight_set(80) != ESP_OK) {
         return NULL;
