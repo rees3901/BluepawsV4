@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useState, type FocusEvent } from "react";
 import type { FamilyRole } from "@/lib/familySelection";
 
 interface AccountMenuProps {
@@ -12,33 +12,37 @@ interface AccountMenuProps {
 }
 
 export function AccountMenu({ email, familyName, familyRole, onSignOut }: AccountMenuProps) {
-  const [open, setOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
-  useEffect(() => {
-    if (!open) return;
-    function closeOnOutside(event: PointerEvent) {
-      if (!menuRef.current?.contains(event.target as Node)) setOpen(false);
-    }
-    function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") setOpen(false);
-    }
-    document.addEventListener("pointerdown", closeOnOutside);
-    document.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.removeEventListener("pointerdown", closeOnOutside);
-      document.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [open]);
+  const closeAfterFocusLeaves = (event: FocusEvent<HTMLDivElement>) => {
+    if (!event.currentTarget.contains(event.relatedTarget)) setPreviewOpen(false);
+  };
 
   return (
-    <div className="account-menu-wrap" ref={menuRef}>
-      <button className="ctrl-btn account-menu-trigger" type="button" title="Account" aria-label="Account menu" aria-expanded={open} aria-haspopup="menu" onClick={() => setOpen((current) => !current)}><PersonIcon /></button>
-      {open && (
-        <div className="account-menu" role="menu">
-          <div className="account-menu-summary"><strong>{familyName ?? "Bluepaws"}</strong><small>{email ?? "Signed-in user"}</small>{familyRole && <span>{familyRole === "owner" ? "Family Owner" : "Family Member"}</span>}</div>
-          <Link href="/account" role="menuitem" onClick={() => setOpen(false)}>Open account</Link>
-          <button type="button" role="menuitem" onClick={onSignOut}>Sign out</button>
+    <div
+      className="account-menu-wrap"
+      onPointerEnter={() => setPreviewOpen(true)}
+      onPointerLeave={() => setPreviewOpen(false)}
+      onFocusCapture={() => setPreviewOpen(true)}
+      onBlurCapture={closeAfterFocusLeaves}
+    >
+      <Link
+        className="ctrl-btn account-menu-trigger"
+        href="/account"
+        title="Open account"
+        aria-label="Open account options"
+        aria-describedby={previewOpen ? "accountPreview" : undefined}
+      ><PersonIcon /></Link>
+      {previewOpen && (
+        <div className="account-menu account-menu-preview" id="accountPreview" role="dialog" aria-label="Signed-in account summary">
+          <span className="account-menu-eyebrow">Signed in</span>
+          <strong className="account-menu-email">{email ?? "Signed-in user"}</strong>
+          <dl className="account-menu-stats">
+            <div><dt>Family</dt><dd>{familyName ?? "Bluepaws"}</dd></div>
+            <div><dt>Access</dt><dd>{familyRole === "owner" ? "Owner" : familyRole === "member" ? "Member" : "Signed in"}</dd></div>
+          </dl>
+          <small className="account-menu-hint">Click the account button for all options</small>
+          <button type="button" onClick={onSignOut}>Sign out</button>
         </div>
       )}
     </div>

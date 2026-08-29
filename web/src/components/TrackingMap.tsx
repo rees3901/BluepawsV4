@@ -214,8 +214,17 @@ export default function TrackingMap(props: TrackingMapProps) {
       options: { position: "bottomright" },
       onAdd() {
         const coordinates = L.DomUtil.create("div", "leaflet-cursor-coords");
-        coordinates.id = "cursorCoords";
-        coordinates.textContent = "--";
+        coordinates.tabIndex = 0;
+        coordinates.setAttribute("role", "status");
+        coordinates.setAttribute("aria-label", "Map cursor coordinates. Hover or focus to reveal.");
+        const tab = L.DomUtil.create("span", "leaflet-cursor-coords-tab", coordinates);
+        tab.textContent = "⌖";
+        tab.setAttribute("aria-hidden", "true");
+        const value = L.DomUtil.create("span", "leaflet-cursor-coords-value", coordinates);
+        value.id = "cursorCoords";
+        value.textContent = "Move over map";
+        L.DomEvent.disableClickPropagation(coordinates);
+        L.DomEvent.disableScrollPropagation(coordinates);
         return coordinates;
       },
     });
@@ -224,7 +233,10 @@ export default function TrackingMap(props: TrackingMapProps) {
 
     map.on("mousemove", (event) => {
       const element = document.getElementById("cursorCoords");
-      if (element) element.innerHTML = `${event.latlng.lat.toFixed(6)}, ${event.latlng.lng.toFixed(6)}<br>${toDms(event.latlng.lat, "N", "S")} ${toDms(event.latlng.lng, "E", "W")}`;
+      if (element) {
+        element.innerHTML = `${event.latlng.lat.toFixed(6)}, ${event.latlng.lng.toFixed(6)}<br>${toDms(event.latlng.lat, "N", "S")} ${toDms(event.latlng.lng, "E", "W")}`;
+        element.parentElement?.setAttribute("aria-label", `Map cursor coordinates: ${element.textContent ?? ""}`);
+      }
     });
     map.on("click", (event) => {
       if (layerControlOpen) setLayerControlOpen(false);

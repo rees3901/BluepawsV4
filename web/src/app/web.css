@@ -143,41 +143,41 @@ button, input, select {
 }
 
 .hamburger-btn {
-  width: 46px;
-  height: 46px;
+  width: 53px;
+  height: 53px;
 }
 
 .hamburger-btn svg {
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
 }
 
 .leaflet-top.leaflet-left {
-  top: 64px;
+  top: 72px;
 }
 
 .leaflet-map-btn {
-  width: 41px;
-  height: 41px;
+  width: 47px;
+  height: 47px;
   margin-bottom: 8px;
 }
 
 .leaflet-map-btn svg {
-  width: 19px;
-  height: 19px;
+  width: 22px;
+  height: 22px;
 }
 
 .leaflet-control-zoom a {
-  width: 36px !important;
-  height: 36px !important;
-  line-height: 36px !important;
-  font-size: 22px !important;
+  width: 41px !important;
+  height: 41px !important;
+  line-height: 41px !important;
+  font-size: 25px !important;
 }
 
 .leaflet-control-layers-toggle {
-  width: 46px !important;
-  height: 46px !important;
-  background-size: 24px 24px !important;
+  width: 53px !important;
+  height: 53px !important;
+  background-size: 28px 28px !important;
 }
 
 .bp-click-layer-control:not(.bp-layer-open) {
@@ -229,7 +229,7 @@ button, input, select {
 
 .bp-layer-preview-toggle {
   display: block;
-  width: 150px;
+  width: 173px;
   padding: 2px;
   overflow: hidden;
   border: 0.5px solid rgb(115 196 255 / 45%);
@@ -249,8 +249,8 @@ button, input, select {
 
 .bp-layer-preview-map {
   display: block;
-  width: 146px;
-  height: 104px;
+  width: 169px;
+  height: 120px;
   overflow: hidden;
   border-radius: 7px;
   background: var(--bg-primary);
@@ -270,12 +270,12 @@ button, input, select {
 
 @media (max-width: 620px) {
   .bp-layer-preview-toggle {
-    width: 110px;
+    width: 127px;
   }
 
   .bp-layer-preview-map {
-    width: 106px;
-    height: 76px;
+    width: 123px;
+    height: 87px;
   }
 }
 
@@ -381,6 +381,40 @@ body.panel-open .map-loading {
 
 #panel {
   min-height: 0;
+}
+
+.panel-brand {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+}
+
+.panel-brand-mark,
+.panel-brand-mascot {
+  display: block;
+  flex: 0 0 auto;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
+}
+
+.panel-brand-mark {
+  width: 21px;
+  height: 21px;
+  background-image: url("/brand/favicon.ico");
+  image-rendering: auto;
+}
+
+.panel-brand-mascot {
+  width: 32px;
+  height: 32px;
+  margin-left: 1px;
+  background-image: url("/brand/main-logo-podge-carrie.avif");
+}
+
+.panel-brand .panel-title {
+  white-space: nowrap;
 }
 
 #deviceCards {
@@ -1230,9 +1264,14 @@ body.panel-open .map-loading {
   position: relative;
 }
 
-.account-menu-trigger[aria-expanded="true"] {
+.account-menu-wrap:hover .account-menu-trigger,
+.account-menu-wrap:focus-within .account-menu-trigger {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+.account-menu-trigger {
+  text-decoration: none;
 }
 
 .account-menu {
@@ -1240,32 +1279,66 @@ body.panel-open .map-loading {
   top: calc(100% + 8px);
   right: 0;
   z-index: 1800;
-  width: 220px;
-  padding: 6px;
+  width: 238px;
+  padding: 10px;
   border: 1px solid var(--border);
   border-radius: 9px;
   background: var(--bg-card);
   box-shadow: 0 16px 36px rgb(0 0 0 / 38%);
 }
 
-.account-menu-summary {
+.account-menu-preview {
   display: grid;
-  gap: 2px;
-  padding: 9px 10px 11px;
-  border-bottom: 1px solid var(--border);
+  gap: 8px;
 }
 
-.account-menu-summary strong,
-.account-menu-summary small {
+.account-menu-email {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.account-menu-summary small,
-.account-menu-summary span {
+.account-menu-eyebrow,
+.account-menu-hint {
   color: var(--text-secondary);
   font-size: 0.67rem;
+}
+
+.account-menu-eyebrow {
+  color: var(--success);
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.account-menu-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin: 0;
+}
+
+.account-menu-stats > div {
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg-primary);
+}
+
+.account-menu-stats dt {
+  margin-bottom: 2px;
+  color: var(--text-secondary);
+  font-size: 0.62rem;
+}
+
+.account-menu-stats dd {
+  margin: 0;
+  overflow: hidden;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .account-menu a,
@@ -1293,6 +1366,55 @@ body.panel-open .map-loading {
 
 .account-menu > button {
   color: var(--danger);
+}
+
+/* Keep cursor coordinates out of the way until they are deliberately inspected. */
+.leaflet-cursor-coords {
+  display: flex;
+  width: auto;
+  max-width: 30px;
+  min-height: 30px;
+  align-items: center;
+  overflow: hidden;
+  padding: 0;
+  border-radius: 6px 0 0 6px;
+  cursor: default;
+  pointer-events: auto;
+  transition: max-width 180ms ease, box-shadow 180ms ease;
+}
+
+.leaflet-cursor-coords-tab {
+  display: grid;
+  width: 30px;
+  min-width: 30px;
+  min-height: 30px;
+  place-items: center;
+  color: var(--accent);
+  font-family: system-ui, sans-serif;
+  font-size: 1rem;
+}
+
+.leaflet-cursor-coords-value {
+  min-width: 205px;
+  padding: 4px 8px 4px 2px;
+  opacity: 0;
+  white-space: nowrap;
+  transition: opacity 120ms ease;
+}
+
+.leaflet-cursor-coords:hover,
+.leaflet-cursor-coords:focus,
+.leaflet-cursor-coords:focus-within {
+  max-width: 245px;
+  outline: 0;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgb(29 155 240 / 18%);
+}
+
+.leaflet-cursor-coords:hover .leaflet-cursor-coords-value,
+.leaflet-cursor-coords:focus .leaflet-cursor-coords-value,
+.leaflet-cursor-coords:focus-within .leaflet-cursor-coords-value {
+  opacity: 1;
 }
 
 .account-shell {
