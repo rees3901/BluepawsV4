@@ -7,6 +7,21 @@ The prototype SD-card layout is:
 /bluepaws/maps/tiles/{z}/{x}/{y}.jpg
 ```
 
+The August 2026 multi-layer test card extends that without breaking the current
+firmware's hard-coded road path:
+
+```text
+/bluepaws/maps/map_manifest.json             active OSM road manifest
+/bluepaws/maps/tiles/{z}/{x}/{y}.jpg         active OSM road layer
+/bluepaws/maps/layers/aerial/...             EA Gloucester aerial layer
+/bluepaws/maps/layers/satellite/...          EOX Sentinel-2 overview layer
+/bluepaws/maps/legacy/os-zoomstack-fixture/  preserved first hardware proof
+```
+
+The current firmware reads only the active root `tiles` tree. The two layer
+directories are ready for the forthcoming map-layer switcher; copying them to
+the card now avoids another long preparation step later.
+
 Copy `map_manifest.example.json` to the SD card as `map_manifest.json` and
 change its region metadata when the first test tile pack is prepared. Raster
 tiles use conventional XYZ addressing and 256-pixel JPEG images.
@@ -35,6 +50,10 @@ from current OpenStreetMap data, with the open-source Protomaps `light` style.
 The PC renders that vector source to the same hardware-friendly JPEG XYZ layout;
 the P4 does not need to parse PMTiles or run a map server. Do not bulk-download
 `tile.openstreetmap.org`, whose usage policy prohibits offline prefetching.
+The card pack combines a Great Britain z5-11 extract with a Gloucestershire
+z10-16 extract and z17 detail along the Gloucester/Cheltenham corridor. The
+overlap is intentional and the county render wins when the two trees are
+merged.
 
 The FAT32 volume is about 31.24 GiB. Keep normal map payloads below 20-24 GiB
 to leave room for update staging, indexes, telemetry and filesystem headroom.
@@ -103,12 +122,39 @@ Aerial Photography collection. It is Open Government Licence data, supplied as
 surveys exist. QGIS/GDAL can mosaic and reproject selected Gloucester coverage
 before rendering it to a separate JPEG XYZ layer.
 
+For the first pack, the official coverage catalogue was queried at Gloucester
+and the available 2012 incident-response RGB and 2014 RGBN surveys were
+downloaded and mosaicked. Despite the historic product name `IRRGB`, `IR` means
+incident response here rather than infra-red; bands 1-3 are rendered as RGB
+and band 4 is used as the source mask. The surveys contain flight-strip gaps,
+so the Sentinel layer remains the fallback outside the aerial footprints. The
+pack is bounded to the available Gloucester survey footprint and z12-17.
+
 Copernicus Sentinel-2 true-colour imagery is the open gap-filler where no EA
 survey exists. Its best RGB bands are 10 m per pixel, so it is useful for broad
 landscape context but not cat-scale or house-scale detail. Google, Bing and
 similar consumer basemaps are not offline-pack sources. Road and aerial tiles
 will remain separate layer directories so switching layers never requires
 duplicating cat markers or interaction overlays.
+
+The broad satellite pack uses EOX's `s2cloudless_3857` service, which is the
+2016/2017 Sentinel-2 cloudless mosaic released under CC BY 4.0 with rendered
+tile download explicitly allowed. It contains Great Britain at z5-11 and
+Gloucestershire at z12-14. Later EOX annual mosaics have different
+non-commercial/licensing terms, so do not silently substitute a newer layer.
+
+Download only from a provider whose offline terms have been checked. The
+bounded downloader is deliberately profile-based:
+
+```powershell
+python tools\download_home_hub_raster_tiles.py `
+  --url-template 'https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless_3857/default/g/{z}/{row}/{col}.jpg' `
+  --output home-hub\maps\work\packs\satellite\tiles `
+  --manifest home-hub\maps\work\packs\satellite\map_manifest.json `
+  --name 'BluePaws Sentinel-2 cloudless 2016/2017' `
+  --attribution 'Sentinel-2 cloudless by EOX IT Services GmbH (Contains modified Copernicus Sentinel data 2016 & 2017), CC BY 4.0' `
+  --source-url 'https://eox.at/2017/08/sentinel-2-global-cloudless-mosaic/'
+```
 
 The first generated fixture uses the official June 2026 OS Open Zoomstack
 Vector Tiles database (2,852,712,448 bytes, SHA-256
