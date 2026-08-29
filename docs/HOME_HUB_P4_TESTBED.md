@@ -303,3 +303,17 @@ It was flashed app-only at `0x10000`; esptool verified the written hash. The
 monitored clean reset reported ESP32-P4 revision 1.3, 16 MB flash, 32 MB PSRAM,
 800x480 display, GT911 touch and the 32 GB FAT volume on the 480 GB physical card,
 then started the UI without a panic or reset loop.
+
+The brightness panel is subsequently marked as an LVGL floating object so it
+never participates in the page's flex layout or moves the underlying map tiles.
+Opening the panel starts a five-second inactivity timer; slider movement restarts
+the timer, and expiry fades the panel to transparent over 320 ms before hiding
+it. Page, theme and orientation rebuilds delete the panel timer and any active
+fade before cleaning the screen.
+
+The resulting 960,544-byte application has SHA-256
+`9AD0544162E866FBCAADD9260369D76E79688CBE069E70E0E61683196D1CF3C7`.
+It was again flashed only at `0x10000`, with esptool write verification. Its
+monitored boot reported ESP32-P4 revision 1.3, 16 MB flash, 32 MB PSRAM,
+800x480 display, GT911 touch and the mounted FAT volume, then entered the UI
+without a panic or reset loop.

@@ -25,6 +25,8 @@ constexpr int32_t kMapLeft = 0;
 constexpr int32_t kMapTop = 0;
 constexpr int32_t kMarkerSize = 28;
 constexpr size_t kTilePixelBytes = bluepaws::map::kTileSize * bluepaws::map::kTileSize * 2;
+constexpr uint32_t kBrightnessTimeoutMs = 5000;
+constexpr uint32_t kBrightnessFadeMs = 320;
 constexpr char kTag[] = "bluepaws_home_hub";
 constexpr uint32_t kMarkerColours[] = {
     0x1E88E5, 0xE53935, 0x43A047, 0xFB8C00,
@@ -75,6 +77,7 @@ struct UiState {
     lv_obj_t *brightness_popup = nullptr;
     lv_obj_t *brightness_slider = nullptr;
     lv_obj_t *brightness_label = nullptr;
+    lv_timer_t *brightness_hide_timer = nullptr;
     lv_obj_t *status = nullptr;
     lv_timer_t *update_timer = nullptr;
     guition_jc4880p443c_sd_info_t sd{};
@@ -535,9 +538,91 @@ void fit_all_clicked(lv_event_t *event)
 
 void create_ui(UiState &ui);
 
+void brightness_fade_exec(void *object, int32_t opacity)
+{
+    lv_obj_set_style_opa(static_cast<lv_obj_t *>(object), static_cast<lv_opa_t>(opacity), 0);
+}
+
+void brightness_fade_completed(lv_anim_t *animation)
+{
+    auto *ui = static_cast<UiState *>(lv_anim_get_user_data(animation));
+    auto *popup = static_cast<lv_obj_t *>(animation->var);
+    if (ui == nullptr || popup == nullptr || ui->brightness_popup != popup) {
+        return;
+    }
+    lv_obj_add_flag(popup, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_opa(popup, LV_OPA_COVER, 0);
+}
+
+void brightness_timeout(lv_timer_t *timer)
+{
+    auto *ui = static_cast<UiState *>(lv_timer_get_user_data(timer));
+    lv_timer_pause(timer);
+    if (ui == nullptr || ui->brightness_popup == nullptr ||
+        lv_obj_has_flag(ui->brightness_popup, LV_OBJ_FLAG_HIDDEN)) {
+        return;
+    }
+
+    lv_anim_delete(ui->brightness_popup, brightness_fade_exec);
+    lv_anim_t fade;
+    lv_anim_init(&fade);
+    lv_anim_set_var(&fade, ui->brightness_popup);
+    lv_anim_set_user_data(&fade, ui);
+    lv_anim_set_exec_cb(&fade, brightness_fade_exec);
+    lv_anim_set_values(&fade, LV_OPA_COVER, LV_OPA_TRANSP);
+    lv_anim_set_duration(&fade, kBrightnessFadeMs);
+    lv_anim_set_path_cb(&fade, lv_anim_path_ease_out);
+    lv_anim_set_completed_cb(&fade, brightness_fade_completed);
+    lv_anim_start(&fade);
+}
+
+void reset_brightness_timeout(UiState &ui)
+{
+    if (ui.brightness_popup == nullptr) {
+        return;
+    }
+    lv_anim_delete(ui.brightness_popup, brightness_fade_exec);
+    lv_obj_set_style_opa(ui.brightness_popup, LV_OPA_COVER, 0);
+    if (ui.brightness_hide_timer == nullptr) {
+        ui.brightness_hide_timer =
+            lv_timer_create(brightness_timeout, kBrightnessTimeoutMs, &ui);
+    } else {
+        lv_timer_set_period(ui.brightness_hide_timer, kBrightnessTimeoutMs);
+        lv_timer_reset(ui.brightness_hide_timer);
+        lv_timer_resume(ui.brightness_hide_timer);
+    }
+}
+
+void hide_brightness_popup(UiState &ui)
+{
+    if (ui.brightness_hide_timer != nullptr) {
+        lv_timer_pause(ui.brightness_hide_timer);
+    }
+    if (ui.brightness_popup != nullptr) {
+        lv_anim_delete(ui.brightness_popup, brightness_fade_exec);
+        lv_obj_set_style_opa(ui.brightness_popup, LV_OPA_COVER, 0);
+        lv_obj_add_flag(ui.brightness_popup, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+void brightness_activity(lv_event_t *event)
+{
+    auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
+    if (ui != nullptr) {
+        reset_brightness_timeout(*ui);
+    }
+}
+
 void rebuild_current_page(void *user_data)
 {
     auto *ui = static_cast<UiState *>(user_data);
+    if (ui->brightness_hide_timer != nullptr) {
+        lv_timer_delete(ui->brightness_hide_timer);
+        ui->brightness_hide_timer = nullptr;
+    }
+    if (ui->brightness_popup != nullptr) {
+        lv_anim_delete(ui->brightness_popup, brightness_fade_exec);
+    }
     lv_obj_clean(lv_screen_active());
     create_ui(*ui);
 }
@@ -590,6 +675,7 @@ void brightness_changed(lv_event_t *event)
     if (error != ESP_OK) {
         ESP_LOGE(kTag, "Backlight update failed: %s", esp_err_to_name(error));
     }
+    reset_brightness_timeout(*ui);
 }
 
 void create_brightness_popup(UiState &ui)
@@ -597,6 +683,7 @@ void create_brightness_popup(UiState &ui)
     lv_obj_t *popup = lv_obj_create(lv_screen_active());
     lv_obj_set_size(popup, 78, 270);
     lv_obj_align(popup, LV_ALIGN_TOP_RIGHT, -12, 64);
+    lv_obj_add_flag(popup, LV_OBJ_FLAG_FLOATING);
     lv_obj_set_style_bg_color(popup,
                               ui.dark_mode ? lv_color_hex(0x15232E) : lv_color_hex(0xE7E2D8),
                               0);
@@ -627,6 +714,8 @@ void create_brightness_popup(UiState &ui)
     lv_obj_set_style_pad_all(ui.brightness_slider, 4, LV_PART_KNOB);
     lv_obj_add_event_cb(
         ui.brightness_slider, brightness_changed, LV_EVENT_VALUE_CHANGED, &ui);
+    lv_obj_add_event_cb(
+        ui.brightness_slider, brightness_activity, LV_EVENT_PRESSING, &ui);
 
     ui.brightness_label = make_label(
         popup,
@@ -638,6 +727,7 @@ void create_brightness_popup(UiState &ui)
 
     ui.brightness_popup = popup;
     lv_obj_move_foreground(popup);
+    reset_brightness_timeout(ui);
 }
 
 void brightness_clicked(lv_event_t *event)
@@ -653,8 +743,9 @@ void brightness_clicked(lv_event_t *event)
     if (lv_obj_has_flag(ui->brightness_popup, LV_OBJ_FLAG_HIDDEN)) {
         lv_obj_remove_flag(ui->brightness_popup, LV_OBJ_FLAG_HIDDEN);
         lv_obj_move_foreground(ui->brightness_popup);
+        reset_brightness_timeout(*ui);
     } else {
-        lv_obj_add_flag(ui->brightness_popup, LV_OBJ_FLAG_HIDDEN);
+        hide_brightness_popup(*ui);
     }
 }
 
@@ -1176,6 +1267,7 @@ void create_ui(UiState &ui)
     ui.brightness_popup = nullptr;
     ui.brightness_slider = nullptr;
     ui.brightness_label = nullptr;
+    ui.brightness_hide_timer = nullptr;
     ui.status = nullptr;
 
     switch (ui.active_page) {
