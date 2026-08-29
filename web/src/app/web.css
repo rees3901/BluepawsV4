@@ -458,6 +458,26 @@ body.panel-open .map-loading {
   white-space: nowrap;
 }
 
+@media (max-width: 768px) {
+  #panelHeader {
+    flex-wrap: wrap;
+    gap: 6px 0;
+    padding: 10px 12px;
+  }
+
+  .panel-brand {
+    width: 100%;
+    flex: 0 0 100%;
+  }
+
+  .panel-header-btns {
+    width: 100%;
+    flex: 0 0 100%;
+    align-items: center;
+    justify-content: flex-end;
+  }
+}
+
 .transport-wifi {
   color: var(--text-secondary);
 }
