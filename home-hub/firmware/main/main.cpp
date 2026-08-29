@@ -3,6 +3,8 @@
 #include "bluepaws/map_engine.h"
 #include "guition_jc4880p443c.h"
 
+#include "driver/jpeg_decode.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_lvgl_port.h"
@@ -12,15 +14,18 @@
 #include <array>
 #include <cstdint>
 #include <cstdio>
+#include <sys/stat.h>
 
 namespace {
 
-constexpr bluepaws::map::GeoPoint kTestOrigin{51.5074, -0.1278};
+constexpr bluepaws::map::GeoPoint kTestOrigin{51.8642, -2.2382};
 constexpr int32_t kMapWidth = 515;
 constexpr int32_t kMapHeight = 350;
 constexpr int32_t kMapLeft = 10;
 constexpr int32_t kMapTop = 42;
 constexpr int32_t kMarkerSize = 28;
+constexpr size_t kTilePixelBytes = bluepaws::map::kTileSize * bluepaws::map::kTileSize * 2;
+constexpr char kTag[] = "bluepaws_home_hub";
 constexpr uint32_t kMarkerColours[] = {
     0x1E88E5, 0xE53935, 0x43A047, 0xFB8C00,
     0x8E24AA, 0x00897B, 0x6D4C41, 0x546E7A,
@@ -29,12 +34,23 @@ constexpr uint32_t kMarkerColours[] = {
 struct UiState {
     bluepaws::CatStore cats;
     bluepaws::CatSimulator simulator{kTestOrigin};
-    bluepaws::map::Viewport viewport{kMapWidth, kMapHeight, kTestOrigin, 17};
+    bluepaws::map::Viewport viewport{kMapWidth, kMapHeight, kTestOrigin, 15};
+    std::array<lv_obj_t *, bluepaws::map::kMaximumVisibleTiles> tile_images{};
+    std::array<bluepaws::map::TileId, bluepaws::map::kMaximumVisibleTiles> tile_ids{};
+    std::array<lv_image_dsc_t, bluepaws::map::kMaximumVisibleTiles> tile_descriptors{};
+    std::array<uint8_t *, bluepaws::map::kMaximumVisibleTiles> tile_pixels{};
+    std::array<size_t, bluepaws::map::kMaximumVisibleTiles> tile_pixel_capacities{};
+    std::array<bool, bluepaws::map::kMaximumVisibleTiles> tile_assigned{};
     std::array<lv_obj_t *, bluepaws::kMaximumCats> markers{};
     lv_obj_t *cat_list = nullptr;
     lv_obj_t *status = nullptr;
     guition_jc4880p443c_sd_info_t sd{};
     esp_err_t sd_error = ESP_FAIL;
+    jpeg_decoder_handle_t jpeg_decoder = nullptr;
+    size_t visible_tile_count = 0;
+    size_t loaded_tile_count = 0;
+    uint32_t map_decode_ms = 0;
+    bool tiles_dirty = true;
 };
 
 uint32_t uptime_ms()
@@ -42,8 +58,162 @@ uint32_t uptime_ms()
     return static_cast<uint32_t>(esp_timer_get_time() / 1000ULL);
 }
 
+bool decode_tile(UiState &ui, size_t slot, const char *path)
+{
+    if (ui.jpeg_decoder == nullptr || slot >= ui.tile_images.size()) {
+        return false;
+    }
+
+    struct stat tile_stat {};
+    if (stat(path, &tile_stat) != 0 || !S_ISREG(tile_stat.st_mode) || tile_stat.st_size <= 0) {
+        return false;
+    }
+
+    jpeg_decode_memory_alloc_cfg_t input_config{
+        .buffer_direction = JPEG_DEC_ALLOC_INPUT_BUFFER,
+    };
+    size_t input_capacity = 0;
+    auto *input = static_cast<uint8_t *>(jpeg_alloc_decoder_mem(
+        static_cast<size_t>(tile_stat.st_size), &input_config, &input_capacity));
+    if (input == nullptr || input_capacity < static_cast<size_t>(tile_stat.st_size)) {
+        heap_caps_free(input);
+        ESP_LOGE(kTag, "Could not allocate JPEG input buffer for %s", path);
+        return false;
+    }
+
+    FILE *file = std::fopen(path, "rb");
+    if (file == nullptr) {
+        heap_caps_free(input);
+        return false;
+    }
+    const size_t jpeg_size = std::fread(input, 1, static_cast<size_t>(tile_stat.st_size), file);
+    std::fclose(file);
+    if (jpeg_size != static_cast<size_t>(tile_stat.st_size)) {
+        heap_caps_free(input);
+        ESP_LOGE(kTag, "Short read for map tile %s", path);
+        return false;
+    }
+
+    jpeg_decode_picture_info_t picture{};
+    esp_err_t error = jpeg_decoder_get_info(input, jpeg_size, &picture);
+    if (error != ESP_OK || picture.width != bluepaws::map::kTileSize ||
+        picture.height != bluepaws::map::kTileSize) {
+        heap_caps_free(input);
+        ESP_LOGE(kTag, "Unexpected JPEG tile dimensions for %s", path);
+        return false;
+    }
+
+    if (ui.tile_pixels[slot] == nullptr) {
+        jpeg_decode_memory_alloc_cfg_t output_config{
+            .buffer_direction = JPEG_DEC_ALLOC_OUTPUT_BUFFER,
+        };
+        ui.tile_pixels[slot] = static_cast<uint8_t *>(jpeg_alloc_decoder_mem(
+            kTilePixelBytes, &output_config, &ui.tile_pixel_capacities[slot]));
+        if (ui.tile_pixels[slot] == nullptr || ui.tile_pixel_capacities[slot] < kTilePixelBytes) {
+            heap_caps_free(input);
+            ESP_LOGE(kTag, "Could not allocate decoded tile buffer in PSRAM");
+            return false;
+        }
+    }
+
+    jpeg_decode_cfg_t decode_config{
+        .output_format = JPEG_DECODE_OUT_FORMAT_RGB565,
+        .rgb_order = JPEG_DEC_RGB_ELEMENT_ORDER_BGR,
+        .conv_std = JPEG_YUV_RGB_CONV_STD_BT601,
+    };
+    uint32_t output_size = 0;
+    const int64_t started_us = esp_timer_get_time();
+    error = jpeg_decoder_process(ui.jpeg_decoder,
+                                 &decode_config,
+                                 input,
+                                 jpeg_size,
+                                 ui.tile_pixels[slot],
+                                 ui.tile_pixel_capacities[slot],
+                                 &output_size);
+    const uint32_t elapsed_ms = static_cast<uint32_t>((esp_timer_get_time() - started_us + 999) / 1000);
+    heap_caps_free(input);
+    if (error != ESP_OK || output_size < kTilePixelBytes) {
+        ESP_LOGE(kTag, "Hardware JPEG decode failed for %s: %s", path, esp_err_to_name(error));
+        return false;
+    }
+
+    lv_image_dsc_t &descriptor = ui.tile_descriptors[slot];
+    descriptor = {};
+    descriptor.header.magic = LV_IMAGE_HEADER_MAGIC;
+    descriptor.header.cf = LV_COLOR_FORMAT_RGB565;
+    descriptor.header.w = bluepaws::map::kTileSize;
+    descriptor.header.h = bluepaws::map::kTileSize;
+    descriptor.header.stride = bluepaws::map::kTileSize * 2;
+    descriptor.data_size = kTilePixelBytes;
+    descriptor.data = ui.tile_pixels[slot];
+    ui.map_decode_ms += elapsed_ms;
+    ESP_LOGI(kTag, "Hardware-decoded map tile in %lu ms: %s",
+             static_cast<unsigned long>(elapsed_ms), path);
+    return true;
+}
+
+void refresh_map_tiles(UiState &ui)
+{
+    if (!ui.tiles_dirty) {
+        return;
+    }
+    ui.tiles_dirty = false;
+    ui.visible_tile_count = 0;
+    ui.loaded_tile_count = 0;
+    ui.map_decode_ms = 0;
+
+    if (!ui.sd.mounted) {
+        for (lv_obj_t *image : ui.tile_images) {
+            if (image != nullptr) {
+                lv_obj_add_flag(image, LV_OBJ_FLAG_HIDDEN);
+            }
+        }
+        return;
+    }
+
+    const bluepaws::map::TileGrid grid = ui.viewport.visibleTiles(0);
+    ui.visible_tile_count = grid.count;
+    for (size_t i = 0; i < ui.tile_images.size(); ++i) {
+        lv_obj_t *image = ui.tile_images[i];
+        if (image == nullptr) {
+            continue;
+        }
+        if (i >= grid.count) {
+            lv_obj_add_flag(image, LV_OBJ_FLAG_HIDDEN);
+            ui.tile_assigned[i] = false;
+            continue;
+        }
+
+        const bluepaws::map::TilePlacement &placement = grid.tiles[i];
+        char filesystem_path[128]{};
+        std::snprintf(filesystem_path,
+                      sizeof(filesystem_path),
+                      "/sdcard/bluepaws/maps/tiles/%u/%lu/%lu.jpg",
+                      placement.id.zoom,
+                      static_cast<unsigned long>(placement.id.x),
+                      static_cast<unsigned long>(placement.id.y));
+        if (!ui.tile_assigned[i] || !(ui.tile_ids[i] == placement.id)) {
+            if (!decode_tile(ui, i, filesystem_path)) {
+                lv_obj_add_flag(image, LV_OBJ_FLAG_HIDDEN);
+                ui.tile_assigned[i] = false;
+                continue;
+            }
+            lv_image_set_src(image, &ui.tile_descriptors[i]);
+            ui.tile_ids[i] = placement.id;
+            ui.tile_assigned[i] = true;
+        }
+        lv_obj_set_pos(image,
+                       kMapLeft + placement.screen_x,
+                       kMapTop + placement.screen_y);
+        lv_obj_remove_flag(image, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_invalidate(image);
+        ++ui.loaded_tile_count;
+    }
+}
+
 void update_ui(UiState &ui)
 {
+    refresh_map_tiles(ui);
     const uint32_t now_ms = uptime_ms();
     ui.simulator.update(now_ms, ui.cats);
 
@@ -94,10 +264,13 @@ void update_ui(UiState &ui)
         const unsigned volume_gib = static_cast<unsigned>((ui.sd.volume_total_bytes + kGiB / 2) / kGiB);
         const unsigned card_gib = static_cast<unsigned>((ui.sd.card_capacity_bytes + kGiB / 2) / kGiB);
         lv_label_set_text_fmt(ui.status,
-                              "SIMULATOR  |  %u cats  |  SD %u/%u GiB  |  touch ready",
+                              "SIMULATOR | %u cats | SD %u/%u GiB | tiles %u/%u | %lu ms",
                               static_cast<unsigned>(ui.cats.size()),
                               volume_gib,
-                              card_gib);
+                              card_gib,
+                              static_cast<unsigned>(ui.loaded_tile_count),
+                              static_cast<unsigned>(ui.visible_tile_count),
+                              static_cast<unsigned long>(ui.map_decode_ms));
     } else {
         lv_label_set_text_fmt(ui.status,
                               "SIMULATOR  |  %u cats  |  SD unavailable  |  touch ready",
@@ -126,10 +299,11 @@ void fit_all_clicked(lv_event_t *event)
         }
     }
     const auto fit = bluepaws::map::fitPoints(
-        points.data(), count, kMapWidth, kMapHeight, 38, 12, 18);
+        points.data(), count, kMapWidth, kMapHeight, 38, 12, 17);
     if (fit.valid) {
         ui->viewport = bluepaws::map::Viewport(
             kMapWidth, kMapHeight, fit.center, fit.zoom);
+        ui->tiles_dirty = true;
         update_ui(*ui);
     }
 }
@@ -205,7 +379,13 @@ void create_ui(UiState &ui)
     lv_obj_set_style_pad_all(map_panel, 0, 0);
     lv_obj_remove_flag(map_panel, LV_OBJ_FLAG_SCROLLABLE);
 
-    lv_obj_t *map_title = make_label(map_panel, "OFFLINE MAP TEST LAYER", lv_color_hex(0x41657A));
+    for (lv_obj_t *&image : ui.tile_images) {
+        image = lv_image_create(map_panel);
+        lv_obj_add_flag(image, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(image, LV_OBJ_FLAG_SCROLLABLE);
+    }
+
+    lv_obj_t *map_title = make_label(map_panel, "OFFLINE GLOUCESTER TILES", lv_color_hex(0x41657A));
     lv_obj_set_pos(map_title, 12, 12);
     lv_obj_set_style_text_font(map_title, &lv_font_montserrat_14, 0);
     create_map_grid(map_panel);
@@ -258,24 +438,32 @@ void create_ui(UiState &ui)
 
 extern "C" void app_main(void)
 {
-    static const char *TAG = "bluepaws_home_hub";
     lv_display_t *display = guition_jc4880p443c_display_start();
     if (display == nullptr) {
-        ESP_LOGE(TAG, "JC4880P443C display/touch initialization failed");
+        ESP_LOGE(kTag, "JC4880P443C display/touch initialization failed");
         return;
     }
 
     static UiState ui;
     ui.sd_error = guition_jc4880p443c_sd_mount(&ui.sd);
     if (ui.sd_error != ESP_OK) {
-        ESP_LOGE(TAG, "SD card initialization failed: %s", esp_err_to_name(ui.sd_error));
+        ESP_LOGE(kTag, "SD card initialization failed: %s", esp_err_to_name(ui.sd_error));
+    } else {
+        const jpeg_decode_engine_cfg_t jpeg_config{
+            .intr_priority = 0,
+            .timeout_ms = 250,
+        };
+        const esp_err_t jpeg_error = jpeg_new_decoder_engine(&jpeg_config, &ui.jpeg_decoder);
+        if (jpeg_error != ESP_OK) {
+            ESP_LOGE(kTag, "Hardware JPEG decoder initialization failed: %s", esp_err_to_name(jpeg_error));
+        }
     }
     ui.simulator.reset(kTestOrigin, uptime_ms());
     if (!lvgl_port_lock(0)) {
-        ESP_LOGE(TAG, "Could not acquire LVGL lock");
+        ESP_LOGE(kTag, "Could not acquire LVGL lock");
         return;
     }
     create_ui(ui);
     lvgl_port_unlock();
-    ESP_LOGI(TAG, "BluePaws Home Hub testbed UI started");
+    ESP_LOGI(kTag, "BluePaws Home Hub testbed UI started");
 }

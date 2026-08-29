@@ -169,4 +169,35 @@ loop. The SD-enabled 872,624-byte application image has SHA-256
 `B599D8CEE6B342956A946F6D2C4CF5659DEDA16620860033B731FDE3ED273680`.
 Only the application region was overwritten, and the factory backup remains
 untouched. This completes the physical SD interface check; JPEG decoding,
-tile caching and filesystem error handling remain to be implemented.
+tile caching and filesystem error handling were left for the map fixture phase
+below.
+
+## Offline tile fixture preparation — 2026-08-29
+
+QGIS LTR 3.44.13 and GDAL 3.13.2 rendered the official June 2026 OS Open
+Zoomstack Vector Tiles with Ordnance Survey's Outdoor QML style. The quick
+Gloucester fixture contains 1,580 standard 256 x 256 JPEG XYZ tiles over zoom
+levels 12-17, totalling 11,093,618 bytes. All tiles and the corrected fixture
+manifest were copied to `/bluepaws/maps` on the FAT32 partition; source and SD
+counts, byte totals, manifest hash and a central tile hash matched.
+
+The first corresponding firmware starts at Gloucester (`51.8642, -2.2382`),
+computes the visible tile grid, verifies each SD path and places available JPEG
+tiles under the cat markers. Its 882,160-byte application binary has SHA-256
+`DEF85546486E76119DCA8AB5426552D55DDB9F37527DEC69ADAF6BDE8AC05D42`.
+Physical testing displayed all six expected tiles with correct coordinates,
+clipping, colours and marker overlay, and **Fit all** selected the new viewport.
+The LVGL Tiny JPEG streaming decoder nevertheless took about five seconds to
+redraw, visibly filling the raster from top to bottom.
+
+The follow-up build replaces that streaming path with the ESP32-P4 hardware
+JPEG engine. Each newly visible JPEG is read once, decoded directly into an
+RGB565 PSRAM buffer and retained for LVGL redraws. The 907,904-byte application
+binary has SHA-256
+`4906ABDFA653D67D46E002F052FC73C5E0E2284E983D200125AB06CB7F658F63`.
+App-only flashing at `0x10000` completed with hash verification; the factory
+backup and all other flash regions remain untouched. On the first monitored
+boot the SD card mounted at 40 MHz in four-bit mode and all six tiles hardware
+decoded in approximately 1 ms each, with roughly 100 ms elapsed across SD reads
+and map preparation. The next architectural step is an asynchronous loader and
+bounded LRU cache before touch panning is introduced.

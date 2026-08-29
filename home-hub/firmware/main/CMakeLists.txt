@@ -3,6 +3,7 @@ idf_component_register(
     INCLUDE_DIRS "."
     REQUIRES
         bluepaws_core
+        esp_driver_jpeg
         esp_timer
         guition_jc4880p443c
 )
