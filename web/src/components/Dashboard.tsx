@@ -88,6 +88,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
   const [commandSending, setCommandSending] = useState(false);
   const [findDevice, setFindDevice] = useState<SelectedDevice | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [mapNotice, setMapNotice] = useState<string | null>(null);
   const [now, setNow] = useState(0);
   const [logs, setLogs] = useState<string[]>([]);
   const [customAvatars, setCustomAvatars] = useState<Record<number, DeviceAvatar>>({});
@@ -303,6 +304,12 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
     const timer = window.setTimeout(() => setToast(null), 2600);
     return () => window.clearTimeout(timer);
   }, [toast]);
+
+  useEffect(() => {
+    if (!mapNotice) return;
+    const timer = window.setTimeout(() => setMapNotice(null), 2600);
+    return () => window.clearTimeout(timer);
+  }, [mapNotice]);
 
   const allTrailsVisible = mapDevices.length > 0 && mapDevices.every((device) => trailIds.has(device.id));
 
@@ -552,7 +559,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
             <span className="panel-brand-mascot" aria-hidden="true" />
           </div>
           <div className="panel-header-btns">
-            <span id="statusBanner" className={statusClass} data-panel-static>
+            <span id="statusBanner" className={statusClass} data-panel-static title={connected && !tutorialMode ? "Live Supabase Realtime connection active" : statusText} aria-label={connected && !tutorialMode ? "Live connection active" : statusText}>
               <span id="statusIcon">●</span><span id="statusText">{statusText}</span>
             </span>
             <AccountMenu email={userEmail} familyName={familyName} familyRole={familyRole} onSignOut={handleSignOut} />
@@ -619,7 +626,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
         </div>
       </aside>
 
-      <TrackingMap devices={mapDevices} avatars={mapAvatars} sidebarOpen={sidebarOpen} followedId={followedId} trailIds={trailIds} trailHistory={trailHistory} command={mapCommand} onAction={handleAction} />
+      <TrackingMap devices={mapDevices} avatars={mapAvatars} sidebarOpen={sidebarOpen} followedId={followedId} trailIds={trailIds} trailHistory={trailHistory} command={mapCommand} onAction={handleAction} onNotice={setMapNotice} />
 
       {settingsOpen && (
         <SettingsModal
@@ -682,7 +689,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
           onStepChange={handleTutorialStepChange}
         />
       )}
-      {toast && <div className="tutorial-toast" role="status">{toast}</div>}
+      {(mapNotice ?? toast) && <div className="tutorial-toast" role="status">{mapNotice ?? toast}</div>}
     </>
   );
 }
