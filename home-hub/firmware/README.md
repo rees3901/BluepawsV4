@@ -25,8 +25,10 @@ moving the map. It selects the Street pack at `/bluepaws/maps/tiles`, Satellite
 at `/bluepaws/maps/layers/satellite/tiles`, or Aerial at
 `/bluepaws/maps/layers/aerial/tiles`. Missing SD directories are disabled. A
 selection keeps the current centre, clamps zoom to that pack's supported range,
-invalidates decoded tiles and redraws the same cat overlays. Aerial survey gaps
-fall back to the Street pack at the matching XYZ coordinate.
+invalidates both the BluePaws and LVGL decoded-image caches, and redraws the same
+cat overlays. Cache entries include the selected layer as well as the XYZ ID;
+missing tiles remain blank rather than silently showing imagery from a different
+layer.
 
 ## Toolchain
 

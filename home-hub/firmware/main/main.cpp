@@ -11,11 +11,13 @@
 #include "esp_timer.h"
 #include "esp_lvgl_port.h"
 #include "lvgl.h"
+#include "src/misc/cache/instance/lv_image_cache.h"
 
 #include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstdio>
+#include <dirent.h>
 #include <sys/stat.h>
 
 namespace {
@@ -73,6 +75,7 @@ constexpr UiLayout kPortraitLayout{464, 726, 464, 726};
 
 struct TileCacheEntry {
     bluepaws::map::TileId id{};
+    MapLayer layer = MapLayer::Street;
     lv_image_dsc_t descriptor{};
     uint8_t *pixels = nullptr;
     size_t pixel_capacity = 0;
@@ -133,13 +136,20 @@ bool map_layer_available(const UiState &ui, MapLayer layer)
     if (!ui.sd.mounted) {
         return false;
     }
-    struct stat layer_stat {};
-    return stat(map_layer_info(layer).tile_root, &layer_stat) == 0 && S_ISDIR(layer_stat.st_mode);
+    DIR *directory = opendir(map_layer_info(layer).tile_root);
+    if (directory == nullptr) {
+        return false;
+    }
+    closedir(directory);
+    return true;
 }
 
 void invalidate_tile_cache(UiState &ui)
 {
     for (TileCacheEntry &entry : ui.tile_cache) {
+        if (entry.descriptor.data != nullptr) {
+            lv_image_cache_drop(&entry.descriptor);
+        }
         entry.valid = false;
         entry.generation = 0;
     }
@@ -246,11 +256,12 @@ bool decode_tile(UiState &ui, TileCacheEntry &entry, const char *path)
 }
 
 TileCacheEntry *acquire_tile(UiState &ui,
+                             MapLayer layer,
                              const bluepaws::map::TileId &id,
                              const char *path)
 {
     for (TileCacheEntry &entry : ui.tile_cache) {
-        if (entry.valid && entry.id == id) {
+        if (entry.valid && entry.layer == layer && entry.id == id) {
             entry.generation = ui.cache_generation;
             return &entry;
         }
@@ -272,10 +283,17 @@ TileCacheEntry *acquire_tile(UiState &ui,
         return nullptr;
     }
 
+    // LVGL keys variable-image caches by descriptor address. This descriptor
+    // and its PSRAM buffer are deliberately reused, so evict the old identity
+    // before decoding a different XYZ tile into the same memory.
+    if (candidate->descriptor.data != nullptr) {
+        lv_image_cache_drop(&candidate->descriptor);
+    }
     candidate->valid = false;
     if (!decode_tile(ui, *candidate, path)) {
         return nullptr;
     }
+    candidate->layer = layer;
     candidate->id = id;
     candidate->generation = ui.cache_generation;
     candidate->valid = true;
@@ -307,6 +325,16 @@ void refresh_map_tiles(UiState &ui)
     const bluepaws::map::TileGrid visible_grid = ui.viewport.visibleTiles(0);
     const bluepaws::map::TileGrid grid = ui.viewport.visibleTiles(1);
     ui.visible_tile_count = visible_grid.count;
+
+    // Do not leave an object displaying a descriptor while that descriptor may
+    // be reassigned below. The objects are restored only after their new tile
+    // identity is known and decoded.
+    for (lv_obj_t *image : ui.tile_images) {
+        if (image != nullptr) {
+            lv_obj_add_flag(image, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+
     ++ui.cache_generation;
     if (ui.cache_generation == 0) {
         ++ui.cache_generation;
@@ -334,18 +362,8 @@ void refresh_map_tiles(UiState &ui)
                       placement.id.zoom,
                       static_cast<unsigned long>(placement.id.x),
                       static_cast<unsigned long>(placement.id.y));
-        TileCacheEntry *entry = acquire_tile(ui, placement.id, filesystem_path);
-        if (entry == nullptr && ui.active_map_layer == MapLayer::Aerial) {
-            const MapLayerInfo &fallback = map_layer_info(MapLayer::Street);
-            std::snprintf(filesystem_path,
-                          sizeof(filesystem_path),
-                          "%s/%u/%lu/%lu.jpg",
-                          fallback.tile_root,
-                          placement.id.zoom,
-                          static_cast<unsigned long>(placement.id.x),
-                          static_cast<unsigned long>(placement.id.y));
-            entry = acquire_tile(ui, placement.id, filesystem_path);
-        }
+        TileCacheEntry *entry =
+            acquire_tile(ui, ui.active_map_layer, placement.id, filesystem_path);
         if (entry == nullptr) {
             lv_obj_add_flag(image, LV_OBJ_FLAG_HIDDEN);
             continue;
@@ -1372,7 +1390,7 @@ void create_map_page(UiState &ui)
     make_layer_option(ui.layer_drawer, MapLayer::Aerial, aerial_layer_clicked, ui);
     lv_obj_t *layer_note = make_label(
         ui.layer_drawer,
-        "Aerial coverage has survey gaps; Street tiles fill missing areas.",
+        "Layers stay separate; unavailable coverage remains blank.",
         ui.dark_mode ? lv_color_hex(0x9DB3C0) : lv_color_hex(0x41657A));
     lv_obj_set_width(layer_note, LV_PCT(100));
     lv_label_set_long_mode(layer_note, LV_LABEL_LONG_WRAP);

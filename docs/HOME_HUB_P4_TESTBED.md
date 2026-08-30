@@ -323,9 +323,25 @@ slides a picker above the right edge of the existing viewport. Street,
 Satellite and Aerial use separate XYZ roots on the FAT partition; unavailable
 roots are visibly disabled. Changing layer preserves the map centre, clamps to
 the selected pack's zoom range and invalidates the decoded-tile cache so stale
-imagery cannot be reused. Environment Agency aerial survey gaps fall back to
-the Street tile at the same XYZ coordinate. Opening either the layer picker or
-nearby-cat drawer closes the other.
+imagery cannot be reused. Opening either the layer picker or nearby-cat drawer
+closes the other.
+
+Hardware testing exposed a second cache beneath the application's decoded-tile
+LRU: LVGL keys variable images by descriptor address. Reusing a descriptor and
+PSRAM buffer for a different XYZ tile without evicting that LVGL entry produced
+geographically scrambled 256-pixel squares and allowed imagery to leak between
+layer selections even though the files themselves stitched correctly on the
+PC. Cache identities now contain both layer and XYZ ID, the LVGL image entry is
+dropped before a descriptor is reused, and tile objects are hidden while a
+dirty grid is reassigned. Missing layer tiles remain blank; cross-layer fallback
+is intentionally prohibited.
+
+The corrected application is 951,424 bytes with SHA-256
+`E65DC3854615989AD38606EECC6465C9D1050AC7EC15DAC74FBE4DCD66313F3B`.
+It was flashed app-only at `0x10000` on COM27 and esptool verified the written
+hash. The monitored restart again reported revision 1.3, 16 MB flash, 32 MB
+PSRAM, GT911 touch and the mounted 128 GB card's FAT volume, then entered the UI
+without a panic or reset loop.
 
 The resulting 950,912-byte application has SHA-256
 `97501ABCC0A687687E4A2CC75C646161DE60E0DC2867AB27A2A9E397C89E40AE`.
