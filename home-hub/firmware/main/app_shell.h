@@ -10,6 +10,7 @@ struct PageActions {
     lv_event_cb_t theme = nullptr;
     lv_event_cb_t brightness = nullptr;
     void *user_data = nullptr;
+    bool show_header_actions = false;
 };
 
 lv_obj_t *create_page_frame(lv_obj_t *screen,

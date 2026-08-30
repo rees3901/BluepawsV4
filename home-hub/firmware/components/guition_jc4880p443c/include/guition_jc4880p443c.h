@@ -50,6 +50,9 @@ uint8_t guition_jc4880p443c_touch_count(void);
 /** Consume accumulated pinch steps: positive zooms in, negative zooms out. */
 int8_t guition_jc4880p443c_take_pinch_steps(void);
 
+/** Consume a two-finger downward swipe that began at the displayed top edge. */
+bool guition_jc4880p443c_take_quick_settings_swipe(void);
+
 /**
  * Mount the first FAT partition through the board's four-bit SDMMC slot.
  * The function never formats a card when mounting fails.

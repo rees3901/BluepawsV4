@@ -28,7 +28,8 @@ constexpr int32_t kMapTop = 0;
 constexpr int32_t kMarkerSize = 28;
 constexpr size_t kTilePixelBytes = bluepaws::map::kTileSize * bluepaws::map::kTileSize * 2;
 constexpr uint32_t kBrightnessTimeoutMs = 5000;
-constexpr uint32_t kBrightnessFadeMs = 320;
+constexpr uint32_t kBrightnessFadeMs = 450;
+constexpr uint32_t kGesturePollMs = 30;
 constexpr char kTag[] = "bluepaws_home_hub";
 constexpr uint32_t kMarkerColours[] = {
     0x1E88E5, 0xE53935, 0x43A047, 0xFB8C00,
@@ -100,7 +101,10 @@ struct UiState {
     lv_obj_t *brightness_popup = nullptr;
     lv_obj_t *brightness_slider = nullptr;
     lv_obj_t *brightness_label = nullptr;
+    lv_obj_t *quick_settings_tray = nullptr;
+    lv_obj_t *quick_settings_handle = nullptr;
     lv_timer_t *brightness_hide_timer = nullptr;
+    lv_timer_t *gesture_timer = nullptr;
     lv_obj_t *status = nullptr;
     lv_timer_t *update_timer = nullptr;
     guition_jc4880p443c_sd_info_t sd{};
@@ -115,6 +119,7 @@ struct UiState {
     bool dark_mode = true;
     bool drawer_open = false;
     bool layer_drawer_open = false;
+    bool quick_settings_open = false;
     bool portrait = false;
     bool tiles_dirty = true;
     bool tile_images_bound = false;
@@ -542,6 +547,16 @@ void update_timer(lv_timer_t *timer)
 
 void change_zoom(UiState &ui, int delta);
 lv_obj_t *make_label(lv_obj_t *parent, const char *text, lv_color_t colour);
+void open_quick_settings(UiState &ui);
+void close_quick_settings(UiState &ui, bool animate);
+
+void gesture_timer(lv_timer_t *timer)
+{
+    auto *ui = static_cast<UiState *>(lv_timer_get_user_data(timer));
+    if (ui != nullptr && guition_jc4880p443c_take_quick_settings_swipe()) {
+        open_quick_settings(*ui);
+    }
+}
 
 void map_pressing(lv_event_t *event)
 {
@@ -789,6 +804,8 @@ void create_brightness_popup(UiState &ui)
     lv_obj_set_style_radius(popup, 12, 0);
     lv_obj_set_style_pad_all(popup, 10, 0);
     lv_obj_remove_flag(popup, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(popup, brightness_activity, LV_EVENT_PRESSED, &ui);
+    lv_obj_add_event_cb(popup, brightness_activity, LV_EVENT_PRESSING, &ui);
 
     lv_obj_t *icon = lv_image_create(popup);
     lv_image_set_src(icon, &bluepaws::ui::icon_brightness);
@@ -830,6 +847,7 @@ void brightness_clicked(lv_event_t *event)
     if (ui == nullptr) {
         return;
     }
+    close_quick_settings(*ui, true);
     if (ui->brightness_popup == nullptr) {
         create_brightness_popup(*ui);
         return;
@@ -1157,6 +1175,211 @@ bluepaws::ui::PageActions page_actions(UiState &ui, bool show_home)
         .brightness = brightness_clicked,
         .user_data = &ui,
     };
+}
+
+void quick_settings_y_exec(void *object, int32_t y)
+{
+    lv_obj_set_y(static_cast<lv_obj_t *>(object), y);
+}
+
+void quick_settings_close_completed(lv_anim_t *animation)
+{
+    auto *ui = static_cast<UiState *>(lv_anim_get_user_data(animation));
+    auto *tray = static_cast<lv_obj_t *>(animation->var);
+    if (ui == nullptr || tray == nullptr || ui->quick_settings_tray != tray ||
+        ui->quick_settings_open) {
+        return;
+    }
+    lv_obj_add_flag(tray, LV_OBJ_FLAG_HIDDEN);
+}
+
+lv_obj_t *make_quick_setting(lv_obj_t *parent,
+                             const lv_image_dsc_t &icon,
+                             const char *label_text,
+                             UiState &ui,
+                             lv_event_cb_t callback)
+{
+    lv_obj_t *button = lv_button_create(parent);
+    lv_obj_set_size(button, ui.portrait ? 96 : 108, 78);
+    lv_obj_set_style_bg_color(button,
+                              ui.dark_mode ? lv_color_hex(0x243746) : lv_color_hex(0xDDD8CF),
+                              0);
+    lv_obj_set_style_bg_opa(button, LV_OPA_80, 0);
+    lv_obj_set_style_border_color(button,
+                                  ui.dark_mode ? lv_color_hex(0x60788C) : lv_color_hex(0xAAA69E),
+                                  0);
+    lv_obj_set_style_border_width(button, 1, 0);
+    lv_obj_set_style_radius(button, 12, 0);
+    lv_obj_set_style_pad_all(button, 5, 0);
+    lv_obj_add_event_cb(button, callback, LV_EVENT_CLICKED, &ui);
+
+    lv_obj_t *image = lv_image_create(button);
+    lv_image_set_src(image, &icon);
+    lv_obj_set_style_image_recolor(
+        image, ui.dark_mode ? lv_color_hex(0xFFFFFF) : lv_color_hex(0x17324D), 0);
+    lv_obj_set_style_image_recolor_opa(image, LV_OPA_COVER, 0);
+    lv_obj_align(image, LV_ALIGN_TOP_MID, 0, 0);
+
+    lv_obj_t *label = make_label(
+        button,
+        label_text,
+        ui.dark_mode ? lv_color_hex(0xF3F8FB) : lv_color_hex(0x17324D));
+    lv_obj_set_style_text_font(label, &lv_font_montserrat_14, 0);
+    lv_obj_align(label, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_remove_flag(label, LV_OBJ_FLAG_CLICKABLE);
+    return button;
+}
+
+void quick_settings_handle_clicked(lv_event_t *event)
+{
+    auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
+    if (ui == nullptr) {
+        return;
+    }
+    if (ui->quick_settings_open) {
+        close_quick_settings(*ui, true);
+    } else {
+        open_quick_settings(*ui);
+    }
+}
+
+void quick_settings_close_clicked(lv_event_t *event)
+{
+    auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
+    if (ui != nullptr) {
+        close_quick_settings(*ui, true);
+    }
+}
+
+void create_quick_settings_tray(UiState &ui)
+{
+    lv_obj_t *screen = lv_screen_active();
+    const int32_t tray_height = ui.portrait ? 164 : 132;
+    lv_obj_t *tray = lv_obj_create(screen);
+    lv_obj_set_size(tray, LV_PCT(100), tray_height);
+    lv_obj_set_pos(tray, 0, -tray_height);
+    lv_obj_add_flag(tray, LV_OBJ_FLAG_FLOATING);
+    lv_obj_add_flag(tray, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_bg_color(
+        tray, ui.dark_mode ? lv_color_hex(0x101B25) : lv_color_hex(0xD8D3C9), 0);
+    lv_obj_set_style_bg_opa(tray, LV_OPA_90, 0);
+    lv_obj_set_style_border_color(
+        tray, ui.dark_mode ? lv_color_hex(0x4E7187) : lv_color_hex(0xAAA69E), 0);
+    lv_obj_set_style_border_width(tray, 1, 0);
+    lv_obj_set_style_border_side(tray, LV_BORDER_SIDE_BOTTOM, 0);
+    lv_obj_set_style_radius(tray, 0, 0);
+    lv_obj_set_style_pad_all(tray, 8, 0);
+    lv_obj_remove_flag(tray, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *title = make_label(
+        tray,
+        "Quick controls",
+        ui.dark_mode ? lv_color_hex(0xF3F8FB) : lv_color_hex(0x17324D));
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_14, 0);
+    lv_obj_align(title, LV_ALIGN_TOP_LEFT, 6, 0);
+
+    lv_obj_t *close = lv_button_create(tray);
+    lv_obj_set_size(close, 46, 28);
+    lv_obj_align(close, LV_ALIGN_TOP_RIGHT, 0, -3);
+    lv_obj_set_style_bg_opa(close, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(close, 0, 0);
+    lv_obj_set_style_shadow_width(close, 0, 0);
+    lv_obj_add_event_cb(close, quick_settings_close_clicked, LV_EVENT_CLICKED, &ui);
+    lv_obj_t *chevron = make_label(
+        close,
+        LV_SYMBOL_UP,
+        ui.dark_mode ? lv_color_hex(0xF3F8FB) : lv_color_hex(0x17324D));
+    lv_obj_center(chevron);
+
+    lv_obj_t *controls = lv_obj_create(tray);
+    lv_obj_set_size(controls, LV_PCT(100), 84);
+    lv_obj_align(controls, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_flex_flow(controls, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(controls,
+                          LV_FLEX_ALIGN_SPACE_EVENLY,
+                          LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_bg_opa(controls, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(controls, 0, 0);
+    lv_obj_set_style_pad_all(controls, 0, 0);
+    lv_obj_remove_flag(controls, LV_OBJ_FLAG_SCROLLABLE);
+
+    make_quick_setting(controls, bluepaws::ui::icon_home, "Home", ui, launcher_clicked);
+    make_quick_setting(
+        controls, bluepaws::ui::icon_brightness, "Brightness", ui, brightness_clicked);
+    make_quick_setting(
+        controls, bluepaws::ui::icon_rotate, "Orientation", ui, orientation_clicked);
+    make_quick_setting(controls,
+                       bluepaws::ui::icon_night_mode,
+                       ui.dark_mode ? "Light mode" : "Dark mode",
+                       ui,
+                       theme_clicked);
+
+    lv_obj_t *handle = lv_button_create(screen);
+    lv_obj_set_size(handle, 72, 10);
+    lv_obj_align(handle, LV_ALIGN_TOP_MID, 0, 1);
+    lv_obj_add_flag(handle, LV_OBJ_FLAG_FLOATING);
+    lv_obj_set_style_bg_color(
+        handle, ui.dark_mode ? lv_color_hex(0x80C9F2) : lv_color_hex(0x28709A), 0);
+    lv_obj_set_style_bg_opa(handle, LV_OPA_60, 0);
+    lv_obj_set_style_border_width(handle, 0, 0);
+    lv_obj_set_style_radius(handle, 5, 0);
+    lv_obj_set_style_pad_all(handle, 0, 0);
+    lv_obj_set_style_shadow_width(handle, 0, 0);
+    lv_obj_add_event_cb(handle, quick_settings_handle_clicked, LV_EVENT_CLICKED, &ui);
+
+    ui.quick_settings_tray = tray;
+    ui.quick_settings_handle = handle;
+    ui.quick_settings_open = false;
+    lv_obj_move_foreground(handle);
+}
+
+void open_quick_settings(UiState &ui)
+{
+    if (ui.quick_settings_tray == nullptr || ui.quick_settings_open) {
+        return;
+    }
+    hide_brightness_popup(ui);
+    ui.quick_settings_open = true;
+    lv_obj_remove_flag(ui.quick_settings_tray, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(ui.quick_settings_tray);
+    const int32_t height = lv_obj_get_height(ui.quick_settings_tray);
+    lv_anim_delete(ui.quick_settings_tray, quick_settings_y_exec);
+    lv_obj_set_y(ui.quick_settings_tray, -height);
+    lv_anim_t animation{};
+    lv_anim_init(&animation);
+    lv_anim_set_var(&animation, ui.quick_settings_tray);
+    lv_anim_set_values(&animation, -height, 0);
+    lv_anim_set_duration(&animation, 220);
+    lv_anim_set_path_cb(&animation, lv_anim_path_ease_out);
+    lv_anim_set_exec_cb(&animation, quick_settings_y_exec);
+    lv_anim_start(&animation);
+    ESP_LOGI(kTag, "Quick settings opened");
+}
+
+void close_quick_settings(UiState &ui, bool animate)
+{
+    if (ui.quick_settings_tray == nullptr || !ui.quick_settings_open) {
+        return;
+    }
+    ui.quick_settings_open = false;
+    lv_anim_delete(ui.quick_settings_tray, quick_settings_y_exec);
+    if (!animate) {
+        lv_obj_add_flag(ui.quick_settings_tray, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+    const int32_t height = lv_obj_get_height(ui.quick_settings_tray);
+    lv_anim_t animation{};
+    lv_anim_init(&animation);
+    lv_anim_set_var(&animation, ui.quick_settings_tray);
+    lv_anim_set_user_data(&animation, &ui);
+    lv_anim_set_values(&animation, lv_obj_get_y(ui.quick_settings_tray), -height);
+    lv_anim_set_duration(&animation, 180);
+    lv_anim_set_path_cb(&animation, lv_anim_path_ease_in);
+    lv_anim_set_exec_cb(&animation, quick_settings_y_exec);
+    lv_anim_set_completed_cb(&animation, quick_settings_close_completed);
+    lv_anim_start(&animation);
+    ESP_LOGI(kTag, "Quick settings closed");
 }
 
 void create_launcher(UiState &ui)
@@ -1552,7 +1775,10 @@ void create_ui(UiState &ui)
     ui.brightness_popup = nullptr;
     ui.brightness_slider = nullptr;
     ui.brightness_label = nullptr;
+    ui.quick_settings_tray = nullptr;
+    ui.quick_settings_handle = nullptr;
     ui.brightness_hide_timer = nullptr;
+    ui.quick_settings_open = false;
     ui.status = nullptr;
 
     switch (ui.active_page) {
@@ -1573,9 +1799,14 @@ void create_ui(UiState &ui)
         break;
     }
 
+    create_quick_settings_tray(ui);
+
     update_ui(ui);
     if (ui.update_timer == nullptr) {
         ui.update_timer = lv_timer_create(update_timer, 1000, &ui);
+    }
+    if (ui.gesture_timer == nullptr) {
+        ui.gesture_timer = lv_timer_create(gesture_timer, kGesturePollMs, &ui);
     }
 }
 

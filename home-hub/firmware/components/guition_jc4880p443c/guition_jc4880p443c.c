@@ -49,8 +49,13 @@ static i2c_master_bus_handle_t touch_i2c;
 static esp_lcd_touch_handle_t touch;
 static volatile uint8_t touch_contact_count;
 static volatile int8_t pending_pinch_steps;
+static volatile bool pending_quick_settings_swipe;
 static uint64_t pinch_reference_squared;
 static bool pinch_tracking;
+static bool quick_settings_tracking;
+static bool quick_settings_latched;
+static int32_t quick_settings_start_x;
+static int32_t quick_settings_start_y;
 static sd_pwr_ctrl_handle_t sd_power;
 static sdmmc_card_t *sd_card;
 
@@ -303,6 +308,57 @@ int8_t guition_jc4880p443c_take_pinch_steps(void)
     return steps;
 }
 
+bool guition_jc4880p443c_take_quick_settings_swipe(void)
+{
+    const bool pending = pending_quick_settings_swipe;
+    pending_quick_settings_swipe = false;
+    return pending;
+}
+
+static bool update_quick_settings_swipe(lv_display_t *display,
+                                        const esp_lcd_touch_point_data_t *contacts,
+                                        uint8_t contact_count)
+{
+    if (contact_count < 2) {
+        quick_settings_tracking = false;
+        quick_settings_latched = false;
+        return false;
+    }
+
+    lv_point_t first = {.x = contacts[0].x, .y = contacts[0].y};
+    lv_point_t second = {.x = contacts[1].x, .y = contacts[1].y};
+    lv_display_rotate_point(display, &first);
+    lv_display_rotate_point(display, &second);
+    const int32_t centre_x = (first.x + second.x) / 2;
+    const int32_t centre_y = (first.y + second.y) / 2;
+
+    if (quick_settings_latched) {
+        return true;
+    }
+    if (!quick_settings_tracking) {
+        /* Both fingers must begin inside the top 64 displayed pixels. */
+        if (first.y <= 64 && second.y <= 64) {
+            quick_settings_tracking = true;
+            quick_settings_start_x = centre_x;
+            quick_settings_start_y = centre_y;
+        }
+        return quick_settings_tracking;
+    }
+
+    const int32_t travel_y = centre_y - quick_settings_start_y;
+    const int32_t travel_x = centre_x - quick_settings_start_x;
+    if (travel_y >= 72 && travel_x >= -120 && travel_x <= 120) {
+        pending_quick_settings_swipe = true;
+        quick_settings_tracking = false;
+        quick_settings_latched = true;
+        pending_pinch_steps = 0;
+        ESP_LOGI(TAG, "GT911 two-finger quick-settings swipe");
+    } else if (travel_y < -24 || travel_x < -140 || travel_x > 140) {
+        quick_settings_tracking = false;
+    }
+    return quick_settings_tracking || quick_settings_latched;
+}
+
 static void update_pinch(const esp_lcd_touch_point_data_t *contacts, uint8_t contact_count)
 {
     if (contact_count < 2) {
@@ -363,7 +419,14 @@ static void touchpad_read(lv_indev_t *indev, lv_indev_data_t *data)
     }
 
     touch_contact_count = contact_count;
-    update_pinch(contacts, contact_count);
+    const bool quick_settings_gesture =
+        update_quick_settings_swipe(lv_indev_get_display(indev), contacts, contact_count);
+    if (quick_settings_gesture) {
+        pinch_tracking = false;
+        pinch_reference_squared = 0;
+    } else {
+        update_pinch(contacts, contact_count);
+    }
     if (contact_count != logged_contact_count) {
         if (contact_count >= 2) {
             ESP_LOGI(TAG,
