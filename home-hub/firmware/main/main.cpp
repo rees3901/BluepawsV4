@@ -108,6 +108,7 @@ struct UiState {
     jpeg_decoder_handle_t jpeg_decoder = nullptr;
     size_t visible_tile_count = 0;
     size_t prepared_tile_count = 0;
+    size_t loaded_tile_count = 0;
     uint32_t map_refresh_ms = 0;
     AppPage active_page = AppPage::Launcher;
     MapLayer active_map_layer = MapLayer::Street;
@@ -116,6 +117,7 @@ struct UiState {
     bool layer_drawer_open = false;
     bool portrait = false;
     bool tiles_dirty = true;
+    bool tile_images_bound = false;
     int brightness_percent = 80;
 };
 
@@ -259,6 +261,7 @@ void refresh_map_tiles(UiState &ui)
     ui.tiles_dirty = false;
     ui.visible_tile_count = 0;
     ui.prepared_tile_count = 0;
+    ui.loaded_tile_count = 0;
     ui.map_refresh_ms = 0;
     const int64_t refresh_started_us = esp_timer_get_time();
 
@@ -277,15 +280,58 @@ void refresh_map_tiles(UiState &ui)
     const bluepaws::map::TileGrid grid = ui.viewport.visibleTiles(1);
     ui.visible_tile_count = visible_grid.count;
 
-    // A screen slot permanently owns the descriptor and pixel buffer with the
-    // same array index.  Detach every LVGL object before a buffer can be
-    // overwritten. Moving descriptors between screen objects allowed queued
-    // draw work to retain a previous tile identity and produced a stable but
-    // geographically shuffled map after pan/zoom operations.
-    for (lv_obj_t *image : ui.tile_images) {
-        if (image != nullptr) {
-            lv_obj_add_flag(image, LV_OBJ_FLAG_HIDDEN);
-            lv_image_set_src(image, nullptr);
+    bool sources_changed = !ui.tile_images_bound;
+    for (size_t i = 0; i < grid.count && !sources_changed; ++i) {
+        const TileCacheEntry &entry = ui.tile_cache[i];
+        sources_changed = !entry.valid || entry.layer != ui.active_map_layer ||
+                          !(entry.id == grid.tiles[i].id);
+    }
+
+    if (sources_changed) {
+        // Keep LVGL descriptor addresses fixed by screen slot, but reorder the
+        // decoded buffer identities before rebinding them. Most of a shifted
+        // grid therefore survives and only the newly exposed row/column needs
+        // an SD read. This is the fixed-grid strategy used by 0015/map_tiles,
+        // extended here with XYZ-aware reuse for continuous panning.
+        for (lv_obj_t *image : ui.tile_images) {
+            if (image != nullptr) {
+                lv_obj_add_flag(image, LV_OBJ_FLAG_HIDDEN);
+                lv_image_set_src(image, nullptr);
+            }
+        }
+        ui.tile_images_bound = false;
+
+        const auto previous_cache = ui.tile_cache;
+        std::array<int, bluepaws::map::kMaximumVisibleTiles> source_indices{};
+        std::array<bool, bluepaws::map::kMaximumVisibleTiles> source_used{};
+        source_indices.fill(-1);
+
+        for (size_t i = 0; i < grid.count; ++i) {
+            for (size_t j = 0; j < previous_cache.size(); ++j) {
+                const TileCacheEntry &candidate = previous_cache[j];
+                if (!source_used[j] && candidate.valid &&
+                    candidate.layer == ui.active_map_layer &&
+                    candidate.id == grid.tiles[i].id) {
+                    source_indices[i] = static_cast<int>(j);
+                    source_used[j] = true;
+                    break;
+                }
+            }
+        }
+
+        size_t next_unused = 0;
+        for (size_t i = 0; i < source_indices.size(); ++i) {
+            if (source_indices[i] >= 0) {
+                continue;
+            }
+            while (next_unused < source_used.size() && source_used[next_unused]) {
+                ++next_unused;
+            }
+            source_indices[i] = static_cast<int>(next_unused);
+            source_used[next_unused] = true;
+        }
+        for (size_t i = 0; i < ui.tile_cache.size(); ++i) {
+            ui.tile_cache[i] = previous_cache[static_cast<size_t>(source_indices[i])];
         }
     }
 
@@ -322,12 +368,17 @@ void refresh_map_tiles(UiState &ui)
             entry.layer = ui.active_map_layer;
             entry.id = placement.id;
             entry.valid = true;
+            ++ui.loaded_tile_count;
         }
-        lv_image_set_src(image, &entry.descriptor);
+        if (sources_changed) {
+            lv_image_set_src(image, &entry.descriptor);
+            lv_obj_remove_flag(image, LV_OBJ_FLAG_HIDDEN);
+        }
         lv_obj_set_pos(image, placement.screen_x, placement.screen_y);
-        lv_obj_remove_flag(image, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_invalidate(image);
         ++ui.prepared_tile_count;
+    }
+    if (sources_changed) {
+        ui.tile_images_bound = true;
     }
     ui.map_refresh_ms = static_cast<uint32_t>(
         (esp_timer_get_time() - refresh_started_us + 999) / 1000);
@@ -451,14 +502,15 @@ void update_ui(UiState &ui)
         if (ui.sd.mounted) {
             lv_label_set_text_fmt(ui.status,
                                   ui.portrait
-                                      ? "%u cats | %s | z%u | SD %u/%u | view %u | %lu ms"
-                                      : "SIM | %u cats | %s | z%u | SD %u/%u GiB | view %u | %lu ms",
+                                      ? "%u cats | %s | z%u | SD %u/%u | view %u | new %u | %lu ms"
+                                      : "SIM | %u cats | %s | z%u | SD %u/%u GiB | view %u | new %u | %lu ms",
                                   static_cast<unsigned>(ui.cats.size()),
                                   map_layer_info(ui.active_map_layer).name,
                                   static_cast<unsigned>(ui.viewport.zoom()),
                                   volume_gib,
                                   card_gib,
                                   static_cast<unsigned>(ui.visible_tile_count),
+                                  static_cast<unsigned>(ui.loaded_tile_count),
                                   static_cast<unsigned long>(ui.map_refresh_ms));
         } else {
             lv_label_set_text(ui.status, "SIMULATOR | SD unavailable | touch ready");
@@ -1174,6 +1226,7 @@ void create_map_page(UiState &ui)
 {
     const UiLayout &layout = current_layout(ui);
     ui.tiles_dirty = true;
+    ui.tile_images_bound = false;
     lv_obj_t *content = bluepaws::ui::create_page_frame(
         lv_screen_active(),
         "BluePaws | Live Map",

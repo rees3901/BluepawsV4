@@ -335,8 +335,18 @@ objects are detached before their slot is overwritten, and slot identities
 contain both layer and XYZ ID. Missing layer tiles remain blank; cross-layer
 fallback is intentionally prohibited.
 
-The corrected application is 951,232 bytes with SHA-256
-`D0306E3D25CACD63C1B183B5FE088CD275F6BE36043A5A1DAA60B03473289091`.
+The first correct fixed-slot build still re-decoded the entire overscan grid
+when a pan crossed a 256-pixel boundary, producing reported stalls around 500
+ms. The follow-up grid-reuse pass keeps sub-tile pans bound and merely moves the
+LVGL objects. At a boundary it permutes matching decoded XYZ entries into their
+new screen slots, then reads only the newly exposed row or column. The status
+line's `new N` field records the number of SD/JPEG loads in the last refresh.
+This adapts the fixed RGB565 grid used by the open-source `0015/map_tiles`
+component while retaining BluePaws' continuous viewport, JPEG storage and live
+overlay architecture.
+
+The optimized application is 951,888 bytes with SHA-256
+`C1B41A5B8E99D5B6E823F6BE395F6034BABB2AA5D43B42C0054EC6F74A9D5C6A`.
 It was flashed app-only at `0x10000` on COM27 and esptool verified the written
 hash. The monitored restart again reported revision 1.3, 16 MB flash, 32 MB
 PSRAM, GT911 touch and the mounted 128 GB card's FAT volume, then entered the UI
