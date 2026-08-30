@@ -1,8 +1,9 @@
 idf_component_register(
-    SRCS "main.cpp"
+    SRCS "main.cpp" "app_shell.cpp" "ui_icons.cpp"
     INCLUDE_DIRS "."
     REQUIRES
         bluepaws_core
+        esp_driver_jpeg
         esp_timer
         guition_jc4880p443c
 )
