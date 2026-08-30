@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cerrno>
 #include <cstdint>
 #include <cstdio>
 #include <dirent.h>
@@ -61,7 +62,7 @@ struct MapLayerInfo {
 constexpr std::array<MapLayerInfo, 3> kMapLayers{{
     {"Street", "OSM roads, places and buildings", "/sdcard/bluepaws/maps/tiles", 10, 17},
     {"Satellite", "Sentinel-2 Gloucestershire imagery", "/sdcard/bluepaws/maps/layers/satellite/tiles", 5, 14},
-    {"Aerial", "Environment Agency Gloucester surveys", "/sdcard/bluepaws/maps/layers/aerial/tiles", 12, 17},
+    {"Aerial", "Single-source Gloucester aerial imagery", "/sdcard/bluepaws/maps/layers/aerial-consistent/tiles", 12, 17},
 }};
 
 struct UiLayout {
@@ -94,6 +95,10 @@ struct UiState {
     std::array<TileCacheEntry, bluepaws::map::kMaximumVisibleTiles> tile_cache{};
     std::array<lv_obj_t *, bluepaws::kMaximumCats> markers{};
     std::array<lv_obj_t *, bluepaws::kMaximumCats> summary_rows{};
+    std::array<lv_obj_t *, bluepaws::kMaximumCats> drawer_cards{};
+    std::array<lv_obj_t *, bluepaws::kMaximumCats> drawer_summary_labels{};
+    std::array<lv_obj_t *, bluepaws::kMaximumCats> drawer_detail_labels{};
+    std::array<bool, bluepaws::kMaximumCats> drawer_card_expanded{};
     lv_obj_t *cat_list = nullptr;
     lv_obj_t *diagnostics_text = nullptr;
     lv_obj_t *map_drawer = nullptr;
@@ -141,12 +146,24 @@ bool map_layer_available(const UiState &ui, MapLayer layer)
     if (!ui.sd.mounted) {
         return false;
     }
-    DIR *directory = opendir(map_layer_info(layer).tile_root);
-    if (directory == nullptr) {
-        return false;
+    const char *root = map_layer_info(layer).tile_root;
+    struct stat directory_stat {};
+    if (stat(root, &directory_stat) == 0 && S_ISDIR(directory_stat.st_mode)) {
+        return true;
     }
-    closedir(directory);
-    return true;
+    const int stat_error = errno;
+    DIR *directory = opendir(root);
+    if (directory != nullptr) {
+        closedir(directory);
+        return true;
+    }
+    ESP_LOGW(kTag,
+             "Map layer probe failed: %s path=%s stat_errno=%d opendir_errno=%d",
+             map_layer_info(layer).name,
+             root,
+             stat_error,
+             errno);
+    return false;
 }
 
 void invalidate_tile_cache(UiState &ui)
@@ -434,6 +451,31 @@ void update_ui(UiState &ui)
                                   static_cast<unsigned>(cat->latest.battery_percent),
                                   static_cast<int>(cat->latest.rssi),
                                   static_cast<unsigned long>(age_seconds));
+        }
+
+        const uint32_t age_seconds = (now_ms - cat->latest.received_at_ms) / 1000U;
+        if (ui.drawer_summary_labels[i] != nullptr) {
+            lv_label_set_text_fmt(ui.drawer_summary_labels[i],
+                                  "%s\nSIMULATED  |  %u%%  |  %d dBm  |  %lus",
+                                  cat->name,
+                                  static_cast<unsigned>(cat->latest.battery_percent),
+                                  static_cast<int>(cat->latest.rssi),
+                                  static_cast<unsigned long>(age_seconds));
+        }
+        if (ui.drawer_detail_labels[i] != nullptr) {
+            lv_label_set_text_fmt(
+                ui.drawer_detail_labels[i],
+                "Device ID: %u\nSequence: %lu\nBattery: %u mV (%u%%)\nSignal: %d dBm / %.1f dB SNR\n"
+                "Position: %.5f, %.5f\nLast report: %lu seconds ago\nSource: simulator",
+                static_cast<unsigned>(cat->device_id),
+                static_cast<unsigned long>(cat->latest.sequence),
+                static_cast<unsigned>(cat->latest.battery_mv),
+                static_cast<unsigned>(cat->latest.battery_percent),
+                static_cast<int>(cat->latest.rssi),
+                static_cast<double>(cat->latest.snr),
+                static_cast<double>(cat->last_valid_latitude_e7) / 1.0e7,
+                static_cast<double>(cat->last_valid_longitude_e7) / 1.0e7,
+                static_cast<unsigned long>(age_seconds));
         }
 
         lv_obj_t *marker = ui.markers[i];
@@ -912,12 +954,12 @@ lv_obj_t *make_map_control(lv_obj_t *parent,
 {
     lv_obj_t *button = lv_button_create(parent);
     lv_obj_set_pos(button, x, y);
-    lv_obj_set_size(button, 44, 38);
+    lv_obj_set_size(button, 54, 54);
     lv_obj_set_style_bg_color(button, lv_color_hex(0x17324D), 0);
     lv_obj_set_style_bg_opa(button, LV_OPA_90, 0);
     lv_obj_set_style_border_color(button, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_border_width(button, 1, 0);
-    lv_obj_set_style_radius(button, 6, 0);
+    lv_obj_set_style_radius(button, 10, 0);
     lv_obj_set_style_pad_all(button, 0, 0);
     lv_obj_add_event_cb(button, callback, LV_EVENT_CLICKED, &ui);
     lv_obj_t *label = make_label(button, text, lv_color_hex(0xFFFFFF));
@@ -935,13 +977,13 @@ lv_obj_t *make_map_icon_control(lv_obj_t *parent,
 {
     lv_obj_t *button = lv_button_create(parent);
     lv_obj_set_pos(button, x, y);
-    lv_obj_set_size(button, 44, 44);
+    lv_obj_set_size(button, 54, 54);
     lv_obj_set_style_bg_color(button, lv_color_hex(0x10202E), 0);
     lv_obj_set_style_bg_opa(button, LV_OPA_80, 0);
     lv_obj_set_style_border_color(button, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_border_width(button, 1, 0);
-    lv_obj_set_style_radius(button, 8, 0);
-    lv_obj_set_style_pad_all(button, 7, 0);
+    lv_obj_set_style_radius(button, 10, 0);
+    lv_obj_set_style_pad_all(button, 10, 0);
     lv_obj_add_event_cb(button, callback, LV_EVENT_CLICKED, &ui);
     lv_obj_t *image = lv_image_create(button);
     lv_image_set_src(image, &icon);
@@ -959,17 +1001,17 @@ lv_obj_t *make_hamburger_control(lv_obj_t *parent,
 {
     lv_obj_t *button = lv_button_create(parent);
     lv_obj_set_pos(button, x, y);
-    lv_obj_set_size(button, 44, 44);
+    lv_obj_set_size(button, 54, 54);
     lv_obj_set_style_bg_color(button, lv_color_hex(0x10202E), 0);
     lv_obj_set_style_bg_opa(button, LV_OPA_80, 0);
     lv_obj_set_style_border_color(button, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_border_width(button, 1, 0);
-    lv_obj_set_style_radius(button, 8, 0);
+    lv_obj_set_style_radius(button, 10, 0);
     lv_obj_set_style_pad_all(button, 0, 0);
     lv_obj_add_event_cb(button, callback, LV_EVENT_CLICKED, &ui);
-    for (int32_t offset : {-8, 0, 8}) {
+    for (int32_t offset : {-10, 0, 10}) {
         lv_obj_t *bar = lv_obj_create(button);
-        lv_obj_set_size(bar, 24, 3);
+        lv_obj_set_size(bar, 30, 4);
         lv_obj_align(bar, LV_ALIGN_CENTER, 0, offset);
         lv_obj_set_style_bg_color(bar, lv_color_hex(0xFFFFFF), 0);
         lv_obj_set_style_border_width(bar, 0, 0);
@@ -1032,6 +1074,11 @@ lv_obj_t *make_layer_option(lv_obj_t *parent,
     const MapLayerInfo &info = map_layer_info(layer);
     const bool selected = ui.active_map_layer == layer;
     const bool available = map_layer_available(ui, layer);
+    ESP_LOGI(kTag,
+             "Map layer %s: %s (%s)",
+             info.name,
+             available ? "available" : "unavailable",
+             info.tile_root);
     lv_obj_t *button = lv_button_create(parent);
     lv_obj_set_size(button, LV_PCT(100), 78);
     lv_obj_set_style_bg_color(
@@ -1056,7 +1103,10 @@ lv_obj_t *make_layer_option(lv_obj_t *parent,
     lv_obj_set_style_text_font(title, &lv_font_montserrat_18, 0);
     lv_obj_t *description = make_label(
         button,
-        available ? info.description : "Not installed on SD card",
+        available ? info.description
+                  : (layer == MapLayer::Aerial
+                         ? "Mixed pack rejected; one imagery source required"
+                         : "Not installed on SD card"),
         ui.dark_mode ? lv_color_hex(0xC2D4DE) : lv_color_hex(0x41657A));
     lv_obj_set_pos(description, 0, 31);
     lv_obj_set_width(description, LV_PCT(100));
@@ -1141,28 +1191,6 @@ void layer_drawer_close_clicked(lv_event_t *event)
     if (ui != nullptr) {
         close_layer_drawer(*ui);
         ESP_LOGI(kTag, "Map layer drawer closed");
-    }
-}
-
-void create_map_grid(lv_obj_t *map_view, int32_t map_width, int32_t map_height)
-{
-    for (int i = 1; i < 5; ++i) {
-        lv_obj_t *line = lv_obj_create(map_view);
-        lv_obj_set_pos(line, i * map_width / 5, 0);
-        lv_obj_set_size(line, 1, map_height);
-        lv_obj_set_style_bg_color(line, lv_color_hex(0xC8D8E4), 0);
-        lv_obj_set_style_border_width(line, 0, 0);
-        lv_obj_remove_flag(line, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_remove_flag(line, LV_OBJ_FLAG_CLICKABLE);
-    }
-    for (int i = 1; i < 4; ++i) {
-        lv_obj_t *line = lv_obj_create(map_view);
-        lv_obj_set_pos(line, 0, i * map_height / 4);
-        lv_obj_set_size(line, map_width, 1);
-        lv_obj_set_style_bg_color(line, lv_color_hex(0xC8D8E4), 0);
-        lv_obj_set_style_border_width(line, 0, 0);
-        lv_obj_remove_flag(line, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_remove_flag(line, LV_OBJ_FLAG_CLICKABLE);
     }
 }
 
@@ -1445,6 +1473,72 @@ void create_launcher(UiState &ui)
                                   &ui);
 }
 
+void drawer_cat_card_clicked(lv_event_t *event)
+{
+    auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
+    auto *target = static_cast<lv_obj_t *>(lv_event_get_current_target(event));
+    if (ui == nullptr || target == nullptr) {
+        return;
+    }
+    for (size_t i = 0; i < ui->drawer_cards.size(); ++i) {
+        const bool was_expanded = ui->drawer_card_expanded[i];
+        const bool expand = ui->drawer_cards[i] == target && !was_expanded;
+        ui->drawer_card_expanded[i] = expand;
+        if (ui->drawer_cards[i] != nullptr) {
+            lv_obj_set_height(ui->drawer_cards[i], expand ? 230 : 78);
+        }
+        if (ui->drawer_detail_labels[i] != nullptr) {
+            if (expand) {
+                lv_obj_remove_flag(ui->drawer_detail_labels[i], LV_OBJ_FLAG_HIDDEN);
+            } else {
+                lv_obj_add_flag(ui->drawer_detail_labels[i], LV_OBJ_FLAG_HIDDEN);
+            }
+        }
+    }
+}
+
+void create_drawer_cat_card(lv_obj_t *parent, size_t index, UiState &ui)
+{
+    lv_obj_t *card = lv_button_create(parent);
+    lv_obj_set_width(card, LV_PCT(100));
+    lv_obj_set_height(card, 78);
+    lv_obj_set_style_bg_color(
+        card, ui.dark_mode ? lv_color_hex(0x172733) : lv_color_hex(0xD9D5CC), 0);
+    lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(
+        card, ui.dark_mode ? lv_color_hex(0x405B6D) : lv_color_hex(0xA8B7C0), 0);
+    lv_obj_set_style_border_width(card, 1, 0);
+    lv_obj_set_style_radius(card, 10, 0);
+    lv_obj_set_style_pad_all(card, 10, 0);
+    lv_obj_set_style_pad_gap(card, 8, 0);
+    lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
+    lv_obj_add_event_cb(card, drawer_cat_card_clicked, LV_EVENT_CLICKED, &ui);
+
+    lv_obj_t *summary = make_label(
+        card,
+        "Waiting for telemetry...",
+        ui.dark_mode ? lv_color_hex(0xF3F8FB) : lv_color_hex(0x17324D));
+    lv_obj_set_width(summary, LV_PCT(100));
+    lv_label_set_long_mode(summary, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_font(summary, &lv_font_montserrat_14, 0);
+    lv_obj_remove_flag(summary, LV_OBJ_FLAG_CLICKABLE);
+
+    lv_obj_t *detail = make_label(
+        card,
+        "",
+        ui.dark_mode ? lv_color_hex(0xB9D0DC) : lv_color_hex(0x36596D));
+    lv_obj_set_width(detail, LV_PCT(100));
+    lv_label_set_long_mode(detail, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_font(detail, &lv_font_montserrat_14, 0);
+    lv_obj_add_flag(detail, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(detail, LV_OBJ_FLAG_CLICKABLE);
+
+    ui.drawer_cards[index] = card;
+    ui.drawer_summary_labels[index] = summary;
+    ui.drawer_detail_labels[index] = detail;
+    ui.drawer_card_expanded[index] = false;
+}
+
 void create_map_page(UiState &ui)
 {
     const UiLayout &layout = current_layout(ui);
@@ -1484,8 +1578,6 @@ void create_map_page(UiState &ui)
         lv_obj_remove_flag(image, LV_OBJ_FLAG_CLICKABLE);
     }
 
-    create_map_grid(ui.map_view, layout.map_width, layout.map_height);
-
     for (size_t i = 0; i < ui.markers.size(); ++i) {
         lv_obj_t *marker = lv_obj_create(ui.map_view);
         lv_obj_set_size(marker, kMarkerSize, kMarkerSize);
@@ -1502,25 +1594,44 @@ void create_map_page(UiState &ui)
         ui.markers[i] = marker;
     }
 
-    make_hamburger_control(ui.map_view, 8, 8, drawer_open_clicked, ui);
+    constexpr int32_t control_inset = 14;
+    constexpr int32_t control_size = 54;
+    constexpr int32_t control_gap = 10;
+    make_hamburger_control(
+        ui.map_view, control_inset, control_inset, drawer_open_clicked, ui);
     make_map_control(
-        ui.map_view, layout.map_width - 52, 8, "MAP", layer_drawer_open_clicked, ui);
-    make_map_control(ui.map_view, 8, 58, "HOME", home_clicked, ui);
-    make_map_control(ui.map_view, 8, 100, "FIT", fit_all_clicked, ui);
+        ui.map_view,
+        layout.map_width - control_inset - control_size,
+        control_inset,
+        "MAP",
+        layer_drawer_open_clicked,
+        ui);
+    make_map_control(ui.map_view,
+                     control_inset,
+                     control_inset + control_size + control_gap,
+                     "HOME",
+                     home_clicked,
+                     ui);
+    make_map_control(ui.map_view,
+                     control_inset,
+                     control_inset + (control_size + control_gap) * 2,
+                     "FIT",
+                     fit_all_clicked,
+                     ui);
     make_map_icon_control(ui.map_view,
-                          8,
-                          layout.map_height - 94,
+                          control_inset,
+                          layout.map_height - control_inset - control_size * 2 - control_gap,
                           bluepaws::ui::icon_zoom_in,
                           zoom_in_clicked,
                           ui);
     make_map_icon_control(ui.map_view,
-                          8,
-                          layout.map_height - 46,
+                          control_inset,
+                          layout.map_height - control_inset - control_size,
                           bluepaws::ui::icon_zoom_out,
                           zoom_out_clicked,
                           ui);
 
-    const int32_t drawer_width = ui.portrait ? 360 : 280;
+    const int32_t drawer_width = ui.portrait ? 420 : 340;
     ui.map_drawer = lv_obj_create(map_panel);
     lv_obj_set_pos(ui.map_drawer, 0, 0);
     lv_obj_set_size(ui.map_drawer, drawer_width, layout.map_height);
@@ -1540,7 +1651,7 @@ void create_map_page(UiState &ui)
     lv_obj_remove_flag(ui.map_drawer, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *drawer_header = lv_obj_create(ui.map_drawer);
-    lv_obj_set_size(drawer_header, LV_PCT(100), 44);
+    lv_obj_set_size(drawer_header, LV_PCT(100), 48);
     lv_obj_set_style_bg_opa(drawer_header, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(drawer_header, 0, 0);
     lv_obj_set_style_pad_all(drawer_header, 0, 0);
@@ -1552,7 +1663,7 @@ void create_map_page(UiState &ui)
     lv_obj_set_pos(cats_title, 0, 7);
     lv_obj_set_style_text_font(cats_title, &lv_font_montserrat_18, 0);
     lv_obj_t *close_button = lv_button_create(drawer_header);
-    lv_obj_set_size(close_button, 38, 38);
+    lv_obj_set_size(close_button, 46, 46);
     lv_obj_align(close_button, LV_ALIGN_RIGHT_MID, 0, 0);
     lv_obj_set_style_bg_color(close_button, lv_color_hex(0x2B5878), 0);
     lv_obj_set_style_bg_opa(close_button, LV_OPA_70, 0);
@@ -1562,13 +1673,21 @@ void create_map_page(UiState &ui)
     lv_obj_t *close_label = make_label(close_button, "X", lv_color_hex(0xFFFFFF));
     lv_obj_center(close_label);
 
-    ui.cat_list = make_label(
-        ui.map_drawer,
-        "Waiting for telemetry...",
-        ui.dark_mode ? lv_color_hex(0xCFE2EC) : lv_color_hex(0x29495D));
-    lv_obj_set_width(ui.cat_list, LV_PCT(100));
-    lv_label_set_long_mode(ui.cat_list, LV_LABEL_LONG_WRAP);
-    lv_obj_set_flex_grow(ui.cat_list, 1);
+    lv_obj_t *drawer_scroll = lv_obj_create(ui.map_drawer);
+    lv_obj_set_width(drawer_scroll, LV_PCT(100));
+    lv_obj_set_height(drawer_scroll, 0);
+    lv_obj_set_flex_grow(drawer_scroll, 1);
+    lv_obj_set_flex_flow(drawer_scroll, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_bg_opa(drawer_scroll, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(drawer_scroll, 0, 0);
+    lv_obj_set_style_radius(drawer_scroll, 0, 0);
+    lv_obj_set_style_pad_all(drawer_scroll, 0, 0);
+    lv_obj_set_style_pad_gap(drawer_scroll, 8, 0);
+    lv_obj_set_scroll_dir(drawer_scroll, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(drawer_scroll, LV_SCROLLBAR_MODE_AUTO);
+    for (size_t i = 0; i < bluepaws::kMaximumCats; ++i) {
+        create_drawer_cat_card(drawer_scroll, i, ui);
+    }
     if (!ui.drawer_open) {
         lv_obj_add_flag(ui.map_drawer, LV_OBJ_FLAG_HIDDEN);
     }
@@ -1591,7 +1710,8 @@ void create_map_page(UiState &ui)
     lv_obj_set_style_pad_all(ui.layer_drawer, 14, 0);
     lv_obj_set_style_pad_gap(ui.layer_drawer, 8, 0);
     lv_obj_set_flex_flow(ui.layer_drawer, LV_FLEX_FLOW_COLUMN);
-    lv_obj_remove_flag(ui.layer_drawer, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scroll_dir(ui.layer_drawer, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(ui.layer_drawer, LV_SCROLLBAR_MODE_AUTO);
 
     lv_obj_t *layer_header = lv_obj_create(ui.layer_drawer);
     lv_obj_set_size(layer_header, LV_PCT(100), 44);
@@ -1606,7 +1726,7 @@ void create_map_page(UiState &ui)
     lv_obj_set_pos(layer_title, 0, 7);
     lv_obj_set_style_text_font(layer_title, &lv_font_montserrat_18, 0);
     lv_obj_t *layer_close = lv_button_create(layer_header);
-    lv_obj_set_size(layer_close, 38, 38);
+    lv_obj_set_size(layer_close, 46, 46);
     lv_obj_align(layer_close, LV_ALIGN_RIGHT_MID, 0, 0);
     lv_obj_set_style_bg_color(layer_close, lv_color_hex(0x2B5878), 0);
     lv_obj_set_style_bg_opa(layer_close, LV_OPA_70, 0);
@@ -1621,7 +1741,7 @@ void create_map_page(UiState &ui)
     make_layer_option(ui.layer_drawer, MapLayer::Aerial, aerial_layer_clicked, ui);
     lv_obj_t *layer_note = make_label(
         ui.layer_drawer,
-        "Layers stay separate; unavailable coverage remains blank.",
+        "Mixed-source aerial imagery is disabled. Install a consistent aerial pack to enable it.",
         ui.dark_mode ? lv_color_hex(0x9DB3C0) : lv_color_hex(0x41657A));
     lv_obj_set_width(layer_note, LV_PCT(100));
     lv_label_set_long_mode(layer_note, LV_LABEL_LONG_WRAP);
@@ -1767,6 +1887,10 @@ void create_ui(UiState &ui)
     ui.tile_images.fill(nullptr);
     ui.markers.fill(nullptr);
     ui.summary_rows.fill(nullptr);
+    ui.drawer_cards.fill(nullptr);
+    ui.drawer_summary_labels.fill(nullptr);
+    ui.drawer_detail_labels.fill(nullptr);
+    ui.drawer_card_expanded.fill(false);
     ui.map_view = nullptr;
     ui.cat_list = nullptr;
     ui.diagnostics_text = nullptr;
