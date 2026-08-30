@@ -46,10 +46,19 @@ with QGIS LTR. It remains a useful reference pack, but its Outdoor cartography
 is not the intended BluePaws visual style.
 
 The preferred road-map source is now a bounded Protomaps PMTiles extract made
-from current OpenStreetMap data, with the open-source Protomaps `light` style.
+from current OpenStreetMap data. The hardware pack uses the BluePaws
+`bluepaws-carto` style: warm land, strong water/woodland/building fills, an
+OSM-Carto-like coloured road hierarchy and dark, haloed labels. The original
+Protomaps `light` render was technically correct but too pale on the hub LCD.
 The PC renders that vector source to the same hardware-friendly JPEG XYZ layout;
 the P4 does not need to parse PMTiles or run a map server. Do not bulk-download
 `tile.openstreetmap.org`, whose usage policy prohibits offline prefetching.
+OpenStreetMap's [downloading data](https://wiki.openstreetmap.org/wiki/Downloading_data)
+guide recommends starting with a regional extract and using extract providers
+for larger downloads. That is the model used here: obtain a bounded vector
+extract, then render it locally. It is distinct from scraping the public OSM
+raster or vector tile services, whose usage policies prohibit offline bulk
+prefetching.
 The card pack combines a Great Britain z5-11 extract with a Gloucestershire
 z10-16 extract and z17 detail along the Gloucester/Cheltenham corridor. The
 overlap is intentional and the county render wins when the two trees are
@@ -97,22 +106,26 @@ In another terminal, generate the QGIS-compatible style and render a fixture:
 ```powershell
 npm --prefix tools/protomaps-style install
 node tools/protomaps-style/build-style.mjs `
-  '--output=home-hub/maps/work/styles/osm-light.json' `
+  '--output=home-hub/maps/work/styles/osm-bluepaws-carto.json' `
+  '--flavor=bluepaws-carto' `
   '--tile-url=http://127.0.0.1:8077/gloucestershire-20260829/{z}/{x}/{y}.mvt'
 
 & 'C:\Program Files\QGIS 3.44.13\bin\python-qgis-ltr.bat' `
   tools/build_home_hub_map_pack.py `
   '--tile-url=http://127.0.0.1:8077/gloucestershire-20260829/{z}/{x}/{y}.mvt' `
-  --mapbox-style home-hub/maps/work/styles/osm-light.json `
+  --mapbox-style home-hub/maps/work/styles/osm-bluepaws-carto.json `
   --output home-hub/maps/work/osm-fixture/tiles `
   --manifest home-hub/maps/work/osm-fixture/map_manifest.json `
   --profile fixture
 ```
 
 After visual approval, change the output directory and use
-`--profile gloucestershire`. That profile renders county-wide z10-16 plus z17
-around the Gloucester/Cheltenham corridor. OpenStreetMap attribution must stay
-in the manifest and the eventual map information panel.
+`--profile gloucester` for the card-efficient city test pack, or
+`--profile gloucestershire` for the larger master pack. The city profile covers
+Gloucester and its immediate approaches at z10-17. The county profile renders
+county-wide z10-16 plus z17 around the Gloucester/Cheltenham corridor.
+OpenStreetMap attribution must stay in the manifest and the eventual map
+information panel.
 
 ## Aerial layer
 
