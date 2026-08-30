@@ -317,3 +317,20 @@ It was again flashed only at `0x10000`, with esptool write verification. Its
 monitored boot reported ESP32-P4 revision 1.3, 16 MB flash, 32 MB PSRAM,
 800x480 display, GT911 touch and the mounted FAT volume, then entered the UI
 without a panic or reset loop.
+
+The map-layer pass adds a top-right **MAP** control whose 200 ms animation
+slides a picker above the right edge of the existing viewport. Street,
+Satellite and Aerial use separate XYZ roots on the FAT partition; unavailable
+roots are visibly disabled. Changing layer preserves the map centre, clamps to
+the selected pack's zoom range and invalidates the decoded-tile cache so stale
+imagery cannot be reused. Environment Agency aerial survey gaps fall back to
+the Street tile at the same XYZ coordinate. Opening either the layer picker or
+nearby-cat drawer closes the other.
+
+The resulting 950,912-byte application has SHA-256
+`97501ABCC0A687687E4A2CC75C646161DE60E0DC2867AB27A2A9E397C89E40AE`.
+ESP-IDF wrote and hash-verified the bootloader at `0x2000`, partition table at
+`0x8000` and application at `0x10000` on COM27 without erasing the rest of the
+16 MB flash. The first monitored boot reported ESP32-P4 revision 1.3, 16 MB
+flash, 32 MB PSRAM, 800x480 display, GT911 touch and the healthy 121,001 MB SD
+card/FAT volume, then started the UI without a panic or reset loop.

@@ -20,6 +20,14 @@ viewport moves. Moving SD reads to a background loader remains appropriate
 before this becomes the production GUI. These controls are hardware proofs;
 the product UI will place the map inside an app-launcher navigation shell.
 
+The Live Map's top-right **MAP** control opens a right-hand layer drawer without
+moving the map. It selects the Street pack at `/bluepaws/maps/tiles`, Satellite
+at `/bluepaws/maps/layers/satellite/tiles`, or Aerial at
+`/bluepaws/maps/layers/aerial/tiles`. Missing SD directories are disabled. A
+selection keeps the current centre, clamps zoom to that pack's supported range,
+invalidates decoded tiles and redraws the same cat overlays. Aerial survey gaps
+fall back to the Street pack at the matching XYZ coordinate.
+
 ## Toolchain
 
 - ESP-IDF `5.5.4` (the component manifest accepts only the 5.5 release line).
