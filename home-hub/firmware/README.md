@@ -15,8 +15,9 @@ engine to decode each newly visible tile into RGB565 PSRAM. LVGL then draws the
 memory-backed tiles below the live cat markers. The interactive testbed now
 supports continuous one-finger panning, **Home**, **Fit**, integer **+/-** zoom,
 direct GT911 two-finger pinch zoom and in-app landscape/portrait rotation. A one-tile
-overscan and 36-entry PSRAM LRU keep already visited tiles available while the
-viewport moves. Moving SD reads to a background loader remains appropriate
+overscan and 36 fixed PSRAM screen slots keep each LVGL image object permanently
+paired with its own descriptor and decoded buffer. Moving SD reads to a
+background loader remains appropriate
 before this becomes the production GUI. These controls are hardware proofs;
 the product UI will place the map inside an app-launcher navigation shell.
 
@@ -25,8 +26,8 @@ moving the map. It selects the Street pack at `/bluepaws/maps/tiles`, Satellite
 at `/bluepaws/maps/layers/satellite/tiles`, or Aerial at
 `/bluepaws/maps/layers/aerial/tiles`. Missing SD directories are disabled. A
 selection keeps the current centre, clamps zoom to that pack's supported range,
-invalidates both the BluePaws and LVGL decoded-image caches, and redraws the same
-cat overlays. Cache entries include the selected layer as well as the XYZ ID;
+invalidates the decoded screen slots and redraws the same cat overlays. Each
+slot identity includes the selected layer as well as the XYZ ID;
 missing tiles remain blank rather than silently showing imagery from a different
 layer.
 

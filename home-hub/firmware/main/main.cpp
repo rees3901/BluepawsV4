@@ -79,7 +79,6 @@ struct TileCacheEntry {
     lv_image_dsc_t descriptor{};
     uint8_t *pixels = nullptr;
     size_t pixel_capacity = 0;
-    uint32_t generation = 0;
     bool valid = false;
 };
 
@@ -110,7 +109,6 @@ struct UiState {
     size_t visible_tile_count = 0;
     size_t prepared_tile_count = 0;
     uint32_t map_refresh_ms = 0;
-    uint32_t cache_generation = 0;
     AppPage active_page = AppPage::Launcher;
     MapLayer active_map_layer = MapLayer::Street;
     bool dark_mode = true;
@@ -151,9 +149,7 @@ void invalidate_tile_cache(UiState &ui)
             lv_image_cache_drop(&entry.descriptor);
         }
         entry.valid = false;
-        entry.generation = 0;
     }
-    ui.cache_generation = 0;
     ui.tiles_dirty = true;
 }
 
@@ -255,51 +251,6 @@ bool decode_tile(UiState &ui, TileCacheEntry &entry, const char *path)
     return true;
 }
 
-TileCacheEntry *acquire_tile(UiState &ui,
-                             MapLayer layer,
-                             const bluepaws::map::TileId &id,
-                             const char *path)
-{
-    for (TileCacheEntry &entry : ui.tile_cache) {
-        if (entry.valid && entry.layer == layer && entry.id == id) {
-            entry.generation = ui.cache_generation;
-            return &entry;
-        }
-    }
-
-    TileCacheEntry *candidate = nullptr;
-    for (TileCacheEntry &entry : ui.tile_cache) {
-        if (!entry.valid) {
-            candidate = &entry;
-            break;
-        }
-        if (entry.generation != ui.cache_generation &&
-            (candidate == nullptr || entry.generation < candidate->generation)) {
-            candidate = &entry;
-        }
-    }
-    if (candidate == nullptr) {
-        ESP_LOGE(kTag, "No unpinned map tile cache entry is available");
-        return nullptr;
-    }
-
-    // LVGL keys variable-image caches by descriptor address. This descriptor
-    // and its PSRAM buffer are deliberately reused, so evict the old identity
-    // before decoding a different XYZ tile into the same memory.
-    if (candidate->descriptor.data != nullptr) {
-        lv_image_cache_drop(&candidate->descriptor);
-    }
-    candidate->valid = false;
-    if (!decode_tile(ui, *candidate, path)) {
-        return nullptr;
-    }
-    candidate->layer = layer;
-    candidate->id = id;
-    candidate->generation = ui.cache_generation;
-    candidate->valid = true;
-    return candidate;
-}
-
 void refresh_map_tiles(UiState &ui)
 {
     if (!ui.tiles_dirty) {
@@ -326,22 +277,18 @@ void refresh_map_tiles(UiState &ui)
     const bluepaws::map::TileGrid grid = ui.viewport.visibleTiles(1);
     ui.visible_tile_count = visible_grid.count;
 
-    // Do not leave an object displaying a descriptor while that descriptor may
-    // be reassigned below. The objects are restored only after their new tile
-    // identity is known and decoded.
+    // A screen slot permanently owns the descriptor and pixel buffer with the
+    // same array index.  Detach every LVGL object before a buffer can be
+    // overwritten. Moving descriptors between screen objects allowed queued
+    // draw work to retain a previous tile identity and produced a stable but
+    // geographically shuffled map after pan/zoom operations.
     for (lv_obj_t *image : ui.tile_images) {
         if (image != nullptr) {
             lv_obj_add_flag(image, LV_OBJ_FLAG_HIDDEN);
+            lv_image_set_src(image, nullptr);
         }
     }
 
-    ++ui.cache_generation;
-    if (ui.cache_generation == 0) {
-        ++ui.cache_generation;
-        for (TileCacheEntry &entry : ui.tile_cache) {
-            entry.generation = 0;
-        }
-    }
     for (size_t i = 0; i < ui.tile_images.size(); ++i) {
         lv_obj_t *image = ui.tile_images[i];
         if (image == nullptr) {
@@ -362,13 +309,21 @@ void refresh_map_tiles(UiState &ui)
                       placement.id.zoom,
                       static_cast<unsigned long>(placement.id.x),
                       static_cast<unsigned long>(placement.id.y));
-        TileCacheEntry *entry =
-            acquire_tile(ui, ui.active_map_layer, placement.id, filesystem_path);
-        if (entry == nullptr) {
-            lv_obj_add_flag(image, LV_OBJ_FLAG_HIDDEN);
-            continue;
+        TileCacheEntry &entry = ui.tile_cache[i];
+        if (!entry.valid || entry.layer != ui.active_map_layer || !(entry.id == placement.id)) {
+            if (entry.descriptor.data != nullptr) {
+                lv_image_cache_drop(&entry.descriptor);
+            }
+            entry.valid = false;
+            if (!decode_tile(ui, entry, filesystem_path)) {
+                lv_obj_add_flag(image, LV_OBJ_FLAG_HIDDEN);
+                continue;
+            }
+            entry.layer = ui.active_map_layer;
+            entry.id = placement.id;
+            entry.valid = true;
         }
-        lv_image_set_src(image, &entry->descriptor);
+        lv_image_set_src(image, &entry.descriptor);
         lv_obj_set_pos(image, placement.screen_x, placement.screen_y);
         lv_obj_remove_flag(image, LV_OBJ_FLAG_HIDDEN);
         lv_obj_invalidate(image);

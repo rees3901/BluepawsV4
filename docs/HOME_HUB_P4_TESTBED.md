@@ -326,18 +326,17 @@ the selected pack's zoom range and invalidates the decoded-tile cache so stale
 imagery cannot be reused. Opening either the layer picker or nearby-cat drawer
 closes the other.
 
-Hardware testing exposed a second cache beneath the application's decoded-tile
-LRU: LVGL keys variable images by descriptor address. Reusing a descriptor and
-PSRAM buffer for a different XYZ tile without evicting that LVGL entry produced
-geographically scrambled 256-pixel squares and allowed imagery to leak between
-layer selections even though the files themselves stitched correctly on the
-PC. Cache identities now contain both layer and XYZ ID, the LVGL image entry is
-dropped before a descriptor is reused, and tile objects are hidden while a
-dirty grid is reassigned. Missing layer tiles remain blank; cross-layer fallback
-is intentionally prohibited.
+Hardware testing showed that moving decoded descriptors between LVGL image
+objects could leave queued draw work associated with a previous screen slot.
+That produced geographically scrambled 256-pixel squares after map interaction
+even though the source JPEGs stitched correctly on the PC. Every grid slot now
+permanently owns the descriptor and PSRAM buffer at the same array index. Image
+objects are detached before their slot is overwritten, and slot identities
+contain both layer and XYZ ID. Missing layer tiles remain blank; cross-layer
+fallback is intentionally prohibited.
 
-The corrected application is 951,424 bytes with SHA-256
-`E65DC3854615989AD38606EECC6465C9D1050AC7EC15DAC74FBE4DCD66313F3B`.
+The corrected application is 951,232 bytes with SHA-256
+`D0306E3D25CACD63C1B183B5FE088CD275F6BE36043A5A1DAA60B03473289091`.
 It was flashed app-only at `0x10000` on COM27 and esptool verified the written
 hash. The monitored restart again reported revision 1.3, 16 MB flash, 32 MB
 PSRAM, GT911 touch and the mounted 128 GB card's FAT volume, then entered the UI
