@@ -59,13 +59,13 @@ Current spoof origin:
 
 ## Power profiles
 
-| Profile | Intended use | Wake interval | Home LoRa check-in | Home GNSS sanity refresh | LTE heartbeat |
-|---|---:|---:|---:|---:|---:|
-| `POWER_SAVE` | Manual battery saving, low battery, or future “mostly home” automation | 30 min | Every 2 BLE-home wakes | Every 10 BLE-home wakes | Every 3 hours |
-| `NORMAL` | Default everyday collar behaviour | 10 min | Every BLE-home wake | Every 10 BLE-home wakes | Every 1 hour |
-| `ACTIVE` | Higher-frequency monitoring, not an emergency mode | 60 sec | Every BLE-home wake | Every 10 BLE-home wakes | Every 10 min |
-| `DEBUG` | Development-only noisy bench-test mode | 30 sec | Every BLE-home wake | Every BLE-home wake | Every 30 sec |
-| `LOST_ALERT` | Temporary emergency search mode | No normal sleep cadence | Separate emergency cadence | Continuous/aggressive where practical | Frequent fallback |
+| Profile | Intended use | Wake interval | Home LoRa check-in | Home GNSS sanity refresh | Scheduled LTE heartbeat | Failed LoRa cycles before LTE |
+|---|---:|---:|---:|---:|---:|---:|
+| `POWER_SAVE` | Manual battery saving, low battery, or future “mostly home” automation | 30 min | Every 2 BLE-home wakes | Every 10 BLE-home wakes | Every 3 hours | 3 |
+| `NORMAL` | Default everyday collar behaviour | 10 min | Every BLE-home wake | Every 10 BLE-home wakes | Every 1 hour | 3 |
+| `ACTIVE` | Higher-frequency monitoring, not an emergency mode | 60 sec | Every BLE-home wake | Every 10 BLE-home wakes | Every 10 min | 2 |
+| `DEBUG` | Development-only noisy bench-test mode | 30 sec | Every BLE-home wake | Every BLE-home wake | Every 30 sec | 1 |
+| `LOST_ALERT` | Temporary emergency search mode | No normal sleep cadence | Separate emergency cadence | Continuous/aggressive where practical | Every minute | 1 |
 
 `DEBUG` is for firmware and pipeline development only. It is intentionally noisy, should not be exposed as a normal customer control, and must not be confused with `LOST_ALERT` safety behaviour.
 
@@ -80,7 +80,7 @@ stateDiagram-v2
   BootReport --> BootBleScan: scan Home beacon
   BootBleScan --> BootGnss: try GNSS up to 60s, even if Home seen
   BootGnss --> SendBoot: tx_reason = BOOT
-  SendBoot --> CommandWindow: 10s LoRa RX
+  SendBoot --> CommandWindow: 15s LoRa ACK/command RX
   SendBoot --> BootLtePost: same TLV via LTE HTTPS wrapper
   BootLtePost --> Sleep
 
@@ -101,7 +101,7 @@ stateDiagram-v2
 
   HomePath --> WakeCheckinDue: profile home check-in cadence due
   WakeCheckinDue --> SendWakeCheckin: tx_reason = WAKE_CHECKIN + HOME_BEACON_SEEN
-  SendWakeCheckin --> CommandWindow: 10s LoRa RX
+  SendWakeCheckin --> CommandWindow: 15s LoRa ACK/command RX
 
   HomePath --> HomeGnssDue: every N BLE-home wakes
   HomeGnssDue --> AcquireGnss: sanity refresh
@@ -115,7 +115,7 @@ stateDiagram-v2
   AwayPath --> AwakeLookingCheckin: optional lightweight awake/looking packet
   AwakeLookingCheckin --> AcquireGnss
   AcquireGnss --> LoRaTelemetry: normal telemetry when GNSS usable
-  LoRaTelemetry --> CommandWindow: 10s LoRa RX/ACK/commands
+  LoRaTelemetry --> CommandWindow: 15s LoRa receipt ACK/commands
   CommandWindow --> CellularFallback: if ACK missing or heartbeat due
   CellularFallback --> Sleep
   CommandWindow --> Sleep
@@ -135,7 +135,7 @@ On every cold boot, reboot, watchdog recovery or firmware restart, the collar mu
 2. Attempt a BLE Home scan.
 3. Attempt GNSS acquisition for up to 60 seconds, even if the BLE Home beacon is seen.
 4. Send a LoRa TLV report with `tx_reason = BOOT`.
-5. Open the normal 10-second command receive window.
+5. Open the normal 15-second receipt-ACK and command receive window.
 6. Queue the same boot TLV for LTE direct-to-cloud POST.
 
 If GNSS succeeds, the boot report includes valid coordinates. If GNSS fails, the boot report remains valid and useful: set stale/error indicators, include diagnostics, and let the backend update presence/last-seen without moving or erasing the last known map position.
@@ -156,10 +156,18 @@ When the collar sees the trusted Home Hub BLE beacon:
 
 1. It increments the consecutive BLE-home wake counter.
 2. It sends a lightweight LoRa wake check-in according to the current profile.
-3. It opens the 10-second LoRa command receive window.
+3. It opens the 15-second LoRa receipt-ACK and command receive window.
 4. It avoids routine GNSS/LTE on most wakes.
 5. It occasionally performs a GNSS sanity refresh according to the current profile.
 6. It performs LTE heartbeat by elapsed time, not by BLE-home wake count.
+
+Every report expects a separate immediate hub receipt ACK. If it is absent after
+two seconds, the collar retries the exact packet once after a short random
+backoff. Only a complete two-attempt failure increments the consecutive failure
+counter. A matching ACK resets the counter. Reaching the profile threshold queues
+an LTE copy and resets the counter, so a long RF outage causes bounded periodic
+fallback rather than prepaid LTE use on every wake. Scheduled LTE ratios and
+elapsed-time Home heartbeats continue independently even when LoRa is healthy.
 
 `WAKE_CHECKIN` does not automatically mutate any packet fields. The firmware path that chooses wake check-in explicitly sets `tx_reason = WAKE_CHECKIN` and `HOME_BEACON_SEEN`.
 
@@ -219,7 +227,7 @@ Early firmware may advertise a stable device identifier for development. Product
 
 - Replace spoof GNSS with real GM02SP GNSS parsing.
 - Implement real battery measurement.
-- Tune LoRa ACK retry counts and LTE fallback rules after range tests.
-- Design authenticated downlink commands before treating command packets as production-secure.
+- Tune the implemented LoRa receipt timeout, retry count and profile LTE-fallback thresholds after range/current tests.
+- Authenticate hub-to-collar receipt ACKs and commands, with replay protection, before treating downlinks or ACK-driven power decisions as production-secure.
 - Decide final user-facing rules for automatic profile changes.
 - Validate deep sleep current on the final collar PCB.

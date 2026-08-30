@@ -178,7 +178,7 @@ The original power-saving design was: wake, scan for the BLE home beacon, and if
 - [x] ~~Command ACK/retry/deduplication foundations already exist between hub and collar.~~
 - [x] ~~Replace the current old behaviour of `home -> usually sleep, occasional heartbeat` with profile-controlled **presence/check-in on scheduled home wakes** behaviour.~~
 - [x] ~~Remove/retire the old cycle-only heartbeat idea in favour of explicit home check-in, home GNSS sanity refresh and time-based LTE heartbeat cadences.~~
-- [x] ~~Increase the current firmware command listen window from 2 seconds to the agreed **10-second RX window**.~~
+- [x] ~~Increase the firmware command listen window from 2 seconds, subsequently extended to the current **15-second receipt-ACK/command RX window**.~~
 - [x] ~~Keep the radio continuously in RX for that window. Do not implement one-second on/off listening pauses.~~
 - [x] ~~Add the final `WAKE_CHECKIN` TX reason enum value to the shared protocol.~~
 - [x] ~~Ensure Supabase interprets this packet as a presence/check-in event rather than requiring a GNSS position.~~
@@ -272,7 +272,7 @@ BLE home detection is primarily a **power-saving mechanism**. Presence of the tr
 - [x] ~~On every scheduled wake, perform the BLE home check before deciding whether GNSS is required.~~
 - [x] ~~If home is confirmed, skip routine GNSS and LTE attachment except for profile-defined sanity refreshes/heartbeats.~~
 - [x] ~~Send a lightweight LoRa **wake-up check-in / presence packet according to the profile's home cadence**.~~
-- [x] ~~Immediately follow that transmission with the **10-second continuous LoRa RX command window**.~~
+- [x] ~~Immediately follow that transmission with the current **15-second continuous LoRa receipt-ACK/command RX window**.~~
 - [ ] Permit OTA configuration/profile commands during that window so a collar that remains at home for days is still predictably reachable.
 - [x] ~~Return to deep sleep after the command window when no action requires the collar to remain awake.~~
 - [x] ~~Ensure `last_seen` is refreshed by the presence packet even though no new position is generated.~~
@@ -297,15 +297,16 @@ The current shared configuration contains a consecutive-detection threshold. The
 - [x] ~~Hub pending-command ACK tracking/retry structure exists.~~
 - [x] ~~Collar command deduplication foundation exists.~~
 - [x] ~~Mode/find command foundations exist.~~
-- [ ] Extend collar command RX window to the agreed 10 seconds.
+- [x] ~~Extend the collar RX window to 15 seconds and keep receiving after the separate hub receipt ACK so a pending command can follow.~~
 - [ ] Define the cloud-to-hub command queue and delivery path end to end.
-- [ ] Finalise retry/expiry rules and ACK semantics against the current TLV protocol.
+- [x] ~~Implement separate immediate hub receipt ACKs, one identical-packet collar retry and profile-aware consecutive-failure LTE escalation.~~
+- [ ] Authenticate hub-to-collar receipt ACKs and commands with replay protection; structural validation alone must not drive production power-management decisions.
 - [ ] Define configuration commands required for launch.
 
 ## 12. Power Management
 
 - [ ] Measure real current consumption of nRF52840, SX1262, GM02SP, GNSS and supporting rails in every state.
-- [ ] Measure the cost of the 10-second home RX window and confirm the battery-life tradeoff is acceptable.
+- [ ] Measure the cost of the 15-second home RX window and confirm the battery-life tradeoff is acceptable.
 - [ ] Build a realistic battery model using actual wake frequency, BLE scan, presence TX, RX window, LoRa telemetry, GNSS and LTE figures.
 - [ ] Validate deep-sleep current on the production PCB.
 - [ ] Integrate/test MAX17048 fuel-gauge reporting.

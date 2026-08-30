@@ -56,16 +56,17 @@ struct bp_profile_config_t {
     uint8_t      wake_checkin_ratio; // 1 wake check-in per N home cycles; use 1 for every scheduled home wake
     uint8_t      home_gnss_refresh_ratio; // 1 proper GNSS sanity refresh per N BLE-home wakes
     uint32_t     lte_heartbeat_interval_s; // time-based LTE heartbeat while repeatedly home
+    uint8_t      lora_failed_cycles_before_cellular; // consecutive unacknowledged LoRa cycles before LTE fallback
 };
 
 // Profile lookup table
 static const bp_profile_config_t BP_PROFILES[] = {
-    //                        power  sleep   led  beacon  gps_cont  cell_ratio  checkin  home_gnss  lte_heartbeat
-    { PROFILE_NORMAL,          14,    600,    5,  false,  false,    10,          1,       10,        3600  }, // default everyday collar
-    { PROFILE_POWERSAVE,       10,   1800,    3,  false,  false,    30,          2,       10,        10800 }, // lazy/low-battery conservation
-    { PROFILE_ACTIVE,          20,     60,    5,  false,  false,     5,          1,       10,        600   }, // interested/high-frequency monitoring
-    { PROFILE_DEBUG,           14,     30,    2,  false,  false,     1,          1,        1,        30    }, // development-only noisy telemetry
-    { PROFILE_LOST,            20,      0,   10,  true,   true,      3,          1,        1,        60    }, // emergency; handled outside home gate
+    //                        power  sleep   led  beacon  gps_cont  cell_ratio  checkin  home_gnss  lte_heartbeat  LoRa failures->LTE
+    { PROFILE_NORMAL,          14,    600,    5,  false,  false,    10,          1,       10,        3600,          3 }, // default everyday collar
+    { PROFILE_POWERSAVE,       10,   1800,    3,  false,  false,    30,          2,       10,        10800,         3 }, // lazy/low-battery conservation
+    { PROFILE_ACTIVE,          20,     60,    5,  false,  false,     5,          1,       10,        600,           2 }, // interested/high-frequency monitoring
+    { PROFILE_DEBUG,           14,     30,    2,  false,  false,     1,          1,        1,        30,            1 }, // development-only noisy telemetry
+    { PROFILE_LOST,            20,      0,   10,  true,   true,      3,          1,        1,        60,            1 }, // emergency; handled outside home gate
 };
 
 #define BP_PROFILE_COUNT  (sizeof(BP_PROFILES) / sizeof(BP_PROFILES[0]))
@@ -134,8 +135,15 @@ static inline const bp_profile_config_t *bp_profile_config(bp_profile_t p) {
 // ═══════════════════════════════════════════════
 // Command Listen Window
 // ═══════════════════════════════════════════════
-#define CMD_LISTEN_WINDOW_MS      10000
+#define CMD_LISTEN_WINDOW_MS      15000
 #define CMD_QUEUE_INTERVAL_MS     3000  // rate limit between outbound commands
+
+// Hub receipt ACK and collar uplink retry policy. A retry reuses the exact
+// packet bytes and sequence so hub/cloud deduplication remains deterministic.
+#define UPLINK_ACK_WAIT_MS        2000
+#define UPLINK_MAX_ATTEMPTS       2
+#define UPLINK_RETRY_BACKOFF_MIN_MS 100
+#define UPLINK_RETRY_BACKOFF_MAX_MS 400
 
 // ═══════════════════════════════════════════════
 // Buzzer (passive piezo — PWM-driven)
