@@ -29,7 +29,7 @@ constexpr int32_t kMapTop = 0;
 constexpr int32_t kMarkerSize = 28;
 constexpr size_t kTilePixelBytes = bluepaws::map::kTileSize * bluepaws::map::kTileSize * 2;
 constexpr uint32_t kBrightnessTimeoutMs = 1000;
-constexpr uint32_t kBrightnessFadeMs = 5000;
+constexpr uint32_t kBrightnessFadeMs = 3000;
 constexpr uint32_t kGesturePollMs = 30;
 constexpr char kTag[] = "bluepaws_home_hub";
 constexpr uint32_t kMarkerColours[] = {
@@ -176,6 +176,19 @@ bool map_layer_available(const UiState &ui, MapLayer layer)
         closedir(directory);
         return true;
     }
+    // Some FatFs/VFS combinations have returned an error for directory
+    // metadata while files beneath the same path remain readable. A known
+    // centre tile is therefore a final positive probe for the installed
+    // satellite pack, preventing a valid layer from being greyed out.
+    if (layer == MapLayer::Satellite) {
+        char probe_path[160]{};
+        std::snprintf(probe_path, sizeof(probe_path), "%s/14/8090/5421.jpg", root);
+        struct stat probe_stat {};
+        if (stat(probe_path, &probe_stat) == 0 && S_ISREG(probe_stat.st_mode) &&
+            probe_stat.st_size > 4) {
+            return true;
+        }
+    }
     ESP_LOGW(kTag,
              "Map layer probe failed: %s path=%s stat_errno=%d opendir_errno=%d",
              map_layer_info(layer).name,
@@ -183,6 +196,37 @@ bool map_layer_available(const UiState &ui, MapLayer layer)
              stat_error,
              errno);
     return false;
+}
+
+void log_map_storage_probe(const UiState &ui)
+{
+    for (size_t i = 0; i < kMapLayers.size(); ++i) {
+        const auto layer = static_cast<MapLayer>(i);
+        ESP_LOGI(kTag,
+                 "Startup map layer probe: %s=%s path=%s",
+                 kMapLayers[i].name,
+                 map_layer_available(ui, layer) ? "available" : "unavailable",
+                 kMapLayers[i].tile_root);
+    }
+
+    constexpr char satellite_probe[] =
+        "/sdcard/bluepaws/maps/layers/satellite/tiles/14/8090/5421.jpg";
+    struct stat tile_stat {};
+    if (stat(satellite_probe, &tile_stat) != 0) {
+        ESP_LOGE(kTag, "Satellite centre tile missing: %s errno=%d", satellite_probe, errno);
+        return;
+    }
+    FILE *tile = std::fopen(satellite_probe, "rb");
+    uint8_t magic[2]{};
+    const size_t read = tile == nullptr ? 0 : std::fread(magic, 1, sizeof(magic), tile);
+    if (tile != nullptr) {
+        std::fclose(tile);
+    }
+    ESP_LOGI(kTag,
+             "Satellite centre tile: bytes=%ld jpeg=%s path=%s",
+             static_cast<long>(tile_stat.st_size),
+             read == 2 && magic[0] == 0xFF && magic[1] == 0xD8 ? "yes" : "no",
+             satellite_probe);
 }
 
 void invalidate_tile_cache(UiState &ui)
@@ -1746,7 +1790,7 @@ void create_drawer_cat_card(lv_obj_t *parent, size_t index, UiState &ui)
     lv_obj_center(avatar_number);
 
     lv_obj_t *name = make_label(header, "Waiting", primary_text);
-    lv_obj_set_width(name, 62);
+    lv_obj_set_width(name, 90);
     lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_font(name, &lv_font_montserrat_14, 0);
     lv_obj_remove_flag(name, LV_OBJ_FLAG_CLICKABLE);
@@ -1764,7 +1808,7 @@ void create_drawer_cat_card(lv_obj_t *parent, size_t index, UiState &ui)
     make_drawer_image(telemetry, bluepaws::ui::icon_radio_antenna);
     lv_obj_t *signal = make_drawer_image(telemetry, bluepaws::ui::icon_signal_full);
     lv_obj_t *signal_text = make_label(telemetry, "--", lv_color_hex(0x31B988));
-    lv_obj_set_width(signal_text, 58);
+    lv_obj_set_width(signal_text, 82);
     lv_label_set_long_mode(signal_text, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_font(signal_text, &lv_font_montserrat_14, 0);
     lv_obj_t *radio = make_drawer_image(telemetry, bluepaws::ui::icon_radio_rf);
@@ -1938,7 +1982,7 @@ void create_map_page(UiState &ui)
                           zoom_out_clicked,
                           ui);
 
-    const int32_t drawer_width = ui.portrait ? 420 : 340;
+    const int32_t drawer_width = ui.portrait ? 440 : 430;
     ui.map_drawer = lv_obj_create(map_panel);
     lv_obj_set_pos(ui.map_drawer, 0, 0);
     lv_obj_set_size(ui.map_drawer, drawer_width, layout.map_height);
@@ -1999,7 +2043,7 @@ void create_map_page(UiState &ui)
         lv_obj_add_flag(ui.map_drawer, LV_OBJ_FLAG_HIDDEN);
     }
 
-    const int32_t layer_drawer_width = ui.portrait ? 360 : 300;
+    const int32_t layer_drawer_width = ui.portrait ? 400 : 340;
     ui.layer_drawer = lv_obj_create(map_panel);
     lv_obj_set_pos(ui.layer_drawer, layout.map_panel_width - layer_drawer_width, 0);
     lv_obj_set_size(ui.layer_drawer, layer_drawer_width, layout.map_height);
@@ -2282,6 +2326,7 @@ extern "C" void app_main(void)
         if (jpeg_error != ESP_OK) {
             ESP_LOGE(kTag, "Hardware JPEG decoder initialization failed: %s", esp_err_to_name(jpeg_error));
         }
+        log_map_storage_probe(ui);
     }
     ui.simulator.reset(kTestOrigin, uptime_ms());
     if (!lvgl_port_lock(0)) {
