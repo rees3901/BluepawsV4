@@ -34,6 +34,10 @@ SATELLITE_PASSES = (
     DownloadPass("Gloucestershire detail", (-2.72, 51.55, -1.62, 52.15), 12, 14),
 )
 
+FULL_GB_PASSES = (
+    DownloadPass("Great Britain complete", (-8.82, 49.79, 1.92, 60.95), 5, 14),
+)
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Download licensed JPEG XYZ map tiles")
@@ -49,6 +53,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--source-url", required=True)
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--retries", type=int, default=3)
+    parser.add_argument(
+        "--profile",
+        choices=("gloucestershire", "great-britain"),
+        default="gloucestershire",
+        help="Coverage profile; great-britain extends genuine Sentinel detail through z14",
+    )
     return parser.parse_args()
 
 
@@ -62,9 +72,10 @@ def latitude_to_y(latitude: float, zoom: int) -> int:
     return int((1.0 - value / math.pi) / 2.0 * (1 << zoom))
 
 
-def enumerate_tiles() -> list[tuple[int, int, int]]:
+def enumerate_tiles(profile: str = "gloucestershire") -> list[tuple[int, int, int]]:
     tiles: set[tuple[int, int, int]] = set()
-    for render in SATELLITE_PASSES:
+    passes = FULL_GB_PASSES if profile == "great-britain" else SATELLITE_PASSES
+    for render in passes:
         west, south, east, north = render.bounds
         for zoom in range(render.minimum_zoom, render.maximum_zoom + 1):
             x_min = longitude_to_x(west, zoom)
@@ -138,12 +149,13 @@ def write_manifest(args: argparse.Namespace, count: int, total_bytes: int) -> No
         "tile_path": "tiles/{z}/{x}/{y}.jpg",
         "center": {"latitude": 51.8642, "longitude": -2.2382, "zoom": 13},
         "high_detail_bounds": {
-            "west": -2.72,
-            "south": 51.55,
-            "east": -1.62,
-            "north": 52.15,
+            "west": -8.82 if args.profile == "great-britain" else -2.72,
+            "south": 49.79 if args.profile == "great-britain" else 51.55,
+            "east": 1.92 if args.profile == "great-britain" else -1.62,
+            "north": 60.95 if args.profile == "great-britain" else 52.15,
             "min_zoom": 12,
         },
+        "coverage_profile": args.profile,
         "tile_count": count,
         "payload_bytes": total_bytes,
         "attribution": args.attribution,
@@ -162,8 +174,8 @@ def main() -> int:
     if "{y}" not in args.url_template and "{row}" not in args.url_template:
         raise SystemExit("URL template must contain {y} or {row}")
 
-    tiles = enumerate_tiles()
-    print(f"Preparing {len(tiles)} bounded tiles", flush=True)
+    tiles = enumerate_tiles(args.profile)
+    print(f"Preparing {len(tiles)} bounded tiles for {args.profile}", flush=True)
     totals = {"downloaded": 0, "skipped": 0, "empty": 0, "failed": 0}
     total_bytes = 0
     failures: list[str] = []

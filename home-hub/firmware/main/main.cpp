@@ -61,7 +61,7 @@ struct MapLayerInfo {
 
 constexpr std::array<MapLayerInfo, 3> kMapLayers{{
     {"Street", "OSM roads, places and buildings", "/sdcard/bluepaws/maps/tiles", 10, 17},
-    {"Satellite", "Sentinel-2 Gloucestershire imagery", "/sdcard/bluepaws/maps/layers/satellite/tiles", 5, 14},
+    {"Satellite", "Consistent Sentinel-2 Great Britain imagery", "/sdcard/bluepaws/maps/layers/satellite/tiles", 5, 14},
     {"Aerial", "Single-source Gloucester aerial imagery", "/sdcard/bluepaws/maps/layers/aerial-consistent/tiles", 12, 17},
 }};
 
@@ -98,7 +98,14 @@ struct UiState {
     std::array<lv_obj_t *, bluepaws::kMaximumCats> drawer_cards{};
     std::array<lv_obj_t *, bluepaws::kMaximumCats> drawer_summary_labels{};
     std::array<lv_obj_t *, bluepaws::kMaximumCats> drawer_detail_labels{};
+    std::array<lv_obj_t *, bluepaws::kMaximumCats> drawer_expanded_panels{};
+    std::array<lv_obj_t *, bluepaws::kMaximumCats> drawer_message_labels{};
+    std::array<lv_obj_t *, bluepaws::kMaximumCats> drawer_jump_buttons{};
+    std::array<lv_obj_t *, bluepaws::kMaximumCats> drawer_follow_buttons{};
+    std::array<lv_obj_t *, bluepaws::kMaximumCats> drawer_trail_buttons{};
+    std::array<lv_obj_t *, bluepaws::kMaximumCats> drawer_command_buttons{};
     std::array<bool, bluepaws::kMaximumCats> drawer_card_expanded{};
+    std::array<bool, bluepaws::kMaximumCats> trail_enabled{};
     lv_obj_t *cat_list = nullptr;
     lv_obj_t *diagnostics_text = nullptr;
     lv_obj_t *map_drawer = nullptr;
@@ -129,6 +136,7 @@ struct UiState {
     bool tiles_dirty = true;
     bool tile_images_bound = false;
     int brightness_percent = 80;
+    int followed_cat = -1;
 };
 
 const UiLayout &current_layout(const UiState &ui)
@@ -411,6 +419,17 @@ void update_ui(UiState &ui)
     const uint32_t now_ms = uptime_ms();
     ui.simulator.update(now_ms, ui.cats);
 
+    if (ui.followed_cat >= 0 && static_cast<size_t>(ui.followed_cat) < ui.cats.size()) {
+        const bluepaws::CatRecord *followed = ui.cats.at(static_cast<size_t>(ui.followed_cat));
+        if (followed != nullptr && followed->has_position) {
+            ui.viewport.setCenter({
+                static_cast<double>(followed->last_valid_latitude_e7) / 1.0e7,
+                static_cast<double>(followed->last_valid_longitude_e7) / 1.0e7,
+            });
+            ui.tiles_dirty = true;
+        }
+    }
+
     if (ui.active_page == AppPage::Map && ui.map_view != nullptr) {
         refresh_map_tiles(ui);
     }
@@ -455,26 +474,44 @@ void update_ui(UiState &ui)
 
         const uint32_t age_seconds = (now_ms - cat->latest.received_at_ms) / 1000U;
         if (ui.drawer_summary_labels[i] != nullptr) {
+            const char *battery_state = cat->latest.battery_percent < 30 ? "LOW" :
+                (cat->latest.battery_percent < 65 ? "MED" : "GOOD");
+            const char *signal_state = cat->latest.rssi > -80 ? "EXCELLENT" :
+                (cat->latest.rssi > -95 ? "GOOD" : "WEAK");
+            const char *power_profile = (i % 3U == 0U) ? "POWERSAVE" :
+                ((i % 3U == 1U) ? "NORMAL" : "RECOVERY");
             lv_label_set_text_fmt(ui.drawer_summary_labels[i],
-                                  "%s\nSIMULATED  |  %u%%  |  %d dBm  |  %lus",
+                                  "%s   OUT   %s\n"
+                                  "STATUS: %s\n"
+                                  "BAT [%3u%%] %-4s    SIG [||||] %s   RF\n"
+                                  "%lum away     last %lus",
                                   cat->name,
+                                  power_profile,
+                                  i == 0 ? "REPORTED FAULT" : "NORMAL",
                                   static_cast<unsigned>(cat->latest.battery_percent),
-                                  static_cast<int>(cat->latest.rssi),
+                                  battery_state,
+                                  signal_state,
+                                  static_cast<unsigned long>(35U + i * 17U),
                                   static_cast<unsigned long>(age_seconds));
         }
         if (ui.drawer_detail_labels[i] != nullptr) {
             lv_label_set_text_fmt(
                 ui.drawer_detail_labels[i],
-                "Device ID: %u\nSequence: %lu\nBattery: %u mV (%u%%)\nSignal: %d dBm / %.1f dB SNR\n"
-                "Position: %.5f, %.5f\nLast report: %lu seconds ago\nSource: simulator",
-                static_cast<unsigned>(cat->device_id),
-                static_cast<unsigned long>(cat->latest.sequence),
-                static_cast<unsigned>(cat->latest.battery_mv),
-                static_cast<unsigned>(cat->latest.battery_percent),
-                static_cast<int>(cat->latest.rssi),
-                static_cast<double>(cat->latest.snr),
+                "Coordinates        %.5f, %.5f\n"
+                "Device ID                          %u\n"
+                "Power Profile              %s\n"
+                "Distance from hub              %lum\n"
+                "Signal                 %d dBm / %.1f dB\n"
+                "Battery                       %u mV\n"
+                "Last seen                         %lus",
                 static_cast<double>(cat->last_valid_latitude_e7) / 1.0e7,
                 static_cast<double>(cat->last_valid_longitude_e7) / 1.0e7,
+                static_cast<unsigned>(cat->device_id),
+                (i % 3U == 0U) ? "PowerSave" : ((i % 3U == 1U) ? "Normal" : "Recovery"),
+                static_cast<unsigned long>(35U + i * 17U),
+                static_cast<int>(cat->latest.rssi),
+                static_cast<double>(cat->latest.snr),
+                static_cast<unsigned>(cat->latest.battery_mv),
                 static_cast<unsigned long>(age_seconds));
         }
 
@@ -1485,23 +1522,117 @@ void drawer_cat_card_clicked(lv_event_t *event)
         const bool expand = ui->drawer_cards[i] == target && !was_expanded;
         ui->drawer_card_expanded[i] = expand;
         if (ui->drawer_cards[i] != nullptr) {
-            lv_obj_set_height(ui->drawer_cards[i], expand ? 230 : 78);
+            lv_obj_set_height(ui->drawer_cards[i], expand ? 360 : 116);
         }
-        if (ui->drawer_detail_labels[i] != nullptr) {
+        if (ui->drawer_expanded_panels[i] != nullptr) {
             if (expand) {
-                lv_obj_remove_flag(ui->drawer_detail_labels[i], LV_OBJ_FLAG_HIDDEN);
+                lv_obj_remove_flag(ui->drawer_expanded_panels[i], LV_OBJ_FLAG_HIDDEN);
             } else {
-                lv_obj_add_flag(ui->drawer_detail_labels[i], LV_OBJ_FLAG_HIDDEN);
+                lv_obj_add_flag(ui->drawer_expanded_panels[i], LV_OBJ_FLAG_HIDDEN);
             }
         }
     }
+}
+
+size_t drawer_action_index(const std::array<lv_obj_t *, bluepaws::kMaximumCats> &buttons,
+                           lv_obj_t *target)
+{
+    for (size_t i = 0; i < buttons.size(); ++i) {
+        if (buttons[i] == target) {
+            return i;
+        }
+    }
+    return buttons.size();
+}
+
+void drawer_jump_clicked(lv_event_t *event)
+{
+    auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
+    auto *target = static_cast<lv_obj_t *>(lv_event_get_current_target(event));
+    if (ui == nullptr) return;
+    const size_t index = drawer_action_index(ui->drawer_jump_buttons, target);
+    const bluepaws::CatRecord *cat = index < ui->cats.size() ? ui->cats.at(index) : nullptr;
+    if (cat == nullptr || !cat->has_position) return;
+    ui->viewport.setCenter({static_cast<double>(cat->last_valid_latitude_e7) / 1.0e7,
+                            static_cast<double>(cat->last_valid_longitude_e7) / 1.0e7});
+    ui->tiles_dirty = true;
+    ui->drawer_open = false;
+    if (ui->map_drawer != nullptr) lv_obj_add_flag(ui->map_drawer, LV_OBJ_FLAG_HIDDEN);
+    update_ui(*ui);
+}
+
+void drawer_follow_clicked(lv_event_t *event)
+{
+    auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
+    auto *target = static_cast<lv_obj_t *>(lv_event_get_current_target(event));
+    if (ui == nullptr) return;
+    const size_t index = drawer_action_index(ui->drawer_follow_buttons, target);
+    if (index >= ui->drawer_follow_buttons.size()) return;
+    ui->followed_cat = ui->followed_cat == static_cast<int>(index) ? -1 : static_cast<int>(index);
+    for (size_t i = 0; i < ui->drawer_follow_buttons.size(); ++i) {
+        if (ui->drawer_follow_buttons[i] == nullptr) continue;
+        lv_obj_t *label = lv_obj_get_child(ui->drawer_follow_buttons[i], 0);
+        lv_label_set_text(label, ui->followed_cat == static_cast<int>(i) ? "FOLLOWING" : "FOLLOW");
+    }
+    if (ui->drawer_message_labels[index] != nullptr) {
+        lv_label_set_text(ui->drawer_message_labels[index],
+                          ui->followed_cat == static_cast<int>(index)
+                              ? "Live map now follows this collar."
+                              : "Live following stopped.");
+    }
+}
+
+void drawer_trail_clicked(lv_event_t *event)
+{
+    auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
+    auto *target = static_cast<lv_obj_t *>(lv_event_get_current_target(event));
+    if (ui == nullptr) return;
+    const size_t index = drawer_action_index(ui->drawer_trail_buttons, target);
+    if (index >= ui->trail_enabled.size()) return;
+    ui->trail_enabled[index] = !ui->trail_enabled[index];
+    lv_obj_t *label = lv_obj_get_child(target, 0);
+    lv_label_set_text(label, ui->trail_enabled[index] ? "TRAIL ON" : "TRAIL");
+    if (ui->drawer_message_labels[index] != nullptr) {
+        lv_label_set_text(ui->drawer_message_labels[index],
+                          ui->trail_enabled[index]
+                              ? "Trail capture armed; history rendering follows telemetry storage."
+                              : "Trail capture disabled.");
+    }
+}
+
+void drawer_command_clicked(lv_event_t *event)
+{
+    auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
+    auto *target = static_cast<lv_obj_t *>(lv_event_get_current_target(event));
+    if (ui == nullptr) return;
+    const size_t index = drawer_action_index(ui->drawer_command_buttons, target);
+    if (index < ui->drawer_message_labels.size() && ui->drawer_message_labels[index] != nullptr) {
+        lv_label_set_text(ui->drawer_message_labels[index],
+                          "Command panel ready; C6/LoRa transport is not connected yet.");
+    }
+}
+
+lv_obj_t *make_drawer_action(lv_obj_t *parent, const char *text, lv_event_cb_t callback, UiState &ui)
+{
+    lv_obj_t *button = lv_button_create(parent);
+    lv_obj_set_size(button, 70, 38);
+    lv_obj_set_style_bg_color(button, lv_color_hex(0x173B52), 0);
+    lv_obj_set_style_border_color(button, lv_color_hex(0x3C718D), 0);
+    lv_obj_set_style_border_width(button, 1, 0);
+    lv_obj_set_style_radius(button, 7, 0);
+    lv_obj_set_style_pad_all(button, 0, 0);
+    lv_obj_add_event_cb(button, callback, LV_EVENT_CLICKED, &ui);
+    lv_obj_t *label = make_label(button, text, lv_color_hex(0xD8E6ED));
+    lv_obj_set_style_text_font(label, &lv_font_montserrat_14, 0);
+    lv_obj_center(label);
+    return button;
 }
 
 void create_drawer_cat_card(lv_obj_t *parent, size_t index, UiState &ui)
 {
     lv_obj_t *card = lv_button_create(parent);
     lv_obj_set_width(card, LV_PCT(100));
-    lv_obj_set_height(card, 78);
+    lv_obj_set_height(card, 116);
     lv_obj_set_style_bg_color(
         card, ui.dark_mode ? lv_color_hex(0x172733) : lv_color_hex(0xD9D5CC), 0);
     lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
@@ -1509,8 +1640,8 @@ void create_drawer_cat_card(lv_obj_t *parent, size_t index, UiState &ui)
         card, ui.dark_mode ? lv_color_hex(0x405B6D) : lv_color_hex(0xA8B7C0), 0);
     lv_obj_set_style_border_width(card, 1, 0);
     lv_obj_set_style_radius(card, 10, 0);
-    lv_obj_set_style_pad_all(card, 10, 0);
-    lv_obj_set_style_pad_gap(card, 8, 0);
+    lv_obj_set_style_pad_all(card, 9, 0);
+    lv_obj_set_style_pad_gap(card, 6, 0);
     lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
     lv_obj_add_event_cb(card, drawer_cat_card_clicked, LV_EVENT_CLICKED, &ui);
 
@@ -1523,19 +1654,52 @@ void create_drawer_cat_card(lv_obj_t *parent, size_t index, UiState &ui)
     lv_obj_set_style_text_font(summary, &lv_font_montserrat_14, 0);
     lv_obj_remove_flag(summary, LV_OBJ_FLAG_CLICKABLE);
 
+    lv_obj_t *expanded = lv_obj_create(card);
+    lv_obj_set_width(expanded, LV_PCT(100));
+    lv_obj_set_height(expanded, 230);
+    lv_obj_set_style_bg_opa(expanded, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(expanded, 0, 0);
+    lv_obj_set_style_pad_all(expanded, 0, 0);
+    lv_obj_set_style_pad_gap(expanded, 6, 0);
+    lv_obj_set_flex_flow(expanded, LV_FLEX_FLOW_COLUMN);
+    lv_obj_remove_flag(expanded, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(expanded, LV_OBJ_FLAG_HIDDEN);
+
     lv_obj_t *detail = make_label(
-        card,
+        expanded,
         "",
         ui.dark_mode ? lv_color_hex(0xB9D0DC) : lv_color_hex(0x36596D));
     lv_obj_set_width(detail, LV_PCT(100));
     lv_label_set_long_mode(detail, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_font(detail, &lv_font_montserrat_14, 0);
-    lv_obj_add_flag(detail, LV_OBJ_FLAG_HIDDEN);
     lv_obj_remove_flag(detail, LV_OBJ_FLAG_CLICKABLE);
+
+    lv_obj_t *actions = lv_obj_create(expanded);
+    lv_obj_set_size(actions, LV_PCT(100), 42);
+    lv_obj_set_style_bg_opa(actions, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(actions, 0, 0);
+    lv_obj_set_style_pad_all(actions, 0, 0);
+    lv_obj_set_style_pad_gap(actions, 5, 0);
+    lv_obj_set_flex_flow(actions, LV_FLEX_FLOW_ROW);
+    lv_obj_remove_flag(actions, LV_OBJ_FLAG_SCROLLABLE);
+    ui.drawer_jump_buttons[index] = make_drawer_action(actions, "JUMP", drawer_jump_clicked, ui);
+    ui.drawer_follow_buttons[index] = make_drawer_action(actions, "FOLLOW", drawer_follow_clicked, ui);
+    ui.drawer_trail_buttons[index] = make_drawer_action(actions, "TRAIL", drawer_trail_clicked, ui);
+    ui.drawer_command_buttons[index] = make_drawer_action(actions, "CMD", drawer_command_clicked, ui);
+
+    lv_obj_t *message = make_label(
+        expanded,
+        "MESSAGE LOG  No messages",
+        ui.dark_mode ? lv_color_hex(0x8EABB9) : lv_color_hex(0x496B7C));
+    lv_obj_set_width(message, LV_PCT(100));
+    lv_label_set_long_mode(message, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_font(message, &lv_font_montserrat_14, 0);
 
     ui.drawer_cards[index] = card;
     ui.drawer_summary_labels[index] = summary;
     ui.drawer_detail_labels[index] = detail;
+    ui.drawer_expanded_panels[index] = expanded;
+    ui.drawer_message_labels[index] = message;
     ui.drawer_card_expanded[index] = false;
 }
 
@@ -1890,6 +2054,12 @@ void create_ui(UiState &ui)
     ui.drawer_cards.fill(nullptr);
     ui.drawer_summary_labels.fill(nullptr);
     ui.drawer_detail_labels.fill(nullptr);
+    ui.drawer_expanded_panels.fill(nullptr);
+    ui.drawer_message_labels.fill(nullptr);
+    ui.drawer_jump_buttons.fill(nullptr);
+    ui.drawer_follow_buttons.fill(nullptr);
+    ui.drawer_trail_buttons.fill(nullptr);
+    ui.drawer_command_buttons.fill(nullptr);
     ui.drawer_card_expanded.fill(false);
     ui.map_view = nullptr;
     ui.cat_list = nullptr;
