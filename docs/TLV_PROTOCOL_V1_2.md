@@ -236,6 +236,29 @@ TLV 0x20         = acked_msg_seq_id = 4711
 
 The addresses identify the participants. `acked_msg_seq_id` identifies the exact message being acknowledged.
 
+### LoRa uplink receipt ACK
+
+For every structurally valid collar report addressed to its hub, except an ACK
+packet itself, the hub immediately sends a separate receipt packet before flash,
+browser or cloud processing:
+
+```text
+source_id16      = affiliated hub ID
+destination_id16 = reporting collar ID
+tx_reason        = ACK
+TLV 0x20         = collar uplink msg_seq_id
+```
+
+This confirms only collar-to-hub radio receipt. It does not claim that the
+journal write or cloud upload succeeded. A pending command remains a second,
+independent hub transmission. The collar keeps its receiver open for 15 seconds
+so it can receive the receipt ACK and then a command.
+
+If no matching receipt arrives within two seconds, the collar waits a short
+random backoff and retransmits the identical authenticated packet once. Both
+attempts retain the same source, sequence, payload and HMAC for deterministic
+hub/cloud deduplication. An ACK is never ACKed, preventing an ACK loop.
+
 ## 13. State, flags and TX reason
 
 `state` remains packed as:
@@ -348,8 +371,10 @@ TLV 0xF1         = resulting power profile u8 (where included)
 
 The 1.2 addresses identify the participants; TLV `0x20` correlates the exact
 command. Prototype firmware currently performs structural routing and ACK
-testing without verifying downlink authentication. This remains explicitly
-non-production until a hub-to-collar key/proof model is locked and implemented.
+testing without verifying downlink authentication. That includes hub receipt
+ACKs, which influence LTE fallback decisions. This remains explicitly
+non-production until a hub-to-collar key/proof model with replay protection is
+locked and implemented.
 
 ## 15. Transport separation
 

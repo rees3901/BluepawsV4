@@ -173,6 +173,7 @@ static uint32_t rxCount = 0;         // Total valid packets received
 static uint32_t crcFailCount = 0;    // Packets that failed TLV structure/auth checks
 static uint32_t txCount = 0;         // Total commands transmitted
 static std::atomic<uint32_t> cmdSeqCounter{0}; // Web, console and cloud tasks
+static std::atomic<uint32_t> uplinkAckSeqCounter{0}; // Hub receipt ACK packet identity
 
 // ── Pending Command ACK Tracking ──
 // When we send a command to a collar, we track it here and wait for
@@ -359,6 +360,7 @@ static void syncHubClock(bool force);
 
 // Packet handling pipeline
 static void handlePacket(const uint8_t *buf, uint8_t len, int16_t rssi, float snr);
+static bool sendUplinkReceiptAck(const uint8_t *uplink);
 static void buildDeviceJson(const uint8_t *buf, int16_t rssi, float snr,
                              uint32_t localId, uint32_t gatewayRxTime,
                              uint8_t syncState, char *out, size_t outLen);
@@ -1187,7 +1189,8 @@ static void queuePendingCommandForDevice(uint16_t targetId) {
             cmd.cmdSeq = (uint16_t)(pendingCmds[i].cmdSeq & 0xFFFF);
             cmd.type = pendingCmds[i].type;
 
-            commandRxOpportunityUntil = xTaskGetTickCount() + pdMS_TO_TICKS(8000);
+            commandRxOpportunityUntil = xTaskGetTickCount()
+                + pdMS_TO_TICKS(CMD_LISTEN_WINDOW_MS - 500);
             if (xQueueSendToFront(cmdQueue, &cmd, 0) == pdTRUE) {
                 Serial.printf("[CMD] RX window opportunity: queued seq %u -> %s\n",
                               cmd.cmdSeq, bp_device_name(targetId));
@@ -1297,6 +1300,12 @@ static void handlePacket(const uint8_t *buf, uint8_t len, int16_t rssi, float sn
     Serial.printf("[LORA] RX #%u source=%04X destination=%04X | type=0x%02X rssi=%d snr=%.1f\n",
                   rxCount, devId, destinationId, pktType, rssi, snr);
 
+    // Confirm every accepted collar report immediately. A collar command ACK is
+    // terminal traffic and must not itself trigger another ACK.
+    if (pktType != TX_ACK) {
+        sendUplinkReceiptAck(buf);
+    }
+
     // Step 3: If this is an ACK/response to a command we sent, match it up
     if ((pktType == PKT_MODE_ACK || pktType == PKT_FIND_ACK || pktType == PKT_STATUS_RESP)
         && destinationId == (uint16_t)GATEWAY_GUID16) {
@@ -1337,6 +1346,48 @@ static void handlePacket(const uint8_t *buf, uint8_t len, int16_t rssi, float sn
     // the front of the LoRa TX queue immediately rather than waiting for blind
     // retry timing.
     queuePendingCommandForDevice(devId);
+}
+
+// A receipt ACK is deliberately separate from any pending command. It is sent
+// immediately after local structure/routing validation, before journal, browser
+// or cloud work, so backend latency cannot consume the collar's RX window.
+// TX_ACK packets are never ACKed, preventing an acknowledgement loop.
+static bool sendUplinkReceiptAck(const uint8_t *uplink) {
+    uint8_t ack[BP_MAX_PACKET_SIZE];
+    uint16_t ackSeq = (uint16_t)(++uplinkAckSeqCounter & 0xFFFF);
+    if (ackSeq == 0) ackSeq = (uint16_t)(++uplinkAckSeqCounter & 0xFFFF);
+
+    pkt_init(ack, (uint16_t)GATEWAY_GUID16, pkt_source_id(uplink), ackSeq, 0,
+             STATUS_HOME, pkt_power_profile(uplink), 0, TX_ACK);
+    pkt_add_tlv_u16(ack, TLV_ACKED_MSG_SEQ_ID,
+                    (uint16_t)(pkt_msg_seq(uplink) & 0xFFFF));
+    uint8_t ackLen = pkt_finalize(ack);
+
+    if (!xSemaphoreTake(loraMutex, pdMS_TO_TICKS(250))) {
+        Serial.printf("[ACK] Uplink ACK radio busy for seq %lu -> %s\n",
+                      (unsigned long)pkt_msg_seq(uplink),
+                      bp_device_name(pkt_source_id(uplink)));
+        return false;
+    }
+
+    femSetTx();
+    int state = lora.transmit(ack, ackLen);
+    femSetRx();
+    lora.startReceive();
+    xSemaphoreGive(loraMutex);
+
+    if (state != RADIOLIB_ERR_NONE) {
+        Serial.printf("[ACK] Uplink ACK TX failed state=%d seq=%lu -> %s\n",
+                      state, (unsigned long)pkt_msg_seq(uplink),
+                      bp_device_name(pkt_source_id(uplink)));
+        return false;
+    }
+
+    txCount++;
+    Serial.printf("[ACK] Uplink seq %lu acknowledged -> %s\n",
+                  (unsigned long)pkt_msg_seq(uplink),
+                  bp_device_name(pkt_source_id(uplink)));
+    return true;
 }
 
 // Build a JSON string from a raw packet for the web GUI.

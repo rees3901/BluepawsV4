@@ -128,6 +128,7 @@ static const bp_profile_config_t *currentConfig = bp_profile_config(PROFILE_NORM
 static uint32_t messageSeq     = 0;    // Incrementing sequence number for outgoing packets
 static uint32_t cycleCount     = 0;    // Total wake/transmit cycles since boot
 static uint8_t  homeCycleCount = 0;    // Consecutive cycles where BLE home beacon was detected
+static uint8_t  consecutiveLoRaFailedCycles = 0; // complete uplink cycles with no hub receipt ACK
 static uint32_t lastLteHeartbeatMs = 0; // Last time a home LTE heartbeat was queued
 static volatile bool bootReportPending = true;        // First runtime action is a BOOT report
 static volatile bool forceUserReportRequested = false; // Physical button / debug forced TX
@@ -181,7 +182,8 @@ struct collar_persisted_state_t {
     uint32_t boot_counter;
     uint32_t runtime_counter_checkpoint;
     uint8_t  home_cycle_checkpoint;
-    uint8_t  reserved0[3];
+    uint8_t  lora_failed_cycles;
+    uint8_t  reserved0[2];
     int32_t  last_lat_e7;
     int32_t  last_lon_e7;
     uint32_t last_fix_unix;
@@ -229,7 +231,7 @@ static void cellularTask(void *param);     // Notification-driven: wakes GM02SP 
 static bool     bleScanForHome();          // BLE scan for hub's home beacon
 static bool     gnssAcquireFix();          // Request GNSS fix via AT+SQNGNSS
 static bool     gnssAcquireFixWithTimeout(uint32_t timeoutS); // Bounded GNSS request
-static void     listenForCommands();       // Open 10s LoRa RX window for hub commands
+static void     listenForCommands();       // Wait for receipt ACK and commands in the 15s RX window
 static void     enterDeepSleep();          // Power down, sleep until next cycle
 static void     runLostMode();             // Emergency continuous operation loop
 
@@ -250,6 +252,7 @@ static uint8_t  finalizeAuthenticatedPacket(uint8_t *buf); // Append/sign TLV v1
 
 // Command handling
 static void     handleReceivedCommand(const uint8_t *buf, uint8_t len);
+static void     noteUplinkAckResult(bool acknowledged);
 static void     applyProfile(bp_profile_t profile);  // Switch operating profile
 static void     sendFindAck(uint32_t cmdMsgSeq, uint16_t destinationId);     // ACK a find command
 
@@ -364,6 +367,7 @@ void setup() {
             messageSeq = persistedState.message_seq_checkpoint;
             cycleCount = persistedState.runtime_counter_checkpoint;
             homeCycleCount = persistedState.home_cycle_checkpoint;
+            consecutiveLoRaFailedCycles = persistedState.lora_failed_cycles;
             if (persistedState.has_last_fix) {
                 gnssLat = persistedState.last_lat_e7 / 1e7;
                 gnssLon = persistedState.last_lon_e7 / 1e7;
@@ -663,6 +667,7 @@ static void runLostMode() {
         if (elapsed >= LOST_MODE_MAX_DURATION_S) {
             Serial.println("[LOST] 2-hour timeout — reverting to active");
             sendLostModeAlert();
+            listenForCommands();
             applyProfile(LOST_MODE_FALLBACK);
             peripheralsSleep();
             break;
@@ -962,6 +967,7 @@ static void collarStateSave(const char *reason, bool noisy) {
     persistedState.message_seq_checkpoint = messageSeq;
     persistedState.runtime_counter_checkpoint = cycleCount;
     persistedState.home_cycle_checkpoint = homeCycleCount;
+    persistedState.lora_failed_cycles = consecutiveLoRaFailedCycles;
     persistedState.checksum = collarStateChecksum(persistedState);
 
     InternalFS.remove(BLUEPAWS_COLLAR_STATE_PATH);
@@ -1359,6 +1365,10 @@ static void sendLostModeAlert() {
     uint8_t pktLen = finalizeAuthenticatedPacket(buf);
     Serial.printf("[TX] ALERT: lost mode timeout after %lus\n", duration);
     transmitPacket(buf, pktLen);
+
+    memcpy(lastTxPacket, buf, pktLen);
+    lastTxPacketLen = pktLen;
+    collarStateCheckpoint("lost-timeout-alert");
 }
 
 // ═══════════════════════════════════════════════
@@ -1391,40 +1401,132 @@ static void transmitPacket(uint8_t *buf, uint8_t len, bool suppressLed) {
 }
 
 // ═══════════════════════════════════════════════
-// Listen for Commands (10s RX window)
+// Listen for Hub Receipt ACK and Commands (15s RX window)
 //
-// After transmitting telemetry, the collar opens a short receive
-// window so the hub can send commands (mode change, find, etc.).
-// This is like a "half-duplex" protocol — the collar is mostly
-// sleeping/transmitting, but briefly listens after each TX.
-// The hub times its command TX to coincide with this window.
+// The hub ACK and any pending command are deliberately separate packets. The
+// collar therefore keeps receiving until the fixed deadline instead of exiting
+// after the first packet. If the receipt ACK is absent, it retries the exact
+// same uplink bytes once; the sequence and HMAC remain unchanged for dedupe.
 // ═══════════════════════════════════════════════
 static void listenForCommands() {
-    Serial.printf("[RX] Listening %dms...\n", CMD_LISTEN_WINDOW_MS);
-
-    uint8_t rxBuf[BP_MAX_PACKET_SIZE];
-    int state = lora.receive(rxBuf, sizeof(rxBuf), CMD_LISTEN_WINDOW_MS);
-
-    if (state == RADIOLIB_ERR_NONE) {
-        size_t rxLen = lora.getPacketLength(false);
-        if (rxLen == 0 || rxLen > sizeof(rxBuf)) {
-            rxLen = sizeof(rxBuf);
-        }
-
-        Serial.printf("[RX] Received %d bytes\n", (int)rxLen);
-        pkt_print_hex(rxBuf, (uint8_t)rxLen);  // Debug: hex dump to serial
-
-        // Basic validation before processing
-        if (rxLen >= BP_MIN_PACKET_SIZE && rxBuf[0] == BP_PROTOCOL_VERSION) {
-            handleReceivedCommand(rxBuf, (uint8_t)rxLen);
-        }
-    } else if (state == RADIOLIB_ERR_RX_TIMEOUT) {
-        Serial.println("[RX] No command received");
-    } else {
-        Serial.printf("[RX] receive failed: %d\n", state);
+    if (lastTxPacketLen < BP_MIN_PACKET_SIZE || pkt_pkt_type(lastTxPacket) == TX_ACK) {
+        Serial.println("[RX] No report packet available for receipt ACK tracking");
+        return;
     }
 
+    const uint16_t expectedSeq = (uint16_t)(pkt_msg_seq(lastTxPacket) & 0xFFFF);
+    const uint32_t windowStartedMs = millis();
+    uint32_t ackDeadlineMs = windowStartedMs + UPLINK_ACK_WAIT_MS;
+    uint8_t attempts = 1;
+    bool receiptAcknowledged = false;
+    bool ackResultRecorded = false;
+    uint8_t rxBuf[BP_MAX_PACKET_SIZE];
+
+    Serial.printf("[RX] Listening %dms for hub ACK seq=%u and commands...\n",
+                  CMD_LISTEN_WINDOW_MS, expectedSeq);
+
+    while ((uint32_t)(millis() - windowStartedMs) < CMD_LISTEN_WINDOW_MS) {
+        uint32_t now = millis();
+        if (!receiptAcknowledged && (int32_t)(now - ackDeadlineMs) >= 0) {
+            if (attempts < UPLINK_MAX_ATTEMPTS) {
+                attempts++;
+                Serial.printf("[ACK] No receipt for seq=%u; retrying identical packet (%u/%u)\n",
+                              expectedSeq, attempts, UPLINK_MAX_ATTEMPTS);
+                vTaskDelay(pdMS_TO_TICKS(random(UPLINK_RETRY_BACKOFF_MIN_MS,
+                                                UPLINK_RETRY_BACKOFF_MAX_MS + 1)));
+                transmitPacket(lastTxPacket, lastTxPacketLen, /*suppressLed=*/true);
+                ackDeadlineMs = millis() + UPLINK_ACK_WAIT_MS;
+                continue;
+            }
+
+            Serial.printf("[ACK] Uplink seq=%u unacknowledged after %u attempts\n",
+                          expectedSeq, attempts);
+            noteUplinkAckResult(false);
+            ackResultRecorded = true;
+            break;
+        }
+
+        uint32_t windowRemainingMs = CMD_LISTEN_WINDOW_MS - (millis() - windowStartedMs);
+        uint32_t receiveTimeoutMs = windowRemainingMs;
+        if (!receiptAcknowledged) {
+            uint32_t ackRemainingMs = (int32_t)(ackDeadlineMs - millis()) > 0
+                ? ackDeadlineMs - millis() : 1;
+            if (ackRemainingMs < receiveTimeoutMs) receiveTimeoutMs = ackRemainingMs;
+        }
+
+        int state = lora.receive(rxBuf, sizeof(rxBuf), receiveTimeoutMs);
+        if (state == RADIOLIB_ERR_RX_TIMEOUT) continue;
+        if (state != RADIOLIB_ERR_NONE) {
+            Serial.printf("[RX] receive failed: %d\n", state);
+            continue;
+        }
+
+        size_t rxLen = lora.getPacketLength(false);
+        if (rxLen == 0 || rxLen > sizeof(rxBuf)) rxLen = sizeof(rxBuf);
+        if (rxLen < BP_MIN_PACKET_SIZE || !pkt_validate_crc(rxBuf, (uint8_t)rxLen)
+            || pkt_version(rxBuf) != BP_PROTOCOL_VERSION) {
+            Serial.println("[RX] Invalid hub packet ignored");
+            continue;
+        }
+        if (pkt_source_id(rxBuf) != MY_HOME_HUB_ID
+            || (pkt_destination_id(rxBuf) != MY_DEVICE_ID
+                && pkt_destination_id(rxBuf) != DEVICE_ID_BROADCAST)) {
+            Serial.println("[RX] Unrelated packet ignored");
+            continue;
+        }
+
+        if (pkt_pkt_type(rxBuf) == TX_ACK) {
+            uint16_t ackedSeq = 0;
+            if (pkt_tlv_get_u16(rxBuf, TLV_ACKED_MSG_SEQ_ID, &ackedSeq)
+                && ackedSeq == expectedSeq) {
+                if (!receiptAcknowledged) {
+                    receiptAcknowledged = true;
+                    noteUplinkAckResult(true);
+                    ackResultRecorded = true;
+                    Serial.printf("[ACK] Hub acknowledged uplink seq=%u after %u attempt(s)\n",
+                                  expectedSeq, attempts);
+                }
+            } else {
+                Serial.printf("[ACK] Receipt for different sequence %u ignored\n", ackedSeq);
+            }
+            continue;
+        }
+
+        Serial.printf("[RX] Command packet type=0x%02X (%u bytes)\n",
+                      pkt_pkt_type(rxBuf), (unsigned)rxLen);
+        handleReceivedCommand(rxBuf, (uint8_t)rxLen);
+    }
+
+    if (!ackResultRecorded) noteUplinkAckResult(receiptAcknowledged);
     lora.standby();  // Return radio to standby (will go to sleep later)
+}
+
+static void noteUplinkAckResult(bool acknowledged) {
+    if (acknowledged) {
+        if (consecutiveLoRaFailedCycles > 0) {
+            Serial.printf("[ACK] LoRa path recovered after %u failed cycle(s)\n",
+                          consecutiveLoRaFailedCycles);
+            consecutiveLoRaFailedCycles = 0;
+            collarStateSave("lora-ack-recovered", false);
+        }
+        return;
+    }
+
+    if (consecutiveLoRaFailedCycles < UINT8_MAX) consecutiveLoRaFailedCycles++;
+    uint8_t threshold = currentConfig->lora_failed_cycles_before_cellular;
+    Serial.printf("[ACK] Consecutive failed LoRa cycles: %u/%u (%s)\n",
+                  consecutiveLoRaFailedCycles, threshold,
+                  bp_profile_name(currentProfile));
+
+    if (threshold > 0 && consecutiveLoRaFailedCycles >= threshold) {
+        Serial.println("[CELL] LoRa ACK failure threshold reached; requesting LTE fallback");
+        cellularPending = true;
+        if (cellTaskHandle) xTaskNotifyGive(cellTaskHandle);
+        // Count failures in bounded groups so a persistent outage does not wake
+        // prepaid LTE on every single collar cycle.
+        consecutiveLoRaFailedCycles = 0;
+    }
+    collarStateSave("lora-ack-result", false);
 }
 
 // ═══════════════════════════════════════════════

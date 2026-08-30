@@ -91,7 +91,7 @@ The backend keeps the UUID command ID for audit and web UI state, but the embedd
 
 For `ingest_path = lora_hub`, the collar sends raw TLV over private LoRa. The Home Hub receives it, wraps it for HTTPS, and relays it to Supabase.
 
-The Home Hub's authenticated telemetry POST is also the command check. The Edge Function returns the next pending command in that HTTP response, and the Home Hub immediately transmits the corresponding TLV v1.2 downlink during the collar's 10-second RX window. If delivery or the ACK is missed, the same command remains retryable until acknowledged, superseded, or expired.
+The Home Hub immediately returns a standalone radio receipt ACK, then its authenticated telemetry POST also checks for a command. The Edge Function returns the next pending command in that HTTP response, and the Home Hub transmits the corresponding, separate TLV v1.2 downlink during the collar's 15-second RX window. If delivery or the command ACK is missed, the same command remains retryable until acknowledged, superseded, or expired.
 
 The collar ACK format remains the same:
 
