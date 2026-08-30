@@ -59,6 +59,14 @@ FIXTURE_PASSES = (
     RenderPass("Gloucester fixture", (-2.285, 51.837, -2.191, 51.891), 12, 17),
 )
 
+# A practical on-device pack for the first layer-switching build: Gloucester,
+# its immediate suburbs and approaches at every firmware-supported zoom. This
+# is deliberately much smaller than the county profile because FAT32 wastes a
+# full allocation unit for every small JPEG tile on the test card.
+GLOUCESTER_PASSES = (
+    RenderPass("Gloucester city", (-2.36, 51.78, -2.10, 51.96), 10, 17),
+)
+
 # Coarse Great Britain coverage plus a roughly 40 km square around Gloucester.
 # OS Open Zoomstack does not include Northern Ireland.
 PILOT_PASSES = (
@@ -95,10 +103,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, required=True, help="Destination tile directory")
     parser.add_argument(
         "--profile",
-        choices=("fixture", "pilot", "great-britain-overview", "gloucestershire"),
+        choices=("fixture", "gloucester", "pilot", "great-britain-overview", "gloucestershire"),
         default="fixture",
         help=(
-            "fixture is fast; pilot uses OS GB coverage; great-britain-overview "
+            "fixture is fast; gloucester is the city test pack; pilot uses OS GB coverage; great-britain-overview "
             "renders the shallow OSM UK extract; gloucestershire adds local detail"
         ),
     )
@@ -213,7 +221,13 @@ def render_pass(
     )
 
 
-def write_manifest(path: Path, profile: str, quality: int, osm_attribution: bool) -> None:
+def write_manifest(
+    path: Path,
+    output: Path,
+    profile: str,
+    quality: int,
+    osm_attribution: bool,
+) -> None:
     maximum_zoom = 11 if profile == "great-britain-overview" else 17
     if profile == "fixture":
         bounds = {
@@ -222,6 +236,14 @@ def write_manifest(path: Path, profile: str, quality: int, osm_attribution: bool
             "east": -2.191,
             "north": 51.891,
             "min_zoom": 12,
+        }
+    elif profile == "gloucester":
+        bounds = {
+            "west": -2.36,
+            "south": 51.78,
+            "east": -2.10,
+            "north": 51.96,
+            "min_zoom": 10,
         }
     elif profile == "pilot":
         bounds = {
@@ -247,6 +269,7 @@ def write_manifest(path: Path, profile: str, quality: int, osm_attribution: bool
             "north": 60.95,
             "min_zoom": 5,
         }
+    tile_files = list(output.rglob("*.jpg"))
     manifest = {
         "schema_version": 1,
         "name": f"BluePaws {profile}",
@@ -257,12 +280,14 @@ def write_manifest(path: Path, profile: str, quality: int, osm_attribution: bool
         "min_zoom": (
             5
             if profile in ("pilot", "great-britain-overview")
-            else (10 if profile == "gloucestershire" else 12)
+            else (10 if profile in ("gloucester", "gloucestershire") else 12)
         ),
         "max_zoom": maximum_zoom,
         "format": "jpg",
         "jpeg_quality": quality,
         "tile_path": "tiles/{z}/{x}/{y}.jpg",
+        "tile_count": len(tile_files),
+        "payload_bytes": sum(tile.stat().st_size for tile in tile_files),
         "center": {"latitude": 51.8642, "longitude": -2.2382, "zoom": 14},
         "high_detail_bounds": bounds,
         "attribution": (
@@ -294,6 +319,7 @@ def main() -> int:
         args.output.mkdir(parents=True, exist_ok=True)
         passes = {
             "fixture": FIXTURE_PASSES,
+            "gloucester": GLOUCESTER_PASSES,
             "pilot": PILOT_PASSES,
             "great-britain-overview": GREAT_BRITAIN_OVERVIEW_PASSES,
             "gloucestershire": GLOUCESTERSHIRE_PASSES,
@@ -310,6 +336,7 @@ def main() -> int:
         if args.manifest:
             write_manifest(
                 args.manifest,
+                args.output,
                 args.profile,
                 args.quality,
                 osm_attribution=args.tile_url is not None,
