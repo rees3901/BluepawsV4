@@ -180,7 +180,7 @@ bounded downloader is deliberately profile-based:
 
 ```powershell
 python tools\download_home_hub_raster_tiles.py `
-  --profile great-britain `
+  --profile western-england `
   --url-template 'https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless_3857/default/g/{z}/{row}/{col}.jpg' `
   --output home-hub\maps\work\packs\satellite\tiles `
   --manifest home-hub\maps\work\packs\satellite\map_manifest.json `
@@ -189,11 +189,14 @@ python tools\download_home_hub_raster_tiles.py `
   --source-url 'https://eox.at/2017/08/sentinel-2-global-cloudless-mosaic/'
 ```
 
-The default profile keeps z12-14 limited to Gloucestershire. The
-`great-britain` profile builds one consistent Sentinel pyramid through z14 for
-all Great Britain (589,877 requested XYZ positions). It deliberately stops at
-z14: Sentinel-2 RGB source pixels are 10 m, so extra zoom levels would consume
-space without adding image detail.
+The default profile keeps z12-14 limited to Gloucestershire. The recommended
+`western-england` profile keeps Great Britain at z5-11 and extends z12-14 over
+a broad region around Gloucester (47,663 requested XYZ positions). The
+optional `great-britain` profile extends genuine imagery through z14 across the
+whole country (589,877 positions), but takes hours and creates too many small
+files for a responsive test card. Every profile deliberately stops at z14:
+Sentinel-2 RGB source pixels are 10 m, so extra zooms would consume space
+without adding image detail.
 
 The first generated fixture uses the official June 2026 OS Open Zoomstack
 Vector Tiles database (2,852,712,448 bytes, SHA-256

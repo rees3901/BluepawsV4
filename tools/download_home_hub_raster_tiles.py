@@ -38,6 +38,11 @@ FULL_GB_PASSES = (
     DownloadPass("Great Britain complete", (-8.82, 49.79, 1.92, 60.95), 5, 14),
 )
 
+WESTERN_ENGLAND_PASSES = (
+    DownloadPass("Great Britain overview", (-8.82, 49.79, 1.92, 60.95), 5, 11),
+    DownloadPass("Western England detail", (-4.20, 50.70, -0.50, 53.00), 12, 14),
+)
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Download licensed JPEG XYZ map tiles")
@@ -55,7 +60,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--retries", type=int, default=3)
     parser.add_argument(
         "--profile",
-        choices=("gloucestershire", "great-britain"),
+        choices=("gloucestershire", "western-england", "great-britain"),
         default="gloucestershire",
         help="Coverage profile; great-britain extends genuine Sentinel detail through z14",
     )
@@ -74,7 +79,11 @@ def latitude_to_y(latitude: float, zoom: int) -> int:
 
 def enumerate_tiles(profile: str = "gloucestershire") -> list[tuple[int, int, int]]:
     tiles: set[tuple[int, int, int]] = set()
-    passes = FULL_GB_PASSES if profile == "great-britain" else SATELLITE_PASSES
+    passes = {
+        "gloucestershire": SATELLITE_PASSES,
+        "western-england": WESTERN_ENGLAND_PASSES,
+        "great-britain": FULL_GB_PASSES,
+    }[profile]
     for render in passes:
         west, south, east, north = render.bounds
         for zoom in range(render.minimum_zoom, render.maximum_zoom + 1):
@@ -136,6 +145,11 @@ def download_one(
 
 
 def write_manifest(args: argparse.Namespace, count: int, total_bytes: int) -> None:
+    detailed_bounds = {
+        "gloucestershire": (-2.72, 51.55, -1.62, 52.15),
+        "western-england": (-4.20, 50.70, -0.50, 53.00),
+        "great-britain": (-8.82, 49.79, 1.92, 60.95),
+    }[args.profile]
     manifest = {
         "schema_version": 1,
         "name": args.name,
@@ -149,10 +163,10 @@ def write_manifest(args: argparse.Namespace, count: int, total_bytes: int) -> No
         "tile_path": "tiles/{z}/{x}/{y}.jpg",
         "center": {"latitude": 51.8642, "longitude": -2.2382, "zoom": 13},
         "high_detail_bounds": {
-            "west": -8.82 if args.profile == "great-britain" else -2.72,
-            "south": 49.79 if args.profile == "great-britain" else 51.55,
-            "east": 1.92 if args.profile == "great-britain" else -1.62,
-            "north": 60.95 if args.profile == "great-britain" else 52.15,
+            "west": detailed_bounds[0],
+            "south": detailed_bounds[1],
+            "east": detailed_bounds[2],
+            "north": detailed_bounds[3],
             "min_zoom": 12,
         },
         "coverage_profile": args.profile,
