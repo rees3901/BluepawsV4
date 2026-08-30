@@ -156,6 +156,25 @@ tile download explicitly allowed. It contains Great Britain at z5-11 and
 Gloucestershire at z12-14. Later EOX annual mosaics have different
 non-commercial/licensing terms, so do not silently substitute a newer layer.
 
+The EA surveys are narrow flight strips rather than a complete rectangular
+basemap. Do not install the raw aerial render directly: its missing pixels are
+black and make the layer look corrupt. Build the installable composite with the
+licensed Sentinel pack underneath the EA detail:
+
+```powershell
+& 'C:\Program Files\QGIS 3.44.13\bin\python-qgis-ltr.bat' `
+  tools\build_home_hub_aerial_composite.py `
+  --aerial home-hub\maps\work\packs\aerial\tiles `
+  --satellite home-hub\maps\work\packs\satellite\tiles `
+  --output home-hub\maps\work\packs\aerial-composite\tiles `
+  --aerial-manifest home-hub\maps\work\packs\aerial\map_manifest.json `
+  --output-manifest home-hub\maps\work\packs\aerial-composite\map_manifest.json
+```
+
+At z15-z17 the fallback is cropped and scaled from the z14 Sentinel parent, so
+it is deliberately soft; true EA pixels retain their native detail. The output
+manifest carries both OGL and CC BY 4.0 attribution.
+
 Download only from a provider whose offline terms have been checked. The
 bounded downloader is deliberately profile-based:
 
