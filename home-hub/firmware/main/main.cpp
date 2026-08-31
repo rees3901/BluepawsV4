@@ -47,6 +47,7 @@ enum class AppPage : uint8_t {
 
 enum class MapLayer : uint8_t {
     Street,
+    OrdnanceSurvey,
     Satellite,
     Aerial,
 };
@@ -59,8 +60,9 @@ struct MapLayerInfo {
     uint8_t maximum_zoom;
 };
 
-constexpr std::array<MapLayerInfo, 3> kMapLayers{{
-    {"Street", "OSM roads, places and buildings", "/sdcard/bluepaws/maps/tiles", 10, 17},
+constexpr std::array<MapLayerInfo, 4> kMapLayers{{
+    {"OpenStreetMap", "High-contrast roads, paths and buildings", "/sdcard/bluepaws/maps/layers/osm-road-v2/tiles", 10, 17},
+    {"Ordnance Survey", "Official OS Road mapping", "/sdcard/bluepaws/maps/layers/ordnance-survey/tiles", 10, 17},
     {"Satellite", "EA 20 cm Gloucester aerial imagery", "/sdcard/bluepaws/maps/layers/satellite-v2/tiles", 14, 17},
     {"Aerial", "Single-source Gloucester aerial imagery", "/sdcard/bluepaws/maps/layers/aerial-consistent/tiles", 12, 17},
 }};
@@ -1199,6 +1201,11 @@ void satellite_layer_clicked(lv_event_t *event)
     select_map_layer(*static_cast<UiState *>(lv_event_get_user_data(event)), MapLayer::Satellite);
 }
 
+void ordnance_survey_layer_clicked(lv_event_t *event)
+{
+    select_map_layer(*static_cast<UiState *>(lv_event_get_user_data(event)), MapLayer::OrdnanceSurvey);
+}
+
 void aerial_layer_clicked(lv_event_t *event)
 {
     select_map_layer(*static_cast<UiState *>(lv_event_get_user_data(event)), MapLayer::Aerial);
@@ -2088,6 +2095,8 @@ void create_map_page(UiState &ui)
     lv_obj_center(layer_close_label);
 
     make_layer_option(ui.layer_drawer, MapLayer::Street, street_layer_clicked, ui);
+    make_layer_option(
+        ui.layer_drawer, MapLayer::OrdnanceSurvey, ordnance_survey_layer_clicked, ui);
     make_layer_option(ui.layer_drawer, MapLayer::Satellite, satellite_layer_clicked, ui);
     make_layer_option(ui.layer_drawer, MapLayer::Aerial, aerial_layer_clicked, ui);
     lv_obj_t *layer_note = make_label(

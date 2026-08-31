@@ -111,6 +111,7 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument("--quality", type=int, default=85, choices=range(40, 96))
+    parser.add_argument("--name", help="Display name written to the map manifest")
     parser.add_argument("--manifest", type=Path, help="Optional manifest output path")
     return parser.parse_args()
 
@@ -144,6 +145,23 @@ def vector_tile_source(path: Path | None, tile_url: str | None) -> str:
     return bytes(encoded).decode("utf-8")
 
 
+def qgis_compatible_mapbox_style(style_text: str) -> str:
+    """Flatten Mapbox features that QGIS cannot rasterise directly."""
+    style = json.loads(style_text)
+    for layer in style.get("layers", []):
+        if layer.get("type") != "fill-extrusion":
+            continue
+        paint = layer.get("paint", {})
+        flattened = {
+            "fill-color": paint.get("fill-extrusion-color", "#B9A897"),
+            "fill-opacity": paint.get("fill-extrusion-opacity", 1),
+            "fill-outline-color": "#786A5D",
+        }
+        layer["type"] = "fill"
+        layer["paint"] = flattened
+    return json.dumps(style)
+
+
 def create_project(args: argparse.Namespace) -> QgsProject:
     project = QgsProject.instance()
     project.clear()
@@ -158,7 +176,9 @@ def create_project(args: argparse.Namespace) -> QgsProject:
         if not style_ok:
             raise RuntimeError(f"QGIS could not load style {args.style}: {style_message}")
     else:
-        style_json = args.mapbox_style.read_text(encoding="utf-8")
+        style_json = qgis_compatible_mapbox_style(
+            args.mapbox_style.read_text(encoding="utf-8")
+        )
         converter = QgsMapBoxGlStyleConverter()
         if converter.convert(style_json) != QgsMapBoxGlStyleConverter.Success:
             raise RuntimeError(f"QGIS could not convert Mapbox style: {converter.errorMessage()}")
@@ -227,6 +247,7 @@ def write_manifest(
     profile: str,
     quality: int,
     osm_attribution: bool,
+    name: str | None,
 ) -> None:
     maximum_zoom = 11 if profile == "great-britain-overview" else 17
     if profile == "fixture":
@@ -272,7 +293,7 @@ def write_manifest(
     tile_files = list(output.rglob("*.jpg"))
     manifest = {
         "schema_version": 1,
-        "name": f"BluePaws {profile}",
+        "name": name or f"BluePaws {profile}",
         "version": "2026-08",
         "projection": "EPSG:3857",
         "tile_scheme": "xyz",
@@ -340,6 +361,7 @@ def main() -> int:
                 args.profile,
                 args.quality,
                 osm_attribution=args.tile_url is not None,
+                name=args.name,
             )
         print(f"Tile rendering complete: {args.output}", flush=True)
         return 0

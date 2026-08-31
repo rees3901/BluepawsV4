@@ -14,6 +14,8 @@ firmware's hard-coded road path:
 /bluepaws/maps/map_manifest.json             active OSM road manifest
 /bluepaws/maps/tiles/{z}/{x}/{y}.jpg         active OSM road layer
 /bluepaws/maps/layers/aerial/...             EA Gloucester aerial layer
+/bluepaws/maps/layers/osm-road-v2/...         high-contrast OSM road layer
+/bluepaws/maps/layers/ordnance-survey/...     OS Open Zoomstack Road layer
 /bluepaws/maps/layers/satellite/...          legacy EOX Sentinel-2 overview layer
 /bluepaws/maps/layers/satellite-v2/...       coherent EA high-resolution aerial layer
 /bluepaws/maps/legacy/os-zoomstack-fixture/  preserved first hardware proof
@@ -127,6 +129,47 @@ Gloucester and its immediate approaches at z10-17. The county profile renders
 county-wide z10-16 plus z17 around the Gloucester/Cheltenham corridor.
 OpenStreetMap attribution must stay in the manifest and the eventual map
 information panel.
+
+The LCD-focused `bluepaws-road` flavour uses stronger building outlines,
+vegetation, water, road casings and label halos than the earlier pastel pack:
+
+```powershell
+node tools/protomaps-style/build-style.mjs `
+  '--output=home-hub/maps/work/styles/osm-bluepaws-road.json' `
+  '--flavor=bluepaws-road' `
+  '--tile-url=http://127.0.0.1:8077/gloucestershire-20260829/{z}/{x}/{y}.mvt'
+
+& 'C:\Program Files\QGIS 3.44.13\bin\python-qgis-ltr.bat' `
+  tools/build_home_hub_map_pack.py `
+  '--tile-url=http://127.0.0.1:8077/gloucestershire-20260829/{z}/{x}/{y}.mvt' `
+  --mapbox-style home-hub/maps/work/styles/osm-bluepaws-road.json `
+  --output 'D:\bluepaws\maps\layers\osm-road-v2\tiles' `
+  --manifest 'D:\bluepaws\maps\layers\osm-road-v2\map_manifest.json' `
+  --profile gloucester --quality 90 --name 'BluePaws OpenStreetMap Road'
+```
+
+## Ordnance Survey road layer
+
+OS Open Zoomstack is an Open Government Licence vector basemap covering Great
+Britain from national to street level. Download the official Vector Tiles
+(MBTiles) release rather than caching OS API raster responses. The QGIS builder
+flattens the official Road style's unsupported 3D building extrusion into
+ordinary 2D footprints before rasterising, retaining roads, labels and local
+context on the hub:
+
+```powershell
+curl.exe -L --continue-at - `
+  --output 'D:\bluepaws\maps\work\os-open-zoomstack-2026-06\OS_Open_Zoomstack.mbtiles' `
+  'https://api.os.uk/downloads/v1/products/OpenZoomstack/downloads?area=GB&format=Vector%20Tiles&subformat=%28MBTiles%29&redirect'
+
+& 'C:\Program Files\QGIS 3.44.13\bin\python-qgis-ltr.bat' `
+  tools/build_home_hub_map_pack.py `
+  --mbtiles 'D:\bluepaws\maps\work\os-open-zoomstack-2026-06\OS_Open_Zoomstack.mbtiles' `
+  --mapbox-style 'D:\bluepaws\maps\work\os-open-zoomstack-2026-06\styles\Vector Tiles\Mapbox GL Styles\OS Open Zoomstack - Road.json' `
+  --output 'D:\bluepaws\maps\layers\ordnance-survey\tiles' `
+  --manifest 'D:\bluepaws\maps\layers\ordnance-survey\map_manifest.json' `
+  --profile gloucester --quality 90 --name 'BluePaws Ordnance Survey Road'
+```
 
 ## Aerial layer
 
