@@ -61,7 +61,7 @@ struct MapLayerInfo {
 
 constexpr std::array<MapLayerInfo, 3> kMapLayers{{
     {"Street", "OSM roads, places and buildings", "/sdcard/bluepaws/maps/tiles", 10, 17},
-    {"Satellite", "Consistent Sentinel-2 Great Britain imagery", "/sdcard/bluepaws/maps/layers/satellite/tiles", 5, 14},
+    {"Satellite", "EA 20 cm Gloucester aerial imagery", "/sdcard/bluepaws/maps/layers/satellite-v2/tiles", 14, 17},
     {"Aerial", "Single-source Gloucester aerial imagery", "/sdcard/bluepaws/maps/layers/aerial-consistent/tiles", 12, 17},
 }};
 
@@ -210,7 +210,7 @@ void log_map_storage_probe(const UiState &ui)
     }
 
     constexpr char satellite_probe[] =
-        "/sdcard/bluepaws/maps/layers/satellite/tiles/14/8090/5421.jpg";
+        "/sdcard/bluepaws/maps/layers/satellite-v2/tiles/14/8090/5421.jpg";
     struct stat tile_stat {};
     if (stat(satellite_probe, &tile_stat) != 0) {
         ESP_LOGE(kTag, "Satellite centre tile missing: %s errno=%d", satellite_probe, errno);
