@@ -16,6 +16,8 @@ firmware's hard-coded road path:
 /bluepaws/maps/layers/aerial/...             EA Gloucester aerial layer
 /bluepaws/maps/layers/osm-road-v2/...         high-contrast OSM road layer
 /bluepaws/maps/layers/ordnance-survey/...     OS Open Zoomstack Road layer
+/bluepaws/maps/layers/osm-road-100km/...      GB overview + Gloucester-region OSM
+/bluepaws/maps/layers/ordnance-survey-100km/  GB overview + Gloucester-region OS
 /bluepaws/maps/layers/satellite/...          legacy EOX Sentinel-2 overview layer
 /bluepaws/maps/layers/satellite-v2/...       coherent EA high-resolution aerial layer
 /bluepaws/maps/legacy/os-zoomstack-fixture/  preserved first hardware proof
@@ -66,6 +68,13 @@ The card pack combines a Great Britain z5-11 extract with a Gloucestershire
 z10-16 extract and z17 detail along the Gloucester/Cheltenham corridor. The
 overlap is intentional and the county render wins when the two trees are
 merged.
+
+The expanded `regional-100km` profile is the current hardware pack. It covers
+all Great Britain at z5-9, then a roughly 100 km-wide rectangle centred on
+Gloucester (`-2.97,51.414,-1.51,52.314`) at z10-17. It contains 379,187 XYZ
+tiles per map style. Zoom 18 is intentionally omitted: it would add about
+1.1 million files per style, quadruple the detailed layer's FAT32 allocation
+cost, and reveal little additional detail in these vector sources.
 
 The FAT32 volume is about 31.24 GiB. Keep normal map payloads below 20-24 GiB
 to leave room for update staging, indexes, telemetry and filesystem headroom.
@@ -127,6 +136,8 @@ After visual approval, change the output directory and use
 `--profile gloucestershire` for the larger master pack. The city profile covers
 Gloucester and its immediate approaches at z10-17. The county profile renders
 county-wide z10-16 plus z17 around the Gloucester/Cheltenham corridor.
+Use `--profile regional-100km` for the current GB z5-9 plus Gloucester-region
+z10-17 pack. Install it as `layers/osm-road-100km`.
 OpenStreetMap attribution must stay in the manifest and the eventual map
 information panel.
 
@@ -147,6 +158,9 @@ node tools/protomaps-style/build-style.mjs `
   --manifest 'D:\bluepaws\maps\layers\osm-road-v2\map_manifest.json' `
   --profile gloucester --quality 90 --name 'BluePaws OpenStreetMap Road'
 ```
+
+For the expanded card, use `--profile regional-100km --quality 88` and write
+the output and manifest below `D:\bluepaws\maps\layers\osm-road-100km`.
 
 ## Ordnance Survey road layer
 
@@ -170,6 +184,10 @@ curl.exe -L --continue-at - `
   --manifest 'D:\bluepaws\maps\layers\ordnance-survey\map_manifest.json' `
   --profile gloucester --quality 90 --name 'BluePaws Ordnance Survey Road'
 ```
+
+For the expanded card, use `--profile regional-100km --quality 88` and write
+the output and manifest below
+`D:\bluepaws\maps\layers\ordnance-survey-100km`.
 
 ## Aerial layer
 

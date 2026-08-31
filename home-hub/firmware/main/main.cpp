@@ -61,8 +61,8 @@ struct MapLayerInfo {
 };
 
 constexpr std::array<MapLayerInfo, 4> kMapLayers{{
-    {"OpenStreetMap", "High-contrast roads, paths and buildings", "/sdcard/bluepaws/maps/layers/osm-road-v2/tiles", 10, 17},
-    {"Ordnance Survey", "Official OS Road mapping", "/sdcard/bluepaws/maps/layers/ordnance-survey/tiles", 10, 17},
+    {"OpenStreetMap", "GB overview; 100 km Gloucester detail", "/sdcard/bluepaws/maps/layers/osm-road-100km/tiles", 5, 17},
+    {"Ordnance Survey", "Official OS mapping; GB overview and regional detail", "/sdcard/bluepaws/maps/layers/ordnance-survey-100km/tiles", 5, 17},
     {"Satellite", "EA 20 cm Gloucester aerial imagery", "/sdcard/bluepaws/maps/layers/satellite-v2/tiles", 14, 17},
     {"Aerial", "Single-source Gloucester aerial imagery", "/sdcard/bluepaws/maps/layers/aerial-consistent/tiles", 12, 17},
 }};
