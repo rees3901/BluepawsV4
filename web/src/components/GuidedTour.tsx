@@ -24,76 +24,76 @@ const TOUR_STEPS: TourStep[] = [
   {
     selector: null,
     title: "Welcome to Tutorial Mode",
-    description: "We have loaded five simulated pets so you can safely explore the dashboard. Nothing in this profile is live customer data.",
+    description: "Welcome! We have loaded five friendly simulated pets so you can explore the dashboard at your own pace. Everything you see during this tour is practice data, and none of it is connected to a real collar or customer account.",
   },
   {
     selector: ".hamburger-btn",
     title: "Show or hide the pet list",
-    description: "Use this menu button whenever you want more room for the map. Select it again to bring the side panel back.",
+    description: "This menu button opens and closes your nearby-pets panel. Hide the panel whenever you would like a wider view of the map, then select the same button again when you want the pet cards and their latest information back.",
   },
   {
     selector: ".device-card:first-of-type",
     title: "Read a pet tile",
-    description: "Each tile gives you the pet's essential status at a glance. Select a tile to expand its details and controls.",
+    description: "Each pet tile is a quick, friendly summary of what Bluepaws currently knows about that collar. Select any tile to open its fuller details, recent status and useful controls.",
     items: [
-      "Home, Out, Lost, and Error badges show location state.",
-      "Battery and radio bars show collar health and signal quality.",
-      "Distance and last seen tell you how far away and how fresh the update is.",
+      "Home, Out, Lost and Error badges help you understand the pet's current location state at a glance.",
+      "The battery and radio indicators give you a quick sense of collar health and the quality of its latest connection.",
+      "Distance from Home and Last seen tell you roughly how far away the pet is and how recent that information is.",
     ],
   },
   {
     selector: ".device-card:first-of-type .card-indicators",
     title: "Understand the status symbols",
-    description: "This key explains the compact symbols used across pet tiles and marker popups.",
+    description: "Bluepaws uses the same small set of symbols throughout the pet tiles and map popups. This quick key introduces the real indicators, so they will feel familiar wherever you meet them later.",
     legend: true,
   },
   {
     selector: ".device-card:first-of-type .card-actions",
     title: "Use the pet controls",
-    description: "The expanded tile groups the actions you are most likely to need.",
+    description: "When a tile is expanded, the most useful actions are gathered together in one convenient row. These let you move around the map, review a journey or prepare a collar action without hunting through another menu.",
     items: [
-      "Jump To centres the map; Follow keeps it centred as the pet moves.",
-      "Trail shows recent movement; Find Alert previews the collar buzzer and light.",
-      "Cmd opens power-profile and collar command options.",
+      "Jump To centres the pet once, while Follow keeps the map centred as fresh positions arrive.",
+      "Trail draws the pet's recent movement; Find Alert is where you can ask the collar to use its buzzer and light.",
+      "Cmd opens the available power-profile choices and other supported collar commands.",
     ],
   },
   {
     selector: ".bp-marker",
     title: "Pick a pet marker",
-    description: "This highlighted pin belongs to the same pet as the matching side-panel tile. Watch it for a moment: the tutorial will select it and open its details.",
+    description: "Here is one of your pet markers. Its colour and picture match the pet tile you have just seen, which makes it easier to recognise on a busy map. In a moment, the tutorial will gently select it for you and open the details.",
     autoAdvanceMs: 1_800,
     nextLabel: "Open now",
   },
   {
     selector: ".device-marker-popup",
     title: "Use a pet marker",
-    description: "The selected marker has now expanded into its complete popup. Its avatar and pin colour match the side-panel tile, and its tip marks the exact coordinate.",
+    description: "The marker has now opened into its full popup. The picture and pin colour still match the side-panel tile, while the pointed tip remains anchored to the pet's latest known map coordinate.",
     items: [
-      "The popup repeats current battery, signal, profile, coordinates and last-report age.",
-      "Jump To, Follow and Trail are available here as well as on the pet tile.",
-      "Find Alert and Cmd remain owner controls and are removed from Search Party read-only mode.",
+      "The popup brings the latest battery, signal, power profile, coordinates and report age together in one place.",
+      "Jump To, Follow and Trail are repeated here, so you can use them without returning to the pet list.",
+      "Find Alert and Cmd are owner controls. They are deliberately hidden whenever somebody opens the read-only Search Party view.",
     ],
   },
   {
     selector: ".leaflet-top.leaflet-left",
     title: "Use the map tools",
-    description: "Each left-side button is labelled beside its real map icon so you can see exactly which control performs each action.",
+    description: "These four handy buttons stay together along the left side of the map. Each real button is labelled beside its icon here, so you can connect the picture with its purpose before trying it yourself.",
     tools: [
-      { selector: "[data-tour='map-home']", title: "Home Hub", description: "Centre the map on the Home Hub's latest valid position." },
-      { selector: "[data-tour='map-fit']", title: "Fit markers", description: "Fit every located pet and Home Hub marker into the current view." },
-      { selector: "[data-tour='map-trails']", title: "All trails", description: "Show or hide all available breadcrumb trails together." },
-      { selector: "[data-tour='map-measure']", title: "Measure", description: "Select points on the map to measure a route or straight-line distance." },
+      { selector: "[data-tour='map-home']", title: "Home Hub", description: "Bring the map back to the Home Hub's latest valid position whenever you need a familiar reference point." },
+      { selector: "[data-tour='map-fit']", title: "Fit markers", description: "Adjust the map so every located pet and Home Hub marker fits comfortably inside the current view." },
+      { selector: "[data-tour='map-trails']", title: "All trails", description: "Show or hide every available breadcrumb trail together, giving you a quick picture of recent movement." },
+      { selector: "[data-tour='map-measure']", title: "Measure", description: "Choose two or more points to measure a straight line or follow a simple route across the map." },
     ],
   },
   {
     selector: "[data-tour='map-layers']",
     title: "Choose the best map view",
-    description: "Use Layers to switch between street, satellite, and topographic maps. Right-click the map—or long-press on mobile—to open location tools; the coordinates are copied as the menu opens.",
+    description: "Open the map-layer picker whenever another view would make the surroundings clearer. You can move between street, satellite and topographic styles. A right-click on desktop, or a comfortable long-press on mobile, also opens the location tools and copies that exact coordinate for easy sharing.",
   },
   {
     selector: "[data-tour='settings']",
     title: "You are ready",
-    description: "Settings is where you can return to Live Mode or replay this tutorial. Live Mode never includes these simulated pets.",
+    description: "That is the tour complete—you now know your way around the main Bluepaws map. Settings is always available if you would like to replay these steps or switch back to Live Mode. Your simulated tutorial pets are kept completely separate and never appear in the live Family view.",
   },
 ];
 
@@ -269,12 +269,12 @@ export const GuidedTour = memo(function GuidedTour({ onFinish, onSkip, onStepCha
 
 function TutorialIconLegend() {
   const entries: Array<{ symbol: ReactNode; label: string; meaning: string }> = [
-    { symbol: <BatteryIndicator millivolts={4_050} />, label: "Battery", meaning: "Remaining collar charge or reported millivolts" },
-    { symbol: <SignalIndicator rssi={-82} snr={8} ingestPath="lora_hub" />, label: "Signal", meaning: "Antenna and bars show the quality of the latest radio report" },
-    { symbol: <span className="tutorial-transport-symbols"><TransportBadge ingestPath="lora_hub" /><TransportBadge ingestPath="cellular_direct" /><WifiTransportBadge /></span>, label: "Ingest path", meaning: "RF, 4G or Wi-Fi shows how the latest update reached Bluepaws" },
-    { symbol: <HomeDistance>352 m</HomeDistance>, label: "Home distance", meaning: "Distance from the collar's assigned Home Hub fix" },
-    { symbol: <LastSeen>2m</LastSeen>, label: "Last seen", meaning: "Age of the newest accepted report" },
-    { symbol: <span className="tutorial-receive-symbols"><span className="collar-awake" title="Command receive window">💡</span><span className="collar-awake" title="Collar probably sleeping">💤</span></span>, label: "Receive window", meaning: "The collar is briefly awake for commands, or probably sleeping" },
+    { symbol: <BatteryIndicator millivolts={4_050} />, label: "Battery", meaning: "Shows the collar's remaining charge using its latest reported battery reading." },
+    { symbol: <SignalIndicator rssi={-82} snr={8} ingestPath="lora_hub" />, label: "Signal", meaning: "The antenna and coloured bars describe the quality of the most recently received radio report." },
+    { symbol: <span className="tutorial-transport-symbols"><TransportBadge ingestPath="lora_hub" /><TransportBadge ingestPath="cellular_direct" /><WifiTransportBadge /></span>, label: "Ingest path", meaning: "RF, 4G or Wi-Fi tells you how that latest update made its way into Bluepaws." },
+    { symbol: <HomeDistance>352 m</HomeDistance>, label: "Home distance", meaning: "Shows the pet's approximate distance from its assigned Home Hub position." },
+    { symbol: <LastSeen>2m</LastSeen>, label: "Last seen", meaning: "Tells you how much time has passed since Bluepaws accepted the newest report." },
+    { symbol: <span className="tutorial-receive-symbols"><span className="collar-awake" title="Command receive window">💡</span><span className="collar-awake" title="Collar probably sleeping">💤</span></span>, label: "Receive window", meaning: "The bulb means a short command window may be open; the sleeping symbol means it has probably closed." },
   ];
   return <div className="tutorial-icon-legend" aria-label="Bluepaws symbol legend">
     {entries.map(({ symbol, label, meaning }) => <div className="tutorial-legend-item" key={label}>

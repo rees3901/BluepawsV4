@@ -2,6 +2,7 @@ import type { TelemetryDevice, TelemetrySource } from "@/types/telemetry";
 
 type TutorialTelemetryDevice = TelemetryDevice & { rssi: number; snr: number };
 type SeedDevice = Omit<TutorialTelemetryDevice, "seq" | "time" | "lastUpdate" | "error">;
+const TUTORIAL_UPDATE_INTERVAL_MS = 12_000;
 
 const seedDevices: SeedDevice[] = [
   { id: 0x0001, name: "Whiskers", lat: 51.5055, lon: -0.09, status: "Out", profile: "Normal", batt: 4050, rssi: -86, snr: 7.4, hasGps: true, bleHome: false, ingestPath: "lora_hub" },
@@ -55,7 +56,7 @@ export const mockTelemetrySource: TelemetrySource = {
         };
       });
       listener(devices);
-    }, 2000);
+    }, TUTORIAL_UPDATE_INTERVAL_MS);
 
     return () => window.clearInterval(timer);
   },
