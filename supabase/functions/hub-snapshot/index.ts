@@ -33,7 +33,7 @@ Deno.serve(async (request: Request) => {
   const cursor = Number.parseInt(url.searchParams.get("cursor") ?? "", 10);
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL"),
-    serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    serviceKey = resolveBackendKey();
   if (!supabaseUrl || !serviceKey) {
     return json({ error: "service_unavailable", request_id: requestId }, 503);
   }
@@ -147,4 +147,23 @@ function json(value: unknown, status: number) {
       "cache-control": "no-store",
     },
   });
+}
+
+function resolveBackendKey() {
+  // New Supabase secret keys supersede the legacy JWT service-role key. The
+  // platform injects them as a JSON object, while older projects still expose
+  // SUPABASE_SERVICE_ROLE_KEY. Prefer the current key so disabling/expiring a
+  // legacy JWT cannot silently break every Home Hub snapshot.
+  const encoded = Deno.env.get("SUPABASE_SECRET_KEYS");
+  if (encoded) {
+    try {
+      const keys = JSON.parse(encoded) as Record<string, unknown>;
+      if (typeof keys.default === "string" && keys.default.length > 0) {
+        return keys.default;
+      }
+    } catch {
+      // Fall through to the legacy key; never log either secret.
+    }
+  }
+  return Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 }
