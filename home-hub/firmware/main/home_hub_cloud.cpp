@@ -42,6 +42,7 @@ namespace {
 
 constexpr char kTag[] = "home_hub_cloud";
 constexpr EventBits_t kConnectedBit = BIT0;
+constexpr EventBits_t kReconfigureBit = BIT1;
 constexpr std::size_t kResponseBytes = 64U * 1024U;
 constexpr char kStateDirectory[] = "/sdcard/bluepaws/data/state-v1";
 constexpr char kAvatarDirectory[] = "/sdcard/bluepaws/data/avatars-v1";
@@ -66,6 +67,10 @@ QueueHandle_t g_updates = nullptr;
 EventGroupHandle_t g_wifi = nullptr;
 Status g_status{};
 portMUX_TYPE g_status_lock = portMUX_INITIALIZER_UNLOCKED;
+portMUX_TYPE g_settings_lock = portMUX_INITIALIZER_UNLOCKED;
+hub::Settings g_network_settings{};
+bool g_wifi_initialized = false;
+bool g_cloud_authorized = false;
 
 uint32_t uptime_ms() {
     return static_cast<uint32_t>(esp_timer_get_time() / 1000ULL);
@@ -352,7 +357,71 @@ void wifi_event(void *, esp_event_base_t base, int32_t id, void *) {
     }
 }
 
-bool start_wifi() {
+hub::Settings network_settings() {
+    portENTER_CRITICAL(&g_settings_lock);
+    const hub::Settings copy = g_network_settings;
+    portEXIT_CRITICAL(&g_settings_lock);
+    return copy;
+}
+
+bool configure_wifi(const hub::Settings &settings, unsigned network_index, bool restart) {
+    const hub::WifiNetwork &requested = network_index == 1
+        ? settings.secondary : settings.primary;
+    const hub::WifiNetwork &station = hub::validSsid(requested.ssid)
+        ? requested
+        : settings.primary;
+    const bool station_enabled = hub::validSsid(station.ssid);
+    const bool access_point_enabled = settings.access_point_enabled &&
+        hub::validSsid(settings.access_point_ssid);
+    if (!station_enabled && !access_point_enabled) return false;
+
+    if (restart && g_wifi_initialized) {
+        esp_wifi_disconnect();
+        esp_wifi_stop();
+    }
+    const wifi_mode_t mode = station_enabled && access_point_enabled
+        ? WIFI_MODE_APSTA
+        : (station_enabled ? WIFI_MODE_STA : WIFI_MODE_AP);
+    if (esp_wifi_set_mode(mode) != ESP_OK) return false;
+
+    if (station_enabled) {
+        wifi_config_t station_config{};
+        const size_t ssid_length = std::strlen(station.ssid);
+        const size_t password_length = std::strlen(station.password);
+        std::memcpy(station_config.sta.ssid, station.ssid, ssid_length);
+        std::memcpy(station_config.sta.password, station.password, password_length);
+        station_config.sta.threshold.authmode = std::strlen(station.password) == 0
+            ? WIFI_AUTH_OPEN : WIFI_AUTH_WPA2_PSK;
+        station_config.sta.pmf_cfg.capable = true;
+        station_config.sta.pmf_cfg.required = false;
+        if (esp_wifi_set_config(WIFI_IF_STA, &station_config) != ESP_OK) return false;
+    }
+    if (access_point_enabled) {
+        wifi_config_t access_point_config{};
+        const size_t ssid_length = std::strlen(settings.access_point_ssid);
+        const size_t password_length = std::strlen(settings.access_point_password);
+        std::memcpy(access_point_config.ap.ssid, settings.access_point_ssid, ssid_length);
+        std::memcpy(access_point_config.ap.password, settings.access_point_password,
+                    password_length);
+        access_point_config.ap.ssid_len = ssid_length;
+        access_point_config.ap.channel = 6;
+        access_point_config.ap.max_connection = 4;
+        access_point_config.ap.authmode =
+            std::strlen(settings.access_point_password) == 0
+                ? WIFI_AUTH_OPEN : WIFI_AUTH_WPA2_PSK;
+        if (esp_wifi_set_config(WIFI_IF_AP, &access_point_config) != ESP_OK) return false;
+    }
+    const bool started = esp_wifi_start() == ESP_OK;
+    if (started) {
+        g_wifi_initialized = true;
+        ESP_LOGI(kTag, "Wi-Fi applied: station=%s fallback_ap=%s",
+                 station_enabled ? station.ssid : "disabled",
+                 access_point_enabled ? settings.access_point_ssid : "disabled");
+    }
+    return started;
+}
+
+bool start_wifi(const hub::Settings &settings) {
     esp_err_t error = nvs_flash_init();
     if (error == ESP_ERR_NVS_NO_FREE_PAGES || error == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
@@ -361,41 +430,49 @@ bool start_wifi() {
     if (error != ESP_OK) return false;
     if (esp_netif_init() != ESP_OK || esp_event_loop_create_default() != ESP_OK) return false;
     esp_netif_create_default_wifi_sta();
+    esp_netif_create_default_wifi_ap();
     wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
     if (esp_wifi_init(&init) != ESP_OK) return false;
     esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event, nullptr);
     esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event, nullptr);
-    wifi_config_t config{};
-    std::strncpy(reinterpret_cast<char *>(config.sta.ssid), HOME_HUB_WIFI_SSID,
-                 sizeof(config.sta.ssid) - 1);
-    std::strncpy(reinterpret_cast<char *>(config.sta.password), HOME_HUB_WIFI_PASSWORD,
-                 sizeof(config.sta.password) - 1);
-    config.sta.threshold.authmode = std::strlen(HOME_HUB_WIFI_PASSWORD) == 0
-        ? WIFI_AUTH_OPEN : WIFI_AUTH_WPA2_PSK;
-    config.sta.pmf_cfg.capable = true;
-    config.sta.pmf_cfg.required = false;
-    return esp_wifi_set_mode(WIFI_MODE_STA) == ESP_OK &&
-           esp_wifi_set_config(WIFI_IF_STA, &config) == ESP_OK &&
-           esp_wifi_start() == ESP_OK;
+    return configure_wifi(settings, 0, false);
 }
 
 void sync_task(void *) {
     set_state(ConnectionState::Starting);
-    if (!start_wifi()) {
+    hub::Settings settings = network_settings();
+    if (!start_wifi(settings)) {
         ESP_LOGE(kTag, "ESP-Hosted Wi-Fi initialization failed");
         set_state(ConnectionState::Degraded);
         vTaskDelete(nullptr);
         return;
     }
     uint32_t delay_ms = HOME_HUB_SYNC_INTERVAL_MS;
+    unsigned network_index = 0;
     while (true) {
         const EventBits_t connected = xEventGroupWaitBits(
-            g_wifi, kConnectedBit, pdFALSE, pdTRUE, pdMS_TO_TICKS(30000));
+            g_wifi,
+            kConnectedBit | kReconfigureBit,
+            pdFALSE,
+            pdFALSE,
+            pdMS_TO_TICKS(30000));
+        if ((connected & kReconfigureBit) != 0) {
+            xEventGroupClearBits(g_wifi, kReconfigureBit | kConnectedBit);
+            settings = network_settings();
+            network_index = 0;
+            configure_wifi(settings, network_index, true);
+            delay_ms = HOME_HUB_SYNC_INTERVAL_MS;
+            continue;
+        }
         if ((connected & kConnectedBit) == 0) {
             set_state(ConnectionState::Connecting);
+            if (hub::validSsid(settings.secondary.ssid)) {
+                network_index = network_index == 0 ? 1 : 0;
+                configure_wifi(settings, network_index, true);
+            }
             delay_ms = std::min(delay_ms * 2U,
                                 static_cast<uint32_t>(HOME_HUB_SYNC_MAX_BACKOFF_MS));
-        } else if (fetch_snapshot()) {
+        } else if (!g_cloud_authorized || fetch_snapshot()) {
             delay_ms = HOME_HUB_SYNC_INTERVAL_MS;
         } else {
             delay_ms = std::min(delay_ms * 2U,
@@ -407,17 +484,31 @@ void sync_task(void *) {
 
 }  // namespace
 
-bool start() {
-    if (std::strlen(HOME_HUB_GATEWAY_TOKEN) < 16) {
+bool start(const hub::Settings &settings) {
+    g_cloud_authorized = std::strlen(HOME_HUB_GATEWAY_TOKEN) >= 16;
+    if (!g_cloud_authorized) {
         ESP_LOGW(kTag, "Cloud sync disabled: home_hub_secrets.h is not provisioned");
         set_state(ConnectionState::Disabled);
-        return false;
     }
+    portENTER_CRITICAL(&g_settings_lock);
+    g_network_settings = settings;
+    portEXIT_CRITICAL(&g_settings_lock);
     g_updates = xQueueCreate(kMaximumCats * 2, sizeof(CloudUpdate));
     g_wifi = xEventGroupCreate();
     if (g_updates == nullptr || g_wifi == nullptr) return false;
-    restore_cached_snapshot();
-    return xTaskCreate(sync_task, "hub_cloud", 12288, nullptr, 5, nullptr) == pdPASS;
+    if (g_cloud_authorized) restore_cached_snapshot();
+    const bool started = xTaskCreate(sync_task, "hub_cloud", 12288, nullptr, 5, nullptr) == pdPASS;
+    return started && g_cloud_authorized;
+}
+
+bool applyNetworkSettings(const hub::Settings &input) {
+    hub::Settings settings = input;
+    hub::sanitize(settings);
+    portENTER_CRITICAL(&g_settings_lock);
+    g_network_settings = settings;
+    portEXIT_CRITICAL(&g_settings_lock);
+    if (g_wifi != nullptr) xEventGroupSetBits(g_wifi, kReconfigureBit);
+    return true;
 }
 
 std::size_t drain(CatStore &store) {
