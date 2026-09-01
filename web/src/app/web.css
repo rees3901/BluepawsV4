@@ -2151,11 +2151,25 @@ button.bluetooth-beacon:disabled {
 
 .search-party-card-actions {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
 }
 
 .search-party-card-actions .btn-action {
   justify-content: center;
+}
+
+.search-party-theme-btn {
+  width: 32px;
+  height: 32px;
+  color: var(--text-primary);
+  font-size: 1rem;
+}
+
+.card-hub-guest-summary {
+  margin-top: 5px;
+  color: var(--text-secondary);
+  font-size: 0.68rem;
 }
 
 @media (max-width: 620px) {
@@ -2164,6 +2178,10 @@ button.bluetooth-beacon:disabled {
   }
 
   .search-party-meta {
+    grid-template-columns: 1fr;
+  }
+
+  .search-party-card-actions {
     grid-template-columns: 1fr;
   }
 }

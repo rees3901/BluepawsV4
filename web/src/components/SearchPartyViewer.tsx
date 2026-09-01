@@ -8,9 +8,10 @@ import { BatteryIndicator, HomeDistance, LastSeen, SignalIndicator } from "@/com
 import { defaultDeviceAvatar } from "@/lib/defaultDeviceAvatar";
 import { emojiImageUrl } from "@/lib/emoji";
 import { isCollarOfflineAge } from "@/lib/devicePresence";
+import { followedDeviceAfterAction } from "@/lib/followState";
 import { formatMapCoordinates, googleMapsUrl } from "@/lib/mapLocation";
 import type { SearchPartySnapshot } from "@/lib/searchParty";
-import type { DeviceAction, DeviceAvatar, MapCommand, TelemetryDevice, TrailPoint } from "@/types/telemetry";
+import type { DeviceAction, DeviceAvatar, MapCommand, TelemetryDevice } from "@/types/telemetry";
 
 const TrackingMap = dynamic(() => import("@/components/TrackingMap"), {
   ssr: false,
@@ -38,6 +39,10 @@ export function SearchPartyViewer({ token, initialSnapshot }: SearchPartyViewerP
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [mapCommand, setMapCommand] = useState<MapCommand | null>(null);
   const [panelOpen, setPanelOpen] = useState(true);
+  const [darkMode, setDarkMode] = useState(true);
+  const [followedId, setFollowedId] = useState<number | null>(null);
+  const [trailIds, setTrailIds] = useState<Set<number>>(() => new Set(Object.keys(initialSnapshot.trailHistory).map(Number)));
+  const [mapNotice, setMapNotice] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -67,9 +72,31 @@ export function SearchPartyViewer({ token, initialSnapshot }: SearchPartyViewerP
   }, [snapshot.devices.length]);
 
   useEffect(() => {
+    const preferenceTimer = window.setTimeout(() => {
+      try { setDarkMode(localStorage.getItem("bp_theme") !== "light"); } catch { /* privacy modes can disable storage */ }
+    }, 0);
+    const clock = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => {
+      window.clearTimeout(preferenceTimer);
+      window.clearInterval(clock);
+    };
+  }, []);
+
+  useEffect(() => {
     document.body.classList.toggle("panel-open", panelOpen && snapshot.valid);
-    return () => document.body.classList.remove("panel-open");
-  }, [panelOpen, snapshot.valid]);
+    document.body.classList.toggle("light", !darkMode);
+    try { localStorage.setItem("bp_theme", darkMode ? "dark" : "light"); } catch { /* non-critical preference */ }
+    return () => {
+      document.body.classList.remove("panel-open");
+      document.body.classList.remove("light");
+    };
+  }, [darkMode, panelOpen, snapshot.valid]);
+
+  useEffect(() => {
+    if (!mapNotice) return;
+    const timer = window.setTimeout(() => setMapNotice(null), 2600);
+    return () => window.clearTimeout(timer);
+  }, [mapNotice]);
 
   const devices = useMemo(() => snapshot.valid ? snapshot.devices : [], [snapshot.devices, snapshot.valid]);
   const avatars = useMemo<Record<number, DeviceAvatar>>(() => Object.fromEntries(devices.map((device) => [
@@ -78,8 +105,32 @@ export function SearchPartyViewer({ token, initialSnapshot }: SearchPartyViewerP
   ])), [devices, snapshot.avatars]);
 
   const handleAction = useCallback((device: TelemetryDevice, action: DeviceAction) => {
-    if (action === "jump") setMapCommand({ type: "jump", deviceId: device.id, nonce: Date.now() });
+    if (action === "jump" || action === "follow") {
+      setFollowedId((current) => followedDeviceAfterAction(current, device.id, action));
+      setMapCommand({ type: "jump", deviceId: device.id, nonce: Date.now() });
+      return;
+    }
+    if (action === "trail") {
+      setTrailIds((current) => {
+        const next = new Set(current);
+        if (next.has(device.id)) next.delete(device.id); else next.add(device.id);
+        return next;
+      });
+      return;
+    }
+    setMapNotice("Search Party access is read-only; collar alerts and commands remain with the Family.");
   }, []);
+
+  const trailCapableIds = useMemo(() => devices.filter((device) => device.entity !== "hub" && (snapshot.trailHistory[device.id]?.length ?? 0) > 0).map((device) => device.id), [devices, snapshot.trailHistory]);
+  const allTrailsVisible = trailCapableIds.length > 0 && trailCapableIds.every((deviceId) => trailIds.has(deviceId));
+  const toggleAllTrails = useCallback(() => {
+    setTrailIds((current) => {
+      const next = new Set(current);
+      if (allTrailsVisible) trailCapableIds.forEach((id) => next.delete(id));
+      else trailCapableIds.forEach((id) => next.add(id));
+      return next;
+    });
+  }, [allTrailsVisible, trailCapableIds]);
 
   const expiresText = snapshot.expiresAt ? new Date(snapshot.expiresAt).toLocaleString() : "soon";
   const refreshedText = lastRefresh ? lastRefresh.toLocaleTimeString() : "loading";
@@ -107,17 +158,25 @@ export function SearchPartyViewer({ token, initialSnapshot }: SearchPartyViewerP
         avatars={avatars}
         presenceNow={Math.floor(now / 60_000) * 60_000}
         sidebarOpen={panelOpen}
-        followedId={null}
-        trailIds={new Set<number>()}
-        trailHistory={{} as Record<number, TrailPoint[]>}
+        followedId={followedId}
+        trailIds={trailIds}
+        trailHistory={snapshot.trailHistory}
+        allTrailsVisible={allTrailsVisible}
+        trailsAvailable={trailCapableIds.length > 0}
         command={mapCommand}
         onAction={handleAction}
+        onAllTrailsToggle={toggleAllTrails}
+        onNotice={setMapNotice}
         readOnly
       />
+      {mapNotice && <div className="map-action-notice" role="status">{mapNotice}</div>}
       <aside id="panel" className={`search-party-panel${panelOpen ? " open" : ""}`} aria-label="Search-party map details">
         <div id="panelHeader">
           <span className="panel-title">Bluepaws V4</span>
           <div className="panel-header-btns">
+            <button className="ctrl-btn search-party-theme-btn" type="button" title="Toggle dark/light theme" aria-label="Toggle dark/light theme" onClick={() => setDarkMode((current) => !current)}>
+              {darkMode ? "☀" : "☾"}
+            </button>
             <span id="statusBanner" className="connected">
               <span id="statusIcon">●</span><span id="statusText">Read-only</span>
             </span>
@@ -127,7 +186,7 @@ export function SearchPartyViewer({ token, initialSnapshot }: SearchPartyViewerP
           <section className="search-party-summary-card">
             <span className="settings-eyebrow">Search party map</span>
             <h1>{snapshot.familyName}</h1>
-            <p>Read-only helper view. Positions refresh every 10 seconds; collar commands and account settings are unavailable.</p>
+            <p>Read-only helper view with pets, breadcrumb trails and Home Hub bearings. Positions refresh every 10 seconds; collar commands and account settings are unavailable.</p>
             <dl className="search-party-meta">
               <div><dt>Expires</dt><dd>{expiresText}</dd></div>
               <div><dt>Last refresh</dt><dd>{refreshedText}</dd></div>
@@ -143,7 +202,9 @@ export function SearchPartyViewer({ token, initialSnapshot }: SearchPartyViewerP
                 device={device}
                 avatar={avatars[device.id] ?? defaultDeviceAvatar(device.id)}
                 now={now}
-                onCentre={() => setMapCommand({ type: "jump", deviceId: device.id, nonce: Date.now() })}
+                followed={followedId === device.id}
+                trailVisible={trailIds.has(device.id)}
+                onAction={(action) => handleAction(device, action)}
               />
             ))}
           </div>
@@ -153,15 +214,17 @@ export function SearchPartyViewer({ token, initialSnapshot }: SearchPartyViewerP
   );
 }
 
-function SearchPartyDeviceRow({ device, avatar, now, onCentre }: { device: TelemetryDevice; avatar: DeviceAvatar; now: number; onCentre: () => void }) {
+function SearchPartyDeviceRow({ device, avatar, now, followed, trailVisible, onAction }: { device: TelemetryDevice; avatar: DeviceAvatar; now: number; followed: boolean; trailVisible: boolean; onAction: (action: DeviceAction) => void }) {
   const mapsUrl = googleMapsUrl(device.lat, device.lon);
   const ageSeconds = Math.max(0, Math.floor((now - device.lastUpdate) / 1000));
-  const offline = isCollarOfflineAge(ageSeconds);
+  const isHub = device.entity === "hub";
+  const offline = !isHub && isCollarOfflineAge(ageSeconds);
   const status = STATUS[device.status.toLowerCase() as keyof typeof STATUS] ?? STATUS.error;
   const profileLower = device.profile.toLowerCase();
   const profileClass = `profile-${profileLower.replace("save", "").replaceAll(" ", "-")}`;
   const profileLabel = profileLower === "powersave" ? "💤 PowerSave" : profileLower === "debug" ? "🧪 Debug" : device.profile;
   const distance = formatHomeDistance(homeDistanceMetres(device));
+  const hubMode = device.hubMode === "portable" ? "Portable" : device.hubMode === "off_grid" ? "Off-Grid" : "Home";
 
   return (
     <article className={`device-card search-party-device-card${offline ? " offline" : ""}`}>
@@ -181,11 +244,11 @@ function SearchPartyDeviceRow({ device, avatar, now, onCentre }: { device: Telem
           <div className="card-name-row">
             <span className="card-name">{device.name}</span>
             {offline ? <span className="card-status status-offline">Offline</span> : <>
-              <span className={`card-status ${status.css}`}>{status.emoji} {status.label}</span>
-              <span className={`card-profile ${profileClass}`}>{profileLabel}</span>
+              <span className={`card-status ${isHub ? device.hubMode === "home" ? "status-home" : "status-out" : status.css}`}>{isHub ? device.hubMode === "home" ? "🏡" : "📱" : status.emoji} {isHub ? hubMode : status.label}</span>
+              {!isHub && <span className={`card-profile ${profileClass}`}>{profileLabel}</span>}
             </>}
           </div>
-          {offline ? <div className="card-offline-summary">No reports for {formatLastSeen(ageSeconds)}</div> : <><div className="card-indicators">
+          {offline ? <div className="card-offline-summary">No reports for {formatLastSeen(ageSeconds)}</div> : isHub ? <div className="card-hub-guest-summary">Read-only hub bearing · updated {formatLastSeen(ageSeconds)} ago</div> : <><div className="card-indicators">
             <span className="card-indicator-group"><BatteryIndicator millivolts={device.batt} percent={device.batteryPercent} /></span>
             <span className="card-indicator-group"><SignalIndicator rssi={device.rssi} snr={device.snr} ingestPath={device.ingestPath} /></span>
           </div>
@@ -201,16 +264,19 @@ function SearchPartyDeviceRow({ device, avatar, now, onCentre }: { device: Telem
             {offline && <p className="card-offline-notice"><strong>Offline.</strong> These are last-known details from {formatAge(ageSeconds)} and may no longer be current.</p>}
             <div className="card-grid">
               <span className="label">{offline ? "Last known coordinates" : "Coordinates"}</span>
-              <span className="value">
+              <span className="value">{device.hasGps ? (
                 <a className="card-coords card-coords-link" href={mapsUrl} target="_blank" rel="noopener noreferrer">
                   {formatMapCoordinates(device.lat, device.lon)}
                 </a>
-              </span>
-              <span className="label">{offline ? "Last known distance" : "Dist From Hub"}</span><span className="value">{distance}</span>
+              ) : "No GPS fix yet"}</span>
+              {!isHub && <><span className="label">{offline ? "Last known distance" : "Dist From Hub"}</span><span className="value">{distance}</span></>}
+              {isHub && <><span className="label">Mode</span><span className="value">{hubMode}</span></>}
               <span className="label">Last report</span><span className="value">{formatAge(ageSeconds)}</span>
             </div>
             <div className="card-actions search-party-card-actions">
-              <button className="btn-action btn-jump" type="button" onClick={onCentre}>↗ Centre</button>
+              <button className="btn-action btn-jump" type="button" disabled={!device.hasGps} onClick={() => onAction("jump")}>↗ Centre</button>
+              <button className={`btn-action btn-follow${followed ? " active" : ""}`} type="button" disabled={!device.hasGps} onClick={() => onAction("follow")}>● {followed ? "Following" : "Follow"}</button>
+              <button className={`btn-action btn-trail${trailVisible ? " active" : ""}`} type="button" disabled={!device.hasGps} onClick={() => onAction("trail")}>⌁ Trail</button>
             </div>
           </div>
         </div>
