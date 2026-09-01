@@ -106,6 +106,36 @@ void simulatorUsesTheSharedStatePath() {
     assert(store.apply(ninth) == bluepaws::ApplyResult::CapacityReached);
 }
 
+void storeRejectsOlderTruth() {
+    bluepaws::CatStore store;
+    bluepaws::CatTelemetry cloud{};
+    cloud.device_id = 1001;
+    cloud.observed_at = 200;
+    cloud.revision = 42;
+    cloud.sequence = 7;
+    cloud.latitude_e7 = 519000000;
+    cloud.position_valid = true;
+    cloud.source = bluepaws::TelemetrySource::Cloud;
+    assert(store.apply(cloud) == bluepaws::ApplyResult::Added);
+
+    auto delayed_lora = cloud;
+    delayed_lora.observed_at = 199;
+    delayed_lora.revision = 0;
+    delayed_lora.sequence = 99;
+    delayed_lora.latitude_e7 = 510000000;
+    delayed_lora.source = bluepaws::TelemetrySource::LoRa;
+    assert(store.apply(delayed_lora) == bluepaws::ApplyResult::IgnoredStale);
+    assert(store.find(1001)->last_valid_latitude_e7 == cloud.latitude_e7);
+
+    auto newer_cloud = cloud;
+    newer_cloud.revision = 43;
+    newer_cloud.latitude_e7 = 520000000;
+    assert(store.apply(newer_cloud) == bluepaws::ApplyResult::Updated);
+    assert(store.find(1001)->last_valid_latitude_e7 == newer_cloud.latitude_e7);
+    assert(store.setAppearance(1001, "🐈", "#1e88e5", true));
+    assert(store.find(1001)->appearance.photo_available);
+}
+
 }  // namespace
 
 int main() {
@@ -114,5 +144,6 @@ int main() {
     fitAllKeepsPointsInsidePadding();
     storeRetainsLastValidPosition();
     simulatorUsesTheSharedStatePath();
+    storeRejectsOlderTruth();
     std::puts("Home Hub portable core: all tests passed");
 }

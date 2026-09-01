@@ -5,8 +5,11 @@ ESP32-C6, a 4.3-inch 480 x 800 ST7701 MIPI-DSI panel, GT911 touch, 16 MB flash
 and 32 MB PSRAM. It does not replace the current `hub/` Heltec ESP32-S3
 LoRa/off-grid testbed.
 
-The initial on-device application starts the screen in 800 x 480 landscape,
-runs eight deterministic simulated cats through `bluepaws_core`, displays their
+The on-device application starts the screen in 800 x 480 landscape,
+restores its last authoritative snapshot from SD, connects through the onboard
+ESP32-C6 and reconciles gateway-authenticated Supabase state every five seconds.
+When no local gateway credential is provisioned it instead runs eight
+deterministic simulated cats through `bluepaws_core`, displaying their
 positions and telemetry in LVGL, and exposes touch-operated map controls.
 The board mounts the first FAT32 microSD partition through four-bit SDMMC
 without ever auto-formatting it. The testbed resolves visible XYZ tile IDs,
@@ -66,10 +69,20 @@ revision 1.3 hardware with only a grey backlit panel.
 - `components/guition_jc4880p443c` owns only this board's display, backlight,
   touch and SDMMC initialization.
 - `main` is the temporary LVGL testbed UI and interactive hardware-decoded SD
-  tile proof. Generated LVGL 9 pages and the eventual asynchronous tile loader
+  tile proof. It also owns the first ESP-Hosted/HTTPS cloud adapter. Generated
+  LVGL 9 pages and the eventual asynchronous tile loader
   should move into their own components rather than accumulating here.
-- The SD tile loader, ESP32-C6 networking and SX1262 LoRa will be adapters
-  around `CatStore`.
+- The SD tile loader, ESP32-C6 networking and future SX1262 LoRa receiver are
+  adapters around `CatStore`. The store rejects older observation timestamps
+  and revisions so delayed replay cannot overwrite newer cloud/LTE truth.
+
+Runtime state is separate from the map packs:
+
+- `/bluepaws/data/state-v1/latest.json` is atomically replaced after a valid
+  snapshot and restored at boot for offline continuity.
+- `/bluepaws/data/avatars-v1/` is reserved for versioned avatar downloads.
+- The plaintext gateway bearer token remains only in ignored local headers;
+  firmware never contains a Supabase service-role or secret API key.
 
 The SD adapter mounts `/sdcard` at 40 MHz in four-bit mode, uses the board's
 on-chip LDO channel 4 and selects the first FAT partition. A mount failure is

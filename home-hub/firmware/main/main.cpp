@@ -4,12 +4,15 @@
 #include "guition_jc4880p443c.h"
 #include "app_shell.h"
 #include "ui_icons.h"
+#include "home_hub_cloud.h"
 
 #include "driver/jpeg_decode.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_lvgl_port.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "lvgl.h"
 #include "src/misc/cache/instance/lv_image_cache.h"
 
@@ -20,6 +23,23 @@
 #include <cstdio>
 #include <dirent.h>
 #include <sys/stat.h>
+
+// ESP-IDF's default static-allocation hook obtains this memory from the heap
+// before app_main. On the P4 build, the two SMP idle tasks and ESP-Hosted leave
+// insufficient contiguous stack-capable heap for that timer allocation.
+// Keep the timer service deterministic and independent of early heap state.
+extern "C" void __wrap_vApplicationGetTimerTaskMemory(
+    StaticTask_t **tcb_buffer,
+    StackType_t **stack_buffer,
+    uint32_t *stack_size)
+{
+    static StaticTask_t timer_tcb;
+    alignas(StackType_t) static uint8_t timer_stack[CONFIG_FREERTOS_TIMER_TASK_STACK_DEPTH];
+
+    *tcb_buffer = &timer_tcb;
+    *stack_buffer = reinterpret_cast<StackType_t *>(timer_stack);
+    *stack_size = CONFIG_FREERTOS_TIMER_TASK_STACK_DEPTH;
+}
 
 namespace {
 
@@ -150,6 +170,7 @@ struct UiState {
     bool tile_images_bound = false;
     int brightness_percent = 80;
     int followed_cat = -1;
+    bool cloud_enabled = false;
 };
 
 const UiLayout &current_layout(const UiState &ui)
@@ -474,7 +495,17 @@ void refresh_map_tiles(UiState &ui)
 void update_ui(UiState &ui)
 {
     const uint32_t now_ms = uptime_ms();
-    ui.simulator.update(now_ms, ui.cats);
+    const size_t cloud_updates = bluepaws::cloud::drain(ui.cats);
+    if (!ui.cloud_enabled) {
+        ui.simulator.update(now_ms, ui.cats);
+    } else if (cloud_updates > 0) {
+        ui.tiles_dirty = true;
+    }
+    const bluepaws::cloud::Status cloud_status = bluepaws::cloud::status();
+    const char *sync_name = !ui.cloud_enabled ? "simulator"
+        : (cloud_status.state == bluepaws::cloud::ConnectionState::Online ? "online"
+        : (cloud_status.state == bluepaws::cloud::ConnectionState::Connecting ? "connecting"
+        : "degraded"));
 
     if (ui.followed_cat >= 0 && static_cast<size_t>(ui.followed_cat) < ui.cats.size()) {
         const bluepaws::CatRecord *followed = ui.cats.at(static_cast<size_t>(ui.followed_cat));
@@ -535,16 +566,17 @@ void update_ui(UiState &ui)
         }
         if (ui.drawer_status_images[i] != nullptr) {
             lv_image_set_src(ui.drawer_status_images[i],
-                             i == 7 ? &bluepaws::ui::icon_status_at_home
+                             cat->latest.status_code == 0 ? &bluepaws::ui::icon_status_at_home
                                     : &bluepaws::ui::icon_status_out);
         }
         if (ui.drawer_profile_images[i] != nullptr) {
             lv_image_set_src(ui.drawer_profile_images[i],
-                             i % 3U == 0U ? &bluepaws::ui::icon_profile_powersave
+                             cat->latest.power_profile_code == 0
+                                 ? &bluepaws::ui::icon_profile_powersave
                                           : &bluepaws::ui::icon_status_normal);
         }
         if (ui.drawer_fault_images[i] != nullptr) {
-            if (i == 0) {
+            if (cat->latest.status_code == 3 || (cat->latest.flags & 0x80U) != 0) {
                 lv_image_set_src(ui.drawer_fault_images[i], &bluepaws::ui::icon_status_error);
                 lv_obj_remove_flag(ui.drawer_fault_images[i], LV_OBJ_FLAG_HIDDEN);
             } else {
@@ -610,7 +642,10 @@ void update_ui(UiState &ui)
                 static_cast<double>(cat->last_valid_latitude_e7) / 1.0e7,
                 static_cast<double>(cat->last_valid_longitude_e7) / 1.0e7,
                 static_cast<unsigned>(cat->device_id),
-                (i % 3U == 0U) ? "PowerSave" : ((i % 3U == 1U) ? "Normal" : "Recovery"),
+                cat->latest.power_profile_code == 0 ? "PowerSave"
+                    : (cat->latest.power_profile_code == 1 ? "Normal"
+                    : (cat->latest.power_profile_code == 2 ? "Active"
+                    : (cat->latest.power_profile_code == 3 ? "Emergency" : "Debug"))),
                 static_cast<unsigned long>(35U + i * 17U),
                 static_cast<int>(cat->latest.rssi),
                 static_cast<double>(cat->latest.snr),
@@ -659,7 +694,8 @@ void update_ui(UiState &ui)
                               "STORAGE + MAP\nSD: %s  |  FAT volume %u GiB  |  card %u GiB\n"
                               "Map layer: %s  |  zoom: %u  |  decoded cache: %u/%u tiles\n\n"
                               "MEMORY\nInternal free: %u KiB\nPSRAM free: %u KiB\n\n"
-                              "SERVICES\nCat simulator: %u active\nC6 networking: not started\nLoRa receiver: not started",
+                              "SERVICES\nState source: %s\nCloud snapshots: %lu ok / %lu failed (HTTP %lu)\n"
+                              "LoRa receiver: UART adapter pending",
                               static_cast<unsigned long>(now_ms / 1000U),
                               ui.portrait ? "portrait" : "landscape",
                               static_cast<unsigned>(guition_jc4880p443c_touch_count()),
@@ -672,7 +708,10 @@ void update_ui(UiState &ui)
                               static_cast<unsigned>(ui.tile_cache.size()),
                               internal_kib,
                               psram_kib,
-                              static_cast<unsigned>(ui.cats.size()));
+                              sync_name,
+                              static_cast<unsigned long>(cloud_status.successful_snapshots),
+                              static_cast<unsigned long>(cloud_status.failed_snapshots),
+                              static_cast<unsigned long>(cloud_status.last_http_status));
     }
 
     if (ui.status == nullptr) {
@@ -689,8 +728,9 @@ void update_ui(UiState &ui)
         if (ui.sd.mounted) {
             lv_label_set_text_fmt(ui.status,
                                   ui.portrait
-                                      ? "%u cats | %s | z%u | SD %u/%u | view %u | new %u | %lu ms"
-                                      : "SIM | %u cats | %s | z%u | SD %u/%u GiB | view %u | new %u | %lu ms",
+                                      ? "%s | %u cats | %s | z%u | SD %u/%u | view %u | new %u | %lu ms"
+                                      : "%s | %u cats | %s | z%u | SD %u/%u GiB | view %u | new %u | %lu ms",
+                                  sync_name,
                                   static_cast<unsigned>(ui.cats.size()),
                                   map_layer_info(ui.active_map_layer).name,
                                   static_cast<unsigned>(ui.viewport.zoom()),
@@ -705,8 +745,8 @@ void update_ui(UiState &ui)
         break;
     case AppPage::Summary:
         lv_label_set_text_fmt(ui.status,
-                              "%u reporting  |  live simulator data  |  updates every second",
-                              static_cast<unsigned>(ui.cats.size()));
+                              "%u reporting  |  %s state  |  snapshots every 5 seconds",
+                              static_cast<unsigned>(ui.cats.size()), sync_name);
         break;
     case AppPage::Settings:
         lv_label_set_text(ui.status, "Configuration preview | values are not persisted yet");
@@ -2338,6 +2378,7 @@ extern "C" void app_main(void)
         log_map_storage_probe(ui);
     }
     ui.simulator.reset(kTestOrigin, uptime_ms());
+    ui.cloud_enabled = bluepaws::cloud::start();
     if (!lvgl_port_lock(0)) {
         ESP_LOGE(kTag, "Could not acquire LVGL lock");
         return;

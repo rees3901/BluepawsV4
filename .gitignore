@@ -4,6 +4,7 @@ tools/devices.provision.sql
 tools/*devices*.json
 tools/*.provision.sql
 hub/include/hub_secrets.h
+home-hub/firmware/main/home_hub_secrets.h
 collar/include/collar_secrets.h
 collar/walter/include/walter_secrets.h
 
