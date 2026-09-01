@@ -19,7 +19,7 @@ const tileUrl = argument(
   "http://127.0.0.1:8077/gloucestershire-20260829/{z}/{x}/{y}.mvt",
 );
 const flavor = argument("flavor", "light");
-const baseFlavor = flavor === "bluepaws-carto" ? "light" : flavor;
+const baseFlavor = flavor === "bluepaws-carto" || flavor === "bluepaws-road" ? "light" : flavor;
 
 const majorRoadColor = [
   "match",
@@ -164,6 +164,78 @@ function bluePawsCartoLayer(layer) {
   return result;
 }
 
+function bluePawsRoadLayer(layer) {
+  const result = bluePawsCartoLayer(layer);
+  const paint = result.paint ?? {};
+  const exactPaint = {
+    background: { "background-color": "#AFC1C8" },
+    earth: { "fill-color": "#DED9CD" },
+    landcover: {
+      "fill-color": [
+        "match", ["get", "kind"],
+        "grassland", "#ABD18D",
+        "barren", "#D8C49A",
+        "urban_area", "#CFCAC0",
+        "farmland", "#C6D69C",
+        "glacier", "#F8F8F4",
+        "scrub", "#A8C887",
+        "#9FC384",
+      ],
+      "fill-opacity": paint["fill-opacity"],
+    },
+    landuse_park: {
+      "fill-opacity": paint["fill-opacity"],
+      "fill-color": [
+        "case",
+        ["in", ["get", "kind"], ["literal", ["forest", "wood"]]], "#7FB875",
+        ["in", ["get", "kind"], ["literal", ["park", "nature_reserve", "protected_area", "national_park"]]], "#91C782",
+        ["in", ["get", "kind"], ["literal", ["grass", "grassland", "golf_course"]]], "#A9D18B",
+        ["==", ["get", "kind"], "sand"], "#E1C98F",
+        "#9CC77F",
+      ],
+    },
+    landuse_urban_green: { "fill-color": "#91C782", "fill-opacity": 0.9 },
+    landuse_hospital: { "fill-color": "#E6BFC0" },
+    landuse_industrial: { "fill-color": "#C7BCCB" },
+    landuse_school: { "fill-color": "#E1C995" },
+    landuse_beach: { "fill-color": "#E1C98F" },
+    landuse_zoo: { "fill-color": "#9CC77F" },
+    landuse_aerodrome: { "fill-color": "#C4C5CB" },
+    landuse_pedestrian: { "fill-color": "#D4CEC4" },
+    landuse_pier: { "fill-color": "#DED9CD" },
+    water: { "fill-color": "#72B5D0" },
+    water_stream: { "line-color": "#428EAF", "line-width": paint["line-width"] },
+    water_river: { "line-color": "#428EAF", "line-width": paint["line-width"] },
+    buildings: {
+      "fill-color": "#B9A897",
+      "fill-opacity": 1,
+      "fill-outline-color": "#786A5D",
+    },
+  };
+  if (exactPaint[result.id]) {
+    result.paint = exactPaint[result.id];
+  }
+
+  if (result.type === "symbol") {
+    result.paint = {
+      ...result.paint,
+      "text-color": "#17232B",
+      "text-halo-color": "#F3EFE5",
+      "text-halo-width": 2,
+    };
+  }
+  if (result.id.includes("_minor_casing") || result.id.includes("_link_casing")) {
+    result.paint["line-color"] = "#77736E";
+  }
+  if (result.id.match(/^roads_(tunnels_|bridges_)?minor$/)) {
+    result.paint["line-color"] = "#F7F4EC";
+  }
+  if (result.id === "roads_minor_service") {
+    result.paint["line-color"] = "#E8E2D7";
+  }
+  return result;
+}
+
 let qgisLayers = layers(sourceName, namedFlavor(baseFlavor), { lang: "en" })
   .filter((layer) => layer.type !== "symbol" || layer.layout?.["text-field"])
   .map((layer) => {
@@ -207,6 +279,8 @@ if (flavor === "bluepaws-carto") {
       "fill-opacity": 0.8,
     },
   });
+} else if (flavor === "bluepaws-road") {
+  qgisLayers = qgisLayers.map(bluePawsRoadLayer);
 }
 const style = {
   version: 8,

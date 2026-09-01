@@ -14,7 +14,12 @@ firmware's hard-coded road path:
 /bluepaws/maps/map_manifest.json             active OSM road manifest
 /bluepaws/maps/tiles/{z}/{x}/{y}.jpg         active OSM road layer
 /bluepaws/maps/layers/aerial/...             EA Gloucester aerial layer
-/bluepaws/maps/layers/satellite/...          EOX Sentinel-2 overview layer
+/bluepaws/maps/layers/osm-road-v2/...         high-contrast OSM road layer
+/bluepaws/maps/layers/ordnance-survey/...     OS Open Zoomstack Road layer
+/bluepaws/maps/layers/osm-road-100km/...      GB overview + Gloucester-region OSM
+/bluepaws/maps/layers/ordnance-survey-100km/  GB overview + Gloucester-region OS
+/bluepaws/maps/layers/satellite/...          legacy EOX Sentinel-2 overview layer
+/bluepaws/maps/layers/satellite-v2/...       coherent EA high-resolution aerial layer
 /bluepaws/maps/legacy/os-zoomstack-fixture/  preserved first hardware proof
 ```
 
@@ -63,6 +68,14 @@ The card pack combines a Great Britain z5-11 extract with a Gloucestershire
 z10-16 extract and z17 detail along the Gloucester/Cheltenham corridor. The
 overlap is intentional and the county render wins when the two trees are
 merged.
+
+The expanded `regional-100km` profile is the current hardware pack. It covers
+all Great Britain at z5-11, then a roughly 100 km-wide rectangle centred on
+Gloucester (`-2.97,51.414,-1.51,52.314`) at z10-17. It contains 388,005 XYZ
+tiles per map style (the previous z5-9 build contained 379,187). Zoom 18 is
+intentionally omitted: it would add about
+1.1 million files per style, quadruple the detailed layer's FAT32 allocation
+cost, and reveal little additional detail in these vector sources.
 
 The FAT32 volume is about 31.24 GiB. Keep normal map payloads below 20-24 GiB
 to leave room for update staging, indexes, telemetry and filesystem headroom.
@@ -124,8 +137,58 @@ After visual approval, change the output directory and use
 `--profile gloucestershire` for the larger master pack. The city profile covers
 Gloucester and its immediate approaches at z10-17. The county profile renders
 county-wide z10-16 plus z17 around the Gloucester/Cheltenham corridor.
+Use `--profile regional-100km` for the current GB z5-11 plus Gloucester-region
+z10-17 pack. Install it as `layers/osm-road-100km`.
 OpenStreetMap attribution must stay in the manifest and the eventual map
 information panel.
+
+The LCD-focused `bluepaws-road` flavour uses stronger building outlines,
+vegetation, water, road casings and label halos than the earlier pastel pack:
+
+```powershell
+node tools/protomaps-style/build-style.mjs `
+  '--output=home-hub/maps/work/styles/osm-bluepaws-road.json' `
+  '--flavor=bluepaws-road' `
+  '--tile-url=http://127.0.0.1:8077/gloucestershire-20260829/{z}/{x}/{y}.mvt'
+
+& 'C:\Program Files\QGIS 3.44.13\bin\python-qgis-ltr.bat' `
+  tools/build_home_hub_map_pack.py `
+  '--tile-url=http://127.0.0.1:8077/gloucestershire-20260829/{z}/{x}/{y}.mvt' `
+  --mapbox-style home-hub/maps/work/styles/osm-bluepaws-road.json `
+  --output 'D:\bluepaws\maps\layers\osm-road-v2\tiles' `
+  --manifest 'D:\bluepaws\maps\layers\osm-road-v2\map_manifest.json' `
+  --profile gloucester --quality 90 --name 'BluePaws OpenStreetMap Road'
+```
+
+For the expanded card, use `--profile regional-100km --quality 88` and write
+the output and manifest below `D:\bluepaws\maps\layers\osm-road-100km`.
+
+## Ordnance Survey road layer
+
+OS Open Zoomstack is an Open Government Licence vector basemap covering Great
+Britain from national to street level. Download the official Vector Tiles
+(MBTiles) release rather than caching OS API raster responses. The QGIS builder
+flattens the official Road style's unsupported 3D building extrusion into
+ordinary 2D footprints before rasterising, retaining roads, labels and local
+context on the hub:
+
+```powershell
+curl.exe -L --continue-at - `
+  --output 'D:\bluepaws\maps\work\os-open-zoomstack-2026-06\OS_Open_Zoomstack.mbtiles' `
+  'https://api.os.uk/downloads/v1/products/OpenZoomstack/downloads?area=GB&format=Vector%20Tiles&subformat=%28MBTiles%29&redirect'
+
+& 'C:\Program Files\QGIS 3.44.13\bin\python-qgis-ltr.bat' `
+  tools/build_home_hub_map_pack.py `
+  --mbtiles 'D:\bluepaws\maps\work\os-open-zoomstack-2026-06\OS_Open_Zoomstack.mbtiles' `
+  --mapbox-style 'D:\bluepaws\maps\work\os-open-zoomstack-2026-06\styles\Vector Tiles\Mapbox GL Styles\OS Open Zoomstack - Road.json' `
+  --output 'D:\bluepaws\maps\layers\ordnance-survey\tiles' `
+  --manifest 'D:\bluepaws\maps\layers\ordnance-survey\map_manifest.json' `
+  --profile gloucester --quality 90 --name 'BluePaws Ordnance Survey Road'
+```
+
+For the expanded card, use `--profile regional-100km --quality 88` and write
+the output and manifest below
+`D:\bluepaws\maps\layers\ordnance-survey-100km`.
 
 ## Aerial layer
 
@@ -135,13 +198,39 @@ Aerial Photography collection. It is Open Government Licence data, supplied as
 surveys exist. QGIS/GDAL can mosaic and reproject selected Gloucester coverage
 before rendering it to a separate JPEG XYZ layer.
 
-For the first pack, the official coverage catalogue was queried at Gloucester
-and the available 2012 incident-response RGB and 2014 RGBN surveys were
-downloaded and mosaicked. Despite the historic product name `IRRGB`, `IR` means
-incident response here rather than infra-red; bands 1-3 are rendered as RGB
-and band 4 is used as the source mask. The surveys contain flight-strip gaps,
-so the Sentinel layer remains the fallback outside the aerial footprints. The
-pack is bounded to the available Gloucester survey footprint and z12-17.
+For the Gloucester/Sandhurst hardware layer, use one Environment Agency survey
+only. The `build_ea_aerial_pack.py` builder downloads the selected official 5 km
+packages, mosaics their native ECW rasters before creating XYZ tiles, and never
+fills gaps from a second provider. This is essential: mixing Sentinel and EA
+pixels inside one apparent imagery layer produced visible seams and a false
+impression that adjacent XYZ tiles were misaligned.
+
+The validated 2007 Gloucester survey is 20 cm/pixel. Block `SO8015` contains
+real RGB pixels at the tracker centre, unlike the newer partial strip. Add the
+adjacent `SO8020` block when the Defra package service can generate it without
+timing out; both belong to the same coherent survey. Build the validated block
+directly onto a staging directory on the SD
+card with the QGIS LTR Python environment, which includes the licensed ECW
+reader:
+
+```powershell
+& 'C:\Program Files\QGIS 3.44.13\bin\python-qgis-ltr.bat' `
+  tools\build_ea_aerial_pack.py `
+  --work 'D:\bluepaws\maps\work\ea-aerial' `
+  --output 'D:\bluepaws\maps\layers\satellite-v2\tiles' `
+  --manifest 'D:\bluepaws\maps\layers\satellite-v2\map_manifest.json' `
+  --year 2007 --resolution 0.2 --min-zoom 14 --max-zoom 17 --workers 3
+```
+
+The staged tree must be count-, JPEG-signature-, and sample-coordinate checked
+before firmware is pointed at `satellite-v2`. Keep the old Sentinel directory
+until that check passes, so an interrupted build never destroys the last known
+bootable map set.
+
+Earlier experimental packs mixed incomplete 2012 survey strips with Sentinel.
+They are retained only as diagnostic history and must not be installed as the
+Satellite layer. The validated pack renders bands 1-3 from the 2007 `IRRGB`
+product as natural colour and uses neutral pixels at the survey boundary.
 
 Copernicus Sentinel-2 true-colour imagery is the open gap-filler where no EA
 survey exists. Its best RGB bands are 10 m per pixel, so it is useful for broad
@@ -156,11 +245,31 @@ tile download explicitly allowed. It contains Great Britain at z5-11 and
 Gloucestershire at z12-14. Later EOX annual mosaics have different
 non-commercial/licensing terms, so do not silently substitute a newer layer.
 
+The old composite builder below is retained for reproducing the rejected test
+pack only. Do not use it for the active Satellite layer because it deliberately
+combines providers and creates the visible imagery seam the coherent builder
+avoids:
+
+```powershell
+& 'C:\Program Files\QGIS 3.44.13\bin\python-qgis-ltr.bat' `
+  tools\build_home_hub_aerial_composite.py `
+  --aerial home-hub\maps\work\packs\aerial\tiles `
+  --satellite home-hub\maps\work\packs\satellite\tiles `
+  --output home-hub\maps\work\packs\aerial-composite\tiles `
+  --aerial-manifest home-hub\maps\work\packs\aerial\map_manifest.json `
+  --output-manifest home-hub\maps\work\packs\aerial-composite\map_manifest.json
+```
+
+At z15-z17 the fallback is cropped and scaled from the z14 Sentinel parent, so
+it is deliberately soft; true EA pixels retain their native detail. The output
+manifest carries both OGL and CC BY 4.0 attribution.
+
 Download only from a provider whose offline terms have been checked. The
 bounded downloader is deliberately profile-based:
 
 ```powershell
 python tools\download_home_hub_raster_tiles.py `
+  --profile western-england `
   --url-template 'https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless_3857/default/g/{z}/{row}/{col}.jpg' `
   --output home-hub\maps\work\packs\satellite\tiles `
   --manifest home-hub\maps\work\packs\satellite\map_manifest.json `
@@ -168,6 +277,15 @@ python tools\download_home_hub_raster_tiles.py `
   --attribution 'Sentinel-2 cloudless by EOX IT Services GmbH (Contains modified Copernicus Sentinel data 2016 & 2017), CC BY 4.0' `
   --source-url 'https://eox.at/2017/08/sentinel-2-global-cloudless-mosaic/'
 ```
+
+The default profile keeps z12-14 limited to Gloucestershire. The recommended
+`western-england` profile keeps Great Britain at z5-11 and extends z12-14 over
+a broad region around Gloucester (47,663 requested XYZ positions). The
+optional `great-britain` profile extends genuine imagery through z14 across the
+whole country (589,877 positions), but takes hours and creates too many small
+files for a responsive test card. Every profile deliberately stops at z14:
+Sentinel-2 RGB source pixels are 10 m, so extra zooms would consume space
+without adding image detail.
 
 The first generated fixture uses the official June 2026 OS Open Zoomstack
 Vector Tiles database (2,852,712,448 bytes, SHA-256

@@ -89,6 +89,14 @@ GREAT_BRITAIN_OVERVIEW_PASSES = (
     RenderPass("Great Britain overview", (-8.82, 49.79, 1.92, 60.95), 5, 11),
 )
 
+# Full-country orientation plus a roughly 100 km square centred on Gloucester.
+# Zoom 18 would quadruple the z17 tile count and FAT32 allocation cost without
+# adding meaningful detail to the source vector datasets.
+REGIONAL_100KM_PASSES = (
+    RenderPass("Great Britain overview", (-8.82, 49.79, 1.92, 60.95), 5, 11),
+    RenderPass("Gloucester 100 km region", (-2.97, 51.414, -1.51, 52.314), 10, 17),
+)
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -103,7 +111,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, required=True, help="Destination tile directory")
     parser.add_argument(
         "--profile",
-        choices=("fixture", "gloucester", "pilot", "great-britain-overview", "gloucestershire"),
+        choices=(
+            "fixture",
+            "gloucester",
+            "pilot",
+            "great-britain-overview",
+            "gloucestershire",
+            "regional-100km",
+        ),
         default="fixture",
         help=(
             "fixture is fast; gloucester is the city test pack; pilot uses OS GB coverage; great-britain-overview "
@@ -111,7 +126,18 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument("--quality", type=int, default=85, choices=range(40, 96))
+    parser.add_argument("--metatile-size", type=int, default=4, choices=(1, 2, 4, 8, 16))
+    parser.add_argument("--name", help="Display name written to the map manifest")
     parser.add_argument("--manifest", type=Path, help="Optional manifest output path")
+    parser.add_argument(
+        "--bounds",
+        nargs=4,
+        type=float,
+        metavar=("WEST", "SOUTH", "EAST", "NORTH"),
+        help="Render one custom WGS84 extent instead of a named profile",
+    )
+    parser.add_argument("--zoom-min", type=int)
+    parser.add_argument("--zoom-max", type=int)
     return parser.parse_args()
 
 
@@ -128,6 +154,8 @@ def validate_inputs(args: argparse.Namespace) -> None:
         raise ValueError(f"Output directory is not empty: {args.output}")
     if args.manifest and args.manifest.exists():
         raise ValueError(f"Manifest already exists: {args.manifest}")
+    if args.bounds is not None and (args.zoom_min is None or args.zoom_max is None):
+        raise ValueError("--bounds requires --zoom-min and --zoom-max")
 
 
 def vector_tile_source(path: Path | None, tile_url: str | None) -> str:
@@ -144,6 +172,23 @@ def vector_tile_source(path: Path | None, tile_url: str | None) -> str:
     return bytes(encoded).decode("utf-8")
 
 
+def qgis_compatible_mapbox_style(style_text: str) -> str:
+    """Flatten Mapbox features that QGIS cannot rasterise directly."""
+    style = json.loads(style_text)
+    for layer in style.get("layers", []):
+        if layer.get("type") != "fill-extrusion":
+            continue
+        paint = layer.get("paint", {})
+        flattened = {
+            "fill-color": paint.get("fill-extrusion-color", "#B9A897"),
+            "fill-opacity": paint.get("fill-extrusion-opacity", 1),
+            "fill-outline-color": "#786A5D",
+        }
+        layer["type"] = "fill"
+        layer["paint"] = flattened
+    return json.dumps(style)
+
+
 def create_project(args: argparse.Namespace) -> QgsProject:
     project = QgsProject.instance()
     project.clear()
@@ -158,7 +203,9 @@ def create_project(args: argparse.Namespace) -> QgsProject:
         if not style_ok:
             raise RuntimeError(f"QGIS could not load style {args.style}: {style_message}")
     else:
-        style_json = args.mapbox_style.read_text(encoding="utf-8")
+        style_json = qgis_compatible_mapbox_style(
+            args.mapbox_style.read_text(encoding="utf-8")
+        )
         converter = QgsMapBoxGlStyleConverter()
         if converter.convert(style_json) != QgsMapBoxGlStyleConverter.Success:
             raise RuntimeError(f"QGIS could not convert Mapbox style: {converter.errorMessage()}")
@@ -183,6 +230,7 @@ def render_pass(
     context: QgsProcessingContext,
     feedback: QgsProcessingFeedback,
     osm_attribution: bool,
+    metatile_size: int,
 ) -> None:
     west, south, east, north = render.bounds_wgs84
     extent = f"{west},{east},{south},{north} [EPSG:4326]"
@@ -202,7 +250,7 @@ def render_pass(
             "ANTIALIAS": True,
             "TILE_FORMAT": 1,
             "QUALITY": quality,
-            "METATILESIZE": 4,
+            "METATILESIZE": metatile_size,
             "TILE_WIDTH": 256,
             "TILE_HEIGHT": 256,
             "TMS_CONVENTION": False,
@@ -227,6 +275,7 @@ def write_manifest(
     profile: str,
     quality: int,
     osm_attribution: bool,
+    name: str | None,
 ) -> None:
     maximum_zoom = 11 if profile == "great-britain-overview" else 17
     if profile == "fixture":
@@ -261,6 +310,14 @@ def write_manifest(
             "north": 52.15,
             "min_zoom": 10,
         }
+    elif profile == "regional-100km":
+        bounds = {
+            "west": -2.97,
+            "south": 51.414,
+            "east": -1.51,
+            "north": 52.314,
+            "min_zoom": 10,
+        }
     else:
         bounds = {
             "west": -8.82,
@@ -272,14 +329,14 @@ def write_manifest(
     tile_files = list(output.rglob("*.jpg"))
     manifest = {
         "schema_version": 1,
-        "name": f"BluePaws {profile}",
+        "name": name or f"BluePaws {profile}",
         "version": "2026-08",
         "projection": "EPSG:3857",
         "tile_scheme": "xyz",
         "tile_size": 256,
         "min_zoom": (
             5
-            if profile in ("pilot", "great-britain-overview")
+            if profile in ("pilot", "great-britain-overview", "regional-100km")
             else (10 if profile in ("gloucester", "gloucestershire") else 12)
         ),
         "max_zoom": maximum_zoom,
@@ -317,13 +374,25 @@ def main() -> int:
         context.setProject(project)
         feedback = QgsProcessingFeedback()
         args.output.mkdir(parents=True, exist_ok=True)
-        passes = {
-            "fixture": FIXTURE_PASSES,
-            "gloucester": GLOUCESTER_PASSES,
-            "pilot": PILOT_PASSES,
-            "great-britain-overview": GREAT_BRITAIN_OVERVIEW_PASSES,
-            "gloucestershire": GLOUCESTERSHIRE_PASSES,
-        }[args.profile]
+        if args.bounds is not None:
+            west, south, east, north = args.bounds
+            passes = (
+                RenderPass(
+                    "Custom extent",
+                    (west, south, east, north),
+                    args.zoom_min,
+                    args.zoom_max,
+                ),
+            )
+        else:
+            passes = {
+                "fixture": FIXTURE_PASSES,
+                "gloucester": GLOUCESTER_PASSES,
+                "pilot": PILOT_PASSES,
+                "great-britain-overview": GREAT_BRITAIN_OVERVIEW_PASSES,
+                "gloucestershire": GLOUCESTERSHIRE_PASSES,
+                "regional-100km": REGIONAL_100KM_PASSES,
+            }[args.profile]
         for render in passes:
             render_pass(
                 render,
@@ -332,6 +401,7 @@ def main() -> int:
                 context,
                 feedback,
                 osm_attribution=args.tile_url is not None,
+                metatile_size=args.metatile_size,
             )
         if args.manifest:
             write_manifest(
@@ -340,6 +410,7 @@ def main() -> int:
                 args.profile,
                 args.quality,
                 osm_attribution=args.tile_url is not None,
+                name=args.name,
             )
         print(f"Tile rendering complete: {args.output}", flush=True)
         return 0

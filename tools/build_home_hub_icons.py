@@ -19,20 +19,44 @@ ALPHA_ICONS = {
     "settings": ("settings.png", 64),
     "diagnostic": ("diagnostic.png", 64),
 }
-COLOUR_ICONS = {"map": ("map.png", 72)}
+COLOUR_ICONS = {
+    "map": ("map.png", (72, 72)),
+    "status_normal": ("status-normal.png", (74, 22)),
+    "status_at_home": ("status-at-home.png", (84, 22)),
+    "status_out": ("status-out.png", (58, 22)),
+    "profile_powersave": ("profile-powersave.png", (104, 20)),
+    "status_error": ("status-error.png", (82, 20)),
+    "radio_wifi": ("radio-wifi.png", (28, 20)),
+    "radio_4g": ("radio-4g.png", (28, 20)),
+    "radio_rf": ("radio-rf.png", (28, 20)),
+    "signal_full": ("signal-full.png", (22, 18)),
+    "signal_high": ("signal-high.png", (22, 18)),
+    "signal_medium": ("signal-medium.png", (22, 18)),
+    "signal_low": ("signal-low.png", (22, 18)),
+    "signal_mobile": ("signal-mobile.png", (22, 18)),
+    "radio_antenna": ("radio-antenna.png", (20, 20)),
+    "battery_full": ("battery-full.png", (26, 18)),
+    "battery_medium": ("battery-medium.png", (26, 18)),
+    "battery_low": ("battery-low.png", (26, 18)),
+    "battery_error": ("battery-error.png", (26, 18)),
+    "status_home_small": ("status-home.png", (18, 18)),
+    "status_stopwatch": ("status-stopwatch.png", (18, 18)),
+}
 
 
-def fitted_rgba(path: Path, size: int) -> Image.Image:
+def fitted_rgba(path: Path, width: int, height: int | None = None) -> Image.Image:
+    height = width if height is None else height
     image = Image.open(path).convert("RGBA")
     alpha = image.getchannel("A")
     bounds = alpha.getbbox()
     if bounds is None:
         raise ValueError(f"{path} has no visible pixels")
     image = image.crop(bounds)
-    inner = max(1, int(size * 0.90))
-    image.thumbnail((inner, inner), Image.Resampling.LANCZOS)
-    output = Image.new("RGBA", (size, size))
-    output.alpha_composite(image, ((size - image.width) // 2, (size - image.height) // 2))
+    inner_width = max(1, int(width * 0.94))
+    inner_height = max(1, int(height * 0.94))
+    image.thumbnail((inner_width, inner_height), Image.Resampling.LANCZOS)
+    output = Image.new("RGBA", (width, height))
+    output.alpha_composite(image, ((width - image.width) // 2, (height - image.height) // 2))
     return output
 
 
@@ -44,14 +68,16 @@ def bytes_as_cpp(data: bytes) -> str:
     return "\n".join(lines)
 
 
-def descriptor(name: str, size: int, colour_format: str, data_size: int, stride: int) -> str:
+def descriptor(
+    name: str, width: int, height: int, colour_format: str, data_size: int, stride: int
+) -> str:
     return f"""const lv_image_dsc_t icon_{name} = {{
     .header = {{
         .magic = LV_IMAGE_HEADER_MAGIC,
         .cf = {colour_format},
         .flags = 0,
-        .w = {size},
-        .h = {size},
+        .w = {width},
+        .h = {height},
         .stride = {stride},
         .reserved_2 = 0,
     }},
@@ -74,11 +100,12 @@ def generate(source: Path, output: Path) -> None:
         definitions.append(
             f"alignas(4) static const uint8_t icon_{name}_data[] = {{\n"
             f"{bytes_as_cpp(data)}\n}};\n\n"
-            + descriptor(name, size, "LV_COLOR_FORMAT_A8", len(data), size)
+            + descriptor(name, size, size, "LV_COLOR_FORMAT_A8", len(data), size)
         )
 
-    for name, (filename, size) in COLOUR_ICONS.items():
-        image = fitted_rgba(source / filename, size)
+    for name, (filename, dimensions) in COLOUR_ICONS.items():
+        width, height = dimensions
+        image = fitted_rgba(source / filename, width, height)
         data = bytearray()
         rgba = image.tobytes()
         for offset in range(0, len(rgba), 4):
@@ -88,7 +115,9 @@ def generate(source: Path, output: Path) -> None:
         definitions.append(
             f"alignas(4) static const uint8_t icon_{name}_data[] = {{\n"
             f"{bytes_as_cpp(bytes(data))}\n}};\n\n"
-            + descriptor(name, size, "LV_COLOR_FORMAT_ARGB8888", len(data), size * 4)
+            + descriptor(
+                name, width, height, "LV_COLOR_FORMAT_ARGB8888", len(data), width * 4
+            )
         )
 
     header = """#pragma once

@@ -82,53 +82,58 @@ lv_obj_t *create_page_frame(lv_obj_t *screen,
 
     lv_obj_t *status = make_label(header, initial_status, secondary_colour);
     lv_obj_set_pos(status, 16, 34);
-    lv_obj_set_width(status, actions.home != nullptr ? LV_PCT(55) : LV_PCT(67));
+    lv_obj_set_width(status, actions.show_header_actions
+                                 ? (actions.home != nullptr ? LV_PCT(55) : LV_PCT(67))
+                                 : LV_PCT(94));
     lv_label_set_long_mode(status, LV_LABEL_LONG_CLIP);
     lv_obj_set_style_text_font(status, &lv_font_montserrat_14, 0);
     if (status_label != nullptr) {
         *status_label = status;
     }
 
-    const lv_color_t icon_colour = dark_mode ? lv_color_hex(0xFFFFFF) : lv_color_hex(0x17324D);
-    int32_t right_offset = -8;
-    if (actions.theme != nullptr) {
-        make_header_button(header,
-                           right_offset,
-                           icon_night_mode,
-                           icon_colour,
-                           dark_mode,
-                           actions.theme,
-                           actions.user_data);
-        right_offset -= 48;
-    }
-    if (actions.rotate != nullptr) {
-        make_header_button(header,
-                           right_offset,
-                           icon_rotate,
-                           icon_colour,
-                           dark_mode,
-                           actions.rotate,
-                           actions.user_data);
-        right_offset -= 48;
-    }
-    if (actions.brightness != nullptr) {
-        make_header_button(header,
-                           right_offset,
-                           icon_brightness,
-                           icon_colour,
-                           dark_mode,
-                           actions.brightness,
-                           actions.user_data);
-        right_offset -= 48;
-    }
-    if (actions.home != nullptr) {
-        make_header_button(header,
-                           right_offset,
-                           icon_home,
-                           icon_colour,
-                           dark_mode,
-                           actions.home,
-                           actions.user_data);
+    if (actions.show_header_actions) {
+        const lv_color_t icon_colour =
+            dark_mode ? lv_color_hex(0xFFFFFF) : lv_color_hex(0x17324D);
+        int32_t right_offset = -8;
+        if (actions.theme != nullptr) {
+            make_header_button(header,
+                               right_offset,
+                               icon_night_mode,
+                               icon_colour,
+                               dark_mode,
+                               actions.theme,
+                               actions.user_data);
+            right_offset -= 48;
+        }
+        if (actions.rotate != nullptr) {
+            make_header_button(header,
+                               right_offset,
+                               icon_rotate,
+                               icon_colour,
+                               dark_mode,
+                               actions.rotate,
+                               actions.user_data);
+            right_offset -= 48;
+        }
+        if (actions.brightness != nullptr) {
+            make_header_button(header,
+                               right_offset,
+                               icon_brightness,
+                               icon_colour,
+                               dark_mode,
+                               actions.brightness,
+                               actions.user_data);
+            right_offset -= 48;
+        }
+        if (actions.home != nullptr) {
+            make_header_button(header,
+                               right_offset,
+                               icon_home,
+                               icon_colour,
+                               dark_mode,
+                               actions.home,
+                               actions.user_data);
+        }
     }
 
     lv_obj_t *content = lv_obj_create(screen);

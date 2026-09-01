@@ -317,3 +317,45 @@ It was again flashed only at `0x10000`, with esptool write verification. Its
 monitored boot reported ESP32-P4 revision 1.3, 16 MB flash, 32 MB PSRAM,
 800x480 display, GT911 touch and the mounted FAT volume, then entered the UI
 without a panic or reset loop.
+
+The map-layer pass adds a top-right **MAP** control whose 200 ms animation
+slides a picker above the right edge of the existing viewport. Street,
+Satellite and Aerial use separate XYZ roots on the FAT partition; unavailable
+roots are visibly disabled. Changing layer preserves the map centre, clamps to
+the selected pack's zoom range and invalidates the decoded-tile cache so stale
+imagery cannot be reused. Opening either the layer picker or nearby-cat drawer
+closes the other.
+
+Hardware testing showed that moving decoded descriptors between LVGL image
+objects could leave queued draw work associated with a previous screen slot.
+That produced geographically scrambled 256-pixel squares after map interaction
+even though the source JPEGs stitched correctly on the PC. Every grid slot now
+permanently owns the descriptor and PSRAM buffer at the same array index. Image
+objects are detached before their slot is overwritten, and slot identities
+contain both layer and XYZ ID. Missing layer tiles remain blank; cross-layer
+fallback is intentionally prohibited.
+
+The first correct fixed-slot build still re-decoded the entire overscan grid
+when a pan crossed a 256-pixel boundary, producing reported stalls around 500
+ms. The follow-up grid-reuse pass keeps sub-tile pans bound and merely moves the
+LVGL objects. At a boundary it permutes matching decoded XYZ entries into their
+new screen slots, then reads only the newly exposed row or column. The status
+line's `new N` field records the number of SD/JPEG loads in the last refresh.
+This adapts the fixed RGB565 grid used by the open-source `0015/map_tiles`
+component while retaining BluePaws' continuous viewport, JPEG storage and live
+overlay architecture.
+
+The optimized application is 951,888 bytes with SHA-256
+`C1B41A5B8E99D5B6E823F6BE395F6034BABB2AA5D43B42C0054EC6F74A9D5C6A`.
+It was flashed app-only at `0x10000` on COM27 and esptool verified the written
+hash. The monitored restart again reported revision 1.3, 16 MB flash, 32 MB
+PSRAM, GT911 touch and the mounted 128 GB card's FAT volume, then entered the UI
+without a panic or reset loop.
+
+The resulting 950,912-byte application has SHA-256
+`97501ABCC0A687687E4A2CC75C646161DE60E0DC2867AB27A2A9E397C89E40AE`.
+ESP-IDF wrote and hash-verified the bootloader at `0x2000`, partition table at
+`0x8000` and application at `0x10000` on COM27 without erasing the rest of the
+16 MB flash. The first monitored boot reported ESP32-P4 revision 1.3, 16 MB
+flash, 32 MB PSRAM, 800x480 display, GT911 touch and the healthy 121,001 MB SD
+card/FAT volume, then started the UI without a panic or reset loop.
