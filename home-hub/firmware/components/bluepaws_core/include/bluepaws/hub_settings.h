@@ -20,7 +20,6 @@ struct Settings {
     WifiNetwork secondary{};
     char access_point_ssid[kWifiSsidBytes]{"BluePaws-Hub"};
     char access_point_password[kWifiPasswordBytes]{};
-    bool access_point_enabled = true;
     uint16_t overview_timeout_seconds = 120;
     uint16_t dim_timeout_seconds = 180;
     uint16_t screen_off_timeout_seconds = 300;

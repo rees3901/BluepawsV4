@@ -29,8 +29,8 @@ struct Status {
 // local gateway credential is not configured or task creation fails.
 bool start(const hub::Settings &settings);
 
-// Applies saved primary/secondary station credentials and fallback AP settings
-// on the networking task. The UI never calls esp_wifi directly.
+// Applies saved primary/secondary station credentials and automatic fallback
+// AP settings on the networking task. The UI never calls esp_wifi directly.
 bool applyNetworkSettings(const hub::Settings &settings);
 
 // Called only by the LVGL/main task. Cloud work never mutates UI state from

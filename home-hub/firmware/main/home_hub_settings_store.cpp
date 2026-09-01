@@ -67,7 +67,6 @@ bool load(hub::Settings &settings) {
     settings.dim_brightness_percent = get_u8(handle, "dim_pct", settings.dim_brightness_percent);
     settings.brightness_percent = get_u8(handle, "bright_pct", settings.brightness_percent);
     settings.volume_percent = get_u8(handle, "volume_pct", settings.volume_percent);
-    settings.access_point_enabled = get_u8(handle, "ap_enabled", settings.access_point_enabled ? 1 : 0) != 0;
     nvs_close(handle);
     hub::sanitize(settings);
     ESP_LOGI(kTag, "Loaded Home Hub settings from NVS");
@@ -93,7 +92,6 @@ bool save(const hub::Settings &input) {
     ok = nvs_set_u8(handle, "dim_pct", settings.dim_brightness_percent) == ESP_OK && ok;
     ok = nvs_set_u8(handle, "bright_pct", settings.brightness_percent) == ESP_OK && ok;
     ok = nvs_set_u8(handle, "volume_pct", settings.volume_percent) == ESP_OK && ok;
-    ok = nvs_set_u8(handle, "ap_enabled", settings.access_point_enabled ? 1 : 0) == ESP_OK && ok;
     ok = nvs_commit(handle) == ESP_OK && ok;
     nvs_close(handle);
     if (ok) ESP_LOGI(kTag, "Saved Home Hub settings to NVS");

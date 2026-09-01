@@ -2671,8 +2671,8 @@ const char *settings_field_title(SettingsField field)
     case SettingsField::PrimaryPassword: return "Primary Wi-Fi password";
     case SettingsField::SecondarySsid: return "Secondary Wi-Fi name";
     case SettingsField::SecondaryPassword: return "Secondary Wi-Fi password";
-    case SettingsField::AccessPointSsid: return "Fallback access point name";
-    case SettingsField::AccessPointPassword: return "Fallback access point password";
+    case SettingsField::AccessPointSsid: return "Off-grid local network name";
+    case SettingsField::AccessPointPassword: return "Off-grid local network password";
     case SettingsField::OverviewTimeout: return "Overview timeout (seconds)";
     case SettingsField::DimTimeout: return "Dim timeout (seconds)";
     case SettingsField::ScreenOffTimeout: return "Screen-off timeout (seconds)";
@@ -2746,7 +2746,7 @@ bool apply_settings_editor_value(UiState &ui, const char *value, const char **er
         copy_text(ui.settings.secondary.ssid, sizeof(ui.settings.secondary.ssid), value); break;
     case SettingsField::AccessPointSsid:
         if (!bluepaws::hub::validSsid(value)) {
-            *error = "The fallback access point needs a name."; return false;
+            *error = "The off-grid local network needs a name."; return false;
         }
         copy_text(ui.settings.access_point_ssid, sizeof(ui.settings.access_point_ssid), value); break;
     case SettingsField::PrimaryPassword:
@@ -2912,16 +2912,6 @@ lv_obj_t *create_setting_card(lv_obj_t *parent,
     return card;
 }
 
-void access_point_toggle_changed(lv_event_t *event)
-{
-    auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
-    auto *toggle = static_cast<lv_obj_t *>(lv_event_get_target(event));
-    if (ui == nullptr || toggle == nullptr) return;
-    ui->settings.access_point_enabled = lv_obj_has_state(toggle, LV_STATE_CHECKED);
-    bluepaws::settings_store::save(ui->settings);
-    bluepaws::cloud::applyNetworkSettings(ui->settings);
-}
-
 void make_settings_section(lv_obj_t *parent, const char *text, bool dark_mode)
 {
     lv_obj_t *label = make_label(parent, text,
@@ -2961,20 +2951,18 @@ void create_settings_page(UiState &ui)
                         ui.settings.secondary.password[0] == '\0' ? "Open / not set" : "Configured - tap to change",
                         SettingsField::SecondaryPassword, lv_color_hex(0x2E7D5B), ui);
 
-    make_settings_section(content, "OFF-GRID FALLBACK ACCESS POINT", ui.dark_mode);
-    lv_obj_t *toggle_row = lv_obj_create(content);
-    lv_obj_set_size(toggle_row, LV_PCT(100), 58);
-    style_card(toggle_row, ui.dark_mode);
-    lv_obj_t *toggle_label = make_label(toggle_row, "ENABLE FALLBACK ACCESS POINT",
-        ui.dark_mode ? lv_color_hex(0xF3F8FB) : lv_color_hex(0x17324D));
-    lv_obj_align(toggle_label, LV_ALIGN_LEFT_MID, 2, 0);
-    lv_obj_t *toggle = lv_switch_create(toggle_row);
-    lv_obj_align(toggle, LV_ALIGN_RIGHT_MID, -2, 0);
-    if (ui.settings.access_point_enabled) lv_obj_add_state(toggle, LV_STATE_CHECKED);
-    lv_obj_add_event_cb(toggle, access_point_toggle_changed, LV_EVENT_VALUE_CHANGED, &ui);
-    create_setting_card(content, "ACCESS POINT NAME", ui.settings.access_point_ssid,
+    make_settings_section(content, "OFF-GRID LOCAL NETWORK", ui.dark_mode);
+    lv_obj_t *automatic_note = make_label(
+        content,
+        "Connection order: primary Wi-Fi, then the secondary phone hotspot. "
+        "This local network starts automatically only when neither is available; "
+        "the safety behaviour is always active.",
+        ui.dark_mode ? lv_color_hex(0xC7D9E5) : lv_color_hex(0x38576D));
+    lv_obj_set_width(automatic_note, LV_PCT(100));
+    lv_label_set_long_mode(automatic_note, LV_LABEL_LONG_WRAP);
+    create_setting_card(content, "LOCAL NETWORK NAME", ui.settings.access_point_ssid,
                         SettingsField::AccessPointSsid, lv_color_hex(0x7A5A9E), ui);
-    create_setting_card(content, "ACCESS POINT PASSWORD",
+    create_setting_card(content, "LOCAL NETWORK PASSWORD",
                         ui.settings.access_point_password[0] == '\0' ? "Open / not set" : "Configured - tap to change",
                         SettingsField::AccessPointPassword, lv_color_hex(0x7A5A9E), ui);
 
