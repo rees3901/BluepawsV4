@@ -1504,7 +1504,7 @@ button.bluetooth-beacon:disabled {
 
 .tutorial-legend-item {
   display: grid;
-  grid-template-columns: 78px minmax(0, 1fr);
+  grid-template-columns: 132px minmax(0, 1fr);
   align-items: center;
   gap: 8px;
   padding: 7px 8px;
@@ -1513,11 +1513,31 @@ button.bluetooth-beacon:disabled {
   background: var(--bg-primary);
 }
 
-.tutorial-legend-icon {
-  color: var(--accent);
-  font-size: 0.78rem;
-  font-weight: 800;
-  text-align: center;
+.tutorial-legend-symbol {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+}
+
+.tutorial-legend-symbol .card-indicator-group {
+  min-width: 0;
+}
+
+.tutorial-legend-symbol .signal-indicator {
+  gap: 2px;
+}
+
+.tutorial-transport-symbols,
+.tutorial-receive-symbols {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+
+.tutorial-transport-symbols .transport-badge {
+  margin-left: 0;
 }
 
 .tutorial-legend-item strong,
@@ -1534,6 +1554,43 @@ button.bluetooth-beacon:disabled {
   color: var(--text-secondary);
   font-size: 0.66rem;
   line-height: 1.3;
+}
+
+.tutorial-tool-bubble {
+  position: fixed;
+  z-index: 3003;
+  display: grid;
+  gap: 2px;
+  padding: 7px 9px;
+  border: 1px solid #f59e0b;
+  border-radius: 8px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 35%);
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.tutorial-tool-bubble::before {
+  position: absolute;
+  top: 50%;
+  right: 100%;
+  border-width: 6px 7px 6px 0;
+  border-style: solid;
+  border-color: transparent #f59e0b transparent transparent;
+  content: "";
+  transform: translateY(-50%);
+}
+
+.tutorial-tool-bubble strong {
+  color: #fbbf24;
+  font-size: 0.7rem;
+}
+
+.tutorial-tool-bubble span {
+  color: var(--text-secondary);
+  font-size: 0.64rem;
+  line-height: 1.25;
 }
 
 .tutorial-progress {

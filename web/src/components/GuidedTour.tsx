@@ -1,6 +1,13 @@
 "use client";
 
-import { memo, useEffect, useRef, useState, type CSSProperties } from "react";
+import { BatteryIndicator, HomeDistance, LastSeen, SignalIndicator, TransportBadge, WifiTransportBadge } from "@/components/Indicators";
+import { memo, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+
+interface TourToolExplanation {
+  selector: string;
+  title: string;
+  description: string;
+}
 
 interface TourStep {
   selector: string | null;
@@ -8,6 +15,9 @@ interface TourStep {
   description: string;
   items?: string[];
   legend?: boolean;
+  autoAdvanceMs?: number;
+  nextLabel?: string;
+  tools?: TourToolExplanation[];
 }
 
 const TOUR_STEPS: TourStep[] = [
@@ -48,9 +58,16 @@ const TOUR_STEPS: TourStep[] = [
     ],
   },
   {
+    selector: ".bp-marker",
+    title: "Pick a pet marker",
+    description: "This highlighted pin belongs to the same pet as the matching side-panel tile. Watch it for a moment: the tutorial will select it and open its details.",
+    autoAdvanceMs: 1_800,
+    nextLabel: "Open now",
+  },
+  {
     selector: ".device-marker-popup",
     title: "Use a pet marker",
-    description: "The tutorial has opened this marker so you can see its complete popup. Its avatar and pin colour match the side-panel tile, and its tip marks the exact coordinate.",
+    description: "The selected marker has now expanded into its complete popup. Its avatar and pin colour match the side-panel tile, and its tip marks the exact coordinate.",
     items: [
       "The popup repeats current battery, signal, profile, coordinates and last-report age.",
       "Jump To, Follow and Trail are available here as well as on the pet tile.",
@@ -60,11 +77,12 @@ const TOUR_STEPS: TourStep[] = [
   {
     selector: ".leaflet-top.leaflet-left",
     title: "Use the map tools",
-    description: "The left-side map tools provide quick navigation and field utilities.",
-    items: [
-      "Home centres on the Home Hub; Fit brings every located marker into view.",
-      "Trails shows or hides all breadcrumbs; the ruler measures a route or straight-line distance.",
-      "Zoom controls sit at the lower left, while the coordinate tab and scale sit at the lower right.",
+    description: "Each left-side button is labelled beside its real map icon so you can see exactly which control performs each action.",
+    tools: [
+      { selector: "[data-tour='map-home']", title: "Home Hub", description: "Centre the map on the Home Hub's latest valid position." },
+      { selector: "[data-tour='map-fit']", title: "Fit markers", description: "Fit every located pet and Home Hub marker into the current view." },
+      { selector: "[data-tour='map-trails']", title: "All trails", description: "Show or hide all available breadcrumb trails together." },
+      { selector: "[data-tour='map-measure']", title: "Measure", description: "Select points on the map to measure a route or straight-line distance." },
     ],
   },
   {
@@ -90,6 +108,12 @@ interface TargetLayout {
   viewportWidth: number;
 }
 
+interface ToolLayout extends TourToolExplanation {
+  left: number;
+  top: number;
+  width: number;
+}
+
 interface GuidedTourProps {
   onFinish: () => void;
   onSkip: () => void;
@@ -99,6 +123,7 @@ interface GuidedTourProps {
 export const GuidedTour = memo(function GuidedTour({ onFinish, onSkip, onStepChange }: GuidedTourProps) {
   const [stepIndex, setStepIndex] = useState(0);
   const [targetLayout, setTargetLayout] = useState<TargetLayout | null>(null);
+  const [toolLayouts, setToolLayouts] = useState<ToolLayout[]>([]);
   const dialogRef = useRef<HTMLElement>(null);
   const primaryButtonRef = useRef<HTMLButtonElement>(null);
   const step = TOUR_STEPS[stepIndex];
@@ -109,6 +134,17 @@ export const GuidedTour = memo(function GuidedTour({ onFinish, onSkip, onStepCha
       window.cancelAnimationFrame(frame);
       frame = window.requestAnimationFrame(() => {
         const target = step.selector ? document.querySelector<HTMLElement>(step.selector) : null;
+        setToolLayouts((step.tools ?? []).flatMap((tool) => {
+          const toolTarget = document.querySelector<HTMLElement>(tool.selector);
+          if (!toolTarget) return [];
+          const toolRect = toolTarget.getBoundingClientRect();
+          return [{
+            ...tool,
+            left: toolRect.right + 12,
+            top: toolRect.top + toolRect.height / 2,
+            width: Math.min(250, Math.max(180, window.innerWidth - toolRect.right - 28)),
+          }];
+        }));
         if (!target) {
           setTargetLayout(null);
           return;
@@ -145,7 +181,17 @@ export const GuidedTour = memo(function GuidedTour({ onFinish, onSkip, onStepCha
       window.removeEventListener("resize", updateTarget);
       window.removeEventListener("scroll", updateTarget, true);
     };
-  }, [step.selector]);
+  }, [step]);
+
+  useEffect(() => {
+    if (!step.autoAdvanceMs || stepIndex >= TOUR_STEPS.length - 1) return;
+    const timer = window.setTimeout(() => {
+      const nextStep = stepIndex + 1;
+      onStepChange(nextStep);
+      setStepIndex(nextStep);
+    }, step.autoAdvanceMs);
+    return () => window.clearTimeout(timer);
+  }, [onStepChange, step.autoAdvanceMs, stepIndex]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -188,10 +234,14 @@ export const GuidedTour = memo(function GuidedTour({ onFinish, onSkip, onStepCha
     <div className="tutorial-tour" data-tour-step={stepIndex + 1}>
       <div className={`tutorial-scrim${targetLayout ? " has-target" : ""}`} aria-hidden="true" />
       {targetLayout && <div className="tutorial-spotlight" style={spotlightStyle(targetLayout)} aria-hidden="true" />}
+      {toolLayouts.map((tool) => <aside className="tutorial-tool-bubble" style={{ left: tool.left, top: tool.top, width: tool.width }} key={tool.selector} role="note">
+        <strong>{tool.title}</strong>
+        <span>{tool.description}</span>
+      </aside>)}
       <section
         ref={dialogRef}
         className={`tutorial-callout${targetLayout ? " targeted" : " centered"}`}
-        style={calloutStyle(targetLayout)}
+        style={calloutStyle(targetLayout, Boolean(step.tools?.length))}
         role="dialog"
         aria-modal="true"
         aria-labelledby="tutorial-title"
@@ -208,7 +258,7 @@ export const GuidedTour = memo(function GuidedTour({ onFinish, onSkip, onStepCha
           <div>
             {stepIndex > 0 && <button className="btn-secondary" type="button" onClick={() => moveToStep(stepIndex - 1)}>Back</button>}
             <button ref={primaryButtonRef} className="btn-primary" type="button" onClick={handleNext}>
-              {stepIndex === 0 ? "Start tour" : stepIndex === TOUR_STEPS.length - 1 ? "Finish" : "Got it"}
+              {stepIndex === 0 ? "Start tour" : stepIndex === TOUR_STEPS.length - 1 ? "Finish" : step.nextLabel ?? "Got it"}
             </button>
           </div>
         </div>
@@ -218,17 +268,17 @@ export const GuidedTour = memo(function GuidedTour({ onFinish, onSkip, onStepCha
 });
 
 function TutorialIconLegend() {
-  const entries = [
-    ["🔋", "Battery", "Remaining collar charge or reported millivolts"],
-    ["▂▄▆█", "Signal bars", "Quality of the most recently reported radio link"],
-    ["RF · 4G · Wi-Fi", "Ingest path", "How the last update reached Bluepaws"],
-    ["⌂", "Home distance", "Distance from the collar's assigned Home Hub fix"],
-    ["⏱", "Last seen", "Age of the newest accepted report"],
-    ["💡 / 💤", "Receive window", "Collar is briefly awake for commands, or sleeping"],
-  ] as const;
+  const entries: Array<{ symbol: ReactNode; label: string; meaning: string }> = [
+    { symbol: <BatteryIndicator millivolts={4_050} />, label: "Battery", meaning: "Remaining collar charge or reported millivolts" },
+    { symbol: <SignalIndicator rssi={-82} snr={8} ingestPath="lora_hub" />, label: "Signal", meaning: "Antenna and bars show the quality of the latest radio report" },
+    { symbol: <span className="tutorial-transport-symbols"><TransportBadge ingestPath="lora_hub" /><TransportBadge ingestPath="cellular_direct" /><WifiTransportBadge /></span>, label: "Ingest path", meaning: "RF, 4G or Wi-Fi shows how the latest update reached Bluepaws" },
+    { symbol: <HomeDistance>352 m</HomeDistance>, label: "Home distance", meaning: "Distance from the collar's assigned Home Hub fix" },
+    { symbol: <LastSeen>2m</LastSeen>, label: "Last seen", meaning: "Age of the newest accepted report" },
+    { symbol: <span className="tutorial-receive-symbols"><span className="collar-awake" title="Command receive window">💡</span><span className="collar-awake" title="Collar probably sleeping">💤</span></span>, label: "Receive window", meaning: "The collar is briefly awake for commands, or probably sleeping" },
+  ];
   return <div className="tutorial-icon-legend" aria-label="Bluepaws symbol legend">
-    {entries.map(([icon, label, meaning]) => <div className="tutorial-legend-item" key={label}>
-      <span className="tutorial-legend-icon" aria-hidden="true">{icon}</span>
+    {entries.map(({ symbol, label, meaning }) => <div className="tutorial-legend-item" key={label}>
+      <span className="tutorial-legend-symbol" aria-hidden="true">{symbol}</span>
       <span><strong>{label}</strong><small>{meaning}</small></span>
     </div>)}
   </div>;
@@ -244,12 +294,19 @@ function spotlightStyle(layout: TargetLayout): CSSProperties {
   };
 }
 
-function calloutStyle(layout: TargetLayout | null): CSSProperties | undefined {
+function calloutStyle(layout: TargetLayout | null, keepRight = false): CSSProperties | undefined {
   if (!layout) return undefined;
   const gap = 18;
   const margin = 16;
   const width = Math.min(340, layout.viewportWidth - margin * 2);
   const estimatedHeight = 310;
+  if (keepRight) {
+    return {
+      right: margin,
+      top: Math.min(Math.max(margin, layout.viewportHeight / 2 - estimatedHeight / 2), layout.viewportHeight - estimatedHeight - margin),
+      width,
+    };
+  }
   let left: number;
   let top: number;
 

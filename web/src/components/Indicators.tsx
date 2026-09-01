@@ -74,7 +74,7 @@ export function WifiIndicator({ rssi, contactLost = false }: { rssi: number | nu
     <AntennaIcon />
     {[1,2,3,4,5].map(bar => <span key={bar} className={`sig-bar${bar <= level ? " filled" : ""}`} style={{height:4+bar*3, backgroundColor:bar <= level ? color : undefined}} />)}
     <span className="sig-label" style={{color}}>{label}</span>
-    <span className="transport-badge transport-wifi" title="Home Hub Wi-Fi uplink" aria-label="Wi-Fi">Wi-Fi</span>
+    <WifiTransportBadge />
   </span>;
 }
 
@@ -96,7 +96,7 @@ export function BluetoothBeaconIndicator({ advertising, enabled = advertising, d
   return <span className={`bluetooth-beacon${advertising ? " active" : ""}`} title={stateLabel} role="img" aria-label={stateLabel}>{content}</span>;
 }
 
-function TransportBadge({ ingestPath }: { ingestPath: IngestPath | null }) {
+export function TransportBadge({ ingestPath }: { ingestPath: IngestPath | null }) {
   const transport = transportPresentation(ingestPath);
   return (
     <span
@@ -108,6 +108,10 @@ function TransportBadge({ ingestPath }: { ingestPath: IngestPath | null }) {
       {transport.badge}
     </span>
   );
+}
+
+export function WifiTransportBadge() {
+  return <span className="transport-badge transport-wifi" title="Home Hub Wi-Fi uplink" role="img" aria-label="Wi-Fi">Wi-Fi</span>;
 }
 
 export function BatteryIndicator({ millivolts, percent }: { millivolts: number | null; percent?: number | null }) {
