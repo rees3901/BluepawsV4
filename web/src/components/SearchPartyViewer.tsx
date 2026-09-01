@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { BatteryIndicator, HomeDistance, LastSeen, SignalIndicator } from "@/components/Indicators";
 import { defaultDeviceAvatar } from "@/lib/defaultDeviceAvatar";
 import { emojiImageUrl } from "@/lib/emoji";
+import { isCollarOfflineAge } from "@/lib/devicePresence";
 import { formatMapCoordinates, googleMapsUrl } from "@/lib/mapLocation";
 import type { SearchPartySnapshot } from "@/lib/searchParty";
 import type { DeviceAction, DeviceAvatar, MapCommand, TelemetryDevice, TrailPoint } from "@/types/telemetry";
@@ -104,6 +105,7 @@ export function SearchPartyViewer({ token, initialSnapshot }: SearchPartyViewerP
       <TrackingMap
         devices={devices}
         avatars={avatars}
+        presenceNow={Math.floor(now / 60_000) * 60_000}
         sidebarOpen={panelOpen}
         followedId={null}
         trailIds={new Set<number>()}
@@ -154,6 +156,7 @@ export function SearchPartyViewer({ token, initialSnapshot }: SearchPartyViewerP
 function SearchPartyDeviceRow({ device, avatar, now, onCentre }: { device: TelemetryDevice; avatar: DeviceAvatar; now: number; onCentre: () => void }) {
   const mapsUrl = googleMapsUrl(device.lat, device.lon);
   const ageSeconds = Math.max(0, Math.floor((now - device.lastUpdate) / 1000));
+  const offline = isCollarOfflineAge(ageSeconds);
   const status = STATUS[device.status.toLowerCase() as keyof typeof STATUS] ?? STATUS.error;
   const profileLower = device.profile.toLowerCase();
   const profileClass = `profile-${profileLower.replace("save", "").replaceAll(" ", "-")}`;
@@ -161,7 +164,7 @@ function SearchPartyDeviceRow({ device, avatar, now, onCentre }: { device: Telem
   const distance = formatHomeDistance(homeDistanceMetres(device));
 
   return (
-    <article className={`device-card search-party-device-card${ageSeconds > 600 ? " stale" : ""}`}>
+    <article className={`device-card search-party-device-card${offline ? " offline" : ""}`}>
       <div className="card-summary">
         <div className="card-avatar-wrap">
           <div
@@ -177,31 +180,34 @@ function SearchPartyDeviceRow({ device, avatar, now, onCentre }: { device: Telem
         <div className="card-identity">
           <div className="card-name-row">
             <span className="card-name">{device.name}</span>
-            <span className={`card-status ${status.css}`}>{status.emoji} {status.label}</span>
-            <span className={`card-profile ${profileClass}`}>{profileLabel}</span>
+            {offline ? <span className="card-status status-offline">Offline</span> : <>
+              <span className={`card-status ${status.css}`}>{status.emoji} {status.label}</span>
+              <span className={`card-profile ${profileClass}`}>{profileLabel}</span>
+            </>}
           </div>
-          <div className="card-indicators">
+          {offline ? <div className="card-offline-summary">No reports for {formatLastSeen(ageSeconds)}</div> : <><div className="card-indicators">
             <span className="card-indicator-group"><BatteryIndicator millivolts={device.batt} percent={device.batteryPercent} /></span>
             <span className="card-indicator-group"><SignalIndicator rssi={device.rssi} snr={device.snr} ingestPath={device.ingestPath} /></span>
           </div>
           <div className="card-indicators card-indicators-row3">
             <HomeDistance>{distance}</HomeDistance>
             <LastSeen>{formatLastSeen(ageSeconds)}</LastSeen>
-          </div>
+          </div></>}
         </div>
       </div>
       <div className="card-detail-reveal" aria-hidden={false}>
         <div className="card-detail-reveal-inner">
           <div className="card-detail">
+            {offline && <p className="card-offline-notice"><strong>Offline.</strong> These are last-known details from {formatAge(ageSeconds)} and may no longer be current.</p>}
             <div className="card-grid">
-              <span className="label">Coordinates</span>
+              <span className="label">{offline ? "Last known coordinates" : "Coordinates"}</span>
               <span className="value">
                 <a className="card-coords card-coords-link" href={mapsUrl} target="_blank" rel="noopener noreferrer">
                   {formatMapCoordinates(device.lat, device.lon)}
                 </a>
               </span>
-              <span className="label">Dist From Hub</span><span className="value">{distance}</span>
-              <span className="label">Last seen</span><span className="value">{formatAge(ageSeconds)}</span>
+              <span className="label">{offline ? "Last known distance" : "Dist From Hub"}</span><span className="value">{distance}</span>
+              <span className="label">Last report</span><span className="value">{formatAge(ageSeconds)}</span>
             </div>
             <div className="card-actions search-party-card-actions">
               <button className="btn-action btn-jump" type="button" onClick={onCentre}>↗ Centre</button>

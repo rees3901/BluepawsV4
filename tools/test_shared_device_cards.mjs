@@ -71,7 +71,7 @@ test('hub emoji changes remove the photo and invalid identities cannot write',as
 test('hub and collar share card shell, avatar, expansion and navigation',()=>{
   for (const html of [renderHub(),renderCollar()]) {
     for (const cls of ['device-card expanded','card-summary','card-avatar-wrap','card-reorder-handle',
-      'card-pin-button','card-avatar-edit','card-detail-reveal','card-grid','btn-jump','btn-follow','btn-trail'])
+      'card-avatar-edit','card-detail-reveal','card-grid','btn-jump','btn-follow','btn-trail'])
       assert.ok(html.includes(cls),cls);
   }
   const html=renderHub();

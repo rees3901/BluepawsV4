@@ -30,7 +30,7 @@ export const hub = {gateway_guid16:16, household_id:'synthetic-family', mode:'ho
 const noop = () => {};
 export const cardProps = {expanded:true, dragging:false,dragOver:false,followed:false,trailVisible:false,
   portableMode:false,distance:'122 m',ageSeconds:3,onExpand:noop,onAction:noop,onAvatarEdit:noop,
-  onDragStart:noop,onDragOver:noop,onDrop:noop,onDragEnd:noop,onPinTop:noop,onReportLog:noop,onReportExport:noop};
+  onDragStart:noop,onDragOver:noop,onDrop:noop,onDragEnd:noop,onPinToggle:noop,onReportLog:noop,onReportExport:noop};
 export function renderHub(overrides={}, props={}) {
   const h={...hub,...overrides};
   const device=load('@/lib/hubPresence').hubMapDevice(h);
@@ -63,6 +63,6 @@ if (process.argv.includes('--serve')) {
     res.end('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">' +
       '<title>Shared cloud cards — synthetic fixture</title><link rel="stylesheet" href="/parity.css"><link rel="stylesheet" href="/web.css"><link rel="stylesheet" href="/hub-presence.css">' +
       '<main style="width:460px;max-width:100%;padding:12px"><h3>Shared cloud cards · UI fixture</h3>' +
-      renderHub() + renderCollar() + renderHub({latitude:null,longitude:null,fix_at:null,mode:'portable'}) + '</main>');
+      renderHub() + renderCollar() + renderCollar({ageSeconds:4*60*60}) + renderHub({latitude:null,longitude:null,fix_at:null,mode:'portable'}) + '</main>');
   }).listen(8793,'127.0.0.1',()=>console.log('Synthetic cloud cards: http://127.0.0.1:8793/'));
 }

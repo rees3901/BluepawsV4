@@ -5,6 +5,7 @@ import { useEffect, useRef } from "react";
 import { batteryPresentation, signalQuality } from "@/components/Indicators";
 import { collarFault } from "@/lib/collarFault";
 import { emojiImageUrl } from "@/lib/emoji";
+import { isCollarOffline } from "@/lib/devicePresence";
 import { formatHomeDistance, formatMapCoordinates, googleMapsUrl, homeDistanceMetres } from "@/lib/mapLocation";
 import { alternatePreviewMapLayer, MAP_LAYER_DEFINITIONS, MAP_LAYER_PICKER_NAMES, previewMapZoom, type MapLayerName, type MapLayerPickerName } from "@/lib/mapLayers";
 import { EMPTY_MAP_CENTER, EMPTY_MAP_ZOOM } from "@/lib/mapViewport";
@@ -22,6 +23,7 @@ import {
 interface TrackingMapProps {
   devices: TelemetryDevice[];
   avatars: Record<number, DeviceAvatar>;
+  presenceNow: number;
   sidebarOpen: boolean;
   followedId: number | null;
   trailIds: Set<number>;
@@ -40,7 +42,7 @@ const MARKER_SLIDE_DURATION_MS = 750;
 const MAX_ANIMATED_MARKER_DISTANCE_METRES = 2_000;
 
 export default function TrackingMap(props: TrackingMapProps) {
-  const { devices, avatars, sidebarOpen, followedId, trailIds, trailHistory, allTrailsVisible = false, trailsAvailable = false, command, onAction, onAllTrailsToggle, onNotice, readOnly = false } = props;
+  const { devices, avatars, presenceNow, sidebarOpen, followedId, trailIds, trailHistory, allTrailsVisible = false, trailsAvailable = false, command, onAction, onAllTrailsToggle, onNotice, readOnly = false } = props;
   const mapRef = useRef<L.Map | null>(null);
   const markersRef = useRef(new Map<number, L.Marker>());
   const markerAnimationsRef = useRef(new Map<number, number>());
@@ -437,11 +439,12 @@ export default function TrackingMap(props: TrackingMapProps) {
     locatedDevices.forEach((device) => {
       const avatar = avatars[device.id];
       const markerColor = normalizeMarkerColor(avatar.color);
+      const offline = isCollarOffline(device, presenceNow);
       const latLng: TrailLatLng = [device.lat, device.lon];
       let marker = markersRef.current.get(device.id);
       const icon = L.divIcon({
         className: "bp-marker-icon",
-        html: markerElement(avatar, markerColor, device.status),
+        html: markerElement(avatar, markerColor, device.status, offline),
         iconSize: [36, 48],
         iconAnchor: [18, 47],
         popupAnchor: [0, -43],
@@ -453,7 +456,7 @@ export default function TrackingMap(props: TrackingMapProps) {
         marker.setIcon(icon);
         slideMarkerTo(marker, L.latLng(device.lat, device.lon), markerAnimationsRef.current, device.id);
       }
-      const popupContent = popupHtml(device, avatar, readOnly, followedId === device.id, trailIds.has(device.id));
+      const popupContent = popupHtml(device, avatar, presenceNow, readOnly, followedId === device.id, trailIds.has(device.id));
       if (marker.getPopup()) marker.setPopupContent(popupContent);
       else marker.bindPopup(popupContent, { className: "device-marker-popup", minWidth: 300, maxWidth: 380 });
 
@@ -470,7 +473,7 @@ export default function TrackingMap(props: TrackingMapProps) {
       if (trailIdsRef.current.has(device.id) && !map.hasLayer(trail)) trail.addTo(map);
       if (!trailIdsRef.current.has(device.id) && map.hasLayer(trail)) map.removeLayer(trail);
     });
-  }, [avatars, devices, followedId, readOnly, trailIds]);
+  }, [avatars, devices, followedId, presenceNow, readOnly, trailIds]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -536,24 +539,29 @@ export default function TrackingMap(props: TrackingMapProps) {
   return <div id="map" aria-label="Live animal tracking map" />;
 }
 
-function popupHtml(device: TelemetryDevice, avatar: DeviceAvatar, readOnly = false, followed = false, trailVisible = false) {
+function popupHtml(device: TelemetryDevice, avatar: DeviceAvatar, presenceNow: number, readOnly = false, followed = false, trailVisible = false) {
   const name = escapeHtml(device.name);
   const isHub = device.entity === "hub";
-  const source = device.source ? `<span class="label">Source</span><span class="value">${escapeHtml(device.source)}</span>` : "";
   const coordinates = formatMapCoordinates(device.lat, device.lon);
   const mapsUrl = googleMapsUrl(device.lat, device.lon);
   const status = popupStatus(device);
   const profile = popupProfile(device);
-  const ageSeconds = Math.max(0, Math.floor((Date.now() - device.lastUpdate) / 1000));
+  const ageSeconds = Math.max(0, Math.floor((presenceNow - device.lastUpdate) / 1000));
+  const offline = isCollarOffline(device, presenceNow);
+  const source = device.source ? `<span class="label">${offline ? "Last reported source" : "Source"}</span><span class="value">${escapeHtml(device.source)}</span>` : "";
   const distance = formatHomeDistance(homeDistanceMetres(device));
-  const fault = isHub ? null : collarFault(device.faultReport, device.error !== "None");
+  const fault = isHub || offline ? null : collarFault(device.faultReport, device.error !== "None");
   const faultHtml = fault ? `<div class="card-fault-row"><span class="error-badge" title="${escapeHtml(fault.title)}">${escapeHtml(fault.label)}</span></div>` : "";
   const actions = readOnly ? "" : `<div class="card-actions popup-actions"><button class="btn-action btn-jump" data-map-action="jump" data-device-id="${device.id}">↗ Jump To</button><button class="btn-action btn-follow${followed ? " active" : ""}" data-map-action="follow" data-device-id="${device.id}">● ${followed ? "Following" : "Follow"}</button><button class="btn-action btn-trail${trailVisible ? " active" : ""}" data-map-action="trail" data-device-id="${device.id}">⌁ Trail</button>${isHub ? "" : `<button class="btn-action btn-find" data-map-action="find" data-device-id="${device.id}">♟ Find Alert</button><button class="btn-action btn-cmd" data-map-action="command" data-device-id="${device.id}">⌘ Cmd</button>`}</div>`;
   const details = isHub
     ? `<span class="label">Hub ID</span><span class="value">${Math.abs(device.id)}</span>`
-    : `<span class="label">Device ID</span><span class="value">${device.id}</span><span class="label">Power Profile</span><span class="value">${escapeHtml(device.profile)}</span><span class="label">Dist From Hub</span><span class="value">${distance}</span>`;
+    : `<span class="label">Device ID</span><span class="value">${device.id}</span><span class="label">${offline ? "Last reported profile" : "Power Profile"}</span><span class="value">${escapeHtml(device.profile)}</span><span class="label">${offline ? "Last known distance" : "Dist From Hub"}</span><span class="value">${distance}</span>`;
 
-  return `<div class="popup-content device-card map-device-card expanded"><div class="card-summary map-popup-summary">${popupAvatarHtml(avatar)}<div class="card-identity"><div class="card-name-row"><span class="card-name">${name}</span><span class="card-status ${status.css}">${status.emoji} ${status.label}</span><span class="card-profile ${profile.css}">${profile.label}</span></div>${faultHtml}<div class="card-indicators"><span class="card-indicator-group">${batteryIndicatorHtml(isHub ? null : device.batt, device.batteryPercent)}</span><span class="card-indicator-group">${signalIndicatorHtml(device, isHub)}</span>${isHub ? "" : `<span class="collar-awake" title="Receive window state is not retained in the map card">💤</span>`}</div><div class="card-indicators card-indicators-row3">${isHub ? "" : homeDistanceHtml(distance)}${lastSeenHtml(formatLastSeen(ageSeconds))}</div></div></div><div class="card-detail map-popup-detail"><div class="card-grid"><span class="label">Coordinates</span><span class="value"><a class="card-coords card-coords-link" href="${mapsUrl}" target="_blank" rel="noopener noreferrer" title="Open this location in Google Maps">${coordinates}</a></span>${details}<span class="label">Last seen</span><span class="value">${formatAge(ageSeconds)}</span>${source}</div>${actions}</div></div>`;
+  const summary = offline
+    ? `<div class="card-name-row"><span class="card-name">${name}</span><span class="card-status status-offline">Offline</span></div><div class="card-offline-summary">No reports for ${formatLastSeen(ageSeconds)}</div>`
+    : `<div class="card-name-row"><span class="card-name">${name}</span><span class="card-status ${status.css}">${status.emoji} ${status.label}</span><span class="card-profile ${profile.css}">${profile.label}</span></div>${faultHtml}<div class="card-indicators"><span class="card-indicator-group">${batteryIndicatorHtml(isHub ? null : device.batt, device.batteryPercent)}</span><span class="card-indicator-group">${signalIndicatorHtml(device, isHub)}</span>${isHub ? "" : `<span class="collar-awake" title="Receive window state is not retained in the map card">💤</span>`}</div><div class="card-indicators card-indicators-row3">${isHub ? "" : homeDistanceHtml(distance)}${lastSeenHtml(formatLastSeen(ageSeconds))}</div>`;
+  const offlineNotice = offline ? `<p class="card-offline-notice"><strong>Offline.</strong> These are last-known details from ${formatAge(ageSeconds)} and may no longer be current.</p>` : "";
+  return `<div class="popup-content device-card map-device-card${offline ? " offline" : ""} expanded"><div class="card-summary map-popup-summary">${popupAvatarHtml(avatar)}<div class="card-identity">${summary}</div></div><div class="card-detail map-popup-detail">${offlineNotice}<div class="card-grid"><span class="label">${offline ? "Last known coordinates" : "Coordinates"}</span><span class="value"><a class="card-coords card-coords-link" href="${mapsUrl}" target="_blank" rel="noopener noreferrer" title="Open this location in Google Maps">${coordinates}</a></span>${details}<span class="label">Last report</span><span class="value">${formatAge(ageSeconds)}</span>${source}</div>${actions}</div></div>`;
 }
 
 function popupStatus(device: TelemetryDevice) {
@@ -679,9 +687,9 @@ function avatarHtml(avatar: DeviceAvatar, className: string) {
   return `<img class="${className} avatar-emoji-image" src="${emojiImageUrl(avatar.emoji)}" alt="${escapeHtml(avatar.emoji)}">`;
 }
 
-function markerElement(avatar: DeviceAvatar, markerColor: string, status: TelemetryDevice["status"]) {
+function markerElement(avatar: DeviceAvatar, markerColor: string, status: TelemetryDevice["status"], offline: boolean) {
   const pin = document.createElement("div");
-  pin.className = `marker-pin bp-marker status-${status.toLowerCase()}`;
+  pin.className = `marker-pin bp-marker status-${status.toLowerCase()}${offline ? " marker-offline" : ""}`;
   pin.style.setProperty("--marker-color", markerColor);
 
   const face = document.createElement("div");

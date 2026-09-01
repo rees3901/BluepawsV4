@@ -234,6 +234,44 @@ body.panel-open .hamburger-btn {
     opacity: 0.5;
 }
 
+.device-card.offline {
+    border-color: color-mix(in srgb, var(--text-dim) 55%, var(--border));
+    background: color-mix(in srgb, var(--bg-card) 82%, #7b8490);
+}
+
+.device-card.offline .card-avatar,
+.marker-offline .marker-pin-face {
+    filter: grayscale(1) saturate(0);
+    opacity: 0.52;
+}
+
+.device-card.offline .card-name {
+    color: var(--text-secondary);
+}
+
+.card-offline-summary {
+    margin-top: 5px;
+    color: var(--text-dim);
+    font-size: 0.78rem;
+    font-weight: 650;
+}
+
+.card-offline-notice {
+    margin: 10px 0;
+    padding: 8px 10px;
+    border: 1px solid color-mix(in srgb, var(--text-dim) 45%, var(--border));
+    border-radius: 7px;
+    background: color-mix(in srgb, var(--bg-primary) 70%, #7b8490);
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+    line-height: 1.35;
+}
+
+.marker-offline {
+    filter: grayscale(1) saturate(0);
+    opacity: 0.62;
+}
+
 /* ── Compact summary row (always visible) ── */
 .card-summary {
     display: flex;
@@ -520,7 +558,13 @@ body.panel-open .hamburger-btn {
 .card-status.status-error { background: var(--danger); color: #fff; }
 .card-status.status-lost  { background: var(--warning); color: #000; }
 .card-status.status-ok      { background: var(--success); color: #000; }
-.card-status.status-offline { background: #555; color: #ccc; }
+.card-status.status-offline {
+    border: 1px solid #7c8794;
+    background: #4b5563;
+    color: #fff;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+}
 
 /* ── Stopwatch / Last Seen indicator ── */
 .icon-stopwatch {

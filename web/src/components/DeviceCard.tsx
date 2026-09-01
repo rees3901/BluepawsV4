@@ -7,6 +7,7 @@ import { formatMapCoordinates, googleMapsUrl } from "@/lib/mapLocation";
 import type { DeviceAction, DeviceAvatar, TelemetryDevice } from "@/types/telemetry";
 import type { commandMessage } from "@/lib/collarFeedback";
 import { collarFault, type CollarFaultReport } from "@/lib/collarFault";
+import { isCollarOfflineAge } from "@/lib/devicePresence";
 
 const STATUS = {
   home: { emoji: "🏠", label: "Home", css: "status-home" },
@@ -53,6 +54,7 @@ export interface DeviceCardProps {
 export function DeviceCard(props: DeviceCardProps) {
   const { device, avatar, expanded, dragging, dragOver, first, pinned, followed, trailVisible, portableMode, distance, ageSeconds, onExpand, onAction, onDragStart, onDragOver, onDrop, onDragEnd, onPinToggle, onReportLog, onReportExport, onAvatarEdit } = props;
   const isHub = device.entity === "hub";
+  const offline = !isHub && isCollarOfflineAge(ageSeconds);
   const hasGps = !isHub || device.hasGps;
   const status = isHub
     ? { emoji: device.hubMode === "home" ? "🏡" : "📱", label: device.hubMode === "home" ? "Home" : device.hubMode === "portable" ? "Portable" : "Off-Grid", css: device.hubMode === "home" ? "status-home" : "status-out" }
@@ -68,12 +70,12 @@ export function DeviceCard(props: DeviceCardProps) {
     ...(props.reportedFaultReport?.flags === props.reportedFlags ? props.reportedFaultReport : {}),
     flags: props.reportedFlags,
   };
-  const fault = isHub ? null : collarFault(report, device.error !== "None");
+  const fault = isHub || offline ? null : collarFault(report, device.error !== "None");
 
   return (
     <article
       data-device-card-id={device.id}
-      className={`device-card${(isHub ? ageSeconds >= hubContactGrace(device.hubReportingProfile) : ageSeconds > 600) ? " stale" : ""}${expanded ? " expanded" : ""}${dragging ? " dragging" : ""}${dragOver ? " drag-over" : ""}`}
+      className={`device-card${isHub && ageSeconds >= hubContactGrace(device.hubReportingProfile) ? " stale" : ""}${offline ? " offline" : ""}${expanded ? " expanded" : ""}${dragging ? " dragging" : ""}${dragOver ? " drag-over" : ""}`}
       onDragOver={(event) => {
         event.preventDefault();
       }}
@@ -139,11 +141,13 @@ export function DeviceCard(props: DeviceCardProps) {
         <div className="card-identity">
           <div className="card-name-row">
             <span className="card-name">{device.name}</span>
-            <span className={`card-status ${status.css}`}>{status.emoji} {status.label}</span>
-            <span className={`card-profile ${profileClass}`}>{profileLabel}</span>
+            {offline ? <span className="card-status status-offline">Offline</span> : <>
+              <span className={`card-status ${status.css}`}>{status.emoji} {status.label}</span>
+              <span className={`card-profile ${profileClass}`}>{profileLabel}</span>
+            </>}
           </div>
           {fault && <div className="card-fault-row"><span className="error-badge" title={fault.title} aria-label={fault.title}>{fault.label}</span></div>}
-          <div className="card-indicators">
+          {offline ? <div className="card-offline-summary">No reports for {lastSeen}</div> : <><div className="card-indicators">
             <span className="card-indicator-group"><BatteryIndicator millivolts={isHub ? null : device.batt} percent={device.batteryPercent} /></span>
             <span className="card-indicator-group">{isHub ? <><WifiIndicator rssi={device.rssi} contactLost={ageSeconds >= hubContactGrace(device.hubReportingProfile)} /><BluetoothBeaconIndicator advertising={device.bleHome} enabled={props.bluetoothEnabled} disabled={props.bluetoothToggleDisabled} onToggle={props.onBluetoothToggle} /></> : <SignalIndicator rssi={device.rssi} snr={device.snr} ingestPath={device.ingestPath} />}</span>
             {!isHub && <span className="collar-awake" title={(props.awakeSeconds ?? 0) > 0 ? "Fresh packet received — expected ten-second command receive window, not guaranteed delivery" : "Receive window ended — collar probably sleeping; sleep is not directly confirmed"} aria-label={(props.awakeSeconds ?? 0) > 0 ? `Collar recently heard; ${props.awakeSeconds} seconds remaining` : "Collar probably sleeping"}>{(props.awakeSeconds ?? 0) > 0 ? "💡" : "💤"}</span>}
@@ -152,7 +156,7 @@ export function DeviceCard(props: DeviceCardProps) {
           <div className="card-indicators card-indicators-row3">
             {!isHub && <HomeDistance>{distance}</HomeDistance>}
             <LastSeen>{lastSeen}</LastSeen>
-          </div>
+          </div></>}
         </div>
         <span className="card-chevron">{expanded ? "▲" : "▼"}</span>
       </div>
@@ -160,18 +164,19 @@ export function DeviceCard(props: DeviceCardProps) {
       <div className="card-detail-reveal" aria-hidden={!expanded} inert={!expanded}>
         <div className="card-detail-reveal-inner">
           <div className="card-detail">
+            {offline && <p className="card-offline-notice"><strong>Offline.</strong> These are last-known details from {formatAge(ageSeconds)} and may no longer be current.</p>}
             <div className="card-grid">
-              <span className="label">Coordinates</span>
+              <span className="label">{offline ? "Last known coordinates" : "Coordinates"}</span>
               <span className="value">
                 {hasGps ? <a className="card-coords card-coords-link" href={googleMapsUrl(device.lat, device.lon)} target="_blank" rel="noopener noreferrer">
                   {formatMapCoordinates(device.lat, device.lon)}
                 </a> : "Waiting for GPS fix"}
               </span>
               {!isHub && <><span className="label">Device ID</span><span className="value">{device.id}</span>
-              <span className="label">Power Profile</span><span className="value">{device.profile}</span>
-              <span className="label">Dist From Hub</span><span className="value">{distance}</span></>}
+              <span className="label">{offline ? "Last reported profile" : "Power Profile"}</span><span className="value">{device.profile}</span>
+              <span className="label">{offline ? "Last known distance" : "Dist From Hub"}</span><span className="value">{distance}</span></>}
               {isHub && props.hubDetails}
-              <span className="label">Last seen</span><span className="value">{formatAge(ageSeconds)}</span>
+              <span className="label">Last report</span><span className="value">{formatAge(ageSeconds)}</span>
             </div>
             <ActionButtons followed={followed} trailVisible={trailVisible} onAction={onAction} collarControls={!isHub} hasGps={hasGps} extra={props.hubActions} />
             {!isHub && props.commandFeedback && <div role="status" className={`command-feedback ${props.commandFeedback.pending ? "pending" : props.commandFeedback.status}`}>{props.commandFeedback.text}</div>}
