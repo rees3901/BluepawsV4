@@ -7,6 +7,7 @@ interface TourStep {
   title: string;
   description: string;
   items?: string[];
+  legend?: boolean;
 }
 
 const TOUR_STEPS: TourStep[] = [
@@ -31,6 +32,12 @@ const TOUR_STEPS: TourStep[] = [
     ],
   },
   {
+    selector: ".device-card:first-of-type .card-indicators",
+    title: "Understand the status symbols",
+    description: "This key explains the compact symbols used across pet tiles and marker popups.",
+    legend: true,
+  },
+  {
     selector: ".device-card:first-of-type .card-actions",
     title: "Use the pet controls",
     description: "The expanded tile groups the actions you are most likely to need.",
@@ -41,12 +48,27 @@ const TOUR_STEPS: TourStep[] = [
     ],
   },
   {
-    selector: ".bp-marker",
-    title: "Open a map marker",
-    description: "The avatar and pin colour match the pet's side-panel tile, while the pointed tip marks its exact coordinate. Select a pin to see current signal, battery, profile, and the same quick actions.",
+    selector: ".device-marker-popup",
+    title: "Use a pet marker",
+    description: "The tutorial has opened this marker so you can see its complete popup. Its avatar and pin colour match the side-panel tile, and its tip marks the exact coordinate.",
+    items: [
+      "The popup repeats current battery, signal, profile, coordinates and last-report age.",
+      "Jump To, Follow and Trail are available here as well as on the pet tile.",
+      "Find Alert and Cmd remain owner controls and are removed from Search Party read-only mode.",
+    ],
   },
   {
-    selector: ".leaflet-control-layers",
+    selector: ".leaflet-top.leaflet-left",
+    title: "Use the map tools",
+    description: "The left-side map tools provide quick navigation and field utilities.",
+    items: [
+      "Home centres on the Home Hub; Fit brings every located marker into view.",
+      "Trails shows or hides all breadcrumbs; the ruler measures a route or straight-line distance.",
+      "Zoom controls sit at the lower left, while the coordinate tab and scale sit at the lower right.",
+    ],
+  },
+  {
+    selector: "[data-tour='map-layers']",
     title: "Choose the best map view",
     description: "Use Layers to switch between street, satellite, and topographic maps. Right-click the map—or long-press on mobile—to open location tools; the coordinates are copied as the menu opens.",
   },
@@ -179,6 +201,7 @@ export const GuidedTour = memo(function GuidedTour({ onFinish, onSkip, onStepCha
         <span className="tutorial-progress">Step {stepIndex + 1} of {TOUR_STEPS.length}</span>
         <h2 id="tutorial-title">{step.title}</h2>
         <p id="tutorial-description">{step.description}</p>
+        {step.legend && <TutorialIconLegend />}
         {step.items && <ul>{step.items.map((item) => <li key={item}>{item}</li>)}</ul>}
         <div className="tutorial-actions">
           <button className="tutorial-skip-text" type="button" onClick={onSkip}>Skip tutorial</button>
@@ -193,6 +216,23 @@ export const GuidedTour = memo(function GuidedTour({ onFinish, onSkip, onStepCha
     </div>
   );
 });
+
+function TutorialIconLegend() {
+  const entries = [
+    ["🔋", "Battery", "Remaining collar charge or reported millivolts"],
+    ["▂▄▆█", "Signal bars", "Quality of the most recently reported radio link"],
+    ["RF · 4G · Wi-Fi", "Ingest path", "How the last update reached Bluepaws"],
+    ["⌂", "Home distance", "Distance from the collar's assigned Home Hub fix"],
+    ["⏱", "Last seen", "Age of the newest accepted report"],
+    ["💡 / 💤", "Receive window", "Collar is briefly awake for commands, or sleeping"],
+  ] as const;
+  return <div className="tutorial-icon-legend" aria-label="Bluepaws symbol legend">
+    {entries.map(([icon, label, meaning]) => <div className="tutorial-legend-item" key={label}>
+      <span className="tutorial-legend-icon" aria-hidden="true">{icon}</span>
+      <span><strong>{label}</strong><small>{meaning}</small></span>
+    </div>)}
+  </div>;
+}
 
 function spotlightStyle(layout: TargetLayout): CSSProperties {
   const padding = 7;

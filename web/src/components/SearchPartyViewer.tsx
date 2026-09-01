@@ -30,10 +30,13 @@ const STATUS = {
 interface SearchPartyViewerProps {
   token: string;
   initialSnapshot: SearchPartySnapshot;
+  previewMode?: boolean;
+  onExitPreview?: () => void;
 }
 
-export function SearchPartyViewer({ token, initialSnapshot }: SearchPartyViewerProps) {
-  const [snapshot, setSnapshot] = useState(initialSnapshot);
+export function SearchPartyViewer({ token, initialSnapshot, previewMode = false, onExitPreview }: SearchPartyViewerProps) {
+  const [remoteSnapshot, setRemoteSnapshot] = useState(initialSnapshot);
+  const snapshot = previewMode ? initialSnapshot : remoteSnapshot;
   const [lastRefresh, setLastRefresh] = useState<Date | null>(() => new Date());
   const [now, setNow] = useState(() => Date.now());
   const [refreshError, setRefreshError] = useState<string | null>(null);
@@ -51,7 +54,7 @@ export function SearchPartyViewer({ token, initialSnapshot }: SearchPartyViewerP
         headers: { accept: "application/json" },
       });
       const next = await response.json() as SearchPartySnapshot;
-      setSnapshot(next);
+      setRemoteSnapshot(next);
       setNow(Date.now());
       setLastRefresh(new Date());
       setRefreshError(response.ok ? null : next.error ?? "The search-party link is no longer available.");
@@ -61,9 +64,10 @@ export function SearchPartyViewer({ token, initialSnapshot }: SearchPartyViewerP
   }, [token]);
 
   useEffect(() => {
+    if (previewMode) return;
     const timer = window.setInterval(() => { void refresh(); }, REFRESH_INTERVAL_MS);
     return () => window.clearInterval(timer);
-  }, [refresh]);
+  }, [previewMode, refresh]);
 
   useEffect(() => {
     if (snapshot.devices.length === 0) return;
@@ -132,7 +136,7 @@ export function SearchPartyViewer({ token, initialSnapshot }: SearchPartyViewerP
     });
   }, [allTrailsVisible, trailCapableIds]);
 
-  const expiresText = snapshot.expiresAt ? new Date(snapshot.expiresAt).toLocaleString() : "soon";
+  const expiresText = previewMode ? "Local preview" : snapshot.expiresAt ? new Date(snapshot.expiresAt).toLocaleString() : "soon";
   const refreshedText = lastRefresh ? lastRefresh.toLocaleTimeString() : "loading";
 
   if (!snapshot.valid) {
@@ -178,15 +182,19 @@ export function SearchPartyViewer({ token, initialSnapshot }: SearchPartyViewerP
               {darkMode ? "☀" : "☾"}
             </button>
             <span id="statusBanner" className="connected">
-              <span id="statusIcon">●</span><span id="statusText">Read-only</span>
+              <span id="statusIcon">●</span><span id="statusText">{previewMode ? "Preview" : "Read-only"}</span>
             </span>
           </div>
         </div>
+        {previewMode && <div className="search-party-preview-banner">
+          <span>SEARCH PARTY READ-ONLY MODE — OWNER PREVIEW</span>
+          <button type="button" onClick={onExitPreview}>Exit preview</button>
+        </div>}
         <div className="search-party-panel-body">
           <section className="search-party-summary-card">
             <span className="settings-eyebrow">Search party map</span>
             <h1>{snapshot.familyName}</h1>
-            <p>Read-only helper view with pets, breadcrumb trails and Home Hub bearings. Positions refresh every 10 seconds; collar commands and account settings are unavailable.</p>
+            <p>{previewMode ? "This is the same read-only presentation an invited helper receives. No guest link was created." : "Read-only helper view with pets, breadcrumb trails and Home Hub bearings. Positions refresh every 10 seconds; collar commands and account settings are unavailable."}</p>
             <dl className="search-party-meta">
               <div><dt>Expires</dt><dd>{expiresText}</dd></div>
               <div><dt>Last refresh</dt><dd>{refreshedText}</dd></div>

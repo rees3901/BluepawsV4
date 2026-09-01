@@ -45,7 +45,7 @@ export interface TrailPoint {
 }
 
 export interface MapCommand {
-  type: "jump" | "fit";
+  type: "jump" | "fit" | "open";
   deviceId?: number;
   nonce: number;
 }

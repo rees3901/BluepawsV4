@@ -105,6 +105,7 @@ export default function TrackingMap(props: TrackingMapProps) {
     let layerPreviewMap: L.Map | null = null;
     let layerPreviewLayer: L.TileLayer | null = null;
     let layerPreviewUpdateTimer: number | null = null;
+    let layerPreviewInvalidateTimer: number | null = null;
     const layerControl = L.control.layers(baseLayers, undefined, { position: "topright", collapsed: true }).addTo(map);
     const layerControlElement = layerControl.getContainer();
     let layerControlOpen = false;
@@ -124,7 +125,12 @@ export default function TrackingMap(props: TrackingMapProps) {
       layerPreviewLayer = createTileLayer(previewLayerName).addTo(layerPreviewMap);
       layerPreviewMap.setMaxZoom(previewDefinition.maxZoom);
       layerPreviewMap.setView(center, zoom, { animate: false });
-      window.setTimeout(() => layerPreviewMap?.invalidateSize(), 0);
+      if (layerPreviewInvalidateTimer !== null) window.clearTimeout(layerPreviewInvalidateTimer);
+      const previewMap = layerPreviewMap;
+      layerPreviewInvalidateTimer = window.setTimeout(() => {
+        layerPreviewInvalidateTimer = null;
+        if (layerPreviewMap === previewMap) previewMap.invalidateSize();
+      }, 0);
     };
     const scheduleLayerPreviewUpdate = () => {
       if (layerPreviewUpdateTimer !== null) window.clearTimeout(layerPreviewUpdateTimer);
@@ -135,6 +141,7 @@ export default function TrackingMap(props: TrackingMapProps) {
     };
     if (layerControlElement) {
       layerControlElement.classList.add("bp-click-layer-control");
+      layerControlElement.setAttribute("data-tour", "map-layers");
       const toggle = layerControlElement.querySelector<HTMLElement>(".leaflet-control-layers-toggle");
       const previewButton = L.DomUtil.create("button", "bp-layer-preview-toggle", layerControlElement) as HTMLButtonElement;
       previewButton.type = "button";
@@ -396,7 +403,10 @@ export default function TrackingMap(props: TrackingMapProps) {
     return () => {
       mapContainer.removeEventListener("click", handleMapAction);
       if (layerPreviewUpdateTimer !== null) window.clearTimeout(layerPreviewUpdateTimer);
+      if (layerPreviewInvalidateTimer !== null) window.clearTimeout(layerPreviewInvalidateTimer);
       layerPreviewMap?.remove();
+      layerPreviewMap = null;
+      layerPreviewLayer = null;
       markerAnimations.forEach((frameId) => window.cancelAnimationFrame(frameId));
       markerAnimations.clear();
       map.remove();
@@ -412,7 +422,10 @@ export default function TrackingMap(props: TrackingMapProps) {
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    window.setTimeout(() => map.invalidateSize(), 340);
+    const resizeTimer = window.setTimeout(() => {
+      if (mapRef.current === map) map.invalidateSize();
+    }, 340);
+    return () => window.clearTimeout(resizeTimer);
   }, [sidebarOpen]);
 
   useEffect(() => {
@@ -532,6 +545,13 @@ export default function TrackingMap(props: TrackingMapProps) {
       if (marker) {
         map.closePopup();
         map.setView(marker.getLatLng(), Math.max(map.getZoom(), JUMP_TO_ZOOM), { animate: true });
+      }
+    }
+    if (command.type === "open" && command.deviceId !== undefined) {
+      const marker = markersRef.current.get(command.deviceId);
+      if (marker) {
+        map.setView(marker.getLatLng(), Math.max(map.getZoom(), JUMP_TO_ZOOM), { animate: true });
+        marker.openPopup();
       }
     }
   }, [command]);

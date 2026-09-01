@@ -7,6 +7,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { DeviceCard, DownloadIcon, type DeviceCardProps } from "@/components/DeviceCard";
 import { DeviceReportModal } from "@/components/DeviceReportModal";
 import { GuidedTour } from "@/components/GuidedTour";
+import { SearchPartyViewer } from "@/components/SearchPartyViewer";
 import { AccountMenu } from "@/components/AccountMenu";
 import { defaultDeviceAvatar } from "@/lib/defaultDeviceAvatar";
 import { queuePowerProfileCommand } from "@/lib/deviceCommands";
@@ -27,6 +28,7 @@ import { createRealtimeTelemetrySource, loadDeviceTrail } from "@/lib/realtimeTe
 import { createClient } from "@/lib/supabase/client";
 import { getTutorialTelemetrySource } from "@/lib/telemetry";
 import { resolveTutorialStartup } from "@/lib/tutorialMode";
+import type { SearchPartySnapshot } from "@/lib/searchParty";
 import type { FamilyRole } from "@/lib/familySelection";
 import type { DeviceAction, DeviceAvatar, MapCommand, TelemetryConnectionStatus, TelemetryDevice, TrailPoint } from "@/types/telemetry";
 
@@ -48,6 +50,7 @@ const AvatarEditorModal = dynamic(
 const TUTORIAL_MODE_STORAGE_KEY = "bp_tutorial_mode";
 const TUTORIAL_COMPLETE_STORAGE_KEY = "bp_tutorial_complete";
 const TUTORIAL_PROMPT_STORAGE_KEY = "bp_tutorial_prompt_seen";
+const SEARCH_PARTY_PREVIEW_STORAGE_KEY = "bp_search_party_preview";
 const FAMILY_HYDRATION_RETRY_DELAYS_MS = [750, 1_500, 3_000, 6_000, 10_000];
 
 interface SelectedDevice {
@@ -75,6 +78,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
   const [tutorialMode, setTutorialMode] = useState(false);
   const [tutorialOpen, setTutorialOpen] = useState(false);
   const [tutorialPromptOpen, setTutorialPromptOpen] = useState(false);
+  const [searchPartyMode, setSearchPartyMode] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [darkMode, setDarkMode] = useState(true);
   const [expandedIds, setExpandedIds] = useState<number[]>([]);
@@ -184,6 +188,17 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
     (!tutorialMode ? customAvatars[device.id] : undefined) ?? defaultDeviceAvatar(device.id),
   ])), [customAvatars, orderedDevices, tutorialMode]);
   const mapAvatars = useMemo<Record<number, DeviceAvatar>>(() => ({ ...avatars, ...Object.fromEntries(hubs.map(h => [-h.gateway_guid16, hubAvatar(h, hubPhotos[h.gateway_guid16])])) }), [avatars, hubs, hubPhotos]);
+  const searchPartyPreviewSnapshot = useMemo<SearchPartySnapshot>(() => ({
+    valid: true,
+    reason: null,
+    householdId,
+    familyName: familyName ?? "Bluepaws Family",
+    expiresAt: null,
+    devices: mapDevices,
+    avatars: mapAvatars,
+    trailHistory,
+    error: null,
+  }), [familyName, householdId, mapAvatars, mapDevices, trailHistory]);
 
   const replaceCustomAvatars = useCallback((next: Record<number, DeviceAvatar>) => {
     revokeAvatarUrls(customAvatarsRef.current);
@@ -235,6 +250,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
         setTutorialMode(startup.enabled);
         setTutorialOpen(startup.open);
         setTutorialPromptOpen(startup.prompt);
+        setSearchPartyMode(!startup.enabled && localStorage.getItem(SEARCH_PARTY_PREVIEW_STORAGE_KEY) === "true");
       } catch { /* localStorage can be unavailable in privacy modes */ }
       setPreferencesReady(true);
     }, 0);
@@ -337,7 +353,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
     document.body.classList.toggle("panel-open", sidebarOpen);
     document.body.classList.toggle("light", !darkMode);
     try { localStorage.setItem("bp_theme", darkMode ? "dark" : "light"); } catch { /* non-critical preference */ }
-  }, [darkMode, sidebarOpen]);
+  }, [darkMode, searchPartyMode, sidebarOpen]);
 
   useEffect(() => {
     if (!toast) return;
@@ -542,6 +558,12 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
     setTutorialOpen(enabled);
   }, []);
 
+  const handleSearchPartyModeChange = useCallback((enabled: boolean) => {
+    try { localStorage.setItem(SEARCH_PARTY_PREVIEW_STORAGE_KEY, String(enabled)); } catch { /* non-critical preference */ }
+    setSettingsOpen(false);
+    setSearchPartyMode(enabled);
+  }, []);
+
   const dismissTutorialPrompt = useCallback(() => {
     try { localStorage.setItem(TUTORIAL_PROMPT_STORAGE_KEY, "true"); } catch { /* non-critical preference */ }
     setTutorialPromptOpen(false);
@@ -566,8 +588,10 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
 
   const firstTutorialDeviceId = devices[0]?.id;
   const handleTutorialStepChange = useCallback((step: number) => {
-    if (step >= 1 && step <= 3) setSidebarOpen(true);
-    if (step === 3 && firstTutorialDeviceId !== undefined) setExpandedIds((current) => current.includes(firstTutorialDeviceId) ? current : nextExpandedDeviceCards(current, firstTutorialDeviceId));
+    if ((step >= 1 && step <= 4) || step === 8) setSidebarOpen(true);
+    if (step >= 5 && step <= 7) setSidebarOpen(false);
+    if (step === 4 && firstTutorialDeviceId !== undefined) setExpandedIds((current) => current.includes(firstTutorialDeviceId) ? current : nextExpandedDeviceCards(current, firstTutorialDeviceId));
+    if (step === 5 && firstTutorialDeviceId !== undefined) setMapCommand({ type: "open", deviceId: firstTutorialDeviceId, nonce: Date.now() });
   }, [firstTutorialDeviceId]);
   const completeTutorial = useCallback(() => finishTutorial(true), [finishTutorial]);
   const skipTutorial = useCallback(() => finishTutorial(false), [finishTutorial]);
@@ -614,6 +638,10 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
   }, [router]);
   const handleThemeToggle = useCallback(() => setDarkMode((dark) => !dark), []);
 
+  if (searchPartyMode) {
+    return <SearchPartyViewer token="" initialSnapshot={searchPartyPreviewSnapshot} previewMode onExitPreview={() => handleSearchPartyModeChange(false)} />;
+  }
+
   return (
     <>
       <button className="hamburger-btn" title="Toggle sidebar" aria-label="Toggle sidebar" onClick={() => setSidebarOpen((open) => !open)}>
@@ -628,9 +656,15 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
             <span className="panel-brand-mascot" aria-hidden="true" />
           </div>
           <div className="panel-header-btns">
-            <span id="statusBanner" className={statusClass} data-panel-static title={connected && !tutorialMode ? "Live Supabase Realtime connection active" : statusText} aria-label={connected && !tutorialMode ? "Live connection active" : statusText}>
-              <span id="statusIcon">●</span><span id="statusText">{statusText}</span>
-            </span>
+            {tutorialMode && !tutorialOpen ? (
+              <button id="statusBanner" className="tutorial tutorial-exit-ready" type="button" data-panel-static title="Tutorial Mode active — select to return to Live Mode" aria-label="Tutorial Mode active. Return to Live Mode" onClick={() => handleTutorialModeChange(false)}>
+                <span id="statusIcon">●</span><span id="statusText">Tutorial</span>
+              </button>
+            ) : (
+              <span id="statusBanner" className={statusClass} data-panel-static title={connected && !tutorialMode ? "Live Supabase Realtime connection active" : statusText} aria-label={connected && !tutorialMode ? "Live connection active" : statusText}>
+                <span id="statusIcon">●</span><span id="statusText">{statusText}</span>
+              </span>
+            )}
             <AccountMenu email={userEmail} familyName={familyName} familyRole={familyRole} onSignOut={handleSignOut} />
             <button className="ctrl-btn" data-tour="settings" title="Settings" aria-label="Settings" onClick={() => setSettingsOpen(true)}><SettingsIcon /></button>
           </div>
@@ -696,6 +730,8 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
           portableMode={portableMode}
           devices={devices.length}
           tutorialMode={tutorialMode}
+          searchPartyMode={searchPartyMode}
+          searchPartyAvailable={Boolean(householdId) && !tutorialMode}
           connected={connected}
           liveTelemetryError={liveTelemetryError}
           connectionDetail={connectionDetail}
@@ -704,6 +740,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
           familyRole={familyRole}
           darkMode={darkMode}
           onTutorialModeChange={handleTutorialModeChange}
+          onSearchPartyModeChange={handleSearchPartyModeChange}
           onReplayTutorial={replayTutorial}
           onModeChange={setPortableMode}
           onThemeToggle={handleThemeToggle}
@@ -761,6 +798,8 @@ interface SettingsModalProps {
   portableMode: boolean;
   devices: number;
   tutorialMode: boolean;
+  searchPartyMode: boolean;
+  searchPartyAvailable: boolean;
   connected: boolean;
   liveTelemetryError: string | null;
   connectionDetail: string | null;
@@ -769,6 +808,7 @@ interface SettingsModalProps {
   familyRole: FamilyRole | null;
   darkMode: boolean;
   onTutorialModeChange: (enabled: boolean) => void;
+  onSearchPartyModeChange: (enabled: boolean) => void;
   onReplayTutorial: () => void;
   onModeChange: (portable: boolean) => void;
   onThemeToggle: () => void;
@@ -776,7 +816,7 @@ interface SettingsModalProps {
   onClose: () => void;
 }
 
-function SettingsModal({ logs, portableMode, devices, tutorialMode, connected, liveTelemetryError, connectionDetail, userEmail, familyName, familyRole, darkMode, onTutorialModeChange, onReplayTutorial, onModeChange, onThemeToggle, onSignOut, onClose }: SettingsModalProps) {
+function SettingsModal({ logs, portableMode, devices, tutorialMode, searchPartyMode, searchPartyAvailable, connected, liveTelemetryError, connectionDetail, userEmail, familyName, familyRole, darkMode, onTutorialModeChange, onSearchPartyModeChange, onReplayTutorial, onModeChange, onThemeToggle, onSignOut, onClose }: SettingsModalProps) {
   const [consoleOpen, setConsoleOpen] = useState(false);
   return (
     <div className="modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
@@ -812,6 +852,11 @@ function SettingsModal({ logs, portableMode, devices, tutorialMode, connected, l
           <Toggle label="Tutorial Mode" checked={tutorialMode} onChange={onTutorialModeChange} />
           <p className="form-hint">Off by default. Loads simulated animals and a guided tour without mixing in live data.</p>
           {tutorialMode && <button className="tutorial-replay-btn" type="button" onClick={onReplayTutorial}>Replay tutorial</button>}
+        </div>
+        <div className="search-party-mode-setting">
+          <Toggle label="Search Party Mode" checked={searchPartyMode} disabled={!searchPartyAvailable} onChange={onSearchPartyModeChange} />
+          <p className="form-hint">Owner-only local preview of the invited helper&apos;s read-only map. It creates no link and sends no email.</p>
+          {!searchPartyAvailable && <p className="form-hint search-party-mode-unavailable">Return to Live Mode and load a Family before starting this preview.</p>}
         </div>
         <div className="modal-actions"><button className="btn-primary" disabled>Save &amp; Restart</button><button className="btn-secondary" onClick={onClose}>Close</button></div>
       </div>
@@ -868,8 +913,8 @@ function FindModal({ device, onClose, onSend }: { device: SelectedDevice; onClos
   );
 }
 
-function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }) {
-  return <div className="form-group"><div className="toggle-row"><label>{label}</label><label className="toggle-switch"><input type="checkbox" aria-label={label} checked={checked} onChange={(event) => onChange(event.target.checked)} /><span className="toggle-slider" /></label></div></div>;
+function Toggle({ label, checked, disabled = false, onChange }: { label: string; checked: boolean; disabled?: boolean; onChange: (checked: boolean) => void }) {
+  return <div className="form-group"><div className="toggle-row"><label>{label}</label><label className={`toggle-switch${disabled ? " disabled" : ""}`}><input type="checkbox" aria-label={label} checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} /><span className="toggle-slider" /></label></div></div>;
 }
 
 function MoonIcon() { return <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3a9 9 0 1 0 9 9c0-.46-.04-.92-.1-1.36a5.389 5.389 0 0 1-4.4 2.26 5.403 5.403 0 0 1-3.14-9.8c-.44-.06-.9-.1-1.36-.1z" /></svg>; }
