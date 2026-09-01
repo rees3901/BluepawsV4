@@ -367,8 +367,12 @@ button#statusBanner {
 }
 
 #statusBanner.tutorial-exit-ready {
+  padding: 2px 5px;
   border-color: #f59e0b;
   animation: tutorial-exit-halo 1.8s ease-in-out infinite;
+  font-size: 0.56rem;
+  line-height: 1.05;
+  white-space: nowrap;
 }
 
 @keyframes tutorial-exit-halo {
@@ -462,9 +466,10 @@ button#statusBanner {
 
 .panel-brand {
   display: flex;
+  flex: 1 1 210px;
   min-width: 0;
   align-items: center;
-  gap: 3px;
+  gap: 4px;
 }
 
 .panel-brand-mark,
@@ -477,21 +482,32 @@ button#statusBanner {
 }
 
 .panel-brand-mark {
-  width: 37px;
-  height: 37px;
-  background-image: url("/brand/favicon.ico");
+  width: 48px;
+  height: 48px;
+  background-image: url("/icon.png");
   image-rendering: auto;
 }
 
 .panel-brand-mascot {
-  width: 56px;
-  height: 56px;
+  width: 73px;
+  height: 73px;
   margin-left: 0;
   background-image: url("/brand/main-logo-podge-carrie.avif");
 }
 
 .panel-brand .panel-title {
+  font-size: 1.02rem;
   white-space: nowrap;
+}
+
+#panelHeader {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.panel-header-btns {
+  flex: 0 0 auto;
+  margin-left: auto;
 }
 
 @media (max-width: 768px) {
