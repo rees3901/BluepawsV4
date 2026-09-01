@@ -588,10 +588,11 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
 
   const firstTutorialDeviceId = devices[0]?.id;
   const handleTutorialStepChange = useCallback((step: number) => {
-    if ((step >= 1 && step <= 4) || step === 8) setSidebarOpen(true);
-    if (step >= 5 && step <= 7) setSidebarOpen(false);
+    if ((step >= 1 && step <= 4) || step === 9) setSidebarOpen(true);
+    if (step >= 5 && step <= 8) setSidebarOpen(false);
     if (step === 4 && firstTutorialDeviceId !== undefined) setExpandedIds((current) => current.includes(firstTutorialDeviceId) ? current : nextExpandedDeviceCards(current, firstTutorialDeviceId));
-    if (step === 5 && firstTutorialDeviceId !== undefined) setMapCommand({ type: "open", deviceId: firstTutorialDeviceId, nonce: Date.now() });
+    if ((step === 5 || step === 7) && firstTutorialDeviceId !== undefined) setMapCommand({ type: "jump", deviceId: firstTutorialDeviceId, nonce: Date.now() });
+    if (step === 6 && firstTutorialDeviceId !== undefined) setMapCommand({ type: "open", deviceId: firstTutorialDeviceId, nonce: Date.now() });
   }, [firstTutorialDeviceId]);
   const completeTutorial = useCallback(() => finishTutorial(true), [finishTutorial]);
   const skipTutorial = useCallback(() => finishTutorial(false), [finishTutorial]);
@@ -658,7 +659,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
           <div className="panel-header-btns">
             {tutorialMode && !tutorialOpen ? (
               <button id="statusBanner" className="tutorial tutorial-exit-ready" type="button" data-panel-static title="Tutorial Mode active — select to return to Live Mode" aria-label="Tutorial Mode active. Return to Live Mode" onClick={() => handleTutorialModeChange(false)}>
-                <span id="statusIcon">●</span><span id="statusText">Tutorial</span>
+                <span id="statusIcon">●</span><span id="statusText">Exit Tutorial</span>
               </button>
             ) : (
               <span id="statusBanner" className={statusClass} data-panel-static title={connected && !tutorialMode ? "Live Supabase Realtime connection active" : statusText} aria-label={connected && !tutorialMode ? "Live connection active" : statusText}>

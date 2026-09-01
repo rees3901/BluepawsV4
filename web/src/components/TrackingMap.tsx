@@ -186,6 +186,7 @@ export default function TrackingMap(props: TrackingMapProps) {
         button.type = "button";
         button.title = "Center on Home Hub";
         button.setAttribute("aria-label", "Center map on Home Hub");
+        button.setAttribute("data-tour", "map-home");
         button.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="5"/><path d="M8 1v3m0 8v3M1 8h3m8 0h3"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/></svg>';
         L.DomEvent.disableClickPropagation(button);
         L.DomEvent.on(button, "click", () => {
@@ -209,6 +210,7 @@ export default function TrackingMap(props: TrackingMapProps) {
         button.type = "button";
         button.title = "Fit all markers into view";
         button.setAttribute("aria-label", "Fit all markers into view");
+        button.setAttribute("data-tour", "map-fit");
         button.innerHTML = '<img class="fit-markers-icon" src="/icons/location-fit-markers.png" alt="" aria-hidden="true">';
         L.DomEvent.disableClickPropagation(button);
         L.DomEvent.on(button, "click", () => fitMarkers(map, markersRef.current));
@@ -229,6 +231,7 @@ export default function TrackingMap(props: TrackingMapProps) {
         button.classList.toggle("active", allTrailsVisibleRef.current);
         button.setAttribute("aria-label", label);
         button.setAttribute("aria-pressed", String(allTrailsVisibleRef.current));
+        button.setAttribute("data-tour", "map-trails");
         button.innerHTML = '<span class="global-trails-icon" aria-hidden="true"></span>';
         L.DomEvent.disableClickPropagation(button);
         L.DomEvent.on(button, "click", () => allTrailsToggleRef.current?.());
@@ -279,6 +282,8 @@ export default function TrackingMap(props: TrackingMapProps) {
         measureButton = button;
         button.type = "button";
         button.title = "Measure distance (click points on map)";
+        button.setAttribute("aria-label", "Measure distance on the map");
+        button.setAttribute("data-tour", "map-measure");
         button.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="1" y="7" width="22" height="10" rx="1"/><path d="M5 7v5M9 7v3M13 7v5M17 7v3M21 7v5"/></svg>';
         L.DomEvent.disableClickPropagation(button);
         L.DomEvent.on(button, "click", () => setMeasuring(!measuring));
