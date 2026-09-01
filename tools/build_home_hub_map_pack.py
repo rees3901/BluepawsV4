@@ -93,7 +93,7 @@ GREAT_BRITAIN_OVERVIEW_PASSES = (
 # Zoom 18 would quadruple the z17 tile count and FAT32 allocation cost without
 # adding meaningful detail to the source vector datasets.
 REGIONAL_100KM_PASSES = (
-    RenderPass("Great Britain overview", (-8.82, 49.79, 1.92, 60.95), 5, 9),
+    RenderPass("Great Britain overview", (-8.82, 49.79, 1.92, 60.95), 5, 11),
     RenderPass("Gloucester 100 km region", (-2.97, 51.414, -1.51, 52.314), 10, 17),
 )
 

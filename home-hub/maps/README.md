@@ -70,9 +70,10 @@ overlap is intentional and the county render wins when the two trees are
 merged.
 
 The expanded `regional-100km` profile is the current hardware pack. It covers
-all Great Britain at z5-9, then a roughly 100 km-wide rectangle centred on
-Gloucester (`-2.97,51.414,-1.51,52.314`) at z10-17. It contains 379,187 XYZ
-tiles per map style. Zoom 18 is intentionally omitted: it would add about
+all Great Britain at z5-11, then a roughly 100 km-wide rectangle centred on
+Gloucester (`-2.97,51.414,-1.51,52.314`) at z10-17. It contains 388,005 XYZ
+tiles per map style (the previous z5-9 build contained 379,187). Zoom 18 is
+intentionally omitted: it would add about
 1.1 million files per style, quadruple the detailed layer's FAT32 allocation
 cost, and reveal little additional detail in these vector sources.
 
@@ -136,7 +137,7 @@ After visual approval, change the output directory and use
 `--profile gloucestershire` for the larger master pack. The city profile covers
 Gloucester and its immediate approaches at z10-17. The county profile renders
 county-wide z10-16 plus z17 around the Gloucester/Cheltenham corridor.
-Use `--profile regional-100km` for the current GB z5-9 plus Gloucester-region
+Use `--profile regional-100km` for the current GB z5-11 plus Gloucester-region
 z10-17 pack. Install it as `layers/osm-road-100km`.
 OpenStreetMap attribution must stay in the manifest and the eventual map
 information panel.
