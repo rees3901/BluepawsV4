@@ -761,6 +761,9 @@ body.panel-open .hamburger-btn {
     padding: 24px;
     width: 90%;
     max-width: 420px;
+    max-height: calc(100dvh - 32px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
 }
 
