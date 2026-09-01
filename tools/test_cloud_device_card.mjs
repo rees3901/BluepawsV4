@@ -8,6 +8,7 @@ import * as hubControlFeedback from '../web/src/lib/hubControlFeedback.ts';
 import * as hubReporting from '../web/src/lib/hubReporting.ts';
 import * as collarFault from '../web/src/lib/collarFault.ts';
 import * as collarFeedback from '../web/src/lib/collarFeedback.ts';
+import * as devicePresence from '../web/src/lib/devicePresence.ts';
 import {buildDiagnosticPacket,defaultDeviceSettings,generateDeviceCredential} from './tlv-web-console/lib/tlv-core.mjs';
 import {parseTlvPacket} from '../supabase/functions/ingest-position/tlv.ts';
 const require = createRequire(new URL('../web/package.json',import.meta.url));
@@ -22,6 +23,7 @@ const context=vm.createContext({exports:{},require(name){
   if(name==='@/lib/hubControlFeedback')return hubControlFeedback;
   if(name==='@/lib/hubReporting')return hubReporting;
   if(name==='@/lib/collarFault')return collarFault;
+  if(name==='@/lib/devicePresence')return devicePresence;
   if(name==='@/lib/emoji')return {emojiImageUrl:()=>'/favicon.svg'};
   if(name==='@/lib/mapLocation')return {googleMapsUrl:()=> '#',formatMapCoordinates:()=> '51.9, -2.2'};
   return require(name);
@@ -42,6 +44,15 @@ test('fresh presence flags clear old position faults; real faults remain visible
   assert.doesNotMatch(render({awakeSeconds:0}),/💡/);
   assert.match(render({awakeSeconds:0}),/💤/);
   assert.doesNotMatch(render({commandFeedback:null}),/role="status"/);
+});
+
+test('four hours without a report replaces stale telemetry with an explicit offline state',()=>{
+  const html=render({ageSeconds:4*60*60,awakeSeconds:0,reportedFlags:0xc4});
+  assert.match(html,/status-offline">Offline/);
+  assert.match(html,/No reports for 4h 0m/);
+  assert.match(html,/Last known coordinates/);
+  assert.match(html,/Last reported profile/);
+  assert.doesNotMatch(html,/💤|card-fault-row|status-lost/);
 });
 
 test('cloud fault badge stays compact and uses only diagnostics belonging to the current report',()=>{

@@ -30,3 +30,9 @@ entrypoint = "./functions/hub-snapshot/index.ts"
 # Specifies static files to be bundled with the function. Supports glob patterns.
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/hub-snapshot/*.html" ]
+
+[functions.search-party-avatar]
+enabled = true
+verify_jwt = false
+import_map = "./functions/search-party-avatar/deno.json"
+entrypoint = "./functions/search-party-avatar/index.ts"
