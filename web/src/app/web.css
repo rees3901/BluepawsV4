@@ -629,6 +629,21 @@ button.bluetooth-beacon:disabled {
   line-height: 1;
 }
 
+.collar-awake.awake {
+  opacity: 1;
+  filter: none;
+}
+
+.collar-awake.sleeping {
+  opacity: 0.58;
+  filter: grayscale(1) saturate(0) brightness(0.76);
+}
+
+body.light .collar-awake.sleeping {
+  opacity: 0.52;
+  filter: grayscale(1) saturate(0) brightness(0.68);
+}
+
 .device-card.stale .collar-awake {
   opacity: 0.32;
   filter: grayscale(1) saturate(0.15);

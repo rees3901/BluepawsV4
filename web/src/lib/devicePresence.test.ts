@@ -1,7 +1,23 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { COLLAR_OFFLINE_AFTER_SECONDS, isCollarOffline, isCollarOfflineAge } from "./devicePresence.ts";
+import {
+  COLLAR_OFFLINE_AFTER_SECONDS,
+  COLLAR_STALE_AFTER_SECONDS,
+  collarCardFreshness,
+  isCollarOffline,
+  isCollarOfflineAge,
+} from "./devicePresence.ts";
 import type { TelemetryDevice } from "../types/telemetry.ts";
+
+test("graduates collar cards from active to sleeping, stale and offline", () => {
+  assert.equal(collarCardFreshness(0, true), "active");
+  assert.equal(collarCardFreshness(0, false), "sleeping");
+  assert.equal(collarCardFreshness(COLLAR_STALE_AFTER_SECONDS - 1, false), "sleeping");
+  assert.equal(collarCardFreshness(COLLAR_STALE_AFTER_SECONDS - 1, true), "active");
+  assert.equal(collarCardFreshness(COLLAR_STALE_AFTER_SECONDS, true), "stale");
+  assert.equal(collarCardFreshness(COLLAR_OFFLINE_AFTER_SECONDS - 1, false), "stale");
+  assert.equal(collarCardFreshness(COLLAR_OFFLINE_AFTER_SECONDS, false), "offline");
+});
 
 test("keeps a collar online throughout the four-hour grace period", () => {
   assert.equal(isCollarOfflineAge(COLLAR_OFFLINE_AFTER_SECONDS - 1), false);

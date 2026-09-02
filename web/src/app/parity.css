@@ -215,7 +215,7 @@ body.panel-open .hamburger-btn {
     border-radius: var(--radius);
     padding: 0;
     cursor: pointer;
-    transition: border-color 0.2s, transform 0.1s, box-shadow 0.2s;
+    transition: border-color 0.2s, transform 0.1s, box-shadow 0.2s, opacity 0.2s, filter 0.2s, background 0.2s;
     position: relative;
     overflow: hidden;
 }
@@ -230,13 +230,35 @@ body.panel-open .hamburger-btn {
     border-color: var(--accent);
 }
 
+.device-card.collar-sleeping {
+    opacity: 0.86;
+    filter: grayscale(0.08) saturate(0.72) brightness(0.94);
+    background: color-mix(in srgb, var(--bg-card) 94%, #090f16);
+}
+
 .device-card.stale {
-    opacity: 0.5;
+    opacity: 0.56;
+    filter: grayscale(0.45) saturate(0.32) brightness(0.86);
 }
 
 .device-card.offline {
+    opacity: 0.48;
+    filter: grayscale(0.9) saturate(0.08) brightness(0.78);
     border-color: color-mix(in srgb, var(--text-dim) 55%, var(--border));
     background: color-mix(in srgb, var(--bg-card) 82%, #7b8490);
+}
+
+body.light .device-card.collar-sleeping {
+    filter: grayscale(0.08) saturate(0.72) brightness(0.97);
+    background: color-mix(in srgb, var(--bg-card) 95%, #7b8490);
+}
+
+body.light .device-card.stale {
+    filter: grayscale(0.45) saturate(0.32) brightness(0.92);
+}
+
+body.light .device-card.offline {
+    filter: grayscale(0.9) saturate(0.08) brightness(0.88);
 }
 
 .device-card.offline .card-avatar,

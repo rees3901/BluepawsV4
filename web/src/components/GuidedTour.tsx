@@ -274,7 +274,7 @@ function TutorialIconLegend() {
     { symbol: <span className="tutorial-transport-symbols"><TransportBadge ingestPath="lora_hub" /><TransportBadge ingestPath="cellular_direct" /><WifiTransportBadge /></span>, label: "Ingest path", meaning: "RF, 4G or Wi-Fi tells you how that latest update made its way into Bluepaws." },
     { symbol: <HomeDistance>352 m</HomeDistance>, label: "Home distance", meaning: "Shows the pet's approximate distance from its assigned Home Hub position." },
     { symbol: <LastSeen>2m</LastSeen>, label: "Last seen", meaning: "Tells you how much time has passed since Bluepaws accepted the newest report." },
-    { symbol: <span className="tutorial-receive-symbols"><span className="collar-awake" title="Command receive window">💡</span><span className="collar-awake" title="Collar probably sleeping">💤</span></span>, label: "Receive window", meaning: "The bulb means a short command window may be open; the sleeping symbol means it has probably closed." },
+    { symbol: <span className="tutorial-receive-symbols"><span className="collar-awake awake" title="Command receive window">💡</span><span className="collar-awake sleeping" title="Collar probably sleeping">💤</span></span>, label: "Receive window", meaning: "The bulb means a short command window may be open; the grey sleeping symbol means it has probably closed." },
   ];
   return <div className="tutorial-icon-legend" aria-label="Bluepaws symbol legend">
     {entries.map(({ symbol, label, meaning }) => <div className="tutorial-legend-item" key={label}>
