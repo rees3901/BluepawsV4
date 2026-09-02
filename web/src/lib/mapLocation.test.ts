@@ -17,6 +17,14 @@ test("home distance uses Gloucester hub coordinates, including later hub movemen
   assert.equal(formatHomeDistance(156000), "156.0 km");
 });
 
+test("home distance switches to kilometres at 1 km and rounds down to one decimal place", () => {
+  assert.equal(formatHomeDistance(999), "999 m");
+  assert.equal(formatHomeDistance(1000), "1.0 km");
+  assert.equal(formatHomeDistance(1200), "1.2 km");
+  assert.equal(formatHomeDistance(1299), "1.2 km");
+  assert.equal(formatHomeDistance(1999), "1.9 km");
+});
+
 test("missing, invalid or non-GPS origins never become a fabricated distance", () => {
   const device = { lat: 0, lon: 0, hasGps: true,
     homeHub: { lat: 0, lon: 0, fixAt: "2026-08-28T20:30:59Z" } };

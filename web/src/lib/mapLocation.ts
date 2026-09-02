@@ -30,5 +30,7 @@ function coordinatesValid(lat: number | null, lon: number | null) {
 
 export function formatHomeDistance(metres: number | null) {
   if (metres === null || !Number.isFinite(metres) || metres < 0) return 'Unknown';
-  return metres >= 2000 ? `${(metres / 1000).toFixed(1)} km` : `${Math.round(metres)} m`;
+  if (metres < 1000) return `${Math.round(metres)} m`;
+  const kilometres = Math.floor(metres / 100) / 10;
+  return `${kilometres.toFixed(1)} km`;
 }
