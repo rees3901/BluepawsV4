@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { BatteryIndicator, HomeDistance, LastSeen, SignalIndicator } from "@/components/Indicators";
 import { defaultDeviceAvatar } from "@/lib/defaultDeviceAvatar";
 import { emojiImageUrl } from "@/lib/emoji";
-import { isCollarOfflineAge } from "@/lib/devicePresence";
+import { COLLAR_RECEIVE_WINDOW_SECONDS, collarCardFreshness } from "@/lib/devicePresence";
 import { followedDeviceAfterAction } from "@/lib/followState";
 import { formatMapCoordinates, googleMapsUrl } from "@/lib/mapLocation";
 import type { SearchPartySnapshot } from "@/lib/searchParty";
@@ -226,7 +226,9 @@ function SearchPartyDeviceRow({ device, avatar, now, followed, trailVisible, onA
   const mapsUrl = googleMapsUrl(device.lat, device.lon);
   const ageSeconds = Math.max(0, Math.floor((now - device.lastUpdate) / 1000));
   const isHub = device.entity === "hub";
-  const offline = !isHub && isCollarOfflineAge(ageSeconds);
+  const freshness = isHub ? null : collarCardFreshness(ageSeconds, ageSeconds < COLLAR_RECEIVE_WINDOW_SECONDS);
+  const offline = freshness === "offline";
+  const freshnessClass = freshness === "sleeping" ? " collar-sleeping" : freshness === "stale" ? " stale" : "";
   const status = STATUS[device.status.toLowerCase() as keyof typeof STATUS] ?? STATUS.error;
   const profileLower = device.profile.toLowerCase();
   const profileClass = `profile-${profileLower.replace("save", "").replaceAll(" ", "-")}`;
@@ -235,7 +237,7 @@ function SearchPartyDeviceRow({ device, avatar, now, followed, trailVisible, onA
   const hubMode = device.hubMode === "portable" ? "Portable" : device.hubMode === "off_grid" ? "Off-Grid" : "Home";
 
   return (
-    <article className={`device-card search-party-device-card${offline ? " offline" : ""}`}>
+    <article className={`device-card search-party-device-card${freshnessClass}${offline ? " offline" : ""}`}>
       <div className="card-summary">
         <div className="card-avatar-wrap">
           <div

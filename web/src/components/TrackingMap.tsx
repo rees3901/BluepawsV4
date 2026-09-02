@@ -5,7 +5,7 @@ import { useEffect, useRef } from "react";
 import { batteryPresentation, signalQuality } from "@/components/Indicators";
 import { collarFault } from "@/lib/collarFault";
 import { emojiImageUrl } from "@/lib/emoji";
-import { isCollarOffline } from "@/lib/devicePresence";
+import { COLLAR_RECEIVE_WINDOW_SECONDS, collarCardFreshness, isCollarOffline } from "@/lib/devicePresence";
 import { formatHomeDistance, formatMapCoordinates, googleMapsUrl, homeDistanceMetres } from "@/lib/mapLocation";
 import { alternatePreviewMapLayer, MAP_LAYER_DEFINITIONS, MAP_LAYER_PICKER_NAMES, previewMapZoom, type MapLayerName, type MapLayerPickerName } from "@/lib/mapLayers";
 import { EMPTY_MAP_CENTER, EMPTY_MAP_ZOOM } from "@/lib/mapViewport";
@@ -572,7 +572,10 @@ function popupHtml(device: TelemetryDevice, avatar: DeviceAvatar, presenceNow: n
   const status = popupStatus(device);
   const profile = popupProfile(device);
   const ageSeconds = Math.max(0, Math.floor((presenceNow - device.lastUpdate) / 1000));
-  const offline = isCollarOffline(device, presenceNow);
+  const estimatedAwake = !isHub && ageSeconds < COLLAR_RECEIVE_WINDOW_SECONDS;
+  const freshness = isHub ? null : collarCardFreshness(ageSeconds, estimatedAwake);
+  const offline = freshness === "offline";
+  const freshnessClass = freshness === "sleeping" ? " collar-sleeping" : freshness === "stale" ? " stale" : "";
   const source = device.source ? `<span class="label">${offline ? "Last reported source" : "Source"}</span><span class="value">${escapeHtml(device.source)}</span>` : "";
   const distance = formatHomeDistance(homeDistanceMetres(device));
   const fault = isHub || offline ? null : collarFault(device.faultReport, device.error !== "None");
@@ -584,9 +587,9 @@ function popupHtml(device: TelemetryDevice, avatar: DeviceAvatar, presenceNow: n
 
   const summary = offline
     ? `<div class="card-name-row"><span class="card-name">${name}</span><span class="card-status status-offline">Offline</span></div><div class="card-offline-summary">No reports for ${formatLastSeen(ageSeconds)}</div>`
-    : `<div class="card-name-row"><span class="card-name">${name}</span><span class="card-status ${status.css}">${status.emoji} ${status.label}</span><span class="card-profile ${profile.css}">${profile.label}</span></div>${faultHtml}<div class="card-indicators"><span class="card-indicator-group">${batteryIndicatorHtml(isHub ? null : device.batt, device.batteryPercent)}</span><span class="card-indicator-group">${signalIndicatorHtml(device, isHub)}</span>${isHub ? "" : `<span class="collar-awake" title="Receive window state is not retained in the map card">💤</span>`}</div><div class="card-indicators card-indicators-row3">${isHub ? "" : homeDistanceHtml(distance)}${lastSeenHtml(formatLastSeen(ageSeconds))}</div>`;
+    : `<div class="card-name-row"><span class="card-name">${name}</span><span class="card-status ${status.css}">${status.emoji} ${status.label}</span><span class="card-profile ${profile.css}">${profile.label}</span></div>${faultHtml}<div class="card-indicators"><span class="card-indicator-group">${batteryIndicatorHtml(isHub ? null : device.batt, device.batteryPercent)}</span><span class="card-indicator-group">${signalIndicatorHtml(device, isHub)}</span>${isHub ? "" : `<span class="collar-awake ${estimatedAwake ? "awake" : "sleeping"}" title="${estimatedAwake ? "Fresh report — command receive window may still be open" : "Receive window ended — collar probably sleeping"}">${estimatedAwake ? "💡" : "💤"}</span>`}</div><div class="card-indicators card-indicators-row3">${isHub ? "" : homeDistanceHtml(distance)}${lastSeenHtml(formatLastSeen(ageSeconds))}</div>`;
   const offlineNotice = offline ? `<p class="card-offline-notice"><strong>Offline.</strong> These are last-known details from ${formatAge(ageSeconds)} and may no longer be current.</p>` : "";
-  return `<div class="popup-content device-card map-device-card${offline ? " offline" : ""} expanded"><div class="card-summary map-popup-summary">${popupAvatarHtml(avatar)}<div class="card-identity">${summary}</div></div><div class="card-detail map-popup-detail">${offlineNotice}<div class="card-grid"><span class="label">${offline ? "Last known coordinates" : "Coordinates"}</span><span class="value"><a class="card-coords card-coords-link" href="${mapsUrl}" target="_blank" rel="noopener noreferrer" title="Open this location in Google Maps">${coordinates}</a></span>${details}<span class="label">Last report</span><span class="value">${formatAge(ageSeconds)}</span>${source}</div>${actions}</div></div>`;
+  return `<div class="popup-content device-card map-device-card${freshnessClass}${offline ? " offline" : ""} expanded"><div class="card-summary map-popup-summary">${popupAvatarHtml(avatar)}<div class="card-identity">${summary}</div></div><div class="card-detail map-popup-detail">${offlineNotice}<div class="card-grid"><span class="label">${offline ? "Last known coordinates" : "Coordinates"}</span><span class="value"><a class="card-coords card-coords-link" href="${mapsUrl}" target="_blank" rel="noopener noreferrer" title="Open this location in Google Maps">${coordinates}</a></span>${details}<span class="label">Last report</span><span class="value">${formatAge(ageSeconds)}</span>${source}</div>${actions}</div></div>`;
 }
 
 function popupStatus(device: TelemetryDevice) {

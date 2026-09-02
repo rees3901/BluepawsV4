@@ -7,7 +7,7 @@ import { formatMapCoordinates, googleMapsUrl } from "@/lib/mapLocation";
 import type { DeviceAction, DeviceAvatar, TelemetryDevice } from "@/types/telemetry";
 import type { commandMessage } from "@/lib/collarFeedback";
 import { collarFault, type CollarFaultReport } from "@/lib/collarFault";
-import { isCollarOfflineAge } from "@/lib/devicePresence";
+import { collarCardFreshness } from "@/lib/devicePresence";
 
 const STATUS = {
   home: { emoji: "🏠", label: "Home", css: "status-home" },
@@ -54,7 +54,10 @@ export interface DeviceCardProps {
 export function DeviceCard(props: DeviceCardProps) {
   const { device, avatar, expanded, dragging, dragOver, first, pinned, followed, trailVisible, portableMode, distance, ageSeconds, onExpand, onAction, onDragStart, onDragOver, onDrop, onDragEnd, onPinToggle, onReportLog, onReportExport, onAvatarEdit } = props;
   const isHub = device.entity === "hub";
-  const offline = !isHub && isCollarOfflineAge(ageSeconds);
+  const collarAwake = !isHub && (props.awakeSeconds ?? 0) > 0;
+  const freshness = isHub ? null : collarCardFreshness(ageSeconds, collarAwake);
+  const offline = freshness === "offline";
+  const freshnessClass = freshness === "sleeping" ? " collar-sleeping" : freshness === "stale" ? " stale" : "";
   const hasGps = !isHub || device.hasGps;
   const status = isHub
     ? { emoji: device.hubMode === "home" ? "🏡" : "📱", label: device.hubMode === "home" ? "Home" : device.hubMode === "portable" ? "Portable" : "Off-Grid", css: device.hubMode === "home" ? "status-home" : "status-out" }
@@ -75,7 +78,7 @@ export function DeviceCard(props: DeviceCardProps) {
   return (
     <article
       data-device-card-id={device.id}
-      className={`device-card${isHub && ageSeconds >= hubContactGrace(device.hubReportingProfile) ? " stale" : ""}${offline ? " offline" : ""}${expanded ? " expanded" : ""}${dragging ? " dragging" : ""}${dragOver ? " drag-over" : ""}`}
+      className={`device-card${isHub && ageSeconds >= hubContactGrace(device.hubReportingProfile) ? " stale" : ""}${freshnessClass}${offline ? " offline" : ""}${expanded ? " expanded" : ""}${dragging ? " dragging" : ""}${dragOver ? " drag-over" : ""}`}
       onDragOver={(event) => {
         event.preventDefault();
       }}
@@ -150,7 +153,7 @@ export function DeviceCard(props: DeviceCardProps) {
           {offline ? <div className="card-offline-summary">No reports for {lastSeen}</div> : <><div className="card-indicators">
             <span className="card-indicator-group"><BatteryIndicator millivolts={isHub ? null : device.batt} percent={device.batteryPercent} /></span>
             <span className="card-indicator-group">{isHub ? <><WifiIndicator rssi={device.rssi} contactLost={ageSeconds >= hubContactGrace(device.hubReportingProfile)} /><BluetoothBeaconIndicator advertising={device.bleHome} enabled={props.bluetoothEnabled} disabled={props.bluetoothToggleDisabled} onToggle={props.onBluetoothToggle} /></> : <SignalIndicator rssi={device.rssi} snr={device.snr} ingestPath={device.ingestPath} />}</span>
-            {!isHub && <span className="collar-awake" title={(props.awakeSeconds ?? 0) > 0 ? "Fresh packet received — expected ten-second command receive window, not guaranteed delivery" : "Receive window ended — collar probably sleeping; sleep is not directly confirmed"} aria-label={(props.awakeSeconds ?? 0) > 0 ? `Collar recently heard; ${props.awakeSeconds} seconds remaining` : "Collar probably sleeping"}>{(props.awakeSeconds ?? 0) > 0 ? "💡" : "💤"}</span>}
+            {!isHub && <span className={`collar-awake ${collarAwake ? "awake" : "sleeping"}`} title={collarAwake ? "Fresh packet received — expected ten-second command receive window, not guaranteed delivery" : "Receive window ended — collar probably sleeping; sleep is not directly confirmed"} aria-label={collarAwake ? `Collar recently heard; ${props.awakeSeconds} seconds remaining` : "Collar probably sleeping"}>{collarAwake ? "💡" : "💤"}</span>}
             {!isHub && portableMode && <span className="card-indicator-group"><BleProximity rssi={device.rssi === null ? null : device.rssi + 28} /></span>}
           </div>
           <div className="card-indicators card-indicators-row3">
