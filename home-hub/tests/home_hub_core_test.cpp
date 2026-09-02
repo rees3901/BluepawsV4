@@ -1,10 +1,12 @@
 #include "bluepaws/cat_simulator.h"
 #include "bluepaws/cat_store.h"
+#include "bluepaws/hub_settings.h"
 #include "bluepaws/map_engine.h"
 
 #include <cassert>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 
 namespace {
 
@@ -136,6 +138,40 @@ void storeRejectsOlderTruth() {
     assert(store.find(1001)->appearance.photo_available);
 }
 
+void settingsRemainSafeAndOrdered() {
+    auto settings = bluepaws::hub::defaultSettings();
+    assert(std::strcmp(settings.access_point_ssid, "BluePaws-Hub") == 0);
+    assert(settings.overview_timeout_seconds == 120);
+    settings.overview_timeout_seconds = 2;
+    settings.dim_timeout_seconds = 1;
+    settings.screen_off_timeout_seconds = 1;
+    settings.brightness_percent = 255;
+    settings.dim_brightness_percent = 0;
+    bluepaws::hub::sanitize(settings);
+    assert(settings.overview_timeout_seconds == 15);
+    assert(settings.dim_timeout_seconds >= settings.overview_timeout_seconds);
+    assert(settings.screen_off_timeout_seconds >= settings.dim_timeout_seconds);
+    assert(settings.brightness_percent == 100);
+    assert(settings.dim_brightness_percent == 1);
+    assert(bluepaws::hub::validSsid("Reesnet Guest"));
+    assert(!bluepaws::hub::validSsid(""));
+    assert(bluepaws::hub::validPassword("password"));
+    assert(!bluepaws::hub::validPassword("short"));
+}
+
+void relativePositionProvidesDistanceAndClockDirection() {
+    const bluepaws::map::GeoPoint hub{51.8642, -2.2382};
+    const auto north_east = bluepaws::hub::relativePosition(hub, {51.8652, -2.2372});
+    assert(north_east.valid);
+    assert(north_east.distance_metres > 100.0 && north_east.distance_metres < 150.0);
+    assert(north_east.clock_hour == 1 || north_east.clock_hour == 2);
+    assert(std::strcmp(north_east.cardinal, "NE") == 0);
+    const auto south = bluepaws::hub::relativePosition(hub, {51.8632, -2.2382});
+    assert(south.valid);
+    assert(south.clock_hour == 6);
+    assert(std::strcmp(south.cardinal, "S") == 0);
+}
+
 }  // namespace
 
 int main() {
@@ -145,5 +181,7 @@ int main() {
     storeRetainsLastValidPosition();
     simulatorUsesTheSharedStatePath();
     storeRejectsOlderTruth();
+    settingsRemainSafeAndOrdered();
+    relativePositionProvidesDistanceAndClockDirection();
     std::puts("Home Hub portable core: all tests passed");
 }

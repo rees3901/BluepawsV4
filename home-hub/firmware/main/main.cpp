@@ -1,10 +1,13 @@
 #include "bluepaws/cat_simulator.h"
 #include "bluepaws/cat_store.h"
+#include "bluepaws/hub_settings.h"
 #include "bluepaws/map_engine.h"
 #include "guition_jc4880p443c.h"
 #include "app_shell.h"
 #include "ui_icons.h"
 #include "home_hub_cloud.h"
+#include "home_hub_config.h"
+#include "home_hub_settings_store.h"
 
 #include "driver/jpeg_decode.h"
 #include "esp_heap_caps.h"
@@ -19,8 +22,11 @@
 #include <algorithm>
 #include <array>
 #include <cerrno>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <dirent.h>
 #include <sys/stat.h>
 
@@ -63,6 +69,20 @@ enum class AppPage : uint8_t {
     Summary,
     Settings,
     Diagnostics,
+    Overview,
+};
+
+enum class SettingsField : uint8_t {
+    PrimarySsid,
+    PrimaryPassword,
+    SecondarySsid,
+    SecondaryPassword,
+    AccessPointSsid,
+    AccessPointPassword,
+    OverviewTimeout,
+    DimTimeout,
+    ScreenOffTimeout,
+    DimBrightness,
 };
 
 enum class MapLayer : uint8_t {
@@ -117,6 +137,8 @@ struct UiState {
     std::array<TileCacheEntry, bluepaws::map::kMaximumVisibleTiles> tile_cache{};
     std::array<lv_obj_t *, bluepaws::kMaximumCats> markers{};
     std::array<lv_obj_t *, bluepaws::kMaximumCats> summary_rows{};
+    std::array<lv_obj_t *, bluepaws::kMaximumCats> overview_markers{};
+    std::array<lv_obj_t *, bluepaws::kMaximumCats> overview_labels{};
     std::array<lv_obj_t *, bluepaws::kMaximumCats> drawer_cards{};
     std::array<lv_obj_t *, bluepaws::kMaximumCats> drawer_summary_labels{};
     std::array<lv_obj_t *, bluepaws::kMaximumCats> drawer_name_labels{};
@@ -146,9 +168,17 @@ struct UiState {
     lv_obj_t *brightness_popup = nullptr;
     lv_obj_t *brightness_slider = nullptr;
     lv_obj_t *brightness_label = nullptr;
+    lv_obj_t *volume_popup = nullptr;
+    lv_obj_t *volume_slider = nullptr;
+    lv_obj_t *volume_label = nullptr;
     lv_obj_t *quick_settings_tray = nullptr;
     lv_obj_t *quick_settings_handle = nullptr;
     lv_timer_t *brightness_hide_timer = nullptr;
+    lv_timer_t *volume_hide_timer = nullptr;
+    lv_obj_t *settings_modal = nullptr;
+    lv_obj_t *settings_input = nullptr;
+    lv_obj_t *settings_keyboard = nullptr;
+    lv_obj_t *settings_error = nullptr;
     lv_timer_t *gesture_timer = nullptr;
     lv_obj_t *status = nullptr;
     lv_timer_t *update_timer = nullptr;
@@ -165,13 +195,22 @@ struct UiState {
     bool drawer_open = false;
     bool layer_drawer_open = false;
     bool quick_settings_open = false;
+    bool screensaver_pending = false;
+    bool screen_dimmed = false;
+    bool screen_off = false;
     bool portrait = false;
     bool tiles_dirty = true;
     bool tile_images_bound = false;
     int brightness_percent = 80;
+    int volume_percent = 60;
     int followed_cat = -1;
     bool cloud_enabled = false;
+    SettingsField editing_field = SettingsField::PrimarySsid;
+    bluepaws::hub::Settings settings = bluepaws::hub::defaultSettings();
 };
+
+void rebuild_current_page(void *user_data);
+void navigate_to(UiState &ui, AppPage page);
 
 const UiLayout &current_layout(const UiState &ui)
 {
@@ -495,6 +534,30 @@ void refresh_map_tiles(UiState &ui)
 void update_ui(UiState &ui)
 {
     const uint32_t now_ms = uptime_ms();
+    const uint32_t inactive_ms = ui.display == nullptr
+        ? 0 : lv_display_get_inactive_time(ui.display);
+    const uint32_t overview_ms = static_cast<uint32_t>(
+        ui.settings.overview_timeout_seconds) * 1000U;
+    const uint32_t dim_ms = static_cast<uint32_t>(ui.settings.dim_timeout_seconds) * 1000U;
+    const uint32_t off_ms = static_cast<uint32_t>(ui.settings.screen_off_timeout_seconds) * 1000U;
+    if (inactive_ms < 1000U && (ui.screen_dimmed || ui.screen_off)) {
+        ui.screen_dimmed = false;
+        ui.screen_off = false;
+        guition_jc4880p443c_backlight_set(ui.brightness_percent);
+    } else if (inactive_ms >= off_ms && !ui.screen_off) {
+        ui.screen_off = true;
+        ui.screen_dimmed = true;
+        guition_jc4880p443c_backlight_set(0);
+    } else if (inactive_ms >= dim_ms && !ui.screen_dimmed) {
+        ui.screen_dimmed = true;
+        guition_jc4880p443c_backlight_set(ui.settings.dim_brightness_percent);
+    }
+    if (inactive_ms >= overview_ms && ui.active_page != AppPage::Overview &&
+        ui.settings_modal == nullptr && !ui.screensaver_pending) {
+        ui.screensaver_pending = true;
+        ui.active_page = AppPage::Overview;
+        lv_async_call(rebuild_current_page, &ui);
+    }
     const size_t cloud_updates = bluepaws::cloud::drain(ui.cats);
     if (!ui.cloud_enabled) {
         ui.simulator.update(now_ms, ui.cats);
@@ -524,6 +587,17 @@ void update_ui(UiState &ui)
 
     char list_text[640]{};
     size_t used = 0;
+    double overview_scale_metres = 250.0;
+    for (size_t i = 0; i < ui.cats.size(); ++i) {
+        const bluepaws::CatRecord *cat = ui.cats.at(i);
+        if (cat == nullptr || !cat->has_position) continue;
+        const auto relative = bluepaws::hub::relativePosition(
+            kTestOrigin,
+            {static_cast<double>(cat->last_valid_latitude_e7) / 1.0e7,
+             static_cast<double>(cat->last_valid_longitude_e7) / 1.0e7});
+        if (relative.valid) overview_scale_metres = std::max(
+            overview_scale_metres, relative.distance_metres * 1.15);
+    }
     for (size_t i = 0; i < ui.cats.size(); ++i) {
         const bluepaws::CatRecord *cat = ui.cats.at(i);
         if (cat == nullptr) {
@@ -561,6 +635,14 @@ void update_ui(UiState &ui)
         }
 
         const uint32_t age_seconds = (now_ms - cat->latest.received_at_ms) / 1000U;
+        const auto relative = cat->has_position
+            ? bluepaws::hub::relativePosition(
+                kTestOrigin,
+                {static_cast<double>(cat->last_valid_latitude_e7) / 1.0e7,
+                 static_cast<double>(cat->last_valid_longitude_e7) / 1.0e7})
+            : bluepaws::hub::RelativePosition{};
+        const unsigned long distance_metres = relative.valid
+            ? static_cast<unsigned long>(std::lround(relative.distance_metres)) : 0UL;
         if (ui.drawer_name_labels[i] != nullptr) {
             lv_label_set_text(ui.drawer_name_labels[i], cat->name);
         }
@@ -622,8 +704,11 @@ void update_ui(UiState &ui)
             lv_image_set_src(ui.drawer_radio_images[i], radio_icon);
         }
         if (ui.drawer_distance_labels[i] != nullptr) {
-            lv_label_set_text_fmt(ui.drawer_distance_labels[i], "%lum",
-                                  static_cast<unsigned long>(35U + i * 17U));
+            if (relative.valid) {
+                lv_label_set_text_fmt(ui.drawer_distance_labels[i], "%lum", distance_metres);
+            } else {
+                lv_label_set_text(ui.drawer_distance_labels[i], "--m");
+            }
         }
         if (ui.drawer_age_labels[i] != nullptr) {
             lv_label_set_text_fmt(ui.drawer_age_labels[i], "%lus",
@@ -646,11 +731,46 @@ void update_ui(UiState &ui)
                     : (cat->latest.power_profile_code == 1 ? "Normal"
                     : (cat->latest.power_profile_code == 2 ? "Active"
                     : (cat->latest.power_profile_code == 3 ? "Emergency" : "Debug"))),
-                static_cast<unsigned long>(35U + i * 17U),
+                distance_metres,
                 static_cast<int>(cat->latest.rssi),
                 static_cast<double>(cat->latest.snr),
                 static_cast<unsigned>(cat->latest.battery_mv),
                 static_cast<unsigned long>(age_seconds));
+        }
+
+        if (ui.overview_labels[i] != nullptr) {
+            if (relative.valid) {
+                lv_label_set_text_fmt(ui.overview_labels[i],
+                                      "%s\n%lum | %u o'clock %s | seen %lus ago",
+                                      cat->name,
+                                      distance_metres,
+                                      static_cast<unsigned>(relative.clock_hour),
+                                      relative.cardinal,
+                                      static_cast<unsigned long>(age_seconds));
+            } else {
+                lv_label_set_text_fmt(ui.overview_labels[i],
+                                      "%s\nPosition unavailable | seen %lus ago",
+                                      cat->name,
+                                      static_cast<unsigned long>(age_seconds));
+            }
+        }
+        if (ui.overview_markers[i] != nullptr) {
+            if (!relative.valid) {
+                lv_obj_add_flag(ui.overview_markers[i], LV_OBJ_FLAG_HIDDEN);
+            } else {
+                lv_obj_remove_flag(ui.overview_markers[i], LV_OBJ_FLAG_HIDDEN);
+                lv_obj_t *radar = lv_obj_get_parent(ui.overview_markers[i]);
+                const double radius = std::max(20.0,
+                    std::min(lv_obj_get_width(radar), lv_obj_get_height(radar)) / 2.0 - 36.0);
+                const double plotted_radius = std::min(
+                    radius, relative.distance_metres / overview_scale_metres * radius);
+                const double bearing = relative.bearing_degrees * 3.14159265358979323846 / 180.0;
+                const int32_t x = static_cast<int32_t>(
+                    lv_obj_get_width(radar) / 2.0 + std::sin(bearing) * plotted_radius - 17.0);
+                const int32_t y = static_cast<int32_t>(
+                    lv_obj_get_height(radar) / 2.0 - std::cos(bearing) * plotted_radius - 17.0);
+                lv_obj_set_pos(ui.overview_markers[i], x, y);
+            }
         }
 
         lv_obj_t *marker = ui.markers[i];
@@ -749,7 +869,7 @@ void update_ui(UiState &ui)
                               static_cast<unsigned>(ui.cats.size()), sync_name);
         break;
     case AppPage::Settings:
-        lv_label_set_text(ui.status, "Configuration preview | values are not persisted yet");
+        lv_label_set_text(ui.status, "Saved locally | Wi-Fi changes apply automatically");
         break;
     case AppPage::Diagnostics:
         lv_label_set_text_fmt(ui.status,
@@ -757,6 +877,12 @@ void update_ui(UiState &ui)
                               static_cast<unsigned long>(now_ms / 1000U),
                               ui.sd.mounted ? "mounted" : "unavailable",
                               static_cast<unsigned>(ui.cats.size()));
+        break;
+    case AppPage::Overview:
+        lv_label_set_text_fmt(ui.status,
+                              "%u cats | %s | tap anywhere to open",
+                              static_cast<unsigned>(ui.cats.size()),
+                              sync_name);
         break;
     }
 }
@@ -868,6 +994,7 @@ void fit_all_clicked(lv_event_t *event)
 }
 
 void create_ui(UiState &ui);
+void volume_fade_exec(void *object, int32_t opacity);
 
 void brightness_fade_exec(void *object, int32_t opacity)
 {
@@ -954,8 +1081,16 @@ void rebuild_current_page(void *user_data)
     if (ui->brightness_popup != nullptr) {
         lv_anim_delete(ui->brightness_popup, brightness_fade_exec);
     }
+    if (ui->volume_hide_timer != nullptr) {
+        lv_timer_delete(ui->volume_hide_timer);
+        ui->volume_hide_timer = nullptr;
+    }
+    if (ui->volume_popup != nullptr) {
+        lv_anim_delete(ui->volume_popup, volume_fade_exec);
+    }
     lv_obj_clean(lv_screen_active());
     create_ui(*ui);
+    ui->screensaver_pending = false;
 }
 
 void rebuild_for_orientation(void *user_data)
@@ -999,6 +1134,7 @@ void brightness_changed(lv_event_t *event)
         return;
     }
     ui->brightness_percent = lv_slider_get_value(slider);
+    ui->settings.brightness_percent = static_cast<uint8_t>(ui->brightness_percent);
     if (ui->brightness_label != nullptr) {
         lv_label_set_text_fmt(ui->brightness_label, "%d%%", ui->brightness_percent);
     }
@@ -1007,6 +1143,15 @@ void brightness_changed(lv_event_t *event)
         ESP_LOGE(kTag, "Backlight update failed: %s", esp_err_to_name(error));
     }
     reset_brightness_timeout(*ui);
+}
+
+void brightness_released(lv_event_t *event)
+{
+    auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
+    if (ui != nullptr) {
+        bluepaws::settings_store::save(ui->settings);
+        reset_brightness_timeout(*ui);
+    }
 }
 
 void create_brightness_popup(UiState &ui)
@@ -1049,6 +1194,8 @@ void create_brightness_popup(UiState &ui)
         ui.brightness_slider, brightness_changed, LV_EVENT_VALUE_CHANGED, &ui);
     lv_obj_add_event_cb(
         ui.brightness_slider, brightness_activity, LV_EVENT_PRESSING, &ui);
+    lv_obj_add_event_cb(
+        ui.brightness_slider, brightness_released, LV_EVENT_RELEASED, &ui);
 
     ui.brightness_label = make_label(
         popup,
@@ -1070,6 +1217,9 @@ void brightness_clicked(lv_event_t *event)
         return;
     }
     close_quick_settings(*ui, true);
+    if (ui->volume_popup != nullptr) {
+        lv_obj_add_flag(ui->volume_popup, LV_OBJ_FLAG_HIDDEN);
+    }
     if (ui->brightness_popup == nullptr) {
         create_brightness_popup(*ui);
         return;
@@ -1083,9 +1233,161 @@ void brightness_clicked(lv_event_t *event)
     }
 }
 
+void volume_fade_exec(void *object, int32_t opacity)
+{
+    lv_obj_set_style_opa(static_cast<lv_obj_t *>(object), static_cast<lv_opa_t>(opacity), 0);
+}
+
+void volume_fade_completed(lv_anim_t *animation)
+{
+    auto *ui = static_cast<UiState *>(lv_anim_get_user_data(animation));
+    auto *popup = static_cast<lv_obj_t *>(animation->var);
+    if (ui == nullptr || popup == nullptr || ui->volume_popup != popup) return;
+    lv_obj_add_flag(popup, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_opa(popup, LV_OPA_COVER, 0);
+}
+
+void volume_timeout(lv_timer_t *timer)
+{
+    auto *ui = static_cast<UiState *>(lv_timer_get_user_data(timer));
+    lv_timer_pause(timer);
+    if (ui == nullptr || ui->volume_popup == nullptr ||
+        lv_obj_has_flag(ui->volume_popup, LV_OBJ_FLAG_HIDDEN)) return;
+    lv_anim_delete(ui->volume_popup, volume_fade_exec);
+    lv_anim_t fade{};
+    lv_anim_init(&fade);
+    lv_anim_set_var(&fade, ui->volume_popup);
+    lv_anim_set_user_data(&fade, ui);
+    lv_anim_set_exec_cb(&fade, volume_fade_exec);
+    lv_anim_set_values(&fade, LV_OPA_COVER, LV_OPA_TRANSP);
+    lv_anim_set_duration(&fade, kBrightnessFadeMs);
+    lv_anim_set_path_cb(&fade, lv_anim_path_ease_out);
+    lv_anim_set_completed_cb(&fade, volume_fade_completed);
+    lv_anim_start(&fade);
+}
+
+void reset_volume_timeout(UiState &ui)
+{
+    if (ui.volume_popup == nullptr) return;
+    lv_anim_delete(ui.volume_popup, volume_fade_exec);
+    lv_obj_set_style_opa(ui.volume_popup, LV_OPA_COVER, 0);
+    if (ui.volume_hide_timer == nullptr) {
+        ui.volume_hide_timer = lv_timer_create(volume_timeout, kBrightnessTimeoutMs, &ui);
+    } else {
+        lv_timer_set_period(ui.volume_hide_timer, kBrightnessTimeoutMs);
+        lv_timer_reset(ui.volume_hide_timer);
+        lv_timer_resume(ui.volume_hide_timer);
+    }
+}
+
+void hide_volume_popup(UiState &ui)
+{
+    if (ui.volume_hide_timer != nullptr) lv_timer_pause(ui.volume_hide_timer);
+    if (ui.volume_popup != nullptr) {
+        lv_anim_delete(ui.volume_popup, volume_fade_exec);
+        lv_obj_set_style_opa(ui.volume_popup, LV_OPA_COVER, 0);
+        lv_obj_add_flag(ui.volume_popup, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+void volume_activity(lv_event_t *event)
+{
+    auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
+    if (ui != nullptr) reset_volume_timeout(*ui);
+}
+
+void volume_changed(lv_event_t *event)
+{
+    auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
+    auto *slider = static_cast<lv_obj_t *>(lv_event_get_target(event));
+    if (ui == nullptr || slider == nullptr) return;
+    ui->volume_percent = lv_slider_get_value(slider);
+    ui->settings.volume_percent = static_cast<uint8_t>(ui->volume_percent);
+    if (ui->volume_label != nullptr) {
+        lv_label_set_text_fmt(ui->volume_label, "%d%%", ui->volume_percent);
+    }
+    reset_volume_timeout(*ui);
+}
+
+void volume_released(lv_event_t *event)
+{
+    auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
+    if (ui != nullptr) {
+        bluepaws::settings_store::save(ui->settings);
+        reset_volume_timeout(*ui);
+    }
+}
+
+void create_volume_popup(UiState &ui)
+{
+    lv_obj_t *popup = lv_obj_create(lv_screen_active());
+    lv_obj_set_size(popup, 78, 270);
+    lv_obj_align(popup, LV_ALIGN_TOP_RIGHT, -12, 64);
+    lv_obj_add_flag(popup, LV_OBJ_FLAG_FLOATING);
+    lv_obj_set_style_bg_color(popup,
+                              ui.dark_mode ? lv_color_hex(0x15232E) : lv_color_hex(0xE7E2D8),
+                              0);
+    lv_obj_set_style_bg_opa(popup, LV_OPA_90, 0);
+    lv_obj_set_style_border_color(popup,
+                                  ui.dark_mode ? lv_color_hex(0x60788C) : lv_color_hex(0xAAA69E),
+                                  0);
+    lv_obj_set_style_border_width(popup, 1, 0);
+    lv_obj_set_style_radius(popup, 12, 0);
+    lv_obj_set_style_pad_all(popup, 10, 0);
+    lv_obj_remove_flag(popup, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(popup, volume_activity, LV_EVENT_PRESSED, &ui);
+    lv_obj_add_event_cb(popup, volume_activity, LV_EVENT_PRESSING, &ui);
+
+    lv_obj_t *icon = make_label(
+        popup, LV_SYMBOL_VOLUME_MAX,
+        ui.dark_mode ? lv_color_hex(0xFFFFFF) : lv_color_hex(0x17324D));
+    lv_obj_set_style_text_font(icon, &lv_font_montserrat_22, 0);
+    lv_obj_align(icon, LV_ALIGN_TOP_MID, 0, 0);
+
+    ui.volume_slider = lv_slider_create(popup);
+    lv_obj_set_size(ui.volume_slider, 20, 172);
+    lv_obj_align(ui.volume_slider, LV_ALIGN_CENTER, 0, 2);
+    lv_slider_set_range(ui.volume_slider, 0, 100);
+    lv_slider_set_value(ui.volume_slider, ui.volume_percent, LV_ANIM_OFF);
+    lv_obj_set_style_bg_color(ui.volume_slider, lv_color_hex(0x586873), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(ui.volume_slider, lv_color_hex(0x1E88D2), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(ui.volume_slider, lv_color_hex(0xF3F8FB), LV_PART_KNOB);
+    lv_obj_set_style_pad_all(ui.volume_slider, 4, LV_PART_KNOB);
+    lv_obj_add_event_cb(ui.volume_slider, volume_changed, LV_EVENT_VALUE_CHANGED, &ui);
+    lv_obj_add_event_cb(ui.volume_slider, volume_activity, LV_EVENT_PRESSING, &ui);
+    lv_obj_add_event_cb(ui.volume_slider, volume_released, LV_EVENT_RELEASED, &ui);
+
+    ui.volume_label = make_label(
+        popup, "", ui.dark_mode ? lv_color_hex(0xF3F8FB) : lv_color_hex(0x17324D));
+    lv_label_set_text_fmt(ui.volume_label, "%d%%", ui.volume_percent);
+    lv_obj_set_style_text_font(ui.volume_label, &lv_font_montserrat_14, 0);
+    lv_obj_align(ui.volume_label, LV_ALIGN_BOTTOM_MID, 0, 0);
+    ui.volume_popup = popup;
+    lv_obj_move_foreground(popup);
+    reset_volume_timeout(ui);
+}
+
+void volume_clicked(lv_event_t *event)
+{
+    auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
+    if (ui == nullptr) return;
+    close_quick_settings(*ui, true);
+    hide_brightness_popup(*ui);
+    if (ui->volume_popup == nullptr) {
+        create_volume_popup(*ui);
+    } else if (lv_obj_has_flag(ui->volume_popup, LV_OBJ_FLAG_HIDDEN)) {
+        lv_obj_remove_flag(ui->volume_popup, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(ui->volume_popup);
+        reset_volume_timeout(*ui);
+    } else {
+        hide_volume_popup(*ui);
+    }
+}
+
 void navigate_to(UiState &ui, AppPage page)
 {
     ui.active_page = page;
+    ui.screensaver_pending = false;
     ui.drawer_open = false;
     ui.layer_drawer_open = false;
     ESP_LOGI(kTag, "Opening app page %u", static_cast<unsigned>(page));
@@ -1413,7 +1715,7 @@ lv_obj_t *make_quick_setting(lv_obj_t *parent,
                              lv_event_cb_t callback)
 {
     lv_obj_t *button = lv_button_create(parent);
-    lv_obj_set_size(button, ui.portrait ? 96 : 108, 78);
+    lv_obj_set_size(button, ui.portrait ? 84 : 108, 78);
     lv_obj_set_style_bg_color(button,
                               ui.dark_mode ? lv_color_hex(0x243746) : lv_color_hex(0xDDD8CF),
                               0);
@@ -1436,6 +1738,38 @@ lv_obj_t *make_quick_setting(lv_obj_t *parent,
     lv_obj_t *label = make_label(
         button,
         label_text,
+        ui.dark_mode ? lv_color_hex(0xF3F8FB) : lv_color_hex(0x17324D));
+    lv_obj_set_style_text_font(label, &lv_font_montserrat_14, 0);
+    lv_obj_align(label, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_remove_flag(label, LV_OBJ_FLAG_CLICKABLE);
+    return button;
+}
+
+lv_obj_t *make_quick_setting_symbol(lv_obj_t *parent,
+                                    const char *symbol,
+                                    const char *label_text,
+                                    UiState &ui,
+                                    lv_event_cb_t callback)
+{
+    lv_obj_t *button = lv_button_create(parent);
+    lv_obj_set_size(button, ui.portrait ? 84 : 108, 78);
+    lv_obj_set_style_bg_color(button,
+                              ui.dark_mode ? lv_color_hex(0x243746) : lv_color_hex(0xDDD8CF),
+                              0);
+    lv_obj_set_style_bg_opa(button, LV_OPA_80, 0);
+    lv_obj_set_style_border_color(button,
+                                  ui.dark_mode ? lv_color_hex(0x60788C) : lv_color_hex(0xAAA69E),
+                                  0);
+    lv_obj_set_style_border_width(button, 1, 0);
+    lv_obj_set_style_radius(button, 12, 0);
+    lv_obj_set_style_pad_all(button, 5, 0);
+    lv_obj_add_event_cb(button, callback, LV_EVENT_CLICKED, &ui);
+    lv_obj_t *icon = make_label(
+        button, symbol, ui.dark_mode ? lv_color_hex(0xFFFFFF) : lv_color_hex(0x17324D));
+    lv_obj_set_style_text_font(icon, &lv_font_montserrat_22, 0);
+    lv_obj_align(icon, LV_ALIGN_TOP_MID, 0, 0);
+    lv_obj_t *label = make_label(
+        button, label_text,
         ui.dark_mode ? lv_color_hex(0xF3F8FB) : lv_color_hex(0x17324D));
     lv_obj_set_style_text_font(label, &lv_font_montserrat_14, 0);
     lv_obj_align(label, LV_ALIGN_BOTTOM_MID, 0, 0);
@@ -1520,6 +1854,7 @@ void create_quick_settings_tray(UiState &ui)
     make_quick_setting(controls, bluepaws::ui::icon_home, "Home", ui, launcher_clicked);
     make_quick_setting(
         controls, bluepaws::ui::icon_brightness, "Brightness", ui, brightness_clicked);
+    make_quick_setting_symbol(controls, LV_SYMBOL_VOLUME_MAX, "Volume", ui, volume_clicked);
     make_quick_setting(
         controls, bluepaws::ui::icon_rotate, "Orientation", ui, orientation_clicked);
     make_quick_setting(controls,
@@ -1553,6 +1888,7 @@ void open_quick_settings(UiState &ui)
         return;
     }
     hide_brightness_popup(ui);
+    hide_volume_popup(ui);
     ui.quick_settings_open = true;
     lv_obj_remove_flag(ui.quick_settings_tray, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(ui.quick_settings_tray);
@@ -1670,7 +2006,7 @@ void drawer_cat_card_clicked(lv_event_t *event)
         const bool expand = ui->drawer_cards[i] == target && !was_expanded;
         ui->drawer_card_expanded[i] = expand;
         if (ui->drawer_cards[i] != nullptr) {
-            lv_obj_set_height(ui->drawer_cards[i], expand ? 390 : 128);
+            lv_obj_set_height(ui->drawer_cards[i], expand ? 402 : 140);
         }
         if (ui->drawer_expanded_panels[i] != nullptr) {
             if (expand) {
@@ -1803,7 +2139,7 @@ void create_drawer_cat_card(lv_obj_t *parent, size_t index, UiState &ui)
 {
     lv_obj_t *card = lv_button_create(parent);
     lv_obj_set_width(card, LV_PCT(100));
-    lv_obj_set_height(card, 128);
+    lv_obj_set_height(card, 140);
     lv_obj_set_style_bg_color(
         card, ui.dark_mode ? lv_color_hex(0x172733) : lv_color_hex(0xD9D5CC), 0);
     lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
@@ -1821,9 +2157,9 @@ void create_drawer_cat_card(lv_obj_t *parent, size_t index, UiState &ui)
     const lv_color_t secondary_text =
         ui.dark_mode ? lv_color_hex(0xAFC3CE) : lv_color_hex(0x456578);
 
-    lv_obj_t *header = make_drawer_row(card, 38, 4);
+    lv_obj_t *header = make_drawer_row(card, 44, 4);
     lv_obj_t *avatar = lv_obj_create(header);
-    lv_obj_set_size(avatar, 36, 36);
+    lv_obj_set_size(avatar, 42, 42);
     lv_obj_set_style_bg_color(avatar, lv_color_hex(kMarkerColours[index]), 0);
     lv_obj_set_style_border_color(avatar, lv_color_hex(0xD3E5ED), 0);
     lv_obj_set_style_border_width(avatar, 2, 0);
@@ -1837,12 +2173,14 @@ void create_drawer_cat_card(lv_obj_t *parent, size_t index, UiState &ui)
     lv_obj_center(avatar_number);
 
     lv_obj_t *name = make_label(header, "Waiting", primary_text);
-    lv_obj_set_width(name, 90);
+    lv_obj_set_width(name, 100);
     lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_font(name, &lv_font_montserrat_14, 0);
     lv_obj_remove_flag(name, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_t *status = make_drawer_image(header, bluepaws::ui::icon_status_out);
     lv_obj_t *profile = make_drawer_image(header, bluepaws::ui::icon_profile_powersave);
+    lv_image_set_scale(status, 307);
+    lv_image_set_scale(profile, 307);
 
     lv_obj_t *fault_row = make_drawer_row(card, 20, 4);
     lv_obj_t *fault = make_drawer_image(fault_row, bluepaws::ui::icon_status_error);
@@ -2197,30 +2535,389 @@ void create_summary_page(UiState &ui)
     }
 }
 
+void overview_wake_clicked(lv_event_t *event)
+{
+    auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
+    if (ui == nullptr) return;
+    lv_display_trigger_activity(ui->display);
+    ui->screen_off = false;
+    ui->screen_dimmed = false;
+    guition_jc4880p443c_backlight_set(ui->brightness_percent);
+    navigate_to(*ui, AppPage::Launcher);
+}
+
+void create_overview_page(UiState &ui)
+{
+    lv_obj_t *content = bluepaws::ui::create_page_frame(
+        lv_screen_active(),
+        "Home Hub overview",
+        "Tap anywhere to open BluePaws",
+        true,
+        {},
+        &ui.status);
+    lv_obj_set_flex_flow(content, ui.portrait ? LV_FLEX_FLOW_COLUMN : LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(content,
+                          LV_FLEX_ALIGN_SPACE_EVENLY,
+                          LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_bg_color(content, lv_color_hex(0x050A0F), 0);
+    lv_obj_add_event_cb(lv_screen_active(), overview_wake_clicked, LV_EVENT_PRESSED, &ui);
+    lv_obj_add_event_cb(content, overview_wake_clicked, LV_EVENT_PRESSED, &ui);
+
+    const int32_t radar_width = ui.portrait ? 440 : 430;
+    const int32_t radar_height = ui.portrait ? 440 : 390;
+    lv_obj_t *radar = lv_obj_create(content);
+    lv_obj_set_size(radar, radar_width, radar_height);
+    lv_obj_set_style_bg_color(radar, lv_color_hex(0x07131A), 0);
+    lv_obj_set_style_bg_opa(radar, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(radar, lv_color_hex(0x17465D), 0);
+    lv_obj_set_style_border_width(radar, 2, 0);
+    lv_obj_set_style_radius(radar, 18, 0);
+    lv_obj_set_style_pad_all(radar, 0, 0);
+    lv_obj_remove_flag(radar, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(radar, LV_OBJ_FLAG_CLICKABLE);
+    const int32_t ring_sizes[] = {330, 240, 150};
+    for (int32_t size : ring_sizes) {
+        lv_obj_t *ring = lv_obj_create(radar);
+        lv_obj_set_size(ring, size, size);
+        lv_obj_center(ring);
+        lv_obj_set_style_bg_opa(ring, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_color(ring, lv_color_hex(0x1C6C83), 0);
+        lv_obj_set_style_border_opa(ring, LV_OPA_50, 0);
+        lv_obj_set_style_border_width(ring, 1, 0);
+        lv_obj_set_style_radius(ring, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_pad_all(ring, 0, 0);
+        lv_obj_remove_flag(ring, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_remove_flag(ring, LV_OBJ_FLAG_CLICKABLE);
+    }
+    lv_obj_t *cross_h = lv_obj_create(radar);
+    lv_obj_set_size(cross_h, 330, 1);
+    lv_obj_center(cross_h);
+    lv_obj_set_style_bg_color(cross_h, lv_color_hex(0x1C6C83), 0);
+    lv_obj_set_style_border_width(cross_h, 0, 0);
+    lv_obj_t *cross_v = lv_obj_create(radar);
+    lv_obj_set_size(cross_v, 1, 330);
+    lv_obj_center(cross_v);
+    lv_obj_set_style_bg_color(cross_v, lv_color_hex(0x1C6C83), 0);
+    lv_obj_set_style_border_width(cross_v, 0, 0);
+
+    lv_obj_t *hub = lv_obj_create(radar);
+    lv_obj_set_size(hub, 54, 54);
+    lv_obj_center(hub);
+    lv_obj_set_style_bg_color(hub, lv_color_hex(0x1E88D2), 0);
+    lv_obj_set_style_border_color(hub, lv_color_hex(0xBDE8FF), 0);
+    lv_obj_set_style_border_width(hub, 3, 0);
+    lv_obj_set_style_radius(hub, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_shadow_color(hub, lv_color_hex(0x27C7F7), 0);
+    lv_obj_set_style_shadow_width(hub, 18, 0);
+    lv_obj_set_style_shadow_opa(hub, LV_OPA_50, 0);
+    lv_obj_set_style_pad_all(hub, 0, 0);
+    lv_obj_remove_flag(hub, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(hub, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_t *hub_label = make_label(hub, LV_SYMBOL_HOME, lv_color_hex(0xFFFFFF));
+    lv_obj_set_style_text_font(hub_label, &lv_font_montserrat_22, 0);
+    lv_obj_center(hub_label);
+
+    for (size_t i = 0; i < ui.overview_markers.size(); ++i) {
+        lv_obj_t *marker = lv_obj_create(radar);
+        lv_obj_set_size(marker, 34, 34);
+        lv_obj_set_style_bg_color(marker, lv_color_hex(kMarkerColours[i]), 0);
+        lv_obj_set_style_border_color(marker, lv_color_hex(0xFFFFFF), 0);
+        lv_obj_set_style_border_width(marker, 2, 0);
+        lv_obj_set_style_radius(marker, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_pad_all(marker, 0, 0);
+        lv_obj_remove_flag(marker, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_remove_flag(marker, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_t *number = make_label(marker, "", lv_color_hex(0xFFFFFF));
+        lv_label_set_text_fmt(number, "%u", static_cast<unsigned>(i + 1));
+        lv_obj_set_style_text_font(number, &lv_font_montserrat_14, 0);
+        lv_obj_center(number);
+        lv_obj_add_flag(marker, LV_OBJ_FLAG_HIDDEN);
+        ui.overview_markers[i] = marker;
+    }
+
+    lv_obj_t *summary = lv_obj_create(content);
+    lv_obj_set_size(summary, ui.portrait ? 440 : 330, ui.portrait ? 250 : 390);
+    lv_obj_set_style_bg_color(summary, lv_color_hex(0x0C1820), 0);
+    lv_obj_set_style_border_color(summary, lv_color_hex(0x17465D), 0);
+    lv_obj_set_style_border_width(summary, 1, 0);
+    lv_obj_set_style_radius(summary, 14, 0);
+    lv_obj_set_style_pad_all(summary, 10, 0);
+    lv_obj_set_style_pad_gap(summary, 5, 0);
+    lv_obj_set_flex_flow(summary, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_scroll_dir(summary, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(summary, LV_SCROLLBAR_MODE_AUTO);
+    lv_obj_t *summary_title = make_label(summary, "Last known positions", lv_color_hex(0x80C9F2));
+    lv_obj_set_style_text_font(summary_title, &lv_font_montserrat_18, 0);
+    for (size_t i = 0; i < ui.overview_labels.size(); ++i) {
+        lv_obj_t *label = make_label(summary, "Waiting for a collar report...", lv_color_hex(0xE7F4FA));
+        lv_obj_set_width(label, LV_PCT(100));
+        lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+        lv_obj_set_style_text_font(label, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_bg_color(label, lv_color_hex(0x102733), 0);
+        lv_obj_set_style_bg_opa(label, LV_OPA_70, 0);
+        lv_obj_set_style_border_color(label, lv_color_hex(kMarkerColours[i]), 0);
+        lv_obj_set_style_border_width(label, 2, 0);
+        lv_obj_set_style_border_side(label, LV_BORDER_SIDE_LEFT, 0);
+        lv_obj_set_style_pad_all(label, 7, 0);
+        ui.overview_labels[i] = label;
+    }
+}
+
+const char *settings_field_title(SettingsField field)
+{
+    switch (field) {
+    case SettingsField::PrimarySsid: return "Primary Wi-Fi name";
+    case SettingsField::PrimaryPassword: return "Primary Wi-Fi password";
+    case SettingsField::SecondarySsid: return "Secondary Wi-Fi name";
+    case SettingsField::SecondaryPassword: return "Secondary Wi-Fi password";
+    case SettingsField::AccessPointSsid: return "Off-grid local network name";
+    case SettingsField::AccessPointPassword: return "Off-grid local network password";
+    case SettingsField::OverviewTimeout: return "Overview timeout (seconds)";
+    case SettingsField::DimTimeout: return "Dim timeout (seconds)";
+    case SettingsField::ScreenOffTimeout: return "Screen-off timeout (seconds)";
+    case SettingsField::DimBrightness: return "Dim brightness (percent)";
+    }
+    return "Setting";
+}
+
+bool settings_field_password(SettingsField field)
+{
+    return field == SettingsField::PrimaryPassword ||
+           field == SettingsField::SecondaryPassword ||
+           field == SettingsField::AccessPointPassword;
+}
+
+bool settings_field_numeric(SettingsField field)
+{
+    return field == SettingsField::OverviewTimeout ||
+           field == SettingsField::DimTimeout ||
+           field == SettingsField::ScreenOffTimeout ||
+           field == SettingsField::DimBrightness;
+}
+
+const char *settings_field_value(UiState &ui, SettingsField field, char *buffer, std::size_t size)
+{
+    switch (field) {
+    case SettingsField::PrimarySsid: return ui.settings.primary.ssid;
+    case SettingsField::PrimaryPassword: return ui.settings.primary.password;
+    case SettingsField::SecondarySsid: return ui.settings.secondary.ssid;
+    case SettingsField::SecondaryPassword: return ui.settings.secondary.password;
+    case SettingsField::AccessPointSsid: return ui.settings.access_point_ssid;
+    case SettingsField::AccessPointPassword: return ui.settings.access_point_password;
+    case SettingsField::OverviewTimeout:
+        std::snprintf(buffer, size, "%u", ui.settings.overview_timeout_seconds); break;
+    case SettingsField::DimTimeout:
+        std::snprintf(buffer, size, "%u", ui.settings.dim_timeout_seconds); break;
+    case SettingsField::ScreenOffTimeout:
+        std::snprintf(buffer, size, "%u", ui.settings.screen_off_timeout_seconds); break;
+    case SettingsField::DimBrightness:
+        std::snprintf(buffer, size, "%u", ui.settings.dim_brightness_percent); break;
+    }
+    return buffer;
+}
+
+void close_settings_editor(UiState &ui)
+{
+    if (ui.settings_modal != nullptr) lv_obj_delete(ui.settings_modal);
+    ui.settings_modal = nullptr;
+    ui.settings_input = nullptr;
+    ui.settings_keyboard = nullptr;
+    ui.settings_error = nullptr;
+}
+
+bool apply_settings_editor_value(UiState &ui, const char *value, const char **error)
+{
+    if (value == nullptr) return false;
+    auto copy_text = [](char *destination, std::size_t capacity, const char *source) {
+        std::strncpy(destination, source, capacity - 1);
+        destination[capacity - 1] = '\0';
+    };
+    switch (ui.editing_field) {
+    case SettingsField::PrimarySsid:
+        if (value[0] != '\0' && !bluepaws::hub::validSsid(value)) {
+            *error = "Use between 1 and 32 characters."; return false;
+        }
+        copy_text(ui.settings.primary.ssid, sizeof(ui.settings.primary.ssid), value); break;
+    case SettingsField::SecondarySsid:
+        if (value[0] != '\0' && !bluepaws::hub::validSsid(value)) {
+            *error = "Use between 1 and 32 characters."; return false;
+        }
+        copy_text(ui.settings.secondary.ssid, sizeof(ui.settings.secondary.ssid), value); break;
+    case SettingsField::AccessPointSsid:
+        if (!bluepaws::hub::validSsid(value)) {
+            *error = "The off-grid local network needs a name."; return false;
+        }
+        copy_text(ui.settings.access_point_ssid, sizeof(ui.settings.access_point_ssid), value); break;
+    case SettingsField::PrimaryPassword:
+    case SettingsField::SecondaryPassword:
+    case SettingsField::AccessPointPassword:
+        if (!bluepaws::hub::validPassword(value, true)) {
+            *error = "Leave blank for open Wi-Fi, or use 8 to 63 characters."; return false;
+        }
+        if (ui.editing_field == SettingsField::PrimaryPassword)
+            copy_text(ui.settings.primary.password, sizeof(ui.settings.primary.password), value);
+        else if (ui.editing_field == SettingsField::SecondaryPassword)
+            copy_text(ui.settings.secondary.password, sizeof(ui.settings.secondary.password), value);
+        else
+            copy_text(ui.settings.access_point_password, sizeof(ui.settings.access_point_password), value);
+        break;
+    default: {
+        char *end = nullptr;
+        const unsigned long parsed = std::strtoul(value, &end, 10);
+        if (value[0] == '\0' || end == nullptr || *end != '\0') {
+            *error = "Enter a whole number."; return false;
+        }
+        if (ui.editing_field == SettingsField::OverviewTimeout) {
+            if (parsed < 15 || parsed > 3600) {
+                *error = "Choose 15 to 3600 seconds."; return false;
+            }
+            ui.settings.overview_timeout_seconds = static_cast<uint16_t>(parsed);
+        } else if (ui.editing_field == SettingsField::DimTimeout) {
+            if (parsed < 15 || parsed > 7200) {
+                *error = "Choose 15 to 7200 seconds."; return false;
+            }
+            ui.settings.dim_timeout_seconds = static_cast<uint16_t>(parsed);
+        } else if (ui.editing_field == SettingsField::ScreenOffTimeout) {
+            if (parsed < 30 || parsed > 14400) {
+                *error = "Choose 30 to 14400 seconds."; return false;
+            }
+            ui.settings.screen_off_timeout_seconds = static_cast<uint16_t>(parsed);
+        } else {
+            if (parsed < 1 || parsed > 50) {
+                *error = "Choose a dim level from 1 to 50 percent."; return false;
+            }
+            ui.settings.dim_brightness_percent = static_cast<uint8_t>(parsed);
+        }
+        break;
+    }
+    }
+    bluepaws::hub::sanitize(ui.settings);
+    return true;
+}
+
+void settings_keyboard_event(lv_event_t *event)
+{
+    auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
+    if (ui == nullptr) return;
+    const lv_event_code_t code = lv_event_get_code(event);
+    if (code == LV_EVENT_CANCEL) {
+        close_settings_editor(*ui);
+        return;
+    }
+    if (code != LV_EVENT_READY || ui->settings_input == nullptr) return;
+    const char *error = nullptr;
+    if (!apply_settings_editor_value(*ui, lv_textarea_get_text(ui->settings_input), &error)) {
+        if (ui->settings_error != nullptr) lv_label_set_text(ui->settings_error, error);
+        return;
+    }
+    const bool saved = bluepaws::settings_store::save(ui->settings);
+    if (!saved) {
+        if (ui->settings_error != nullptr)
+            lv_label_set_text(ui->settings_error, "Could not save to device storage.");
+        return;
+    }
+    if (ui->editing_field <= SettingsField::AccessPointPassword) {
+        bluepaws::cloud::applyNetworkSettings(ui->settings);
+    }
+    close_settings_editor(*ui);
+    lv_async_call(rebuild_current_page, ui);
+}
+
+void setting_card_clicked(lv_event_t *event)
+{
+    auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
+    auto *target = static_cast<lv_obj_t *>(lv_event_get_current_target(event));
+    if (ui == nullptr || target == nullptr || ui->settings_modal != nullptr) return;
+    const uintptr_t encoded = reinterpret_cast<uintptr_t>(lv_obj_get_user_data(target));
+    if (encoded == 0) return;
+    ui->editing_field = static_cast<SettingsField>(encoded - 1U);
+
+    lv_obj_t *modal = lv_obj_create(lv_screen_active());
+    lv_obj_set_size(modal, LV_PCT(100), LV_PCT(100));
+    lv_obj_align(modal, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_add_flag(modal, LV_OBJ_FLAG_FLOATING);
+    lv_obj_set_style_bg_color(modal, lv_color_hex(0x081018), 0);
+    lv_obj_set_style_bg_opa(modal, 242, 0);
+    lv_obj_set_style_border_width(modal, 0, 0);
+    lv_obj_set_style_radius(modal, 0, 0);
+    lv_obj_set_style_pad_all(modal, 14, 0);
+    lv_obj_remove_flag(modal, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *title = make_label(modal, settings_field_title(ui->editing_field), lv_color_hex(0xF3F8FB));
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_18, 0);
+    lv_obj_set_pos(title, 8, 4);
+    lv_obj_t *hint = make_label(modal, "Press the tick to save or the keyboard icon to cancel.", lv_color_hex(0x80C9F2));
+    lv_obj_set_style_text_font(hint, &lv_font_montserrat_14, 0);
+    lv_obj_set_pos(hint, 8, 30);
+
+    lv_obj_t *input = lv_textarea_create(modal);
+    lv_obj_set_size(input, LV_PCT(96), 54);
+    lv_obj_align(input, LV_ALIGN_TOP_MID, 0, 62);
+    lv_textarea_set_one_line(input, true);
+    lv_textarea_set_max_length(input, settings_field_numeric(ui->editing_field) ? 5 :
+        (ui->editing_field == SettingsField::PrimarySsid ||
+         ui->editing_field == SettingsField::SecondarySsid ||
+         ui->editing_field == SettingsField::AccessPointSsid ? 32 : 63));
+    char buffer[16]{};
+    lv_textarea_set_text(input, settings_field_value(*ui, ui->editing_field, buffer, sizeof(buffer)));
+    lv_textarea_set_password_mode(input, settings_field_password(ui->editing_field));
+
+    lv_obj_t *error_label = make_label(modal, "", lv_color_hex(0xFF8A80));
+    lv_obj_set_style_text_font(error_label, &lv_font_montserrat_14, 0);
+    lv_obj_set_pos(error_label, 8, 122);
+
+    lv_obj_t *keyboard = lv_keyboard_create(modal);
+    lv_obj_set_size(keyboard, LV_PCT(100), ui->portrait ? 500 : 300);
+    lv_obj_align(keyboard, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_keyboard_set_mode(keyboard, settings_field_numeric(ui->editing_field)
+        ? LV_KEYBOARD_MODE_NUMBER : LV_KEYBOARD_MODE_TEXT_LOWER);
+    lv_keyboard_set_textarea(keyboard, input);
+    lv_obj_add_event_cb(keyboard, settings_keyboard_event, LV_EVENT_READY, ui);
+    lv_obj_add_event_cb(keyboard, settings_keyboard_event, LV_EVENT_CANCEL, ui);
+    lv_obj_move_foreground(modal);
+    ui->settings_modal = modal;
+    ui->settings_input = input;
+    ui->settings_keyboard = keyboard;
+    ui->settings_error = error_label;
+}
+
 lv_obj_t *create_setting_card(lv_obj_t *parent,
                               const char *title_text,
                               const char *value,
+                              SettingsField field,
                               lv_color_t accent,
-                              bool dark_mode)
+                              UiState &ui)
 {
     lv_obj_t *card = lv_obj_create(parent);
-    lv_obj_set_size(card, LV_PCT(100), 78);
-    style_card(card, dark_mode);
+    lv_obj_set_size(card, LV_PCT(100), 66);
+    style_card(card, ui.dark_mode);
     lv_obj_set_style_border_color(card, accent, 0);
     lv_obj_set_style_border_width(card, 2, 0);
     lv_obj_t *title = make_label(
         card,
         title_text,
-        dark_mode ? lv_color_hex(0x8DCDEC) : lv_color_hex(0x41657A));
+        ui.dark_mode ? lv_color_hex(0x8DCDEC) : lv_color_hex(0x41657A));
     lv_obj_set_pos(title, 2, 0);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_14, 0);
     lv_obj_t *value_label = make_label(
         card,
         value,
-        dark_mode ? lv_color_hex(0xF3F8FB) : lv_color_hex(0x17324D));
+        ui.dark_mode ? lv_color_hex(0xF3F8FB) : lv_color_hex(0x17324D));
     lv_obj_set_pos(value_label, 2, 28);
-    lv_obj_set_style_text_font(value_label, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_font(value_label, &lv_font_montserrat_14, 0);
+    lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_user_data(card, reinterpret_cast<void *>(static_cast<uintptr_t>(field) + 1U));
+    lv_obj_add_event_cb(card, setting_card_clicked, LV_EVENT_CLICKED, &ui);
     return card;
+}
+
+void make_settings_section(lv_obj_t *parent, const char *text, bool dark_mode)
+{
+    lv_obj_t *label = make_label(parent, text,
+        dark_mode ? lv_color_hex(0x80C9F2) : lv_color_hex(0x28709A));
+    lv_obj_set_width(label, LV_PCT(100));
+    lv_obj_set_style_text_font(label, &lv_font_montserrat_18, 0);
 }
 
 void create_settings_page(UiState &ui)
@@ -2228,34 +2925,61 @@ void create_settings_page(UiState &ui)
     lv_obj_t *content = bluepaws::ui::create_page_frame(
         lv_screen_active(),
         "BluePaws | Settings",
-        "Configuration preview",
+        "Tap a value to edit it",
         ui.dark_mode,
         page_actions(ui, true),
         &ui.status);
     lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(content, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_hor(content, ui.portrait ? 12 : 80, 0);
+    lv_obj_set_style_pad_hor(content, ui.portrait ? 12 : 70, 0);
+    lv_obj_add_flag(content, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scroll_dir(content, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(content, LV_SCROLLBAR_MODE_AUTO);
 
-    create_setting_card(
-        content, "PRIMARY WI-FI", "Not configured", lv_color_hex(0x1976A3), ui.dark_mode);
-    create_setting_card(
-        content, "SECONDARY WI-FI", "Not configured", lv_color_hex(0x2E7D5B), ui.dark_mode);
-    create_setting_card(
-        content, "FALLBACK ACCESS POINT", "BluePaws-Hub", lv_color_hex(0x7A5A9E), ui.dark_mode);
+    const auto value_or = [](const char *value, const char *fallback) {
+        return value[0] == '\0' ? fallback : value;
+    };
+    make_settings_section(content, "WI-FI CONNECTIONS", ui.dark_mode);
+    create_setting_card(content, "PRIMARY NETWORK", value_or(ui.settings.primary.ssid, "Tap to configure"),
+                        SettingsField::PrimarySsid, lv_color_hex(0x1976A3), ui);
+    create_setting_card(content, "PRIMARY PASSWORD",
+                        ui.settings.primary.password[0] == '\0' ? "Open / not set" : "Configured - tap to change",
+                        SettingsField::PrimaryPassword, lv_color_hex(0x1976A3), ui);
+    create_setting_card(content, "SECONDARY NETWORK", value_or(ui.settings.secondary.ssid, "Tap to configure"),
+                        SettingsField::SecondarySsid, lv_color_hex(0x2E7D5B), ui);
+    create_setting_card(content, "SECONDARY PASSWORD",
+                        ui.settings.secondary.password[0] == '\0' ? "Open / not set" : "Configured - tap to change",
+                        SettingsField::SecondaryPassword, lv_color_hex(0x2E7D5B), ui);
 
-    lv_obj_t *notice = lv_obj_create(content);
-    lv_obj_set_size(notice, LV_PCT(100), 92);
-    style_card(notice, ui.dark_mode);
-    lv_obj_set_style_bg_color(
-        notice, ui.dark_mode ? lv_color_hex(0x3B3014) : lv_color_hex(0xFFF4D6), 0);
-    lv_obj_set_style_border_color(notice, lv_color_hex(0xD29B29), 0);
-    lv_obj_t *notice_text = make_label(
-        notice,
-        "TESTBED ONLY\nEditing and persistent storage arrive with the C6 networking/settings service.",
-        ui.dark_mode ? lv_color_hex(0xFFE29A) : lv_color_hex(0x654A10));
-    lv_obj_set_width(notice_text, LV_PCT(100));
-    lv_label_set_long_mode(notice_text, LV_LABEL_LONG_WRAP);
-    lv_obj_set_style_text_font(notice_text, &lv_font_montserrat_14, 0);
+    make_settings_section(content, "OFF-GRID LOCAL NETWORK", ui.dark_mode);
+    lv_obj_t *automatic_note = make_label(
+        content,
+        "Connection order: primary Wi-Fi, then the secondary phone hotspot. "
+        "This local network starts automatically only when neither is available; "
+        "the safety behaviour is always active.",
+        ui.dark_mode ? lv_color_hex(0xC7D9E5) : lv_color_hex(0x38576D));
+    lv_obj_set_width(automatic_note, LV_PCT(100));
+    lv_label_set_long_mode(automatic_note, LV_LABEL_LONG_WRAP);
+    create_setting_card(content, "LOCAL NETWORK NAME", ui.settings.access_point_ssid,
+                        SettingsField::AccessPointSsid, lv_color_hex(0x7A5A9E), ui);
+    create_setting_card(content, "LOCAL NETWORK PASSWORD",
+                        ui.settings.access_point_password[0] == '\0' ? "Open / not set" : "Configured - tap to change",
+                        SettingsField::AccessPointPassword, lv_color_hex(0x7A5A9E), ui);
+
+    make_settings_section(content, "DISPLAY AND IDLE BEHAVIOUR", ui.dark_mode);
+    char overview[32]{}, dim[32]{}, off[32]{}, dim_level[32]{};
+    std::snprintf(overview, sizeof(overview), "%u seconds", ui.settings.overview_timeout_seconds);
+    std::snprintf(dim, sizeof(dim), "%u seconds", ui.settings.dim_timeout_seconds);
+    std::snprintf(off, sizeof(off), "%u seconds", ui.settings.screen_off_timeout_seconds);
+    std::snprintf(dim_level, sizeof(dim_level), "%u%% brightness", ui.settings.dim_brightness_percent);
+    create_setting_card(content, "OVERVIEW SCREEN AFTER", overview,
+                        SettingsField::OverviewTimeout, lv_color_hex(0xB65E36), ui);
+    create_setting_card(content, "DIM SCREEN AFTER", dim,
+                        SettingsField::DimTimeout, lv_color_hex(0xB65E36), ui);
+    create_setting_card(content, "SCREEN OFF AFTER", off,
+                        SettingsField::ScreenOffTimeout, lv_color_hex(0xB65E36), ui);
+    create_setting_card(content, "DIM LEVEL", dim_level,
+                        SettingsField::DimBrightness, lv_color_hex(0xB65E36), ui);
 }
 
 void create_diagnostics_page(UiState &ui)
@@ -2287,6 +3011,8 @@ void create_ui(UiState &ui)
     ui.tile_images.fill(nullptr);
     ui.markers.fill(nullptr);
     ui.summary_rows.fill(nullptr);
+    ui.overview_markers.fill(nullptr);
+    ui.overview_labels.fill(nullptr);
     ui.drawer_cards.fill(nullptr);
     ui.drawer_summary_labels.fill(nullptr);
     ui.drawer_name_labels.fill(nullptr);
@@ -2316,9 +3042,17 @@ void create_ui(UiState &ui)
     ui.brightness_popup = nullptr;
     ui.brightness_slider = nullptr;
     ui.brightness_label = nullptr;
+    ui.volume_popup = nullptr;
+    ui.volume_slider = nullptr;
+    ui.volume_label = nullptr;
     ui.quick_settings_tray = nullptr;
     ui.quick_settings_handle = nullptr;
     ui.brightness_hide_timer = nullptr;
+    ui.volume_hide_timer = nullptr;
+    ui.settings_modal = nullptr;
+    ui.settings_input = nullptr;
+    ui.settings_keyboard = nullptr;
+    ui.settings_error = nullptr;
     ui.quick_settings_open = false;
     ui.status = nullptr;
 
@@ -2338,9 +3072,12 @@ void create_ui(UiState &ui)
     case AppPage::Diagnostics:
         create_diagnostics_page(ui);
         break;
+    case AppPage::Overview:
+        create_overview_page(ui);
+        break;
     }
 
-    create_quick_settings_tray(ui);
+    if (ui.active_page != AppPage::Overview) create_quick_settings_tray(ui);
 
     update_ui(ui);
     if (ui.update_timer == nullptr) {
@@ -2363,6 +3100,16 @@ extern "C" void app_main(void)
 
     static UiState ui;
     ui.display = display;
+    std::strncpy(ui.settings.primary.ssid,
+                 HOME_HUB_WIFI_SSID,
+                 sizeof(ui.settings.primary.ssid) - 1);
+    std::strncpy(ui.settings.primary.password,
+                 HOME_HUB_WIFI_PASSWORD,
+                 sizeof(ui.settings.primary.password) - 1);
+    bluepaws::settings_store::load(ui.settings);
+    ui.brightness_percent = ui.settings.brightness_percent;
+    ui.volume_percent = ui.settings.volume_percent;
+    guition_jc4880p443c_backlight_set(ui.brightness_percent);
     ui.sd_error = guition_jc4880p443c_sd_mount(&ui.sd);
     if (ui.sd_error != ESP_OK) {
         ESP_LOGE(kTag, "SD card initialization failed: %s", esp_err_to_name(ui.sd_error));
@@ -2378,7 +3125,7 @@ extern "C" void app_main(void)
         log_map_storage_probe(ui);
     }
     ui.simulator.reset(kTestOrigin, uptime_ms());
-    ui.cloud_enabled = bluepaws::cloud::start();
+    ui.cloud_enabled = bluepaws::cloud::start(ui.settings);
     if (!lvgl_port_lock(0)) {
         ESP_LOGE(kTag, "Could not acquire LVGL lock");
         return;

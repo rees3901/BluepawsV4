@@ -3,6 +3,7 @@ idf_component_register(
         "src/map_engine.cpp"
         "src/cat_store.cpp"
         "src/cat_simulator.cpp"
+        "src/hub_settings.cpp"
     INCLUDE_DIRS "include"
 )
 
