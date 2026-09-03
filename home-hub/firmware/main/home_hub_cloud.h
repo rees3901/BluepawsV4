@@ -23,6 +23,8 @@ struct Status {
     uint32_t failed_snapshots = 0;
     uint32_t last_http_status = 0;
     uint32_t last_sync_uptime_ms = 0;
+    hub::CommunicationsMode effective_mode = hub::CommunicationsMode::Home;
+    bool automatic_off_grid = false;
 };
 
 // Starts ESP-Hosted Wi-Fi and the HTTPS snapshot task. Returns false when the

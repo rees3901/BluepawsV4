@@ -2,12 +2,14 @@
 #include "bluepaws/cat_store.h"
 #include "bluepaws/hub_settings.h"
 #include "bluepaws/map_engine.h"
+#include "bluepaws/qr_payload.h"
 #include "guition_jc4880p443c.h"
 #include "app_shell.h"
 #include "ui_icons.h"
 #include "home_hub_cloud.h"
 #include "home_hub_config.h"
 #include "home_hub_settings_store.h"
+#include "home_hub_camera.h"
 
 #include "driver/jpeg_decode.h"
 #include "esp_heap_caps.h"
@@ -68,6 +70,7 @@ enum class AppPage : uint8_t {
     Map,
     Summary,
     Settings,
+    Camera,
     Diagnostics,
     Overview,
 };
@@ -163,6 +166,9 @@ struct UiState {
     std::array<bool, bluepaws::kMaximumCats> trail_enabled{};
     lv_obj_t *cat_list = nullptr;
     lv_obj_t *diagnostics_text = nullptr;
+    lv_obj_t *camera_preview_image = nullptr;
+    lv_obj_t *camera_result_label = nullptr;
+    lv_obj_t *camera_apply_button = nullptr;
     lv_obj_t *map_drawer = nullptr;
     lv_obj_t *layer_drawer = nullptr;
     lv_obj_t *brightness_popup = nullptr;
@@ -180,6 +186,7 @@ struct UiState {
     lv_obj_t *settings_keyboard = nullptr;
     lv_obj_t *settings_error = nullptr;
     lv_timer_t *gesture_timer = nullptr;
+    lv_timer_t *camera_timer = nullptr;
     lv_obj_t *status = nullptr;
     lv_timer_t *update_timer = nullptr;
     guition_jc4880p443c_sd_info_t sd{};
@@ -207,6 +214,11 @@ struct UiState {
     bool cloud_enabled = false;
     SettingsField editing_field = SettingsField::PrimarySsid;
     bluepaws::hub::Settings settings = bluepaws::hub::defaultSettings();
+    bluepaws::qr::ParsedPayload pending_qr{};
+    uint16_t *camera_preview_pixels = nullptr;
+    lv_image_dsc_t camera_preview_descriptor{};
+    uint32_t camera_preview_generation = 0;
+    uint32_t camera_result_generation = 0;
 };
 
 void rebuild_current_page(void *user_data);
@@ -554,6 +566,7 @@ void update_ui(UiState &ui)
     }
     if (inactive_ms >= overview_ms && ui.active_page != AppPage::Overview &&
         ui.settings_modal == nullptr && !ui.screensaver_pending) {
+        if (ui.active_page == AppPage::Camera) bluepaws::camera::stop();
         ui.screensaver_pending = true;
         ui.active_page = AppPage::Overview;
         lv_async_call(rebuild_current_page, &ui);
@@ -871,6 +884,13 @@ void update_ui(UiState &ui)
     case AppPage::Settings:
         lv_label_set_text(ui.status, "Saved locally | Wi-Fi changes apply automatically");
         break;
+    case AppPage::Camera: {
+        const auto camera_status = bluepaws::camera::status();
+        lv_label_set_text(ui.status, camera_status.message[0] == '\0'
+                                        ? "Camera is idle"
+                                        : camera_status.message);
+        break;
+    }
     case AppPage::Diagnostics:
         lv_label_set_text_fmt(ui.status,
                               "Uptime %lu s | SD %s | %u cats",
@@ -880,9 +900,11 @@ void update_ui(UiState &ui)
         break;
     case AppPage::Overview:
         lv_label_set_text_fmt(ui.status,
-                              "%u cats | %s | tap anywhere to open",
+                              "%u cats | %s | %s%s mode | tap background to open",
                               static_cast<unsigned>(ui.cats.size()),
-                              sync_name);
+                              sync_name,
+                              bluepaws::hub::communicationsModeName(cloud_status.effective_mode),
+                              cloud_status.automatic_off_grid ? "auto " : "");
         break;
     }
 }
@@ -1386,6 +1408,12 @@ void volume_clicked(lv_event_t *event)
 
 void navigate_to(UiState &ui, AppPage page)
 {
+    if (ui.active_page == AppPage::Camera && page != AppPage::Camera) {
+        bluepaws::camera::stop();
+    }
+    if (page == AppPage::Camera) {
+        bluepaws::camera::start();
+    }
     ui.active_page = page;
     ui.screensaver_pending = false;
     ui.drawer_open = false;
@@ -1412,6 +1440,16 @@ void summary_app_clicked(lv_event_t *event)
 void settings_app_clicked(lv_event_t *event)
 {
     navigate_to(*static_cast<UiState *>(lv_event_get_user_data(event)), AppPage::Settings);
+}
+
+void camera_app_clicked(lv_event_t *event)
+{
+    navigate_to(*static_cast<UiState *>(lv_event_get_user_data(event)), AppPage::Camera);
+}
+
+void overview_app_clicked(lv_event_t *event)
+{
+    navigate_to(*static_cast<UiState *>(lv_event_get_user_data(event)), AppPage::Overview);
 }
 
 void diagnostics_app_clicked(lv_event_t *event)
@@ -1984,6 +2022,28 @@ void create_launcher(UiState &ui)
     bluepaws::ui::create_app_tile(content,
                                   tile_width,
                                   tile_height,
+                                  "QR Scanner",
+                                  nullptr,
+                                  "QR",
+                                  false,
+                                  0x007D8A,
+                                  ui.dark_mode,
+                                  camera_app_clicked,
+                                  &ui);
+    bluepaws::ui::create_app_tile(content,
+                                  tile_width,
+                                  tile_height,
+                                  "Overview",
+                                  nullptr,
+                                  LV_SYMBOL_EYE_OPEN,
+                                  false,
+                                  0x155E75,
+                                  ui.dark_mode,
+                                  overview_app_clicked,
+                                  &ui);
+    bluepaws::ui::create_app_tile(content,
+                                  tile_width,
+                                  tile_height,
                                   "Diagnostics",
                                   &bluepaws::ui::icon_diagnostic,
                                   nullptr,
@@ -2546,6 +2606,55 @@ void overview_wake_clicked(lv_event_t *event)
     navigate_to(*ui, AppPage::Launcher);
 }
 
+void set_communications_mode(UiState &ui, bluepaws::hub::CommunicationsMode mode)
+{
+    ui.settings.communications_mode = mode;
+    if (!bluepaws::settings_store::save(ui.settings)) {
+        if (ui.status != nullptr) lv_label_set_text(ui.status, "Could not save hub mode");
+        return;
+    }
+    bluepaws::cloud::applyNetworkSettings(ui.settings);
+    lv_display_trigger_activity(ui.display);
+    lv_async_call(rebuild_current_page, &ui);
+}
+
+void home_mode_clicked(lv_event_t *event)
+{
+    set_communications_mode(*static_cast<UiState *>(lv_event_get_user_data(event)),
+                            bluepaws::hub::CommunicationsMode::Home);
+}
+
+void portable_mode_clicked(lv_event_t *event)
+{
+    set_communications_mode(*static_cast<UiState *>(lv_event_get_user_data(event)),
+                            bluepaws::hub::CommunicationsMode::Portable);
+}
+
+void off_grid_mode_clicked(lv_event_t *event)
+{
+    set_communications_mode(*static_cast<UiState *>(lv_event_get_user_data(event)),
+                            bluepaws::hub::CommunicationsMode::OffGrid);
+}
+
+lv_obj_t *make_mode_button(lv_obj_t *parent, const char *text,
+                           bluepaws::hub::CommunicationsMode mode,
+                           lv_event_cb_t callback, UiState &ui)
+{
+    lv_obj_t *button = lv_button_create(parent);
+    lv_obj_set_size(button, 92, 44);
+    const bool selected = ui.settings.communications_mode == mode;
+    lv_obj_set_style_bg_color(button,
+                              selected ? lv_color_hex(0x1E88D2) : lv_color_hex(0x173342), 0);
+    lv_obj_set_style_border_color(button,
+                                  selected ? lv_color_hex(0xBDE8FF) : lv_color_hex(0x486274), 0);
+    lv_obj_set_style_border_width(button, selected ? 2 : 1, 0);
+    lv_obj_add_event_cb(button, callback, LV_EVENT_CLICKED, &ui);
+    lv_obj_t *label = make_label(button, text, lv_color_hex(0xFFFFFF));
+    lv_obj_set_style_text_font(label, &lv_font_montserrat_14, 0);
+    lv_obj_center(label);
+    return button;
+}
+
 void create_overview_page(UiState &ui)
 {
     lv_obj_t *content = bluepaws::ui::create_page_frame(
@@ -2649,6 +2758,23 @@ void create_overview_page(UiState &ui)
     lv_obj_set_scrollbar_mode(summary, LV_SCROLLBAR_MODE_AUTO);
     lv_obj_t *summary_title = make_label(summary, "Last known positions", lv_color_hex(0x80C9F2));
     lv_obj_set_style_text_font(summary_title, &lv_font_montserrat_18, 0);
+    lv_obj_t *mode_title = make_label(summary, "HUB MODE", lv_color_hex(0x80C9F2));
+    lv_obj_set_style_text_font(mode_title, &lv_font_montserrat_14, 0);
+    lv_obj_t *mode_row = lv_obj_create(summary);
+    lv_obj_set_size(mode_row, LV_PCT(100), 52);
+    lv_obj_set_style_bg_opa(mode_row, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(mode_row, 0, 0);
+    lv_obj_set_style_pad_all(mode_row, 0, 0);
+    lv_obj_set_style_pad_gap(mode_row, 5, 0);
+    lv_obj_set_flex_flow(mode_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(mode_row, LV_FLEX_ALIGN_SPACE_BETWEEN,
+                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    make_mode_button(mode_row, "Home", bluepaws::hub::CommunicationsMode::Home,
+                     home_mode_clicked, ui);
+    make_mode_button(mode_row, "Portable", bluepaws::hub::CommunicationsMode::Portable,
+                     portable_mode_clicked, ui);
+    make_mode_button(mode_row, "Off-Grid", bluepaws::hub::CommunicationsMode::OffGrid,
+                     off_grid_mode_clicked, ui);
     for (size_t i = 0; i < ui.overview_labels.size(); ++i) {
         lv_obj_t *label = make_label(summary, "Waiting for a collar report...", lv_color_hex(0xE7F4FA));
         lv_obj_set_width(label, LV_PCT(100));
@@ -2982,6 +3108,119 @@ void create_settings_page(UiState &ui)
                         SettingsField::DimBrightness, lv_color_hex(0xB65E36), ui);
 }
 
+void camera_apply_wifi_clicked(lv_event_t *event)
+{
+    auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
+    if (ui == nullptr || ui->pending_qr.type != bluepaws::qr::PayloadType::Wifi) return;
+    std::snprintf(ui->settings.primary.ssid, sizeof(ui->settings.primary.ssid), "%s",
+                  ui->pending_qr.wifi.ssid);
+    std::snprintf(ui->settings.primary.password, sizeof(ui->settings.primary.password), "%s",
+                  ui->pending_qr.wifi.password);
+    if (!bluepaws::settings_store::save(ui->settings)) {
+        lv_label_set_text(ui->camera_result_label, "Could not save credentials to device storage.");
+        return;
+    }
+    bluepaws::cloud::applyNetworkSettings(ui->settings);
+    lv_label_set_text_fmt(ui->camera_result_label,
+                          "Saved %s as the primary network. Connecting...",
+                          ui->settings.primary.ssid);
+    lv_obj_add_flag(ui->camera_apply_button, LV_OBJ_FLAG_HIDDEN);
+}
+
+void camera_page_timer(lv_timer_t *timer)
+{
+    auto *ui = static_cast<UiState *>(lv_timer_get_user_data(timer));
+    if (ui == nullptr || ui->active_page != AppPage::Camera) return;
+    if (bluepaws::camera::copyPreview(ui->camera_preview_pixels,
+                                      bluepaws::camera::kPreviewPixelCount,
+                                      ui->camera_preview_generation) &&
+        ui->camera_preview_image != nullptr) {
+        lv_obj_invalidate(ui->camera_preview_image);
+    }
+
+    const auto camera_status = bluepaws::camera::status();
+    if (camera_status.result_generation == 0 ||
+        camera_status.result_generation == ui->camera_result_generation) return;
+    ui->camera_result_generation = camera_status.result_generation;
+    ui->pending_qr = {};
+    if (!bluepaws::qr::parse(camera_status.payload, ui->pending_qr)) {
+        lv_label_set_text(ui->camera_result_label,
+                          "QR read successfully, but this payload is not a supported Wi-Fi or BluePaws code.");
+        lv_obj_add_flag(ui->camera_apply_button, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+    if (ui->pending_qr.type == bluepaws::qr::PayloadType::Wifi) {
+        lv_label_set_text_fmt(ui->camera_result_label,
+                              "Wi-Fi network found\nSSID: %s\nPassword: %s",
+                              ui->pending_qr.wifi.ssid,
+                              ui->pending_qr.wifi.password[0] == '\0' ? "Open network" : "••••••••");
+        lv_obj_remove_flag(ui->camera_apply_button, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_label_set_text_fmt(ui->camera_result_label,
+                              "Collar code found: %s\nProvisioning support is reserved for the next step.",
+                              ui->pending_qr.collar_id);
+        lv_obj_add_flag(ui->camera_apply_button, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+void create_camera_page(UiState &ui)
+{
+    lv_obj_t *content = bluepaws::ui::create_page_frame(
+        lv_screen_active(), "BluePaws | QR Scanner", "Starting camera...", ui.dark_mode,
+        page_actions(ui, true), &ui.status);
+    lv_obj_set_flex_flow(content, ui.portrait ? LV_FLEX_FLOW_COLUMN : LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(content, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    if (ui.camera_preview_pixels == nullptr) {
+        ui.camera_preview_pixels = static_cast<uint16_t *>(heap_caps_calloc(
+            bluepaws::camera::kPreviewPixelCount, sizeof(uint16_t),
+            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+        ui.camera_preview_descriptor = {};
+        ui.camera_preview_descriptor.header.magic = LV_IMAGE_HEADER_MAGIC;
+        ui.camera_preview_descriptor.header.cf = LV_COLOR_FORMAT_RGB565;
+        ui.camera_preview_descriptor.header.w = bluepaws::camera::kPreviewWidth;
+        ui.camera_preview_descriptor.header.h = bluepaws::camera::kPreviewHeight;
+        ui.camera_preview_descriptor.header.stride = bluepaws::camera::kPreviewWidth * 2;
+        ui.camera_preview_descriptor.data_size = bluepaws::camera::kPreviewPixelCount * 2;
+        ui.camera_preview_descriptor.data = reinterpret_cast<const uint8_t *>(ui.camera_preview_pixels);
+    }
+
+    lv_obj_t *preview_panel = lv_obj_create(content);
+    lv_obj_set_size(preview_panel, 340, 260);
+    style_card(preview_panel, ui.dark_mode);
+    lv_obj_set_style_pad_all(preview_panel, 10, 0);
+    ui.camera_preview_image = lv_image_create(preview_panel);
+    if (ui.camera_preview_pixels != nullptr) {
+        lv_image_set_src(ui.camera_preview_image, &ui.camera_preview_descriptor);
+    }
+    lv_obj_center(ui.camera_preview_image);
+
+    lv_obj_t *result_panel = lv_obj_create(content);
+    lv_obj_set_size(result_panel, ui.portrait ? 340 : 390, ui.portrait ? 260 : 260);
+    style_card(result_panel, ui.dark_mode);
+    lv_obj_set_style_pad_all(result_panel, 18, 0);
+    lv_obj_set_flex_flow(result_panel, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(result_panel, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    ui.camera_result_label = make_label(
+        result_panel,
+        "Point the onboard camera at a standard Wi-Fi QR code. Credentials are shown for confirmation before they are saved.",
+        ui.dark_mode ? lv_color_hex(0xF3F8FB) : lv_color_hex(0x17324D));
+    lv_obj_set_width(ui.camera_result_label, LV_PCT(100));
+    lv_label_set_long_mode(ui.camera_result_label, LV_LABEL_LONG_WRAP);
+
+    ui.camera_apply_button = lv_button_create(result_panel);
+    lv_obj_set_size(ui.camera_apply_button, LV_PCT(100), 52);
+    lv_obj_set_style_bg_color(ui.camera_apply_button, lv_color_hex(0x007D8A), 0);
+    lv_obj_add_event_cb(ui.camera_apply_button, camera_apply_wifi_clicked, LV_EVENT_CLICKED, &ui);
+    lv_obj_add_flag(ui.camera_apply_button, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_t *button_label = make_label(ui.camera_apply_button, "Save and connect", lv_color_hex(0xFFFFFF));
+    lv_obj_center(button_label);
+
+    if (ui.camera_timer == nullptr) {
+        ui.camera_timer = lv_timer_create(camera_page_timer, 100, &ui);
+    }
+}
+
 void create_diagnostics_page(UiState &ui)
 {
     lv_obj_t *content = bluepaws::ui::create_page_frame(
@@ -3037,6 +3276,9 @@ void create_ui(UiState &ui)
     ui.map_view = nullptr;
     ui.cat_list = nullptr;
     ui.diagnostics_text = nullptr;
+    ui.camera_preview_image = nullptr;
+    ui.camera_result_label = nullptr;
+    ui.camera_apply_button = nullptr;
     ui.map_drawer = nullptr;
     ui.layer_drawer = nullptr;
     ui.brightness_popup = nullptr;
@@ -3068,6 +3310,9 @@ void create_ui(UiState &ui)
         break;
     case AppPage::Settings:
         create_settings_page(ui);
+        break;
+    case AppPage::Camera:
+        create_camera_page(ui);
         break;
     case AppPage::Diagnostics:
         create_diagnostics_page(ui);

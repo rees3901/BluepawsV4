@@ -2,6 +2,7 @@
 #include "bluepaws/cat_store.h"
 #include "bluepaws/hub_settings.h"
 #include "bluepaws/map_engine.h"
+#include "bluepaws/qr_payload.h"
 
 #include <cassert>
 #include <cmath>
@@ -172,9 +173,35 @@ void relativePositionProvidesDistanceAndClockDirection() {
     assert(std::strcmp(south.cardinal, "S") == 0);
 }
 
+void qrPayloadsAreStrictAndEscaped() {
+    bluepaws::qr::ParsedPayload parsed{};
+    assert(bluepaws::qr::parse(
+        "WIFI:T:WPA;S:BluePaws\\; Lab;P:cat\\:tracker\\,secret;H:true;;", parsed));
+    assert(parsed.type == bluepaws::qr::PayloadType::Wifi);
+    assert(std::strcmp(parsed.wifi.ssid, "BluePaws; Lab") == 0);
+    assert(std::strcmp(parsed.wifi.password, "cat:tracker,secret") == 0);
+    assert(parsed.wifi.hidden);
+    assert(parsed.wifi.security == bluepaws::qr::WifiSecurity::Wpa);
+
+    assert(bluepaws::qr::parse("WIFI:T:nopass;S:Guest;P:;;", parsed));
+    assert(parsed.wifi.security == bluepaws::qr::WifiSecurity::Open);
+    assert(!bluepaws::qr::parse("WIFI:T:WPA;S:Home;P:short;;", parsed));
+    assert(!bluepaws::qr::parse("WIFI:T:WEP;S:Legacy;P:12345678;;", parsed));
+    assert(!bluepaws::qr::parse("https://example.com", parsed));
+    assert(bluepaws::qr::parse("BLUEPAWS:COLLAR:BP4-001122", parsed));
+    assert(parsed.type == bluepaws::qr::PayloadType::Collar);
+    assert(std::strcmp(parsed.collar_id, "BP4-001122") == 0);
+}
+
 }  // namespace
 
 int main() {
+    assert(std::strcmp(bluepaws::hub::communicationsModeName(
+                           bluepaws::hub::CommunicationsMode::Home), "Home") == 0);
+    assert(std::strcmp(bluepaws::hub::communicationsModeName(
+                           bluepaws::hub::CommunicationsMode::Portable), "Portable") == 0);
+    assert(std::strcmp(bluepaws::hub::communicationsModeName(
+                           bluepaws::hub::CommunicationsMode::OffGrid), "Off-Grid") == 0);
     projectionRoundTrips();
     viewportPansAndLaysOutTiles();
     fitAllKeepsPointsInsidePadding();
@@ -183,5 +210,6 @@ int main() {
     storeRejectsOlderTruth();
     settingsRemainSafeAndOrdered();
     relativePositionProvidesDistanceAndClockDirection();
+    qrPayloadsAreStrictAndEscaped();
     std::puts("Home Hub portable core: all tests passed");
 }

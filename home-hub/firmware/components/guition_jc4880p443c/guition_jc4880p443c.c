@@ -301,6 +301,11 @@ uint8_t guition_jc4880p443c_touch_count(void)
     return touch_contact_count;
 }
 
+i2c_master_bus_handle_t guition_jc4880p443c_i2c_bus(void)
+{
+    return touch_i2c;
+}
+
 int8_t guition_jc4880p443c_take_pinch_steps(void)
 {
     const int8_t steps = pending_pinch_steps;

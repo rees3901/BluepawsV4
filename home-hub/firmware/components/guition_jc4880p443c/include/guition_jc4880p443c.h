@@ -11,6 +11,7 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "driver/i2c_master.h"
 #include "lvgl.h"
 
 #ifdef __cplusplus
@@ -40,6 +41,9 @@ typedef struct {
 
 /** Start the MIPI-DSI panel, GT911 touch controller and LVGL in landscape. */
 lv_display_t *guition_jc4880p443c_display_start(void);
+
+/** Shared GPIO7/GPIO8 I2C bus used by GT911 touch and OV02C10 SCCB. */
+i2c_master_bus_handle_t guition_jc4880p443c_i2c_bus(void);
 
 /** Set the PWM backlight from 0 to 100 percent. */
 esp_err_t guition_jc4880p443c_backlight_set(int brightness_percent);
