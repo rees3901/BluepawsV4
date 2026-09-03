@@ -1,6 +1,6 @@
 idf_component_register(
     SRCS "main.cpp" "app_shell.cpp" "ui_icons.cpp" "home_hub_cloud.cpp"
-         "home_hub_settings_store.cpp"
+         "home_hub_settings_store.cpp" "home_hub_camera.cpp"
     INCLUDE_DIRS "."
     REQUIRES
         bluepaws_core
@@ -14,6 +14,8 @@ idf_component_register(
         json
         mbedtls
         nvs_flash
+        espressif__esp_video
+        espressif__quirc
 )
 
 target_compile_features(${COMPONENT_LIB} PRIVATE cxx_std_17)

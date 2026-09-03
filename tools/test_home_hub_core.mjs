@@ -17,6 +17,7 @@ const sources = [
     resolve(component, 'src/cat_store.cpp'),
     resolve(component, 'src/cat_simulator.cpp'),
     resolve(component, 'src/hub_settings.cpp'),
+    resolve(component, 'src/qr_payload.cpp'),
     resolve(root, 'home-hub/tests/home_hub_core_test.cpp'),
 ];
 const compiled = spawnSync(compiler, [

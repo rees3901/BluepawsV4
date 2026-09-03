@@ -38,6 +38,7 @@ BSP 5.2.3 are therefore the implementation baseline.
 | Touch control pins | Reset and interrupt are `GPIO_NUM_NC` in the vendor BSP |
 | microSD | 4-bit SDMMC: D0 39, D1 40, D2 41, D3 42, CMD 44, CLK 43 |
 | Audio I2S | MCLK 13, BCLK 12, WS 10, DOUT 9, DIN 48, amplifier enable 11 |
+| Camera | OV02C10, two-lane MIPI-CSI; SCCB shares I2C GPIO7/GPIO8 |
 | Supply | 5 V; vendor typical current approximately 320 mA without added LoRa |
 
 The active display area is 93.60 x 56.16 mm and the bare board is approximately
@@ -359,3 +360,31 @@ ESP-IDF wrote and hash-verified the bootloader at `0x2000`, partition table at
 16 MB flash. The first monitored boot reported ESP32-P4 revision 1.3, 16 MB
 flash, 32 MB PSRAM, 800x480 display, GT911 touch and the healthy 121,001 MB SD
 card/FAT volume, then started the UI without a panic or reset loop.
+
+## Camera and QR test application
+
+The launcher now includes a **QR Scanner** hardware-test page based on the
+matching GUITION `video_lcd_display` source: OV02C10, MIPI RAW10 1920 x 1080,
+two CSI lanes, `esp_video` 1.1.0 and `esp_cam_sensor` 1.2.1. The ISP supplies
+RGB565 capture buffers, while the app publishes a caller-owned 320 x 240 LVGL
+preview and feeds grayscale samples to `quirc` every fifth frame. Capture starts
+only when the page opens and is asked to stop when the user leaves it or the
+idle overview takes over.
+
+The first supported action is standard Wi-Fi QR import. SSID and password
+escaping is handled by portable, host-testable code; the UI masks the password
+and requires confirmation before saving the primary network to NVS. WEP and
+unknown payloads are rejected. `BLUEPAWS:COLLAR:<id>` is recognized but remains
+non-mutating until collar identity, proof-of-possession and affiliation rules
+are specified. Physical camera/QR validation is still required on the rev 1.3
+testbed before this feature can be considered production-ready.
+
+## P4 communications modes
+
+The P4 Overview is also directly available from the launcher and carries three
+persistent mode controls. **Home** selects primary Wi-Fi, **Portable** selects
+the configured secondary phone hotspot, and **Off-Grid** disables the station
+uplink and starts the configured local access point. Home and Portable retain a
+safety fallback: after the selected uplink is unavailable, the local access
+point starts automatically while that same uplink is probed for recovery. The
+active selection is stored in NVS and reapplied after restart.

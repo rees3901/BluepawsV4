@@ -4,6 +4,7 @@ idf_component_register(
         "src/cat_store.cpp"
         "src/cat_simulator.cpp"
         "src/hub_settings.cpp"
+        "src/qr_payload.cpp"
     INCLUDE_DIRS "include"
 )
 
