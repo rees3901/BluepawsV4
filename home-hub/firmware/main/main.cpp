@@ -730,13 +730,13 @@ void update_ui(UiState &ui)
         if (ui.drawer_detail_labels[i] != nullptr) {
             lv_label_set_text_fmt(
                 ui.drawer_detail_labels[i],
-                "Coordinates        %.5f, %.5f\n"
-                "Device ID                          %u\n"
-                "Power Profile              %s\n"
-                "Distance from hub              %lum\n"
-                "Signal                 %d dBm / %.1f dB\n"
-                "Battery                       %u mV\n"
-                "Last seen                         %lus",
+                "%.5f, %.5f\n"
+                "%u\n"
+                "%s\n"
+                "%lum\n"
+                "%d dBm / %.1f dB\n"
+                "%u mV\n"
+                "%lus",
                 static_cast<double>(cat->last_valid_latitude_e7) / 1.0e7,
                 static_cast<double>(cat->last_valid_longitude_e7) / 1.0e7,
                 static_cast<unsigned>(cat->device_id),
@@ -2261,14 +2261,48 @@ void create_drawer_cat_card(lv_obj_t *parent, size_t index, UiState &ui)
     lv_obj_remove_flag(expanded, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(expanded, LV_OBJ_FLAG_HIDDEN);
 
-    lv_obj_t *detail = make_label(
-        expanded,
-        "",
+    lv_obj_t *detail_row = lv_obj_create(expanded);
+    lv_obj_set_size(detail_row, LV_PCT(100), 126);
+    lv_obj_set_style_bg_opa(detail_row, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(detail_row, 0, 0);
+    lv_obj_set_style_pad_all(detail_row, 0, 0);
+    lv_obj_set_style_pad_gap(detail_row, 12, 0);
+    lv_obj_set_flex_flow(detail_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(detail_row,
+                          LV_FLEX_ALIGN_SPACE_BETWEEN,
+                          LV_FLEX_ALIGN_START,
+                          LV_FLEX_ALIGN_START);
+    lv_obj_remove_flag(detail_row, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(detail_row, LV_OBJ_FLAG_CLICKABLE);
+
+    lv_obj_t *detail_names = make_label(
+        detail_row,
+        "Coordinates\n"
+        "Device ID\n"
+        "Power Profile\n"
+        "Distance from hub\n"
+        "Signal\n"
+        "Battery\n"
+        "Last seen",
         ui.dark_mode ? lv_color_hex(0xB9D0DC) : lv_color_hex(0x36596D));
-    lv_obj_set_width(detail, LV_PCT(100));
-    lv_label_set_long_mode(detail, LV_LABEL_LONG_WRAP);
-    lv_obj_set_style_text_font(detail, &lv_font_montserrat_14, 0);
-    lv_obj_remove_flag(detail, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_width(detail_names, 142);
+    lv_label_set_long_mode(detail_names, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_font(detail_names, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_align(detail_names, LV_TEXT_ALIGN_LEFT, 0);
+    lv_obj_set_style_text_line_space(detail_names, 2, 0);
+    lv_obj_remove_flag(detail_names, LV_OBJ_FLAG_CLICKABLE);
+
+    lv_obj_t *detail_values = make_label(
+        detail_row,
+        "--, --\n--\n--\n--m\n-- dBm / -- dB\n-- mV\n--s",
+        ui.dark_mode ? lv_color_hex(0xE7F4FA) : lv_color_hex(0x17324D));
+    lv_obj_set_width(detail_values, 1);
+    lv_obj_set_flex_grow(detail_values, 1);
+    lv_label_set_long_mode(detail_values, LV_LABEL_LONG_CLIP);
+    lv_obj_set_style_text_font(detail_values, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_align(detail_values, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_style_text_line_space(detail_values, 2, 0);
+    lv_obj_remove_flag(detail_values, LV_OBJ_FLAG_CLICKABLE);
 
     lv_obj_t *actions = lv_obj_create(expanded);
     lv_obj_set_size(actions, LV_PCT(100), 42);
@@ -2304,7 +2338,7 @@ void create_drawer_cat_card(lv_obj_t *parent, size_t index, UiState &ui)
     ui.drawer_radio_images[index] = radio;
     ui.drawer_distance_labels[index] = distance;
     ui.drawer_age_labels[index] = age;
-    ui.drawer_detail_labels[index] = detail;
+    ui.drawer_detail_labels[index] = detail_values;
     ui.drawer_expanded_panels[index] = expanded;
     ui.drawer_message_labels[index] = message;
     ui.drawer_card_expanded[index] = false;
