@@ -152,15 +152,11 @@ struct UiState {
     std::array<lv_obj_t *, bluepaws::kMaximumCats> overview_battery_images{};
     std::array<lv_obj_t *, bluepaws::kMaximumCats> overview_battery_labels{};
     std::array<lv_obj_t *, bluepaws::kMaximumCats> overview_signal_images{};
-    std::array<lv_obj_t *, bluepaws::kMaximumCats> overview_signal_labels{};
     std::array<lv_obj_t *, bluepaws::kMaximumCats> overview_radio_images{};
     std::array<lv_obj_t *, bluepaws::kMaximumCats> overview_distance_labels{};
     std::array<lv_obj_t *, bluepaws::kMaximumCats> overview_age_labels{};
     lv_obj_t *overview_clock_label = nullptr;
-    lv_obj_t *overview_date_label = nullptr;
-    lv_obj_t *overview_time_source_label = nullptr;
     lv_obj_t *overview_header_signal_image = nullptr;
-    lv_obj_t *overview_header_signal_label = nullptr;
     lv_obj_t *overview_header_battery_image = nullptr;
     lv_obj_t *overview_header_battery_label = nullptr;
     std::array<lv_obj_t *, bluepaws::kMaximumCats> drawer_cards{};
@@ -586,6 +582,12 @@ const char *signal_quality(int16_t rssi)
     return rssi > -80 ? "Excellent" : (rssi > -95 ? "Good" : "Low");
 }
 
+lv_color_t signal_colour(int16_t rssi)
+{
+    return rssi > -80 ? lv_color_hex(0x2BC48A)
+        : (rssi > -95 ? lv_color_hex(0xF2B134) : lv_color_hex(0xEF5A67));
+}
+
 void update_ui(UiState &ui)
 {
     const uint32_t now_ms = uptime_ms();
@@ -869,7 +871,9 @@ void update_ui(UiState &ui)
             lv_label_set_text_fmt(ui.overview_battery_labels[slot], "%u%%",
                                   static_cast<unsigned>(cat->latest.battery_percent));
             lv_image_set_src(ui.overview_signal_images[slot], signal_icon(cat->latest.rssi));
-            lv_label_set_text(ui.overview_signal_labels[slot], signal_quality(cat->latest.rssi));
+            lv_obj_set_style_image_recolor(ui.overview_signal_images[slot],
+                                           signal_colour(cat->latest.rssi), 0);
+            lv_obj_set_style_image_recolor_opa(ui.overview_signal_images[slot], LV_OPA_COVER, 0);
             lv_image_set_src(ui.overview_radio_images[slot],
                              cat_index % 3U == 0U ? &bluepaws::ui::icon_radio_rf
                                  : (cat_index % 3U == 1U ? &bluepaws::ui::icon_radio_wifi
@@ -887,13 +891,19 @@ void update_ui(UiState &ui)
         if (ui.cats.size() > 0) {
             const bluepaws::CatRecord *latest = ui.cats.at(newest_first[0]);
             lv_image_set_src(ui.overview_header_signal_image, signal_icon(latest->latest.rssi));
-            lv_label_set_text(ui.overview_header_signal_label, signal_quality(latest->latest.rssi));
+            lv_obj_set_style_image_recolor(ui.overview_header_signal_image,
+                                           signal_colour(latest->latest.rssi), 0);
+            lv_obj_set_style_image_recolor_opa(ui.overview_header_signal_image, LV_OPA_COVER, 0);
             lv_image_set_src(ui.overview_header_battery_image,
                              battery_icon(latest->latest.battery_percent));
             lv_label_set_text_fmt(ui.overview_header_battery_label, "%u%%",
                                   static_cast<unsigned>(latest->latest.battery_percent));
         } else {
-            lv_label_set_text(ui.overview_header_signal_label, "--");
+            lv_image_set_src(ui.overview_header_signal_image,
+                             &bluepaws::ui::icon_signal_mobile);
+            lv_obj_set_style_image_recolor(ui.overview_header_signal_image,
+                                           lv_color_hex(0x6E91A5), 0);
+            lv_obj_set_style_image_recolor_opa(ui.overview_header_signal_image, LV_OPA_COVER, 0);
             lv_label_set_text(ui.overview_header_battery_label, "--%");
         }
     }
@@ -998,20 +1008,13 @@ void update_ui(UiState &ui)
             std::tm local_time{};
             if (wall_time >= 1704067200 && localtime_r(&wall_time, &local_time) != nullptr) {
                 char clock_text[12]{};
-                char date_text[32]{};
                 std::strftime(clock_text, sizeof(clock_text), "%I:%M %p", &local_time);
                 if (clock_text[0] == '0') {
                     std::memmove(clock_text, clock_text + 1, std::strlen(clock_text));
                 }
-                std::strftime(date_text, sizeof(date_text), "%a %e %b", &local_time);
                 lv_label_set_text(ui.overview_clock_label, clock_text);
-                lv_label_set_text(ui.overview_date_label, date_text);
-                lv_label_set_text(ui.overview_time_source_label,
-                                  cloud_status.time_synchronized ? "NTP" : "CLOCK");
             } else {
                 lv_label_set_text(ui.overview_clock_label, "--:-- --");
-                lv_label_set_text(ui.overview_date_label, "Waiting for time");
-                lv_label_set_text(ui.overview_time_source_label, "NTP");
             }
         }
         lv_label_set_text_fmt(ui.status,
@@ -2829,16 +2832,20 @@ void create_overview_cat_card(lv_obj_t *parent, size_t slot, UiState &ui)
 
     lv_obj_t *telemetry = make_drawer_row(card, 22, 4);
     lv_obj_t *battery = make_drawer_image(telemetry, bluepaws::ui::icon_battery_full);
+    lv_image_set_scale(battery, 320);
     lv_obj_t *battery_text = make_label(telemetry, "--%", secondary_text);
-    lv_obj_set_width(battery_text, 40);
+    lv_obj_set_width(battery_text, 46);
     lv_obj_set_style_text_font(battery_text, &lv_font_montserrat_14, 0);
     make_drawer_image(telemetry, bluepaws::ui::icon_radio_antenna);
     lv_obj_t *signal = make_drawer_image(telemetry, bluepaws::ui::icon_signal_full);
-    lv_obj_t *signal_text = make_label(telemetry, "--", lv_color_hex(0x31B988));
-    lv_obj_set_width(signal_text, 1);
-    lv_obj_set_flex_grow(signal_text, 1);
-    lv_label_set_long_mode(signal_text, LV_LABEL_LONG_DOT);
-    lv_obj_set_style_text_font(signal_text, &lv_font_montserrat_14, 0);
+    lv_image_set_scale(signal, 320);
+    lv_obj_t *telemetry_spacer = lv_obj_create(telemetry);
+    lv_obj_set_size(telemetry_spacer, 1, 1);
+    lv_obj_set_flex_grow(telemetry_spacer, 1);
+    lv_obj_set_style_bg_opa(telemetry_spacer, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(telemetry_spacer, 0, 0);
+    lv_obj_set_style_pad_all(telemetry_spacer, 0, 0);
+    lv_obj_remove_flag(telemetry_spacer, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_t *radio = make_drawer_image(telemetry, bluepaws::ui::icon_radio_rf);
 
     lv_obj_t *meta = make_drawer_row(card, 18, 5);
@@ -2861,7 +2868,6 @@ void create_overview_cat_card(lv_obj_t *parent, size_t slot, UiState &ui)
     ui.overview_battery_images[slot] = battery;
     ui.overview_battery_labels[slot] = battery_text;
     ui.overview_signal_images[slot] = signal;
-    ui.overview_signal_labels[slot] = signal_text;
     ui.overview_radio_images[slot] = radio;
     ui.overview_distance_labels[slot] = distance;
     ui.overview_age_labels[slot] = age;
@@ -2884,14 +2890,14 @@ void create_overview_page(UiState &ui)
     lv_obj_set_style_text_font(title, &lv_font_montserrat_18, 0);
 
     lv_obj_t *mode_title = make_label(header, "Hub mode", lv_color_hex(0x80C9F2));
-    lv_obj_set_pos(mode_title, ui.portrait ? 74 : 126, 3);
+    lv_obj_set_pos(mode_title, ui.portrait ? 100 : 260, 3);
     lv_obj_set_style_text_font(mode_title, &lv_font_montserrat_14, 0);
     if (ui.portrait) lv_obj_add_flag(mode_title, LV_OBJ_FLAG_HIDDEN);
     lv_obj_t *mode_dropdown = lv_dropdown_create(header);
     lv_dropdown_set_options(mode_dropdown, "Home Hub\nPortable\nOff-Grid");
     lv_dropdown_set_selected(mode_dropdown, static_cast<uint32_t>(ui.settings.communications_mode));
-    lv_obj_set_pos(mode_dropdown, ui.portrait ? 74 : 126, ui.portrait ? 10 : 21);
-    lv_obj_set_size(mode_dropdown, ui.portrait ? 142 : 152, ui.portrait ? 38 : 34);
+    lv_obj_set_pos(mode_dropdown, ui.portrait ? 100 : 260, ui.portrait ? 10 : 21);
+    lv_obj_set_size(mode_dropdown, ui.portrait ? 136 : 190, ui.portrait ? 38 : 34);
     lv_obj_set_style_bg_color(mode_dropdown, lv_color_hex(0x173342), 0);
     lv_obj_set_style_border_color(mode_dropdown, lv_color_hex(0x80C9F2), 0);
     lv_obj_set_style_border_width(mode_dropdown, 1, 0);
@@ -2901,37 +2907,21 @@ void create_overview_page(UiState &ui)
     lv_obj_add_event_cb(mode_dropdown, mode_dropdown_changed, LV_EVENT_VALUE_CHANGED, &ui);
 
     ui.overview_header_signal_image = make_drawer_image(header, bluepaws::ui::icon_signal_full);
-    lv_obj_set_pos(ui.overview_header_signal_image, ui.portrait ? 225 : 299, 9);
-    ui.overview_header_signal_label = make_label(header, "--", lv_color_hex(0x31B988));
-    lv_obj_set_pos(ui.overview_header_signal_label, ui.portrait ? 251 : 325, 10);
-    lv_obj_set_width(ui.overview_header_signal_label, ui.portrait ? 42 : 78);
-    lv_label_set_long_mode(ui.overview_header_signal_label, LV_LABEL_LONG_DOT);
-    lv_obj_set_style_text_font(ui.overview_header_signal_label, &lv_font_montserrat_14, 0);
+    lv_obj_set_pos(ui.overview_header_signal_image, ui.portrait ? 252 : 488, 17);
+    lv_image_set_scale(ui.overview_header_signal_image, ui.portrait ? 320 : 384);
     ui.overview_header_battery_image = make_drawer_image(header, bluepaws::ui::icon_battery_full);
-    lv_obj_set_pos(ui.overview_header_battery_image, ui.portrait ? 294 : 411, 9);
+    lv_obj_set_pos(ui.overview_header_battery_image, ui.portrait ? 297 : 548, 17);
+    lv_image_set_scale(ui.overview_header_battery_image, ui.portrait ? 320 : 384);
     ui.overview_header_battery_label = make_label(header, "--%", lv_color_hex(0xAFC3CE));
-    lv_obj_set_pos(ui.overview_header_battery_label, ui.portrait ? 320 : 438, 10);
-    lv_obj_set_style_text_font(ui.overview_header_battery_label, &lv_font_montserrat_14, 0);
-    if (!ui.portrait) {
-        lv_obj_t *latest_label = make_label(header, "LATEST COLLAR", lv_color_hex(0x6E91A5));
-        lv_obj_set_pos(latest_label, 299, 35);
-        lv_obj_set_style_text_font(latest_label, &lv_font_montserrat_14, 0);
-    }
-
-    ui.overview_time_source_label = make_label(header, "NTP", lv_color_hex(0x80C9F2));
-    lv_obj_set_pos(ui.overview_time_source_label, ui.portrait ? 368 : 526, 35);
-    lv_obj_set_style_text_font(ui.overview_time_source_label, &lv_font_montserrat_14, 0);
-    ui.overview_date_label = make_label(header, "Waiting for time", lv_color_hex(0xB8D4E3));
-    lv_obj_set_pos(ui.overview_date_label, 570, 35);
-    lv_obj_set_width(ui.overview_date_label, 100);
-    lv_obj_set_style_text_align(ui.overview_date_label, LV_TEXT_ALIGN_RIGHT, 0);
-    lv_obj_set_style_text_font(ui.overview_date_label, &lv_font_montserrat_14, 0);
-    if (ui.portrait) lv_obj_add_flag(ui.overview_date_label, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_pos(ui.overview_header_battery_label, ui.portrait ? 326 : 579, 18);
+    lv_obj_set_style_text_font(ui.overview_header_battery_label, &lv_font_montserrat_18, 0);
     ui.overview_clock_label = make_label(header, "--:-- --", lv_color_hex(0xFFFFFF));
-    lv_obj_set_pos(ui.overview_clock_label, ui.portrait ? 356 : 630, 7);
-    lv_obj_set_width(ui.overview_clock_label, ui.portrait ? 116 : 158);
+    lv_obj_set_pos(ui.overview_clock_label, ui.portrait ? 363 : 642, 17);
+    lv_obj_set_width(ui.overview_clock_label, ui.portrait ? 109 : 146);
     lv_obj_set_style_text_align(ui.overview_clock_label, LV_TEXT_ALIGN_RIGHT, 0);
-    lv_obj_set_style_text_font(ui.overview_clock_label, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_font(ui.overview_clock_label,
+                               ui.portrait ? &lv_font_montserrat_18 : &lv_font_montserrat_22,
+                               0);
 
     lv_obj_set_flex_flow(content, ui.portrait ? LV_FLEX_FLOW_COLUMN : LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(content,
@@ -3502,15 +3492,11 @@ void create_ui(UiState &ui)
     ui.overview_battery_images.fill(nullptr);
     ui.overview_battery_labels.fill(nullptr);
     ui.overview_signal_images.fill(nullptr);
-    ui.overview_signal_labels.fill(nullptr);
     ui.overview_radio_images.fill(nullptr);
     ui.overview_distance_labels.fill(nullptr);
     ui.overview_age_labels.fill(nullptr);
     ui.overview_clock_label = nullptr;
-    ui.overview_date_label = nullptr;
-    ui.overview_time_source_label = nullptr;
     ui.overview_header_signal_image = nullptr;
-    ui.overview_header_signal_label = nullptr;
     ui.overview_header_battery_image = nullptr;
     ui.overview_header_battery_label = nullptr;
     ui.drawer_cards.fill(nullptr);
