@@ -66,11 +66,12 @@ collar yet.
 
 Display settings control the idle experience. By default the hub enters a dark
 radar-style overview after two minutes, dims after three minutes and switches
-the backlight off after five minutes. The overview uses the current authoritative
-cat coordinates to show distance, compass/clock direction and last-seen age
-around the Home Hub. It also shows the UK local date and time synchronized from
-`pool.ntp.org`, with a visible waiting/synchronized state. Touching the overview
-background returns to the launcher while its mode buttons remain interactive. All three timeouts and
+the backlight off after five minutes. The borderless radar uses the current
+authoritative cat coordinates, while the wider last-known-position column reuses
+the map's collar cards and orders them by the newest report. The phone-style
+header contains the active Hub mode selector, latest-collar signal and battery,
+and UK local NTP time in 12-hour AM/PM form. Touching the overview background
+returns to the launcher while the mode selector remains interactive. All three timeouts and
 the dim level are configurable. The pull-down tray now includes a persisted
 volume slider alongside brightness. Volume is a UI setting until the speaker
 hardware is connected. The brightness and volume overlays wait one second after
