@@ -69,8 +69,9 @@ radar-style overview after two minutes, dims after three minutes and switches
 the backlight off after five minutes. The borderless radar uses the current
 authoritative cat coordinates, while the wider last-known-position column reuses
 the map's collar cards and orders them by the newest report. The phone-style
-header contains the active Hub mode selector, latest-collar signal and battery,
-and UK local NTP time in 12-hour AM/PM form. Touching the overview background
+header contains a centred active Hub mode selector, large icon-only latest-collar
+signal and battery indicators, and the UK local time in 12-hour AM/PM form.
+Touching the overview background
 returns to the launcher while the mode selector remains interactive. All three timeouts and
 the dim level are configurable. The pull-down tray now includes a persisted
 volume slider alongside brightness. Volume is a UI setting until the speaker
