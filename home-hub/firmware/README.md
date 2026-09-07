@@ -43,11 +43,13 @@ layer.
 The launcher **Settings** page is backed by ESP-IDF NVS and provides touch
 editing with an on-screen keyboard for primary and secondary Wi-Fi networks,
 plus the fallback off-grid access-point name and password. The launcher also
-opens the Overview directly. Its persistent Home, Portable and Off-Grid buttons
-select primary Wi-Fi, the secondary phone hotspot, or the local access point
-without an upstream station. If a selected Home or Portable uplink is lost, the
-ESP32-C6 adapter opens the local network while continuing to probe that uplink,
-then closes the fallback AP after it reconnects.
+opens the Overview directly. Its compact Hub mode selector persists Home,
+Portable or Off-Grid. Home prefers primary Wi-Fi and Portable prefers the
+secondary phone hotspot; both use one 30-second recovery budget to try every
+configured uplink before starting the automatic local-AP fallback. The fallback
+continues probing known uplinks and closes after one reconnects. Manually
+selecting Off-Grid is separate: it starts the AP immediately, disables station
+reconnects and remains selected until the user chooses another mode.
 Passwords remain in local NVS, are masked in the UI, and are never copied to SD
 or written to the serial log.
 
