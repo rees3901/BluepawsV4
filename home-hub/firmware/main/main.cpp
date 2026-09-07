@@ -155,6 +155,8 @@ struct UiState {
     std::array<lv_obj_t *, bluepaws::kMaximumCats> overview_radio_images{};
     std::array<lv_obj_t *, bluepaws::kMaximumCats> overview_distance_labels{};
     std::array<lv_obj_t *, bluepaws::kMaximumCats> overview_age_labels{};
+    lv_obj_t *overview_summary_label = nullptr;
+    lv_obj_t *overview_mode_dropdown = nullptr;
     lv_obj_t *overview_clock_label = nullptr;
     lv_obj_t *overview_header_signal_image = nullptr;
     lv_obj_t *overview_header_battery_image = nullptr;
@@ -591,6 +593,10 @@ lv_color_t signal_colour(int16_t rssi)
 void update_ui(UiState &ui)
 {
     const uint32_t now_ms = uptime_ms();
+    // A camera scan is an intentional, hands-off activity. Treating it as idle
+    // used to stop the camera and force the Overview page after the normal
+    // inactivity timeout (typically 30 seconds).
+    const bool camera_active = ui.active_page == AppPage::Camera;
     const uint32_t inactive_ms = ui.display == nullptr
         ? 0 : lv_display_get_inactive_time(ui.display);
     const uint32_t overview_ms = static_cast<uint32_t>(
@@ -601,17 +607,16 @@ void update_ui(UiState &ui)
         ui.screen_dimmed = false;
         ui.screen_off = false;
         guition_jc4880p443c_backlight_set(ui.brightness_percent);
-    } else if (inactive_ms >= off_ms && !ui.screen_off) {
+    } else if (!camera_active && inactive_ms >= off_ms && !ui.screen_off) {
         ui.screen_off = true;
         ui.screen_dimmed = true;
         guition_jc4880p443c_backlight_set(0);
-    } else if (inactive_ms >= dim_ms && !ui.screen_dimmed) {
+    } else if (!camera_active && inactive_ms >= dim_ms && !ui.screen_dimmed) {
         ui.screen_dimmed = true;
         guition_jc4880p443c_backlight_set(ui.settings.dim_brightness_percent);
     }
-    if (inactive_ms >= overview_ms && ui.active_page != AppPage::Overview &&
+    if (!camera_active && inactive_ms >= overview_ms && ui.active_page != AppPage::Overview &&
         ui.settings_modal == nullptr && !ui.screensaver_pending) {
-        if (ui.active_page == AppPage::Camera) bluepaws::camera::stop();
         ui.screensaver_pending = true;
         ui.active_page = AppPage::Overview;
         lv_async_call(rebuild_current_page, &ui);
@@ -816,6 +821,26 @@ void update_ui(UiState &ui)
     }
 
     if (ui.overview_cards[0] != nullptr) {
+        size_t recently_seen = 0;
+        for (size_t i = 0; i < ui.cats.size(); ++i) {
+            const bluepaws::CatRecord *cat = ui.cats.at(i);
+            if (cat != nullptr && now_ms >= cat->latest.received_at_ms &&
+                now_ms - cat->latest.received_at_ms <= 60U * 60U * 1000U) {
+                ++recently_seen;
+            }
+        }
+        if (ui.overview_summary_label != nullptr) {
+            if (recently_seen == 0) {
+                lv_label_set_text(ui.overview_summary_label, "No devices seen in the last hour");
+            } else {
+                lv_label_set_text_fmt(ui.overview_summary_label,
+                                      recently_seen == 1
+                                          ? "%u device seen in the last hour"
+                                          : "%u devices seen in the last hour",
+                                      static_cast<unsigned>(recently_seen));
+            }
+        }
+
         std::array<size_t, bluepaws::kMaximumCats> newest_first{};
         for (size_t i = 0; i < ui.cats.size(); ++i) newest_first[i] = i;
         std::sort(newest_first.begin(), newest_first.begin() + ui.cats.size(),
@@ -990,9 +1015,15 @@ void update_ui(UiState &ui)
         break;
     case AppPage::Camera: {
         const auto camera_status = bluepaws::camera::status();
-        lv_label_set_text(ui.status, camera_status.message[0] == '\0'
-                                        ? "Camera is idle"
-                                        : camera_status.message);
+        if (camera_status.state == bluepaws::camera::State::Streaming) {
+            lv_label_set_text_fmt(ui.status, "%s | %lu frames",
+                                  camera_status.message,
+                                  static_cast<unsigned long>(camera_status.captured_frames));
+        } else {
+            lv_label_set_text(ui.status, camera_status.message[0] == '\0'
+                                            ? "Camera is idle"
+                                            : camera_status.message);
+        }
         break;
     }
     case AppPage::Diagnostics:
@@ -2762,15 +2793,25 @@ void set_communications_mode(UiState &ui, bluepaws::hub::CommunicationsMode mode
 {
     if (ui.settings.communications_mode == mode) return;
     const bluepaws::hub::CommunicationsMode previous = ui.settings.communications_mode;
+    ESP_LOGI(kTag, "Hub mode requested: %s -> %s",
+             bluepaws::hub::communicationsModeName(previous),
+             bluepaws::hub::communicationsModeName(mode));
     ui.settings.communications_mode = mode;
     if (!bluepaws::settings_store::save(ui.settings)) {
         ui.settings.communications_mode = previous;
+        if (ui.overview_mode_dropdown != nullptr) {
+            lv_dropdown_set_selected(ui.overview_mode_dropdown,
+                                     static_cast<uint32_t>(previous));
+        }
+        ESP_LOGE(kTag, "Hub mode save failed; restored %s",
+                 bluepaws::hub::communicationsModeName(previous));
         if (ui.status != nullptr) lv_label_set_text(ui.status, "Could not save hub mode");
         return;
     }
     bluepaws::cloud::applyNetworkSettings(ui.settings);
     lv_display_trigger_activity(ui.display);
-    lv_async_call(rebuild_current_page, &ui);
+    ESP_LOGI(kTag, "Hub mode saved and applied: %s",
+             bluepaws::hub::communicationsModeName(mode));
 }
 
 void mode_dropdown_changed(lv_event_t *event)
@@ -2886,17 +2927,22 @@ void create_overview_page(UiState &ui)
     lv_obj_t *header = lv_obj_get_parent(ui.status);
     lv_obj_add_flag(ui.status, LV_OBJ_FLAG_HIDDEN);
     lv_obj_t *title = lv_obj_get_child(header, 0);
-    lv_obj_set_pos(title, ui.portrait ? 8 : 12, 17);
+    lv_obj_set_pos(title, ui.portrait ? 8 : 12, 5);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_18, 0);
+    ui.overview_summary_label = make_label(
+        header, "No devices seen in the last hour", lv_color_hex(0x80A9BE));
+    lv_obj_set_pos(ui.overview_summary_label, ui.portrait ? 8 : 12, 32);
+    lv_obj_set_style_text_font(ui.overview_summary_label, &lv_font_montserrat_14, 0);
+    if (ui.portrait) lv_obj_add_flag(ui.overview_summary_label, LV_OBJ_FLAG_HIDDEN);
 
     lv_obj_t *mode_title = make_label(header, "Hub mode", lv_color_hex(0x80C9F2));
-    lv_obj_set_pos(mode_title, ui.portrait ? 100 : 260, 3);
+    lv_obj_set_pos(mode_title, ui.portrait ? 100 : 305, 3);
     lv_obj_set_style_text_font(mode_title, &lv_font_montserrat_14, 0);
     if (ui.portrait) lv_obj_add_flag(mode_title, LV_OBJ_FLAG_HIDDEN);
     lv_obj_t *mode_dropdown = lv_dropdown_create(header);
     lv_dropdown_set_options(mode_dropdown, "Home Hub\nPortable\nOff-Grid");
     lv_dropdown_set_selected(mode_dropdown, static_cast<uint32_t>(ui.settings.communications_mode));
-    lv_obj_set_pos(mode_dropdown, ui.portrait ? 100 : 260, ui.portrait ? 10 : 21);
+    lv_obj_set_pos(mode_dropdown, ui.portrait ? 100 : 305, ui.portrait ? 10 : 21);
     lv_obj_set_size(mode_dropdown, ui.portrait ? 136 : 190, ui.portrait ? 38 : 34);
     lv_obj_set_style_bg_color(mode_dropdown, lv_color_hex(0x173342), 0);
     lv_obj_set_style_border_color(mode_dropdown, lv_color_hex(0x80C9F2), 0);
@@ -2905,15 +2951,16 @@ void create_overview_page(UiState &ui)
     lv_obj_set_style_text_color(mode_dropdown, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_text_font(mode_dropdown, &lv_font_montserrat_14, 0);
     lv_obj_add_event_cb(mode_dropdown, mode_dropdown_changed, LV_EVENT_VALUE_CHANGED, &ui);
+    ui.overview_mode_dropdown = mode_dropdown;
 
     ui.overview_header_signal_image = make_drawer_image(header, bluepaws::ui::icon_signal_full);
-    lv_obj_set_pos(ui.overview_header_signal_image, ui.portrait ? 252 : 488, 17);
+    lv_obj_set_pos(ui.overview_header_signal_image, ui.portrait ? 252 : 516, 17);
     lv_image_set_scale(ui.overview_header_signal_image, ui.portrait ? 320 : 384);
     ui.overview_header_battery_image = make_drawer_image(header, bluepaws::ui::icon_battery_full);
-    lv_obj_set_pos(ui.overview_header_battery_image, ui.portrait ? 297 : 548, 17);
+    lv_obj_set_pos(ui.overview_header_battery_image, ui.portrait ? 297 : 571, 17);
     lv_image_set_scale(ui.overview_header_battery_image, ui.portrait ? 320 : 384);
     ui.overview_header_battery_label = make_label(header, "--%", lv_color_hex(0xAFC3CE));
-    lv_obj_set_pos(ui.overview_header_battery_label, ui.portrait ? 326 : 579, 18);
+    lv_obj_set_pos(ui.overview_header_battery_label, ui.portrait ? 326 : 602, 18);
     lv_obj_set_style_text_font(ui.overview_header_battery_label, &lv_font_montserrat_18, 0);
     ui.overview_clock_label = make_label(header, "--:-- --", lv_color_hex(0xFFFFFF));
     lv_obj_set_pos(ui.overview_clock_label, ui.portrait ? 363 : 642, 17);
@@ -3358,6 +3405,16 @@ void camera_apply_wifi_clicked(lv_event_t *event)
     lv_obj_add_flag(ui->camera_apply_button, LV_OBJ_FLAG_HIDDEN);
 }
 
+void camera_brightness_changed(lv_event_t *event)
+{
+    auto *button_matrix = static_cast<lv_obj_t *>(lv_event_get_target(event));
+    if (button_matrix == nullptr) return;
+    const uint32_t selected = lv_buttonmatrix_get_selected_button(button_matrix);
+    if (selected <= 2) {
+        bluepaws::camera::setScanBrightness(static_cast<int8_t>(selected) - 1);
+    }
+}
+
 void camera_page_timer(lv_timer_t *timer)
 {
     auto *ui = static_cast<UiState *>(lv_timer_get_user_data(timer));
@@ -3417,7 +3474,7 @@ void create_camera_page(UiState &ui)
     }
 
     lv_obj_t *preview_panel = lv_obj_create(content);
-    lv_obj_set_size(preview_panel, 340, 260);
+    lv_obj_set_size(preview_panel, 340, 220);
     style_card(preview_panel, ui.dark_mode);
     lv_obj_set_style_pad_all(preview_panel, 10, 0);
     ui.camera_preview_image = lv_image_create(preview_panel);
@@ -3425,6 +3482,15 @@ void create_camera_page(UiState &ui)
         lv_image_set_src(ui.camera_preview_image, &ui.camera_preview_descriptor);
     }
     lv_obj_center(ui.camera_preview_image);
+
+    lv_obj_t *scan_guide = lv_obj_create(preview_panel);
+    lv_obj_set_size(scan_guide, 132, 132);
+    lv_obj_center(scan_guide);
+    lv_obj_set_style_bg_opa(scan_guide, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(scan_guide, 3, 0);
+    lv_obj_set_style_border_color(scan_guide, lv_color_hex(0x39D3E6), 0);
+    lv_obj_set_style_radius(scan_guide, 10, 0);
+    lv_obj_remove_flag(scan_guide, LV_OBJ_FLAG_CLICKABLE);
 
     lv_obj_t *result_panel = lv_obj_create(content);
     lv_obj_set_size(result_panel, ui.portrait ? 340 : 390, ui.portrait ? 260 : 260);
@@ -3434,10 +3500,28 @@ void create_camera_page(UiState &ui)
     lv_obj_set_flex_align(result_panel, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
     ui.camera_result_label = make_label(
         result_panel,
-        "Point the onboard camera at a standard Wi-Fi QR code. Credentials are shown for confirmation before they are saved.",
+        "Hold the QR code square inside the guide, about 15-60 cm away. Wi-Fi credentials are shown for confirmation before they are saved.",
         ui.dark_mode ? lv_color_hex(0xF3F8FB) : lv_color_hex(0x17324D));
     lv_obj_set_width(ui.camera_result_label, LV_PCT(100));
     lv_label_set_long_mode(ui.camera_result_label, LV_LABEL_LONG_WRAP);
+
+    lv_obj_t *brightness_label = make_label(
+        result_panel, "QR scan brightness",
+        ui.dark_mode ? lv_color_hex(0xAFC5D6) : lv_color_hex(0x45657D));
+    lv_obj_set_style_text_font(brightness_label, &lv_font_montserrat_14, 0);
+    static const char *brightness_buttons[] = {"Darker", "Auto", "Brighter", ""};
+    lv_obj_t *brightness_matrix = lv_buttonmatrix_create(result_panel);
+    lv_buttonmatrix_set_map(brightness_matrix, brightness_buttons);
+    lv_buttonmatrix_set_one_checked(brightness_matrix, true);
+    lv_buttonmatrix_set_button_ctrl_all(brightness_matrix, LV_BUTTONMATRIX_CTRL_CHECKABLE);
+    const uint32_t brightness_selection =
+        static_cast<uint32_t>(bluepaws::camera::scanBrightness() + 1);
+    lv_buttonmatrix_set_selected_button(brightness_matrix, brightness_selection);
+    lv_buttonmatrix_set_button_ctrl(
+        brightness_matrix, brightness_selection, LV_BUTTONMATRIX_CTRL_CHECKED);
+    lv_obj_set_size(brightness_matrix, LV_PCT(100), 42);
+    lv_obj_add_event_cb(
+        brightness_matrix, camera_brightness_changed, LV_EVENT_VALUE_CHANGED, &ui);
 
     ui.camera_apply_button = lv_button_create(result_panel);
     lv_obj_set_size(ui.camera_apply_button, LV_PCT(100), 52);
@@ -3495,6 +3579,8 @@ void create_ui(UiState &ui)
     ui.overview_radio_images.fill(nullptr);
     ui.overview_distance_labels.fill(nullptr);
     ui.overview_age_labels.fill(nullptr);
+    ui.overview_summary_label = nullptr;
+    ui.overview_mode_dropdown = nullptr;
     ui.overview_clock_label = nullptr;
     ui.overview_header_signal_image = nullptr;
     ui.overview_header_battery_image = nullptr;
