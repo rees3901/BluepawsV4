@@ -142,18 +142,21 @@ void storeRejectsOlderTruth() {
 void settingsRemainSafeAndOrdered() {
     auto settings = bluepaws::hub::defaultSettings();
     assert(std::strcmp(settings.access_point_ssid, "BluePaws-Hub") == 0);
+    assert(settings.communications_mode == bluepaws::hub::CommunicationsMode::Home);
     assert(settings.overview_timeout_seconds == 120);
     settings.overview_timeout_seconds = 2;
     settings.dim_timeout_seconds = 1;
     settings.screen_off_timeout_seconds = 1;
     settings.brightness_percent = 255;
     settings.dim_brightness_percent = 0;
+    settings.communications_mode = static_cast<bluepaws::hub::CommunicationsMode>(99);
     bluepaws::hub::sanitize(settings);
     assert(settings.overview_timeout_seconds == 15);
     assert(settings.dim_timeout_seconds >= settings.overview_timeout_seconds);
     assert(settings.screen_off_timeout_seconds >= settings.dim_timeout_seconds);
     assert(settings.brightness_percent == 100);
     assert(settings.dim_brightness_percent == 1);
+    assert(settings.communications_mode == bluepaws::hub::CommunicationsMode::Home);
     assert(bluepaws::hub::validSsid("Reesnet Guest"));
     assert(!bluepaws::hub::validSsid(""));
     assert(bluepaws::hub::validPassword("password"));
@@ -196,6 +199,12 @@ void qrPayloadsAreStrictAndEscaped() {
 }  // namespace
 
 int main() {
+    assert(std::strcmp(bluepaws::hub::communicationsModeName(
+                           bluepaws::hub::CommunicationsMode::Home), "Home") == 0);
+    assert(std::strcmp(bluepaws::hub::communicationsModeName(
+                           bluepaws::hub::CommunicationsMode::Portable), "Portable") == 0);
+    assert(std::strcmp(bluepaws::hub::communicationsModeName(
+                           bluepaws::hub::CommunicationsMode::OffGrid), "Off-Grid") == 0);
     projectionRoundTrips();
     viewportPansAndLaysOutTiles();
     fitAllKeepsPointsInsidePadding();

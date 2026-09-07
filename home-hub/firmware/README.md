@@ -42,9 +42,12 @@ layer.
 
 The launcher **Settings** page is backed by ESP-IDF NVS and provides touch
 editing with an on-screen keyboard for primary and secondary Wi-Fi networks,
-plus the fallback off-grid access-point name and password. The ESP32-C6 adapter
-runs station and access-point mode together when both are enabled, prefers the
-primary network and attempts the secondary network after a connection timeout.
+plus the fallback off-grid access-point name and password. The launcher also
+opens the Overview directly. Its persistent Home, Portable and Off-Grid buttons
+select primary Wi-Fi, the secondary phone hotspot, or the local access point
+without an upstream station. If a selected Home or Portable uplink is lost, the
+ESP32-C6 adapter opens the local network while continuing to probe that uplink,
+then closes the fallback AP after it reconnects.
 Passwords remain in local NVS, are masked in the UI, and are never copied to SD
 or written to the serial log.
 
@@ -63,7 +66,9 @@ Display settings control the idle experience. By default the hub enters a dark
 radar-style overview after two minutes, dims after three minutes and switches
 the backlight off after five minutes. The overview uses the current authoritative
 cat coordinates to show distance, compass/clock direction and last-seen age
-around the Home Hub; touching it returns to the launcher. All three timeouts and
+around the Home Hub. It also shows the UK local date and time synchronized from
+`pool.ntp.org`, with a visible waiting/synchronized state. Touching the overview
+background returns to the launcher while its mode buttons remain interactive. All three timeouts and
 the dim level are configurable. The pull-down tray now includes a persisted
 volume slider alongside brightness. Volume is a UI setting until the speaker
 hardware is connected. The brightness and volume overlays wait one second after

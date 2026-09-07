@@ -45,6 +45,15 @@ bool validAccessPointPassword(const char *value) {
     return validPassword(value, true);
 }
 
+const char *communicationsModeName(CommunicationsMode mode) {
+    switch (mode) {
+    case CommunicationsMode::Home: return "Home";
+    case CommunicationsMode::Portable: return "Portable";
+    case CommunicationsMode::OffGrid: return "Off-Grid";
+    }
+    return "Home";
+}
+
 void sanitize(Settings &settings) {
     settings.primary.ssid[kWifiSsidBytes - 1] = '\0';
     settings.primary.password[kWifiPasswordBytes - 1] = '\0';
@@ -62,6 +71,10 @@ void sanitize(Settings &settings) {
     }
     if (!validPassword(settings.primary.password)) settings.primary.password[0] = '\0';
     if (!validPassword(settings.secondary.password)) settings.secondary.password[0] = '\0';
+    if (static_cast<uint8_t>(settings.communications_mode) >
+        static_cast<uint8_t>(CommunicationsMode::OffGrid)) {
+        settings.communications_mode = CommunicationsMode::Home;
+    }
 
     settings.overview_timeout_seconds = std::clamp<uint16_t>(
         settings.overview_timeout_seconds, 15, 3600);
