@@ -378,13 +378,3 @@ unknown payloads are rejected. `BLUEPAWS:COLLAR:<id>` is recognized but remains
 non-mutating until collar identity, proof-of-possession and affiliation rules
 are specified. Physical camera/QR validation is still required on the rev 1.3
 testbed before this feature can be considered production-ready.
-
-## P4 communications modes
-
-The P4 Overview is also directly available from the launcher and carries three
-persistent mode controls. **Home** selects primary Wi-Fi, **Portable** selects
-the configured secondary phone hotspot, and **Off-Grid** disables the station
-uplink and starts the configured local access point. Home and Portable retain a
-safety fallback: after the selected uplink is unavailable, the local access
-point starts automatically while that same uplink is probed for recovery. The
-active selection is stored in NVS and reapplied after restart.

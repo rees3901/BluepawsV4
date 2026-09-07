@@ -196,12 +196,6 @@ void qrPayloadsAreStrictAndEscaped() {
 }  // namespace
 
 int main() {
-    assert(std::strcmp(bluepaws::hub::communicationsModeName(
-                           bluepaws::hub::CommunicationsMode::Home), "Home") == 0);
-    assert(std::strcmp(bluepaws::hub::communicationsModeName(
-                           bluepaws::hub::CommunicationsMode::Portable), "Portable") == 0);
-    assert(std::strcmp(bluepaws::hub::communicationsModeName(
-                           bluepaws::hub::CommunicationsMode::OffGrid), "Off-Grid") == 0);
     projectionRoundTrips();
     viewportPansAndLaysOutTiles();
     fitAllKeepsPointsInsidePadding();
