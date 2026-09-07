@@ -29,6 +29,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <dirent.h>
 #include <sys/stat.h>
 
@@ -142,6 +143,9 @@ struct UiState {
     std::array<lv_obj_t *, bluepaws::kMaximumCats> summary_rows{};
     std::array<lv_obj_t *, bluepaws::kMaximumCats> overview_markers{};
     std::array<lv_obj_t *, bluepaws::kMaximumCats> overview_labels{};
+    lv_obj_t *overview_clock_label = nullptr;
+    lv_obj_t *overview_date_label = nullptr;
+    lv_obj_t *overview_time_source_label = nullptr;
     std::array<lv_obj_t *, bluepaws::kMaximumCats> drawer_cards{};
     std::array<lv_obj_t *, bluepaws::kMaximumCats> drawer_summary_labels{};
     std::array<lv_obj_t *, bluepaws::kMaximumCats> drawer_name_labels{};
@@ -899,10 +903,30 @@ void update_ui(UiState &ui)
                               static_cast<unsigned>(ui.cats.size()));
         break;
     case AppPage::Overview:
+        if (ui.overview_clock_label != nullptr) {
+            const std::time_t wall_time = std::time(nullptr);
+            std::tm local_time{};
+            if (wall_time >= 1704067200 && localtime_r(&wall_time, &local_time) != nullptr) {
+                char clock_text[8]{};
+                char date_text[32]{};
+                std::strftime(clock_text, sizeof(clock_text), "%H:%M", &local_time);
+                std::strftime(date_text, sizeof(date_text), "%a %e %b %Y", &local_time);
+                lv_label_set_text(ui.overview_clock_label, clock_text);
+                lv_label_set_text(ui.overview_date_label, date_text);
+                lv_label_set_text(ui.overview_time_source_label,
+                                  cloud_status.time_synchronized ? "NTP synced" : "Clock set");
+            } else {
+                lv_label_set_text(ui.overview_clock_label, "--:--");
+                lv_label_set_text(ui.overview_date_label, "Waiting for network time");
+                lv_label_set_text(ui.overview_time_source_label, "NTP waiting");
+            }
+        }
         lv_label_set_text_fmt(ui.status,
-                              "%u cats | %s | tap anywhere to open",
+                              "%u cats | %s | %s%s mode | tap background to open",
                               static_cast<unsigned>(ui.cats.size()),
-                              sync_name);
+                              sync_name,
+                              cloud_status.automatic_off_grid ? "auto " : "",
+                              bluepaws::hub::communicationsModeName(cloud_status.effective_mode));
         break;
     }
 }
@@ -1443,6 +1467,11 @@ void settings_app_clicked(lv_event_t *event)
 void camera_app_clicked(lv_event_t *event)
 {
     navigate_to(*static_cast<UiState *>(lv_event_get_user_data(event)), AppPage::Camera);
+}
+
+void overview_app_clicked(lv_event_t *event)
+{
+    navigate_to(*static_cast<UiState *>(lv_event_get_user_data(event)), AppPage::Overview);
 }
 
 void diagnostics_app_clicked(lv_event_t *event)
@@ -2022,6 +2051,17 @@ void create_launcher(UiState &ui)
                                   0x007D8A,
                                   ui.dark_mode,
                                   camera_app_clicked,
+                                  &ui);
+    bluepaws::ui::create_app_tile(content,
+                                  tile_width,
+                                  tile_height,
+                                  "Overview",
+                                  nullptr,
+                                  LV_SYMBOL_EYE_OPEN,
+                                  false,
+                                  0x155E75,
+                                  ui.dark_mode,
+                                  overview_app_clicked,
                                   &ui);
     bluepaws::ui::create_app_tile(content,
                                   tile_width,
@@ -2622,6 +2662,58 @@ void overview_wake_clicked(lv_event_t *event)
     navigate_to(*ui, AppPage::Launcher);
 }
 
+void set_communications_mode(UiState &ui, bluepaws::hub::CommunicationsMode mode)
+{
+    if (ui.settings.communications_mode == mode) return;
+    const bluepaws::hub::CommunicationsMode previous = ui.settings.communications_mode;
+    ui.settings.communications_mode = mode;
+    if (!bluepaws::settings_store::save(ui.settings)) {
+        ui.settings.communications_mode = previous;
+        if (ui.status != nullptr) lv_label_set_text(ui.status, "Could not save hub mode");
+        return;
+    }
+    bluepaws::cloud::applyNetworkSettings(ui.settings);
+    lv_display_trigger_activity(ui.display);
+    lv_async_call(rebuild_current_page, &ui);
+}
+
+void home_mode_clicked(lv_event_t *event)
+{
+    set_communications_mode(*static_cast<UiState *>(lv_event_get_user_data(event)),
+                            bluepaws::hub::CommunicationsMode::Home);
+}
+
+void portable_mode_clicked(lv_event_t *event)
+{
+    set_communications_mode(*static_cast<UiState *>(lv_event_get_user_data(event)),
+                            bluepaws::hub::CommunicationsMode::Portable);
+}
+
+void off_grid_mode_clicked(lv_event_t *event)
+{
+    set_communications_mode(*static_cast<UiState *>(lv_event_get_user_data(event)),
+                            bluepaws::hub::CommunicationsMode::OffGrid);
+}
+
+lv_obj_t *make_mode_button(lv_obj_t *parent, const char *text,
+                           bluepaws::hub::CommunicationsMode mode,
+                           lv_event_cb_t callback, UiState &ui)
+{
+    lv_obj_t *button = lv_button_create(parent);
+    lv_obj_set_size(button, 92, 44);
+    const bool selected = ui.settings.communications_mode == mode;
+    lv_obj_set_style_bg_color(button,
+                              selected ? lv_color_hex(0x1E88D2) : lv_color_hex(0x173342), 0);
+    lv_obj_set_style_border_color(button,
+                                  selected ? lv_color_hex(0xBDE8FF) : lv_color_hex(0x486274), 0);
+    lv_obj_set_style_border_width(button, selected ? 2 : 1, 0);
+    lv_obj_add_event_cb(button, callback, LV_EVENT_CLICKED, &ui);
+    lv_obj_t *label = make_label(button, text, lv_color_hex(0xFFFFFF));
+    lv_obj_set_style_text_font(label, &lv_font_montserrat_14, 0);
+    lv_obj_center(label);
+    return button;
+}
+
 void create_overview_page(UiState &ui)
 {
     lv_obj_t *content = bluepaws::ui::create_page_frame(
@@ -2723,6 +2815,41 @@ void create_overview_page(UiState &ui)
     lv_obj_set_flex_flow(summary, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_scroll_dir(summary, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(summary, LV_SCROLLBAR_MODE_AUTO);
+
+    lv_obj_t *clock_row = lv_obj_create(summary);
+    lv_obj_set_size(clock_row, LV_PCT(100), 58);
+    lv_obj_set_style_bg_opa(clock_row, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(clock_row, 0, 0);
+    lv_obj_set_style_pad_all(clock_row, 0, 0);
+    lv_obj_remove_flag(clock_row, LV_OBJ_FLAG_SCROLLABLE);
+    ui.overview_clock_label = make_label(clock_row, "--:--", lv_color_hex(0xFFFFFF));
+    lv_obj_set_style_text_font(ui.overview_clock_label, &lv_font_montserrat_22, 0);
+    lv_obj_align(ui.overview_clock_label, LV_ALIGN_LEFT_MID, 0, -10);
+    ui.overview_date_label = make_label(clock_row, "Waiting for network time", lv_color_hex(0xB8D4E3));
+    lv_obj_set_style_text_font(ui.overview_date_label, &lv_font_montserrat_14, 0);
+    lv_obj_align(ui.overview_date_label, LV_ALIGN_LEFT_MID, 0, 15);
+    ui.overview_time_source_label = make_label(clock_row, "NTP waiting", lv_color_hex(0x80C9F2));
+    lv_obj_set_style_text_font(ui.overview_time_source_label, &lv_font_montserrat_14, 0);
+    lv_obj_align(ui.overview_time_source_label, LV_ALIGN_RIGHT_MID, 0, -10);
+
+    lv_obj_t *mode_title = make_label(summary, "HUB MODE", lv_color_hex(0x80C9F2));
+    lv_obj_set_style_text_font(mode_title, &lv_font_montserrat_14, 0);
+    lv_obj_t *mode_row = lv_obj_create(summary);
+    lv_obj_set_size(mode_row, LV_PCT(100), 52);
+    lv_obj_set_style_bg_opa(mode_row, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(mode_row, 0, 0);
+    lv_obj_set_style_pad_all(mode_row, 0, 0);
+    lv_obj_set_style_pad_gap(mode_row, 5, 0);
+    lv_obj_set_flex_flow(mode_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(mode_row, LV_FLEX_ALIGN_SPACE_BETWEEN,
+                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    make_mode_button(mode_row, "Home", bluepaws::hub::CommunicationsMode::Home,
+                     home_mode_clicked, ui);
+    make_mode_button(mode_row, "Portable", bluepaws::hub::CommunicationsMode::Portable,
+                     portable_mode_clicked, ui);
+    make_mode_button(mode_row, "Off-Grid", bluepaws::hub::CommunicationsMode::OffGrid,
+                     off_grid_mode_clicked, ui);
+
     lv_obj_t *summary_title = make_label(summary, "Last known positions", lv_color_hex(0x80C9F2));
     lv_obj_set_style_text_font(summary_title, &lv_font_montserrat_18, 0);
     for (size_t i = 0; i < ui.overview_labels.size(); ++i) {
@@ -3202,6 +3329,9 @@ void create_ui(UiState &ui)
     ui.summary_rows.fill(nullptr);
     ui.overview_markers.fill(nullptr);
     ui.overview_labels.fill(nullptr);
+    ui.overview_clock_label = nullptr;
+    ui.overview_date_label = nullptr;
+    ui.overview_time_source_label = nullptr;
     ui.drawer_cards.fill(nullptr);
     ui.drawer_summary_labels.fill(nullptr);
     ui.drawer_name_labels.fill(nullptr);

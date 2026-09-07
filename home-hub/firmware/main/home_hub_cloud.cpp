@@ -12,6 +12,7 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_netif_sntp.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
@@ -29,6 +30,8 @@
 #include <cstring>
 #include <limits>
 #include <sys/stat.h>
+#include <sys/time.h>
+#include <time.h>
 
 #if !defined(HOME_HUB_GATEWAY_TOKEN) && defined(CLOUD_BEARER_TOKEN)
 #define HOME_HUB_GATEWAY_TOKEN CLOUD_BEARER_TOKEN
@@ -72,6 +75,13 @@ hub::Settings g_network_settings{};
 bool g_wifi_initialized = false;
 bool g_cloud_authorized = false;
 
+void time_sync_notification(struct timeval *) {
+    portENTER_CRITICAL(&g_status_lock);
+    g_status.time_synchronized = true;
+    portEXIT_CRITICAL(&g_status_lock);
+    ESP_LOGI(kTag, "System clock synchronized by NTP");
+}
+
 uint32_t uptime_ms() {
     return static_cast<uint32_t>(esp_timer_get_time() / 1000ULL);
 }
@@ -79,6 +89,13 @@ uint32_t uptime_ms() {
 void set_state(ConnectionState state) {
     portENTER_CRITICAL(&g_status_lock);
     g_status.state = state;
+    portEXIT_CRITICAL(&g_status_lock);
+}
+
+void set_effective_mode(hub::CommunicationsMode mode, bool automatic_off_grid = false) {
+    portENTER_CRITICAL(&g_status_lock);
+    g_status.effective_mode = mode;
+    g_status.automatic_off_grid = automatic_off_grid;
     portEXIT_CRITICAL(&g_status_lock);
 }
 
@@ -365,13 +382,11 @@ hub::Settings network_settings() {
 }
 
 bool configure_wifi(const hub::Settings &settings, unsigned network_index, bool restart,
-                    bool off_grid_access_point) {
+                    bool off_grid_access_point, bool station_allowed = true) {
     const hub::WifiNetwork &requested = network_index == 1
         ? settings.secondary : settings.primary;
-    const hub::WifiNetwork &station = hub::validSsid(requested.ssid)
-        ? requested
-        : settings.primary;
-    const bool station_enabled = hub::validSsid(station.ssid);
+    const hub::WifiNetwork &station = requested;
+    const bool station_enabled = station_allowed && hub::validSsid(station.ssid);
     const bool access_point_enabled = off_grid_access_point &&
         hub::validSsid(settings.access_point_ssid);
     if (!station_enabled && !access_point_enabled) return false;
@@ -415,7 +430,7 @@ bool configure_wifi(const hub::Settings &settings, unsigned network_index, bool 
     const bool started = esp_wifi_start() == ESP_OK;
     if (started) {
         g_wifi_initialized = true;
-        ESP_LOGI(kTag, "Wi-Fi applied: station=%s automatic_off_grid_ap=%s",
+        ESP_LOGI(kTag, "Wi-Fi applied: station=%s off_grid_ap=%s",
                  station_enabled ? station.ssid : "disabled",
                  access_point_enabled ? settings.access_point_ssid : "disabled");
     }
@@ -430,16 +445,31 @@ bool start_wifi(const hub::Settings &settings) {
     }
     if (error != ESP_OK) return false;
     if (esp_netif_init() != ESP_OK || esp_event_loop_create_default() != ESP_OK) return false;
+    setenv("TZ", "GMT0BST,M3.5.0/1,M10.5.0/2", 1);
+    tzset();
+    esp_sntp_config_t time_config = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
+    time_config.sync_cb = time_sync_notification;
+    if (esp_netif_sntp_init(&time_config) != ESP_OK) {
+        ESP_LOGW(kTag, "Could not start NTP time synchronization");
+    }
     esp_netif_create_default_wifi_sta();
     esp_netif_create_default_wifi_ap();
     wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
     if (esp_wifi_init(&init) != ESP_OK) return false;
     esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event, nullptr);
     esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event, nullptr);
-    const bool primary_available = hub::validSsid(settings.primary.ssid);
-    const bool secondary_available = hub::validSsid(settings.secondary.ssid);
-    return configure_wifi(settings, primary_available ? 0U : 1U, false,
-                          !primary_available && !secondary_available);
+    const bool explicit_off_grid =
+        settings.communications_mode == hub::CommunicationsMode::OffGrid;
+    const unsigned network_index =
+        settings.communications_mode == hub::CommunicationsMode::Portable ? 1U : 0U;
+    const hub::WifiNetwork &selected = network_index == 1 ? settings.secondary : settings.primary;
+    const bool automatic_off_grid = !explicit_off_grid && !hub::validSsid(selected.ssid);
+    set_effective_mode(explicit_off_grid || automatic_off_grid
+                           ? hub::CommunicationsMode::OffGrid
+                           : settings.communications_mode,
+                       automatic_off_grid);
+    return configure_wifi(settings, network_index, false,
+                          explicit_off_grid || automatic_off_grid, !explicit_off_grid);
 }
 
 void sync_task(void *) {
@@ -452,9 +482,12 @@ void sync_task(void *) {
         return;
     }
     uint32_t delay_ms = HOME_HUB_SYNC_INTERVAL_MS;
-    unsigned network_index = hub::validSsid(settings.primary.ssid) ? 0U : 1U;
-    bool off_grid_active = !hub::validSsid(settings.primary.ssid) &&
-                           !hub::validSsid(settings.secondary.ssid);
+    unsigned network_index =
+        settings.communications_mode == hub::CommunicationsMode::Portable ? 1U : 0U;
+    bool explicit_off_grid =
+        settings.communications_mode == hub::CommunicationsMode::OffGrid;
+    const hub::WifiNetwork *selected = network_index == 1 ? &settings.secondary : &settings.primary;
+    bool off_grid_active = explicit_off_grid || !hub::validSsid(selected->ssid);
     while (true) {
         const EventBits_t connected = xEventGroupWaitBits(
             g_wifi,
@@ -465,34 +498,34 @@ void sync_task(void *) {
         if ((connected & kReconfigureBit) != 0) {
             xEventGroupClearBits(g_wifi, kReconfigureBit | kConnectedBit);
             settings = network_settings();
-            const bool primary_available = hub::validSsid(settings.primary.ssid);
-            const bool secondary_available = hub::validSsid(settings.secondary.ssid);
-            network_index = primary_available ? 0U : 1U;
-            off_grid_active = !primary_available && !secondary_available;
-            configure_wifi(settings, network_index, true, off_grid_active);
+            network_index = settings.communications_mode == hub::CommunicationsMode::Portable ? 1U : 0U;
+            explicit_off_grid = settings.communications_mode == hub::CommunicationsMode::OffGrid;
+            selected = network_index == 1 ? &settings.secondary : &settings.primary;
+            off_grid_active = explicit_off_grid || !hub::validSsid(selected->ssid);
+            set_effective_mode(off_grid_active ? hub::CommunicationsMode::OffGrid
+                                               : settings.communications_mode,
+                               off_grid_active && !explicit_off_grid);
+            configure_wifi(settings, network_index, true, off_grid_active, !explicit_off_grid);
             delay_ms = HOME_HUB_SYNC_INTERVAL_MS;
             continue;
         }
+        if (explicit_off_grid) {
+            set_state(ConnectionState::Degraded);
+            set_effective_mode(hub::CommunicationsMode::OffGrid);
+            vTaskDelay(pdMS_TO_TICKS(HOME_HUB_SYNC_INTERVAL_MS));
+            continue;
+        }
         if ((connected & kConnectedBit) == 0) {
-            const bool primary_available = hub::validSsid(settings.primary.ssid);
-            const bool secondary_available = hub::validSsid(settings.secondary.ssid);
-            if (!primary_available && !secondary_available) {
+            selected = network_index == 1 ? &settings.secondary : &settings.primary;
+            if (!hub::validSsid(selected->ssid)) {
                 off_grid_active = true;
                 set_state(ConnectionState::Degraded);
+                set_effective_mode(hub::CommunicationsMode::OffGrid, true);
             } else {
                 set_state(off_grid_active ? ConnectionState::Degraded
                                           : ConnectionState::Connecting);
-                if (off_grid_active && primary_available && secondary_available) {
-                    // Keep probing both upstream routes while the standalone
-                    // network is active so a phone hotspot can restore cloud
-                    // service just as readily as the home network.
-                    network_index = network_index == 0 ? 1U : 0U;
-                } else if (!off_grid_active && network_index == 0 && secondary_available) {
-                    network_index = 1;
-                } else {
-                    off_grid_active = true;
-                    network_index = primary_available ? 0U : 1U;
-                }
+                off_grid_active = true;
+                set_effective_mode(hub::CommunicationsMode::OffGrid, true);
                 configure_wifi(settings, network_index, true, off_grid_active);
             }
             delay_ms = std::min(delay_ms * 2U,
@@ -502,6 +535,7 @@ void sync_task(void *) {
             // the fixed Home Hub role and closes the temporary local AP.
             if (esp_wifi_set_mode(WIFI_MODE_STA) == ESP_OK) {
                 off_grid_active = false;
+                set_effective_mode(settings.communications_mode);
                 ESP_LOGI(kTag, "Trusted Wi-Fi restored; automatic off-grid AP stopped");
             }
             delay_ms = HOME_HUB_SYNC_INTERVAL_MS;
