@@ -2677,49 +2677,22 @@ void set_communications_mode(UiState &ui, bluepaws::hub::CommunicationsMode mode
     lv_async_call(rebuild_current_page, &ui);
 }
 
-void home_mode_clicked(lv_event_t *event)
+void mode_dropdown_changed(lv_event_t *event)
 {
-    set_communications_mode(*static_cast<UiState *>(lv_event_get_user_data(event)),
-                            bluepaws::hub::CommunicationsMode::Home);
-}
-
-void portable_mode_clicked(lv_event_t *event)
-{
-    set_communications_mode(*static_cast<UiState *>(lv_event_get_user_data(event)),
-                            bluepaws::hub::CommunicationsMode::Portable);
-}
-
-void off_grid_mode_clicked(lv_event_t *event)
-{
-    set_communications_mode(*static_cast<UiState *>(lv_event_get_user_data(event)),
-                            bluepaws::hub::CommunicationsMode::OffGrid);
-}
-
-lv_obj_t *make_mode_button(lv_obj_t *parent, const char *text,
-                           bluepaws::hub::CommunicationsMode mode,
-                           lv_event_cb_t callback, UiState &ui)
-{
-    lv_obj_t *button = lv_button_create(parent);
-    lv_obj_set_size(button, 92, 44);
-    const bool selected = ui.settings.communications_mode == mode;
-    lv_obj_set_style_bg_color(button,
-                              selected ? lv_color_hex(0x1E88D2) : lv_color_hex(0x173342), 0);
-    lv_obj_set_style_border_color(button,
-                                  selected ? lv_color_hex(0xBDE8FF) : lv_color_hex(0x486274), 0);
-    lv_obj_set_style_border_width(button, selected ? 2 : 1, 0);
-    lv_obj_add_event_cb(button, callback, LV_EVENT_CLICKED, &ui);
-    lv_obj_t *label = make_label(button, text, lv_color_hex(0xFFFFFF));
-    lv_obj_set_style_text_font(label, &lv_font_montserrat_14, 0);
-    lv_obj_center(label);
-    return button;
+    auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
+    auto *dropdown = static_cast<lv_obj_t *>(lv_event_get_target(event));
+    if (ui == nullptr || dropdown == nullptr) return;
+    const uint32_t selected = lv_dropdown_get_selected(dropdown);
+    if (selected > static_cast<uint32_t>(bluepaws::hub::CommunicationsMode::OffGrid)) return;
+    set_communications_mode(*ui, static_cast<bluepaws::hub::CommunicationsMode>(selected));
 }
 
 void create_overview_page(UiState &ui)
 {
     lv_obj_t *content = bluepaws::ui::create_page_frame(
         lv_screen_active(),
-        "Home Hub overview",
-        "Tap anywhere to open BluePaws",
+        "Overview",
+        "Hub status and nearby collars",
         true,
         {},
         &ui.status);
@@ -2832,23 +2805,26 @@ void create_overview_page(UiState &ui)
     lv_obj_set_style_text_font(ui.overview_time_source_label, &lv_font_montserrat_14, 0);
     lv_obj_align(ui.overview_time_source_label, LV_ALIGN_RIGHT_MID, 0, -10);
 
-    lv_obj_t *mode_title = make_label(summary, "HUB MODE", lv_color_hex(0x80C9F2));
-    lv_obj_set_style_text_font(mode_title, &lv_font_montserrat_14, 0);
     lv_obj_t *mode_row = lv_obj_create(summary);
-    lv_obj_set_size(mode_row, LV_PCT(100), 52);
+    lv_obj_set_size(mode_row, LV_PCT(100), 48);
     lv_obj_set_style_bg_opa(mode_row, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(mode_row, 0, 0);
     lv_obj_set_style_pad_all(mode_row, 0, 0);
-    lv_obj_set_style_pad_gap(mode_row, 5, 0);
     lv_obj_set_flex_flow(mode_row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(mode_row, LV_FLEX_ALIGN_SPACE_BETWEEN,
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    make_mode_button(mode_row, "Home", bluepaws::hub::CommunicationsMode::Home,
-                     home_mode_clicked, ui);
-    make_mode_button(mode_row, "Portable", bluepaws::hub::CommunicationsMode::Portable,
-                     portable_mode_clicked, ui);
-    make_mode_button(mode_row, "Off-Grid", bluepaws::hub::CommunicationsMode::OffGrid,
-                     off_grid_mode_clicked, ui);
+    lv_obj_t *mode_title = make_label(mode_row, "Hub mode", lv_color_hex(0x80C9F2));
+    lv_obj_set_style_text_font(mode_title, &lv_font_montserrat_14, 0);
+    lv_obj_t *mode_dropdown = lv_dropdown_create(mode_row);
+    lv_dropdown_set_options(mode_dropdown, "Home\nPortable\nOff-Grid");
+    lv_dropdown_set_selected(mode_dropdown, static_cast<uint32_t>(ui.settings.communications_mode));
+    lv_obj_set_size(mode_dropdown, 184, 42);
+    lv_obj_set_style_bg_color(mode_dropdown, lv_color_hex(0x173342), 0);
+    lv_obj_set_style_border_color(mode_dropdown, lv_color_hex(0x80C9F2), 0);
+    lv_obj_set_style_border_width(mode_dropdown, 1, 0);
+    lv_obj_set_style_text_color(mode_dropdown, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_font(mode_dropdown, &lv_font_montserrat_14, 0);
+    lv_obj_add_event_cb(mode_dropdown, mode_dropdown_changed, LV_EVENT_VALUE_CHANGED, &ui);
 
     lv_obj_t *summary_title = make_label(summary, "Last known positions", lv_color_hex(0x80C9F2));
     lv_obj_set_style_text_font(summary_title, &lv_font_montserrat_18, 0);
