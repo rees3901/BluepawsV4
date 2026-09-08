@@ -63,6 +63,11 @@ unavailable until the SX1262/GNSS daughterboard and the crash-safe P4 journal ar
 connected. Server-sent events also fall back to the dashboard's established
 10-second device polling path. No Wi-Fi passwords, gateway credentials or journal
 records are included in the SPIFFS image or exposed as static files.
+The browser map discovers the installed map packs through `/api/map-layers` and
+streams only validated XYZ JPEG tile requests from the SD card. OpenStreetMap,
+Ordnance Survey, Satellite and Aerial use the same directories and zoom limits
+as the touchscreen map; unavailable packs are omitted and the compact bundled
+coastline/grid remains the fallback when no supported pack is present.
 
 The launcher **Camera** page starts the fitted 2 MP OV02C10 through the
 ESP32-P4's two-lane MIPI-CSI/ISP path and shows a 432 x 432 colour RGB565

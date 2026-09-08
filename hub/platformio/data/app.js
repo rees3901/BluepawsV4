@@ -352,9 +352,8 @@
             zoomControl: false        // We add our own zoom control below
         });
 
-        // Local map-source abstraction. The first implementation is a bundled
-        // vector skeleton and coordinate grid; a future SD source can replace
-        // it without changing marker/trail code.
+        // Start with the bundled vector skeleton so the map remains useful if
+        // the SD card is absent. P4 hubs replace it with SD-backed raster tiles.
         var SkeletonGrid = L.GridLayer.extend({
             createTile: function () {
                 var tile = document.createElement('canvas');
@@ -374,14 +373,55 @@
         var mapSources = {
             skeleton: new SkeletonGrid({ attribution: 'Bluepaws offline map', maxZoom: 19 })
         };
+        var usingSdMaps = false;
+        var fallbackCoastline = null;
         mapSources.skeleton.addTo(map);
         fetch('/basemap.json').then(function (response) { return response.json(); }).then(function (data) {
-            L.geoJSON(data, {
+            fallbackCoastline = L.geoJSON(data, {
                 style: function () {
                     return { color: '#5f8498', weight: 2, fillColor: '#b8cfad', fillOpacity: 0.52 };
                 }
-            }).addTo(map);
+            });
+            if (!usingSdMaps) fallbackCoastline.addTo(map);
         }).catch(function () { addConsoleLog('Offline coastline unavailable'); });
+
+        fetch('/api/map-layers', {cache: 'no-store'})
+            .then(function (response) {
+                if (!response.ok) throw new Error('SD map catalogue unavailable');
+                return response.json();
+            })
+            .then(function (catalogue) {
+                var layers = catalogue && Array.isArray(catalogue.layers) ? catalogue.layers : [];
+                if (!layers.length) throw new Error('No SD map packs found');
+                var baseLayers = {};
+                layers.forEach(function (source) {
+                    if (!source || !source.name || !source.url) return;
+                    baseLayers[source.name] = L.tileLayer(source.url, {
+                        minZoom: Number(source.minZoom) || 0,
+                        maxZoom: Number(source.maxZoom) || 19,
+                        tileSize: 256,
+                        noWrap: true,
+                        attribution: 'Bluepaws offline SD map'
+                    });
+                });
+                var names = Object.keys(baseLayers);
+                if (!names.length) throw new Error('No valid SD map packs found');
+                usingSdMaps = true;
+                map.removeLayer(mapSources.skeleton);
+                if (fallbackCoastline) map.removeLayer(fallbackCoastline);
+                baseLayers[names[0]].addTo(map);
+                L.control.layers(baseLayers, null, {position: 'topright'}).addTo(map);
+                map.on('baselayerchange', function (event) {
+                    var options = event.layer && event.layer.options ? event.layer.options : {};
+                    if (Number.isFinite(options.minZoom) && map.getZoom() < options.minZoom) {
+                        map.setZoom(options.minZoom);
+                    } else if (Number.isFinite(options.maxZoom) && map.getZoom() > options.maxZoom) {
+                        map.setZoom(options.maxZoom);
+                    }
+                });
+                addConsoleLog('MAP', names.length + ' SD map layer' + (names.length === 1 ? '' : 's') + ' ready');
+            })
+            .catch(function () { addConsoleLog('MAP', 'Using compact fallback map'); });
 
         // Zoom control (bottom-left to avoid hamburger overlap)
         L.control.zoom({ position: 'bottomleft' }).addTo(map);
