@@ -186,6 +186,7 @@ struct UiState {
     lv_obj_t *cat_list = nullptr;
     lv_obj_t *diagnostics_text = nullptr;
     lv_obj_t *camera_preview_image = nullptr;
+    lv_obj_t *camera_scan_guide = nullptr;
     lv_obj_t *camera_result_label = nullptr;
     lv_obj_t *camera_apply_button = nullptr;
     lv_obj_t *map_drawer = nullptr;
@@ -206,6 +207,7 @@ struct UiState {
     lv_obj_t *settings_error = nullptr;
     lv_timer_t *gesture_timer = nullptr;
     lv_timer_t *camera_timer = nullptr;
+    lv_timer_t *camera_success_timer = nullptr;
     lv_obj_t *status = nullptr;
     lv_timer_t *update_timer = nullptr;
     guition_jc4880p443c_sd_info_t sd{};
@@ -225,6 +227,8 @@ struct UiState {
     bool screen_dimmed = false;
     bool screen_off = false;
     bool portrait = false;
+    bool portrait_before_camera = false;
+    bool camera_forced_portrait = false;
     bool tiles_dirty = true;
     bool tile_images_bound = false;
     int brightness_percent = 80;
@@ -1245,6 +1249,10 @@ void brightness_activity(lv_event_t *event)
 void rebuild_current_page(void *user_data)
 {
     auto *ui = static_cast<UiState *>(user_data);
+    if (ui->camera_success_timer != nullptr) {
+        lv_timer_delete(ui->camera_success_timer);
+        ui->camera_success_timer = nullptr;
+    }
     if (ui->brightness_hide_timer != nullptr) {
         lv_timer_delete(ui->brightness_hide_timer);
         ui->brightness_hide_timer = nullptr;
@@ -1280,6 +1288,9 @@ void rebuild_for_orientation(void *user_data)
 void orientation_clicked(lv_event_t *event)
 {
     auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
+    // The scanner layout and its centre-crop guide are deliberately fixed in
+    // portrait. Restore the user's prior orientation when they leave it.
+    if (ui == nullptr || ui->active_page == AppPage::Camera) return;
     lv_async_call(rebuild_for_orientation, ui);
 }
 
@@ -1559,8 +1570,26 @@ void navigate_to(UiState &ui, AppPage page)
 {
     if (ui.active_page == AppPage::Camera && page != AppPage::Camera) {
         bluepaws::camera::stop();
+        if (ui.camera_forced_portrait) {
+            ui.portrait = ui.portrait_before_camera;
+            lv_display_set_rotation(
+                ui.display, ui.portrait ? LV_DISPLAY_ROTATION_0 : LV_DISPLAY_ROTATION_90);
+            const UiLayout &layout = current_layout(ui);
+            ui.viewport.resize(layout.map_width, layout.map_height);
+            ui.tiles_dirty = true;
+            ui.camera_forced_portrait = false;
+        }
     }
-    if (page == AppPage::Camera) {
+    if (page == AppPage::Camera && ui.active_page != AppPage::Camera) {
+        ui.portrait_before_camera = ui.portrait;
+        ui.camera_forced_portrait = !ui.portrait;
+        if (!ui.portrait) {
+            ui.portrait = true;
+            lv_display_set_rotation(ui.display, LV_DISPLAY_ROTATION_0);
+            const UiLayout &layout = current_layout(ui);
+            ui.viewport.resize(layout.map_width, layout.map_height);
+            ui.tiles_dirty = true;
+        }
         bluepaws::camera::start();
     }
     ui.active_page = page;
@@ -3415,6 +3444,30 @@ void camera_brightness_changed(lv_event_t *event)
     }
 }
 
+void camera_success_flash_finished(lv_timer_t *timer)
+{
+    auto *ui = static_cast<UiState *>(lv_timer_get_user_data(timer));
+    if (ui != nullptr) {
+        if (ui->active_page == AppPage::Camera && ui->camera_scan_guide != nullptr) {
+            lv_obj_set_style_border_color(ui->camera_scan_guide, lv_color_hex(0x39D3E6), 0);
+            lv_obj_set_style_border_width(ui->camera_scan_guide, 4, 0);
+        }
+        ui->camera_success_timer = nullptr;
+    }
+    lv_timer_delete(timer);
+}
+
+void flash_camera_success(UiState &ui)
+{
+    if (ui.camera_scan_guide == nullptr) return;
+    lv_obj_set_style_border_color(ui.camera_scan_guide, lv_color_hex(0x35E06F), 0);
+    lv_obj_set_style_border_width(ui.camera_scan_guide, 8, 0);
+    if (ui.camera_success_timer != nullptr) {
+        lv_timer_delete(ui.camera_success_timer);
+    }
+    ui.camera_success_timer = lv_timer_create(camera_success_flash_finished, 1200, &ui);
+}
+
 void camera_page_timer(lv_timer_t *timer)
 {
     auto *ui = static_cast<UiState *>(lv_timer_get_user_data(timer));
@@ -3437,6 +3490,7 @@ void camera_page_timer(lv_timer_t *timer)
         lv_obj_add_flag(ui->camera_apply_button, LV_OBJ_FLAG_HIDDEN);
         return;
     }
+    flash_camera_success(*ui);
     if (ui->pending_qr.type == bluepaws::qr::PayloadType::Wifi) {
         lv_label_set_text_fmt(ui->camera_result_label,
                               "Wi-Fi network found\nSSID: %s\nPassword: %s",
@@ -3453,10 +3507,12 @@ void camera_page_timer(lv_timer_t *timer)
 
 void create_camera_page(UiState &ui)
 {
+    auto actions = page_actions(ui, true);
+    actions.rotate = nullptr;
     lv_obj_t *content = bluepaws::ui::create_page_frame(
         lv_screen_active(), "BluePaws | QR Scanner", "Starting camera...", ui.dark_mode,
-        page_actions(ui, true), &ui.status);
-    lv_obj_set_flex_flow(content, ui.portrait ? LV_FLEX_FLOW_COLUMN : LV_FLEX_FLOW_ROW);
+        actions, &ui.status);
+    lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(content, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 
     if (ui.camera_preview_pixels == nullptr) {
@@ -3474,26 +3530,30 @@ void create_camera_page(UiState &ui)
     }
 
     lv_obj_t *preview_panel = lv_obj_create(content);
-    lv_obj_set_size(preview_panel, 340, 220);
+    lv_obj_set_size(preview_panel, 452, 370);
     style_card(preview_panel, ui.dark_mode);
     lv_obj_set_style_pad_all(preview_panel, 10, 0);
     ui.camera_preview_image = lv_image_create(preview_panel);
     if (ui.camera_preview_pixels != nullptr) {
         lv_image_set_src(ui.camera_preview_image, &ui.camera_preview_descriptor);
     }
+    // Fill the portrait width and deliberately stretch vertically. Fidelity is
+    // secondary here; the larger feedback image makes one-foot alignment easy.
+    lv_image_set_scale_x(ui.camera_preview_image, 346);
+    lv_image_set_scale_y(ui.camera_preview_image, 498);
     lv_obj_center(ui.camera_preview_image);
 
-    lv_obj_t *scan_guide = lv_obj_create(preview_panel);
-    lv_obj_set_size(scan_guide, 132, 132);
-    lv_obj_center(scan_guide);
-    lv_obj_set_style_bg_opa(scan_guide, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(scan_guide, 3, 0);
-    lv_obj_set_style_border_color(scan_guide, lv_color_hex(0x39D3E6), 0);
-    lv_obj_set_style_radius(scan_guide, 10, 0);
-    lv_obj_remove_flag(scan_guide, LV_OBJ_FLAG_CLICKABLE);
+    ui.camera_scan_guide = lv_obj_create(preview_panel);
+    lv_obj_set_size(ui.camera_scan_guide, 236, 236);
+    lv_obj_center(ui.camera_scan_guide);
+    lv_obj_set_style_bg_opa(ui.camera_scan_guide, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(ui.camera_scan_guide, 4, 0);
+    lv_obj_set_style_border_color(ui.camera_scan_guide, lv_color_hex(0x39D3E6), 0);
+    lv_obj_set_style_radius(ui.camera_scan_guide, 14, 0);
+    lv_obj_remove_flag(ui.camera_scan_guide, LV_OBJ_FLAG_CLICKABLE);
 
     lv_obj_t *result_panel = lv_obj_create(content);
-    lv_obj_set_size(result_panel, ui.portrait ? 340 : 390, ui.portrait ? 260 : 260);
+    lv_obj_set_size(result_panel, 452, 330);
     style_card(result_panel, ui.dark_mode);
     lv_obj_set_style_pad_all(result_panel, 18, 0);
     lv_obj_set_flex_flow(result_panel, LV_FLEX_FLOW_COLUMN);
@@ -3610,6 +3670,7 @@ void create_ui(UiState &ui)
     ui.cat_list = nullptr;
     ui.diagnostics_text = nullptr;
     ui.camera_preview_image = nullptr;
+    ui.camera_scan_guide = nullptr;
     ui.camera_result_label = nullptr;
     ui.camera_apply_button = nullptr;
     ui.map_drawer = nullptr;

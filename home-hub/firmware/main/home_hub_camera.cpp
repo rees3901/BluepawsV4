@@ -27,10 +27,10 @@ namespace {
 
 constexpr char kTag[] = "home_hub_camera";
 constexpr unsigned kBufferCount = 2;
-constexpr uint32_t kTargetCaptureFps = 5;
-constexpr uint32_t kDecodeEveryFrames = 1;
+constexpr uint32_t kTargetCaptureFps = 15;
 constexpr uint32_t kScanWidth = 384;
 constexpr uint32_t kScanHeight = 384;
+constexpr std::size_t kScanPixelCount = kScanWidth * kScanHeight;
 
 struct CaptureBuffer {
     void *data = nullptr;
@@ -40,14 +40,19 @@ struct CaptureBuffer {
 void *const kMapFailed = reinterpret_cast<void *>(-1);
 
 SemaphoreHandle_t g_lock = nullptr;
+SemaphoreHandle_t g_scan_lock = nullptr;
 TaskHandle_t g_task = nullptr;
+TaskHandle_t g_decode_task = nullptr;
 Status g_status{};
 uint16_t *g_preview = nullptr;
+uint8_t *g_scan_frame = nullptr;
 volatile bool g_stop_requested = false;
 bool g_video_initialized = false;
 uint32_t g_scan_attempts = 0;
+uint32_t g_scan_generation = 0;
+TickType_t g_capture_started_at = 0;
 volatile int8_t g_scan_brightness = 0;
-bool g_qr_found = false;
+volatile bool g_qr_found = false;
 
 void set_state(State state, const char *message)
 {
@@ -68,10 +73,10 @@ uint8_t rgb565_gray(uint16_t pixel)
     return static_cast<uint8_t>((red * 77U + green * 150U + blue * 29U) >> 8U);
 }
 
-uint8_t adjusted_gray(uint16_t pixel, int brightness_offset)
+uint8_t adjusted_gray(uint8_t gray, int brightness_offset)
 {
     return static_cast<uint8_t>(std::clamp<int>(
-        static_cast<int>(rgb565_gray(pixel)) + brightness_offset, 0, 255));
+        static_cast<int>(gray) + brightness_offset, 0, 255));
 }
 
 uint16_t gray_rgb565(uint8_t gray)
@@ -80,8 +85,7 @@ uint16_t gray_rgb565(uint8_t gray)
         ((gray >> 3U) << 11U) | ((gray >> 2U) << 5U) | (gray >> 3U));
 }
 
-void publish_frame(const uint16_t *source, uint32_t width, uint32_t height, uint32_t stride_bytes,
-                   quirc *decoder)
+void publish_frame(const uint16_t *source, uint32_t width, uint32_t height, uint32_t stride_bytes)
 {
     if (source == nullptr || width == 0 || height == 0 || g_preview == nullptr) return;
     const uint32_t stride_pixels = stride_bytes >= width * 2U ? stride_bytes / 2U : width;
@@ -100,6 +104,7 @@ void publish_frame(const uint16_t *source, uint32_t width, uint32_t height, uint
     xSemaphoreGive(g_lock);
 
     if (captured_frames == 1) {
+        g_capture_started_at = xTaskGetTickCount();
         uint16_t minimum = UINT16_MAX;
         uint16_t maximum = 0;
         uint32_t nonzero = 0;
@@ -117,16 +122,21 @@ void publish_frame(const uint16_t *source, uint32_t width, uint32_t height, uint
                  static_cast<unsigned long>(width), static_cast<unsigned long>(height),
                  static_cast<unsigned long>(stride_bytes), minimum, maximum,
                  static_cast<unsigned long>(nonzero));
+    } else if (captured_frames % 50U == 0 && g_capture_started_at != 0) {
+        const uint32_t elapsed_ms = static_cast<uint32_t>(
+            (xTaskGetTickCount() - g_capture_started_at) * portTICK_PERIOD_MS);
+        if (elapsed_ms > 0) {
+            ESP_LOGI(kTag, "Preview throughput: %.1f fps (%lu frames)",
+                     static_cast<double>((captured_frames - 1U) * 1000U) / elapsed_ms,
+                     static_cast<unsigned long>(captured_frames));
+        }
     }
 
-    if (g_qr_found || captured_frames % kDecodeEveryFrames != 0) return;
-    const int8_t selected_brightness = g_scan_brightness;
-    // Auto cycles through normal, darker, and brighter grayscale once per
-    // scan. This handles phone-screen glare without changing sensor exposure.
-    const int brightness_offset = selected_brightness == 0
-        ? (g_scan_attempts % 3U == 0 ? 0 : (g_scan_attempts % 3U == 1 ? -40 : 40))
-        : selected_brightness * 40;
-    uint8_t *gray = quirc_begin(decoder, nullptr, nullptr);
+    // Publish a fresh centre crop to the independent decoder worker. Task
+    // notifications coalesce, so a busy decoder always receives the newest
+    // image instead of accumulating a stale frame queue.
+    if (g_qr_found || g_scan_frame == nullptr || g_scan_lock == nullptr ||
+        xSemaphoreTake(g_scan_lock, 0) != pdTRUE) return;
     const uint32_t crop_size = std::min(width, height);
     const uint32_t crop_left = (width - crop_size) / 2U;
     const uint32_t crop_top = (height - crop_size) / 2U;
@@ -134,50 +144,94 @@ void publish_frame(const uint16_t *source, uint32_t width, uint32_t height, uint
         const uint32_t source_y = crop_top + y * crop_size / kScanHeight;
         for (uint32_t x = 0; x < kScanWidth; ++x) {
             const uint32_t source_x = crop_left + x * crop_size / kScanWidth;
-            gray[y * kScanWidth + x] = adjusted_gray(
-                source[source_y * stride_pixels + source_x], brightness_offset);
+            g_scan_frame[y * kScanWidth + x] =
+                rgb565_gray(source[source_y * stride_pixels + source_x]);
         }
     }
-    quirc_end(decoder);
-    const int count = quirc_count(decoder);
-    ++g_scan_attempts;
-    if (count > 0) {
-        ESP_LOGI(kTag, "QR finder candidates: %d", count);
-    } else if (g_scan_attempts % 10U == 0) {
-        ESP_LOGI(kTag, "No QR finder candidate after %lu scan attempts",
-                 static_cast<unsigned long>(g_scan_attempts));
+    ++g_scan_generation;
+    xSemaphoreGive(g_scan_lock);
+    if (g_decode_task != nullptr) xTaskNotifyGive(g_decode_task);
+}
+
+void decoder_task(void *)
+{
+    quirc *decoder = quirc_new();
+    if (decoder == nullptr || quirc_resize(decoder, kScanWidth, kScanHeight) < 0) {
+        ESP_LOGE(kTag, "Could not allocate QR decoder");
+        if (decoder != nullptr) quirc_destroy(decoder);
+        g_decode_task = nullptr;
+        vTaskDelete(nullptr);
+        return;
     }
-    for (int index = 0; index < count; ++index) {
-        quirc_code code{};
-        quirc_data data{};
-        quirc_extract(decoder, index, &code);
-        quirc_decode_error_t result = quirc_decode(&code, &data);
-        if (result != QUIRC_SUCCESS) {
-            quirc_flip(&code);
-            result = quirc_decode(&code, &data);
-        }
-        if (result != QUIRC_SUCCESS || data.payload_len == 0) {
-            ESP_LOGW(kTag, "QR candidate %d could not be decoded: %s", index,
-                     quirc_strerror(result));
+
+    uint32_t consumed_generation = 0;
+    while (!g_stop_requested) {
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(100));
+        if (g_stop_requested || g_qr_found || g_scan_lock == nullptr) continue;
+        if (xSemaphoreTake(g_scan_lock, pdMS_TO_TICKS(20)) != pdTRUE) continue;
+        if (consumed_generation == g_scan_generation) {
+            xSemaphoreGive(g_scan_lock);
             continue;
         }
-        if (xSemaphoreTake(g_lock, pdMS_TO_TICKS(100)) == pdTRUE) {
-            const std::size_t length = std::min<std::size_t>(
-                data.payload_len, sizeof(g_status.payload) - 1);
-            const bool changed = std::strlen(g_status.payload) != length ||
-                std::memcmp(g_status.payload, data.payload, length) != 0;
-            if (changed) {
-                std::memcpy(g_status.payload, data.payload, length);
-                g_status.payload[length] = '\0';
-                ++g_status.result_generation;
-            }
-            g_qr_found = true;
-            std::snprintf(g_status.message, sizeof(g_status.message), "QR code detected");
-            xSemaphoreGive(g_lock);
+
+        const int8_t selected_brightness = g_scan_brightness;
+        // Auto cycles through normal, darker, and brighter grayscale once per
+        // scan. This handles phone-screen glare without changing sensor exposure.
+        const int brightness_offset = selected_brightness == 0
+            ? (g_scan_attempts % 3U == 0 ? 0 : (g_scan_attempts % 3U == 1 ? -40 : 40))
+            : selected_brightness * 40;
+        uint8_t *gray = quirc_begin(decoder, nullptr, nullptr);
+        for (std::size_t index = 0; index < kScanPixelCount; ++index) {
+            gray[index] = adjusted_gray(g_scan_frame[index], brightness_offset);
         }
-        ESP_LOGI(kTag, "QR payload detected (%u bytes)", data.payload_len);
-        break;
+        consumed_generation = g_scan_generation;
+        xSemaphoreGive(g_scan_lock);
+
+        quirc_end(decoder);
+        const int count = quirc_count(decoder);
+        ++g_scan_attempts;
+        if (count > 0) {
+            ESP_LOGI(kTag, "QR finder candidates: %d", count);
+        } else if (g_scan_attempts % 10U == 0) {
+            ESP_LOGI(kTag, "No QR finder candidate after %lu scan attempts",
+                     static_cast<unsigned long>(g_scan_attempts));
+        }
+        for (int index = 0; index < count; ++index) {
+            quirc_code code{};
+            quirc_data data{};
+            quirc_extract(decoder, index, &code);
+            quirc_decode_error_t result = quirc_decode(&code, &data);
+            if (result != QUIRC_SUCCESS) {
+                quirc_flip(&code);
+                result = quirc_decode(&code, &data);
+            }
+            if (result != QUIRC_SUCCESS || data.payload_len == 0) {
+                ESP_LOGW(kTag, "QR candidate %d could not be decoded: %s", index,
+                         quirc_strerror(result));
+                continue;
+            }
+            if (xSemaphoreTake(g_lock, pdMS_TO_TICKS(100)) == pdTRUE) {
+                const std::size_t length = std::min<std::size_t>(
+                    data.payload_len, sizeof(g_status.payload) - 1);
+                const bool changed = std::strlen(g_status.payload) != length ||
+                    std::memcmp(g_status.payload, data.payload, length) != 0;
+                if (changed) {
+                    std::memcpy(g_status.payload, data.payload, length);
+                    g_status.payload[length] = '\0';
+                    ++g_status.result_generation;
+                }
+                g_qr_found = true;
+                std::snprintf(g_status.message, sizeof(g_status.message), "QR code detected");
+                xSemaphoreGive(g_lock);
+            }
+            ESP_LOGI(kTag, "QR payload detected (%u bytes)", data.payload_len);
+            break;
+        }
     }
+
+    quirc_destroy(decoder);
+    g_decode_task = nullptr;
+    vTaskDelete(nullptr);
 }
 
 void camera_task(void *)
@@ -302,12 +356,9 @@ void camera_task(void *)
         }
     }
 
-    quirc *decoder = quirc_new();
-    if (!buffers_ready || decoder == nullptr ||
-        quirc_resize(decoder, kScanWidth, kScanHeight) < 0) {
-        ESP_LOGE(kTag, "Camera buffer/QR decoder setup failed (buffers=%d decoder=%p)",
-                 buffers_ready, decoder);
-        if (decoder != nullptr) quirc_destroy(decoder);
+    if (!buffers_ready || xTaskCreatePinnedToCore(
+            decoder_task, "qr_decode", 32768, nullptr, 2, &g_decode_task, 0) != pdPASS) {
+        ESP_LOGE(kTag, "Camera buffer/QR decoder setup failed (buffers=%d)", buffers_ready);
         for (auto &buffer : buffers) {
             if (buffer.data != nullptr && buffer.data != kMapFailed) munmap(buffer.data, buffer.length);
         }
@@ -345,14 +396,15 @@ void camera_task(void *)
                                 ESP_CACHE_MSYNC_FLAG_DIR_M2C);
                 publish_frame(static_cast<const uint16_t *>(buffers[buffer.index].data),
                               format.fmt.pix.width, format.fmt.pix.height,
-                              format.fmt.pix.bytesperline, decoder);
+                              format.fmt.pix.bytesperline);
             }
             ioctl(fd, VIDIOC_QBUF, &buffer);
         }
         ioctl(fd, VIDIOC_STREAMOFF, &type);
     }
 
-    quirc_destroy(decoder);
+    g_stop_requested = true;
+    if (g_decode_task != nullptr) xTaskNotifyGive(g_decode_task);
     for (auto &buffer : buffers) {
         if (buffer.data != nullptr && buffer.data != kMapFailed) munmap(buffer.data, buffer.length);
     }
@@ -368,31 +420,41 @@ void camera_task(void *)
 bool start()
 {
     if (g_lock == nullptr) g_lock = xSemaphoreCreateMutex();
-    if (g_lock == nullptr) return false;
+    if (g_scan_lock == nullptr) g_scan_lock = xSemaphoreCreateMutex();
+    if (g_lock == nullptr || g_scan_lock == nullptr) return false;
     if (g_preview == nullptr) {
         g_preview = static_cast<uint16_t *>(heap_caps_calloc(
             kPreviewPixelCount, sizeof(uint16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     }
     if (g_preview == nullptr) return false;
+    if (g_scan_frame == nullptr) {
+        g_scan_frame = static_cast<uint8_t *>(heap_caps_calloc(
+            kScanPixelCount, sizeof(uint8_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    }
+    if (g_scan_frame == nullptr) return false;
     if (g_task != nullptr && !g_stop_requested) return true;
     // If the page was reopened while the previous stream was still closing,
     // wait for that worker instead of reporting success without starting a
     // replacement task (which left the reopened preview dark).
-    for (unsigned attempt = 0; g_task != nullptr && attempt < 100; ++attempt) {
+    for (unsigned attempt = 0;
+         (g_task != nullptr || g_decode_task != nullptr) && attempt < 100; ++attempt) {
         vTaskDelay(pdMS_TO_TICKS(10));
     }
-    if (g_task != nullptr) {
-        ESP_LOGW(kTag, "Previous camera worker did not stop in time");
+    if (g_task != nullptr || g_decode_task != nullptr) {
+        ESP_LOGW(kTag, "Previous camera workers did not stop in time");
         return false;
     }
     g_stop_requested = false;
     if (xSemaphoreTake(g_lock, pdMS_TO_TICKS(100)) == pdTRUE) {
         g_status.captured_frames = 0;
+        g_status.payload[0] = '\0';
         std::snprintf(g_status.message, sizeof(g_status.message), "Starting OV02C10 camera...");
         g_status.state = State::Starting;
         xSemaphoreGive(g_lock);
     }
     g_scan_attempts = 0;
+    g_scan_generation = 0;
+    g_capture_started_at = 0;
     g_qr_found = false;
     return xTaskCreatePinnedToCore(
         camera_task, "camera_qr", 32768, nullptr, 3, &g_task, 1) == pdPASS;
@@ -401,6 +463,7 @@ bool start()
 void stop()
 {
     g_stop_requested = true;
+    if (g_decode_task != nullptr) xTaskNotifyGive(g_decode_task);
 }
 
 Status status()
