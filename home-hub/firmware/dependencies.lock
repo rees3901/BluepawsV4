@@ -24,22 +24,18 @@ dependencies:
       type: service
     version: 1.1.6
   espressif/esp_cam_sensor:
-    component_hash: 1558652a02e1b2ffbc274a2e97da1962f6dd467fd158478e90231c8e59137997
+    component_hash: 997350d052fca8f2e85a310f60aeb4361bf9df87e5760eb2678e924f267c1e2a
     dependencies:
     - name: espressif/cmake_utilities
-      registry_url: https://components.espressif.com
-      require: private
       version: 0.*
     - name: espressif/esp_sccb_intf
-      registry_url: https://components.espressif.com
-      require: private
       version: '>=0.0.5'
     - name: idf
-      require: private
       version: '>=5.3'
     source:
-      registry_url: https://components.espressif.com/
-      type: service
+      git: https://github.com/guitionofficial/P4-series.git
+      path: JC4880P443C_I_W/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/video_lcd_display/managed_components/espressif__esp_cam_sensor
+      type: git
     targets:
     - esp32p4
     - esp32s3
@@ -47,7 +43,7 @@ dependencies:
     - esp32c5
     - esp32c6
     - esp32c61
-    version: 1.2.1
+    version: 9f1510954d281e30b19cd8baf115e2ed2a65a90a
   espressif/esp_h264:
     component_hash: fa5daaebc8a304f0b79bc57e51aab43e0a03eabc2ba3865bff4063c56b5d4564
     dependencies:
@@ -146,7 +142,7 @@ dependencies:
       require: private
       version: '>=5.3'
     source:
-      registry_url: https://components.espressif.com
+      registry_url: https://components.espressif.com/
       type: service
     version: 0.0.9
   espressif/esp_serial_slave_link:
@@ -262,6 +258,6 @@ direct_dependencies:
 - espressif/quirc
 - idf
 - lvgl/lvgl
-manifest_hash: c7d2ae2a00cb2ac1b7f4791e4587c9106d7aabeaecb3e7ed5a00f309567f086c
+manifest_hash: c1a11e66a034edcdc4780004f0f0b01713763b482696ba7846cf4e6a50fcc60e
 target: esp32p4
 version: 2.0.0

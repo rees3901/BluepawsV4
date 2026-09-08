@@ -5,3 +5,15 @@ dependencies:
   espressif/esp_video: "1.1.0"
   espressif/esp_cam_sensor: "1.2.1"
   espressif/quirc: "1.2.0"
+
+# GUI-TION's JC4880P443C_I_W carries an OV02C10 sensor driver which is not
+# present in Espressif's published 1.2.1 package. Replace every dependency on
+# that package with the board vendor's pinned component revision.
+overrides:
+  - espressif/esp_cam_sensor:
+      with:
+        espressif/esp_cam_sensor:
+          git: https://github.com/guitionofficial/P4-series.git
+          path: JC4880P443C_I_W/JC4880P443C_I_W/1-Demo/idf_examples/ESP-IDF/video_lcd_display/managed_components/espressif__esp_cam_sensor
+          version: 9f1510954d281e30b19cd8baf115e2ed2a65a90a
+      reason: GUI-TION board requires the OV02C10 MIPI-CSI sensor driver
