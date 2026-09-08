@@ -16,6 +16,7 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#include <sys/stat.h>
 
 namespace bluepaws::web {
 namespace {
@@ -23,6 +24,21 @@ namespace {
 constexpr char kTag[] = "home_hub_web";
 constexpr char kWebRoot[] = "/web";
 constexpr char kHubId[] = "0010";
+
+struct MapLayer {
+    const char *id;
+    const char *name;
+    const char *root;
+    uint8_t minimum_zoom;
+    uint8_t maximum_zoom;
+};
+
+constexpr MapLayer kMapLayers[] = {
+    {"osm", "OpenStreetMap", "/sdcard/bluepaws/maps/layers/osm-road-100km/tiles", 5, 17},
+    {"os", "Ordnance Survey", "/sdcard/bluepaws/maps/layers/ordnance-survey-100km/tiles", 5, 17},
+    {"satellite", "Satellite", "/sdcard/bluepaws/maps/layers/satellite-v2/tiles", 14, 17},
+    {"aerial", "Aerial", "/sdcard/bluepaws/maps/layers/aerial-consistent/tiles", 12, 17},
+};
 
 struct WebSnapshot {
     std::array<CatRecord, kMaximumCats> cats{};
@@ -241,6 +257,38 @@ esp_err_t hub_presence_handler(httpd_req_t *request)
     return result;
 }
 
+bool directory_exists(const char *path)
+{
+    struct stat details{};
+    return stat(path, &details) == 0 && S_ISDIR(details.st_mode);
+}
+
+esp_err_t map_layers_handler(httpd_req_t *request)
+{
+    cJSON *response = cJSON_CreateObject();
+    if (response == nullptr) return ESP_ERR_NO_MEM;
+    cJSON *layers = cJSON_AddArrayToObject(response, "layers");
+    if (layers == nullptr) {
+        cJSON_Delete(response);
+        return ESP_ERR_NO_MEM;
+    }
+    for (const MapLayer &layer : kMapLayers) {
+        if (!directory_exists(layer.root)) continue;
+        cJSON *item = cJSON_CreateObject();
+        cJSON_AddStringToObject(item, "id", layer.id);
+        cJSON_AddStringToObject(item, "name", layer.name);
+        char url[80]{};
+        std::snprintf(url, sizeof(url), "/tiles/%s/{z}/{x}/{y}.jpg", layer.id);
+        cJSON_AddStringToObject(item, "url", url);
+        cJSON_AddNumberToObject(item, "minZoom", layer.minimum_zoom);
+        cJSON_AddNumberToObject(item, "maxZoom", layer.maximum_zoom);
+        cJSON_AddItemToArray(layers, item);
+    }
+    const esp_err_t result = send_json(request, response);
+    cJSON_Delete(response);
+    return result;
+}
+
 esp_err_t unavailable_handler(httpd_req_t *request)
 {
     cJSON *json = cJSON_CreateObject();
@@ -317,6 +365,49 @@ esp_err_t serve_file(httpd_req_t *request, const char *uri)
     return result;
 }
 
+esp_err_t serve_map_tile(httpd_req_t *request)
+{
+    char layer_id[16]{};
+    int zoom = -1;
+    int x = -1;
+    int y = -1;
+    int consumed = 0;
+    if (std::sscanf(request->uri, "/tiles/%15[^/]/%d/%d/%d.jpg%n",
+                    layer_id, &zoom, &x, &y, &consumed) != 4 ||
+        consumed <= 0 || request->uri[consumed] != '\0' || x < 0 || y < 0) {
+        return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "Invalid tile path");
+    }
+
+    const MapLayer *selected = nullptr;
+    for (const MapLayer &layer : kMapLayers) {
+        if (std::strcmp(layer.id, layer_id) == 0) {
+            selected = &layer;
+            break;
+        }
+    }
+    if (selected == nullptr || zoom < selected->minimum_zoom ||
+        zoom > selected->maximum_zoom || !directory_exists(selected->root)) {
+        return httpd_resp_send_err(request, HTTPD_404_NOT_FOUND, "Tile unavailable");
+    }
+
+    char path[256]{};
+    std::snprintf(path, sizeof(path), "%s/%d/%d/%d.jpg", selected->root, zoom, x, y);
+    FILE *file = std::fopen(path, "rb");
+    if (file == nullptr) return httpd_resp_send_err(request, HTTPD_404_NOT_FOUND, "Tile unavailable");
+    httpd_resp_set_type(request, "image/jpeg");
+    httpd_resp_set_hdr(request, "Cache-Control", "public, max-age=86400");
+    char buffer[4096];
+    esp_err_t result = ESP_OK;
+    std::size_t count = 0;
+    while ((count = std::fread(buffer, 1, sizeof(buffer), file)) > 0) {
+        result = httpd_resp_send_chunk(request, buffer, count);
+        if (result != ESP_OK) break;
+    }
+    std::fclose(file);
+    if (result == ESP_OK) result = httpd_resp_send_chunk(request, nullptr, 0);
+    return result;
+}
+
 esp_err_t root_handler(httpd_req_t *request)
 {
     return serve_file(request, "/index.html");
@@ -345,10 +436,7 @@ esp_err_t captive_handler(httpd_req_t *request)
 esp_err_t wildcard_handler(httpd_req_t *request)
 {
     if (public_path(request->uri)) return serve_file(request, request->uri);
-    if (std::strncmp(request->uri, "/tiles/", 7) == 0) {
-        httpd_resp_set_status(request, "204 No Content");
-        return httpd_resp_send(request, nullptr, 0);
-    }
+    if (std::strncmp(request->uri, "/tiles/", 7) == 0) return serve_map_tile(request);
     return httpd_resp_send_err(request, HTTPD_404_NOT_FOUND, "Not found");
 }
 
@@ -399,6 +487,7 @@ bool start_server_now()
     ok &= register_uri("/api/devices", HTTP_GET, devices_handler);
     ok &= register_uri("/api/status", HTTP_GET, status_handler);
     ok &= register_uri("/api/hub-presence", HTTP_GET, hub_presence_handler);
+    ok &= register_uri("/api/map-layers", HTTP_GET, map_layers_handler);
     ok &= register_uri("/api/commands", HTTP_GET, empty_array_handler);
     ok &= register_uri("/api/ble", HTTP_GET, empty_array_handler);
     ok &= register_uri("/api/history*", HTTP_GET, history_handler);
