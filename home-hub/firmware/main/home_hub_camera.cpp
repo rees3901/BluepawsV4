@@ -28,8 +28,8 @@ namespace {
 constexpr char kTag[] = "home_hub_camera";
 constexpr unsigned kBufferCount = 2;
 constexpr uint32_t kTargetCaptureFps = 15;
-constexpr uint32_t kScanWidth = 384;
-constexpr uint32_t kScanHeight = 384;
+constexpr uint32_t kScanWidth = 512;
+constexpr uint32_t kScanHeight = 512;
 constexpr std::size_t kScanPixelCount = kScanWidth * kScanHeight;
 
 struct CaptureBuffer {
@@ -100,6 +100,8 @@ void publish_frame(const uint16_t *source, uint32_t width, uint32_t height, uint
     const uint32_t crop_size = std::min(width, height) * 100U / zoom_percent;
     const uint32_t crop_left = (width - crop_size) / 2U;
     const uint32_t crop_top = (height - crop_size) / 2U;
+    const uint32_t crop_right = crop_left + crop_size - 1U;
+    const uint32_t crop_bottom = crop_top + crop_size - 1U;
     uint32_t captured_frames = 0;
     if (xSemaphoreTake(g_lock, pdMS_TO_TICKS(100)) != pdTRUE) return;
     for (uint32_t y = 0; y < kPreviewHeight; ++y) {
@@ -154,11 +156,19 @@ void publish_frame(const uint16_t *source, uint32_t width, uint32_t height, uint
     if (g_qr_found || g_scan_frame == nullptr || g_scan_lock == nullptr ||
         xSemaphoreTake(g_scan_lock, 0) != pdTRUE) return;
     for (uint32_t y = 0; y < kScanHeight; ++y) {
-        const uint32_t source_y = crop_top + y * crop_size / kScanHeight;
+        const uint32_t source_y = std::min<uint32_t>(
+            crop_top + (2U * y + 1U) * crop_size / (2U * kScanHeight), height - 1U);
+        const uint32_t source_y_next = std::min<uint32_t>(source_y + 1U, crop_bottom);
         for (uint32_t x = 0; x < kScanWidth; ++x) {
-            const uint32_t source_x = crop_left + x * crop_size / kScanWidth;
-            g_scan_frame[y * kScanWidth + x] =
-                rgb565_gray(source[source_y * stride_pixels + source_x]);
+            const uint32_t source_x = std::min<uint32_t>(
+                crop_left + (2U * x + 1U) * crop_size / (2U * kScanWidth), width - 1U);
+            const uint32_t source_x_next = std::min<uint32_t>(source_x + 1U, crop_right);
+            const uint32_t gray_sum =
+                rgb565_gray(source[source_y * stride_pixels + source_x]) +
+                rgb565_gray(source[source_y * stride_pixels + source_x_next]) +
+                rgb565_gray(source[source_y_next * stride_pixels + source_x]) +
+                rgb565_gray(source[source_y_next * stride_pixels + source_x_next]);
+            g_scan_frame[y * kScanWidth + x] = static_cast<uint8_t>((gray_sum + 2U) / 4U);
         }
     }
     ++g_scan_generation;
@@ -187,13 +197,25 @@ void decoder_task(void *)
             continue;
         }
 
-        const int brightness_offset = g_scan_brightness +
-            (g_scan_attempts % 3U == 0 ? 0 : (g_scan_attempts % 3U == 1 ? -12 : 12));
-        const uint16_t contrast_percent = g_scan_contrast;
+        // Decode alternating untouched and mildly sharpened frames. The UI
+        // brightness setting intentionally affects only the preview, so a user
+        // adjustment cannot clip QR data or reduce recognition reliability.
+        const bool sharpen = (g_scan_attempts % 2U) != 0;
         uint8_t *gray = quirc_begin(decoder, nullptr, nullptr);
-        for (std::size_t index = 0; index < kScanPixelCount; ++index) {
-            gray[index] = adjusted_gray(
-                g_scan_frame[index], brightness_offset, contrast_percent);
+        for (uint32_t y = 0; y < kScanHeight; ++y) {
+            for (uint32_t x = 0; x < kScanWidth; ++x) {
+                const std::size_t index = y * kScanWidth + x;
+                if (!sharpen || x == 0 || y == 0 ||
+                    x + 1U == kScanWidth || y + 1U == kScanHeight) {
+                    gray[index] = g_scan_frame[index];
+                    continue;
+                }
+                const int neighbours =
+                    g_scan_frame[index - 1U] + g_scan_frame[index + 1U] +
+                    g_scan_frame[index - kScanWidth] + g_scan_frame[index + kScanWidth];
+                gray[index] = static_cast<uint8_t>(std::clamp<int>(
+                    static_cast<int>(g_scan_frame[index]) * 2 - neighbours / 4, 0, 255));
+            }
         }
         consumed_generation = g_scan_generation;
         xSemaphoreGive(g_scan_lock);
