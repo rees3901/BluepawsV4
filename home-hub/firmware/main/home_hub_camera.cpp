@@ -14,6 +14,7 @@
 #include "quirc.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
@@ -57,6 +58,7 @@ volatile uint16_t g_scan_zoom = 125;
 volatile uint8_t g_auto_black = 0;
 volatile uint8_t g_auto_white = 255;
 volatile bool g_qr_found = false;
+std::atomic_bool g_decoder_ready{false};
 
 void set_state(State state, const char *message)
 {
@@ -85,10 +87,13 @@ uint8_t adjusted_gray(uint8_t gray, int brightness_offset, uint16_t contrast_per
         contrasted + brightness_offset, 0, 255));
 }
 
-uint16_t gray_rgb565(uint8_t gray)
+uint16_t adjusted_rgb565(uint16_t pixel, int brightness_offset)
 {
-    return static_cast<uint16_t>(
-        ((gray >> 3U) << 11U) | ((gray >> 2U) << 5U) | (gray >> 3U));
+    if (brightness_offset == 0) return pixel;
+    const int red = std::clamp<int>(((pixel >> 11U) & 0x1FU) + brightness_offset / 8, 0, 31);
+    const int green = std::clamp<int>(((pixel >> 5U) & 0x3FU) + brightness_offset / 4, 0, 63);
+    const int blue = std::clamp<int>((pixel & 0x1FU) + brightness_offset / 8, 0, 31);
+    return static_cast<uint16_t>((red << 11U) | (green << 5U) | blue);
 }
 
 uint8_t level_gray(uint8_t gray, uint8_t black, uint8_t white)
@@ -108,9 +113,6 @@ void publish_frame(const uint16_t *source, uint32_t width, uint32_t height, uint
     const uint16_t requested_zoom = g_scan_zoom;
     const uint16_t zoom_percent = std::clamp<uint16_t>(requested_zoom, 100, 200);
     const int brightness_offset = g_scan_brightness;
-    const uint16_t contrast_percent = g_scan_contrast;
-    const uint8_t auto_black = g_auto_black;
-    const uint8_t auto_white = g_auto_white;
     const uint32_t crop_size = std::min(width, height) * 100U / zoom_percent;
     const uint32_t crop_left = (width - crop_size) / 2U;
     const uint32_t crop_top = (height - crop_size) / 2U;
@@ -123,13 +125,11 @@ void publish_frame(const uint16_t *source, uint32_t width, uint32_t height, uint
         for (uint32_t x = 0; x < kPreviewWidth; ++x) {
             const uint32_t source_x = crop_left + x * crop_size / kPreviewWidth;
             const uint16_t pixel = source[source_y * stride_pixels + source_x];
-            const uint8_t processed = adjusted_gray(
-                level_gray(rgb565_gray(pixel), auto_black, auto_white),
-                brightness_offset, contrast_percent);
-            // Keep the full grayscale range in the preview. Hard black/white
-            // thresholding made sensor noise prominent and could visually merge
-            // the small modules and quiet zone around a QR code.
-            g_preview[y * kPreviewWidth + x] = gray_rgb565(processed);
+            // The ISP already supplies display-ready RGB565. Keep the visible
+            // preview in colour and avoid doing grayscale, levels and contrast
+            // work on all 102,400 display pixels every frame. QR recognition
+            // still receives its own independent grayscale working image.
+            g_preview[y * kPreviewWidth + x] = adjusted_rgb565(pixel, brightness_offset);
         }
     }
     ++g_status.preview_generation;
@@ -166,9 +166,11 @@ void publish_frame(const uint16_t *source, uint32_t width, uint32_t height, uint
     }
 
     // Preserve the full 15 fps user-facing preview. Preparing a 512x512 scan
-    // image is comparatively expensive, while the independent decoder cannot
-    // consume every camera frame anyway, so stage alternate captures only.
-    if ((captured_frames % 2U) == 0U) return;
+    // image is comparatively expensive, so do it only when the decoder is
+    // actually waiting for another image. Notifications still coalesce, but
+    // this additionally avoids preparing frames that the busy decoder could
+    // never consume.
+    if ((captured_frames % 2U) == 0U || !g_decoder_ready.load(std::memory_order_acquire)) return;
 
     // Publish a fresh centre crop to the independent decoder worker. Task
     // notifications coalesce, so a busy decoder always receives the newest
@@ -209,7 +211,9 @@ void decoder_task(void *)
 
     uint32_t consumed_generation = 0;
     while (!g_stop_requested) {
+        g_decoder_ready.store(true, std::memory_order_release);
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(100));
+        g_decoder_ready.store(false, std::memory_order_release);
         if (g_stop_requested || g_qr_found || g_scan_lock == nullptr) continue;
         if (xSemaphoreTake(g_scan_lock, pdMS_TO_TICKS(20)) != pdTRUE) continue;
         if (consumed_generation == g_scan_generation) {
@@ -258,6 +262,7 @@ void decoder_task(void *)
         const unsigned variant = g_scan_attempts % 3U;
         const bool auto_levels = variant != 0;
         const bool sharpen = variant == 2U;
+        const int brightness_offset = g_scan_brightness;
         const uint16_t contrast_percent = g_scan_contrast;
         uint8_t *gray = quirc_begin(decoder, nullptr, nullptr);
         for (uint32_t y = 0; y < kScanHeight; ++y) {
@@ -265,7 +270,7 @@ void decoder_task(void *)
                 const std::size_t index = y * kScanWidth + x;
                 const uint8_t centre = auto_levels
                     ? adjusted_gray(level_gray(g_scan_frame[index], black, white),
-                                    0, contrast_percent)
+                                    brightness_offset, contrast_percent)
                     : g_scan_frame[index];
                 if (!sharpen || x == 0 || y == 0 ||
                     x + 1U == kScanWidth || y + 1U == kScanHeight) {
@@ -274,13 +279,13 @@ void decoder_task(void *)
                 }
                 const int neighbours =
                     adjusted_gray(level_gray(g_scan_frame[index - 1U], black, white),
-                                  0, contrast_percent) +
+                                  brightness_offset, contrast_percent) +
                     adjusted_gray(level_gray(g_scan_frame[index + 1U], black, white),
-                                  0, contrast_percent) +
+                                  brightness_offset, contrast_percent) +
                     adjusted_gray(level_gray(g_scan_frame[index - kScanWidth], black, white),
-                                  0, contrast_percent) +
+                                  brightness_offset, contrast_percent) +
                     adjusted_gray(level_gray(g_scan_frame[index + kScanWidth], black, white),
-                                  0, contrast_percent);
+                                  brightness_offset, contrast_percent);
                 gray[index] = static_cast<uint8_t>(std::clamp<int>(
                     static_cast<int>(centre) * 2 - neighbours / 4, 0, 255));
             }
@@ -331,6 +336,7 @@ void decoder_task(void *)
         }
     }
 
+    g_decoder_ready.store(false, std::memory_order_release);
     quirc_destroy(decoder);
     g_decode_task = nullptr;
     vTaskDelete(nullptr);
@@ -560,6 +566,7 @@ bool start()
     g_auto_black = 0;
     g_auto_white = 255;
     g_qr_found = false;
+    g_decoder_ready.store(false, std::memory_order_release);
     return xTaskCreatePinnedToCore(
         camera_task, "camera_qr", 32768, nullptr, 3, &g_task, 1) == pdPASS;
 }

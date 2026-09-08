@@ -54,9 +54,11 @@ Passwords remain in local NVS, are masked in the UI, and are never copied to SD
 or written to the serial log.
 
 The launcher **QR Scanner** page starts the fitted 2 MP OV02C10 through the
-ESP32-P4's two-lane MIPI-CSI/ISP path and shows a 320 x 240 RGB565 preview.
+ESP32-P4's two-lane MIPI-CSI/ISP path and shows a square colour RGB565 preview.
 Camera control shares the board's GPIO7/GPIO8 I2C bus with GT911 touch. `quirc`
-checks a downscaled grayscale frame every fifth capture. Standard `WIFI:`
+checks an independently downscaled grayscale frame whenever its decoder worker
+is ready, so recognition cannot build a stale queue or needlessly consume every
+visible frame. Standard `WIFI:`
 payloads are parsed with escaped separators, displayed with the password
 masked, and require a touch confirmation before replacing the primary network
 in NVS and asking the network task to reconnect. Raw QR contents are never

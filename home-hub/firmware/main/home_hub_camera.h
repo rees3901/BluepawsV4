@@ -6,8 +6,8 @@
 namespace bluepaws::camera {
 
 constexpr uint32_t kPreviewWidth = 320;
-// Show only the square centre crop consumed by the QR decoder. This keeps QR
-// modules square and avoids presenting the scanner as a general-purpose camera.
+// Show the square centre crop consumed by the QR decoder. The user-facing
+// preview remains colour while the decoder maintains a separate grayscale copy.
 constexpr uint32_t kPreviewHeight = 320;
 constexpr std::size_t kPreviewPixelCount = kPreviewWidth * kPreviewHeight;
 
@@ -32,7 +32,9 @@ bool start();
 void stop();
 Status status();
 
-// Software processing controls shared by the QR-only preview and decoder.
+// Software processing controls for QR framing and decoder tuning. The default
+// colour preview is copied directly; non-zero brightness also gives immediate
+// visual feedback and tunes the enhanced decoder attempts.
 void setScanBrightness(int16_t offset);
 int16_t scanBrightness();
 void setScanContrast(uint16_t percent);
