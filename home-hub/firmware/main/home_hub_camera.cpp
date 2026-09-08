@@ -28,7 +28,8 @@ namespace {
 
 constexpr char kTag[] = "home_hub_camera";
 constexpr unsigned kBufferCount = 2;
-constexpr uint32_t kTargetCaptureFps = 15;
+constexpr uint32_t kSensorCaptureFps = 30;
+constexpr uint32_t kQrPreviewFpsDivider = 2;
 constexpr uint32_t kScanWidth = 512;
 constexpr uint32_t kScanHeight = 512;
 constexpr std::size_t kScanPixelCount = kScanWidth * kScanHeight;
@@ -59,6 +60,7 @@ volatile uint8_t g_auto_black = 0;
 volatile uint8_t g_auto_white = 255;
 volatile bool g_qr_found = false;
 std::atomic_bool g_decoder_ready{false};
+std::atomic<Mode> g_mode{Mode::Photo};
 
 void set_state(State state, const char *message)
 {
@@ -165,12 +167,13 @@ void publish_frame(const uint16_t *source, uint32_t width, uint32_t height, uint
         }
     }
 
-    // Preserve the full 15 fps user-facing preview. Preparing a 512x512 scan
+    // Preserve the full QR user-facing preview. Preparing a 512x512 scan
     // image is comparatively expensive, so do it only when the decoder is
     // actually waiting for another image. Notifications still coalesce, but
     // this additionally avoids preparing frames that the busy decoder could
     // never consume.
-    if ((captured_frames % 2U) == 0U || !g_decoder_ready.load(std::memory_order_acquire)) return;
+    if (g_mode.load(std::memory_order_acquire) != Mode::Qr ||
+        !g_decoder_ready.load(std::memory_order_acquire)) return;
 
     // Publish a fresh centre crop to the independent decoder worker. Task
     // notifications coalesce, so a busy decoder always receives the newest
@@ -211,10 +214,16 @@ void decoder_task(void *)
 
     uint32_t consumed_generation = 0;
     while (!g_stop_requested) {
+        if (g_mode.load(std::memory_order_acquire) != Mode::Qr) {
+            g_decoder_ready.store(false, std::memory_order_release);
+            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(100));
+            continue;
+        }
         g_decoder_ready.store(true, std::memory_order_release);
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(100));
         g_decoder_ready.store(false, std::memory_order_release);
-        if (g_stop_requested || g_qr_found || g_scan_lock == nullptr) continue;
+        if (g_stop_requested || g_qr_found || g_scan_lock == nullptr ||
+            g_mode.load(std::memory_order_acquire) != Mode::Qr) continue;
         if (xSemaphoreTake(g_scan_lock, pdMS_TO_TICKS(20)) != pdTRUE) continue;
         if (consumed_generation == g_scan_generation) {
             xSemaphoreGive(g_scan_lock);
@@ -258,7 +267,8 @@ void decoder_task(void *)
         g_auto_white = white;
 
         // Try raw, automatically levelled, and levelled plus mild sharpening
-        // in rotation. Manual brightness remains preview-only.
+        // in rotation. The raw pass remains an untouched fallback; manual
+        // brightness and contrast tune the two enhanced attempts.
         const unsigned variant = g_scan_attempts % 3U;
         const bool auto_levels = variant != 0;
         const bool sharpen = variant == 2U;
@@ -416,21 +426,20 @@ void camera_task(void *)
              static_cast<unsigned long>(format.fmt.pix.bytesperline),
              static_cast<unsigned long>(format.fmt.pix.sizeimage));
 
-    // The sensor runs at 30 fps, but a QR scanner does not need to process a
-    // 1080p frame that often. The ESP video driver implements this as frame
-    // skipping, leaving CPU time for LVGL while retaining the sensor's native
-    // resolution and automatic exposure pipeline.
+    // Keep the sensor at its native 30 fps for the fluid Photo profile. QR mode
+    // skips alternate frames in software before any preview or grayscale work,
+    // retaining a responsive 15 fps view while leaving CPU for recognition.
     v4l2_streamparm stream_parameters{};
     stream_parameters.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     stream_parameters.parm.capture.capability = V4L2_CAP_TIMEPERFRAME;
     stream_parameters.parm.capture.timeperframe.numerator = 1;
-    stream_parameters.parm.capture.timeperframe.denominator = kTargetCaptureFps;
+    stream_parameters.parm.capture.timeperframe.denominator = kSensorCaptureFps;
     if (ioctl(fd, VIDIOC_S_PARM, &stream_parameters) != 0) {
         ESP_LOGW(kTag, "Could not limit camera to %lu fps: errno=%d (%s)",
-                 static_cast<unsigned long>(kTargetCaptureFps), errno, std::strerror(errno));
+                 static_cast<unsigned long>(kSensorCaptureFps), errno, std::strerror(errno));
     } else {
-        ESP_LOGI(kTag, "Camera processing rate limited to %lu fps",
-                 static_cast<unsigned long>(kTargetCaptureFps));
+        ESP_LOGI(kTag, "Camera sensor rate set to %lu fps",
+                 static_cast<unsigned long>(kSensorCaptureFps));
     }
 
     v4l2_requestbuffers request{};
@@ -483,8 +492,9 @@ void camera_task(void *)
         set_state(State::Failed, "Camera stream did not start");
     } else {
         ESP_LOGI(kTag, "Camera stream started");
-        set_state(State::Streaming, "Local QR processing • no frames saved or uploaded");
+        set_state(State::Streaming, "Photo mode • QR recognition paused");
         uint32_t dequeue_failures = 0;
+        uint32_t sensor_frames = 0;
         while (!g_stop_requested) {
             v4l2_buffer buffer{};
             buffer.type = request.type;
@@ -502,9 +512,14 @@ void camera_task(void *)
             if (buffer.index < kBufferCount) {
                 esp_cache_msync(buffers[buffer.index].data, buffers[buffer.index].length,
                                 ESP_CACHE_MSYNC_FLAG_DIR_M2C);
-                publish_frame(static_cast<const uint16_t *>(buffers[buffer.index].data),
-                              format.fmt.pix.width, format.fmt.pix.height,
-                              format.fmt.pix.bytesperline);
+                ++sensor_frames;
+                const Mode current_mode = g_mode.load(std::memory_order_acquire);
+                if (current_mode == Mode::Photo ||
+                    sensor_frames % kQrPreviewFpsDivider != 0U) {
+                    publish_frame(static_cast<const uint16_t *>(buffers[buffer.index].data),
+                                  format.fmt.pix.width, format.fmt.pix.height,
+                                  format.fmt.pix.bytesperline);
+                }
             }
             ioctl(fd, VIDIOC_QBUF, &buffer);
         }
@@ -591,6 +606,30 @@ void setScanBrightness(int16_t offset)
 {
     g_scan_brightness = std::clamp<int16_t>(offset, -80, 80);
     ESP_LOGI(kTag, "QR scan brightness set to %+d", g_scan_brightness);
+}
+
+void setMode(Mode mode)
+{
+    const Mode previous = g_mode.exchange(mode, std::memory_order_acq_rel);
+    if (previous == mode) return;
+    g_qr_found = false;
+    g_scan_attempts = 0;
+    g_decoder_ready.store(false, std::memory_order_release);
+    if (g_lock != nullptr && xSemaphoreTake(g_lock, pdMS_TO_TICKS(100)) == pdTRUE) {
+        g_status.payload[0] = '\0';
+        std::snprintf(g_status.message, sizeof(g_status.message), "%s",
+                      mode == Mode::Qr
+                          ? "QR mode • scanning Wi-Fi and BluePaws codes"
+                          : "Photo mode • QR recognition paused");
+        xSemaphoreGive(g_lock);
+    }
+    if (g_decode_task != nullptr) xTaskNotifyGive(g_decode_task);
+    ESP_LOGI(kTag, "Camera profile changed to %s", mode == Mode::Qr ? "QR" : "Photo");
+}
+
+Mode mode()
+{
+    return g_mode.load(std::memory_order_acquire);
 }
 
 int16_t scanBrightness()

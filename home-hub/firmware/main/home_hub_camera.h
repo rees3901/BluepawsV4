@@ -5,11 +5,16 @@
 
 namespace bluepaws::camera {
 
-constexpr uint32_t kPreviewWidth = 320;
+constexpr uint32_t kPreviewWidth = 432;
 // Show the square centre crop consumed by the QR decoder. The user-facing
 // preview remains colour while the decoder maintains a separate grayscale copy.
-constexpr uint32_t kPreviewHeight = 320;
+constexpr uint32_t kPreviewHeight = 432;
 constexpr std::size_t kPreviewPixelCount = kPreviewWidth * kPreviewHeight;
+
+enum class Mode : uint8_t {
+    Photo,
+    Qr,
+};
 
 enum class State : uint8_t {
     Stopped,
@@ -31,6 +36,8 @@ struct Status {
 bool start();
 void stop();
 Status status();
+void setMode(Mode mode);
+Mode mode();
 
 // Software processing controls for QR framing and decoder tuning. The default
 // colour preview is copied directly; non-zero brightness also gives immediate
