@@ -9,6 +9,7 @@
 #include "home_hub_cloud.h"
 #include "home_hub_config.h"
 #include "home_hub_settings_store.h"
+#include "home_hub_web.h"
 #include "home_hub_camera.h"
 
 #include "driver/jpeg_decode.h"
@@ -635,6 +636,7 @@ void update_ui(UiState &ui)
         ui.tiles_dirty = true;
     }
     const bluepaws::cloud::Status cloud_status = bluepaws::cloud::status();
+    bluepaws::web::updateSnapshot(ui.cats, cloud_status);
     const char *sync_name = !ui.cloud_enabled ? "simulator"
         : (cloud_status.state == bluepaws::cloud::ConnectionState::Online ? "online"
         : (cloud_status.state == bluepaws::cloud::ConnectionState::Connecting ? "connecting"
@@ -4030,6 +4032,10 @@ extern "C" void app_main(void)
     }
     ui.simulator.reset(kTestOrigin, uptime_ms());
     ui.cloud_enabled = bluepaws::cloud::start(ui.settings);
+    if (!bluepaws::web::start()) {
+        ESP_LOGE(kTag, "Local Off-Grid dashboard failed to start");
+    }
+    bluepaws::web::updateSnapshot(ui.cats, bluepaws::cloud::status());
     if (!lvgl_port_lock(0)) {
         ESP_LOGE(kTag, "Could not acquire LVGL lock");
         return;

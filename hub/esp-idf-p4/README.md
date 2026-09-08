@@ -53,6 +53,17 @@ reconnects and remains selected until the user chooses another mode.
 Passwords remain in local NVS, are masked in the UI, and are never copied to SD
 or written to the serial log.
 
+The P4 now also packages the proven static off-grid dashboard from `hub/data`
+into its 7 MB `storage` SPIFFS partition. When the hub's access point is active,
+clients can open `http://192.168.4.1`; common Android, Apple and Windows captive
+portal probes are redirected to the local welcome page. The first compatibility
+milestone serves live P4 collar snapshots and hub/network status. It deliberately
+reports collar commands, history export, configuration writes and Bluetooth as
+unavailable until the SX1262/GNSS daughterboard and the crash-safe P4 journal are
+connected. Server-sent events also fall back to the dashboard's established
+10-second device polling path. No Wi-Fi passwords, gateway credentials or journal
+records are included in the SPIFFS image or exposed as static files.
+
 The launcher **Camera** page starts the fitted 2 MP OV02C10 through the
 ESP32-P4's two-lane MIPI-CSI/ISP path and shows a 432 x 432 colour RGB565
 preview. It opens in the explicit Photo profile at 30 fps with QR recognition
