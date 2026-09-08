@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "main.cpp" "app_shell.cpp" "ui_icons.cpp" "home_hub_cloud.cpp"
+    SRCS "main.cpp" "app_shell.cpp" "ui_icons.cpp" "home_hub_cloud.cpp" "home_hub_web.cpp"
          "home_hub_settings_store.cpp" "home_hub_camera.cpp"
     INCLUDE_DIRS "."
     REQUIRES
@@ -7,6 +7,7 @@ idf_component_register(
         esp_driver_jpeg
         esp_event
         esp_http_client
+        esp_http_server
         esp_netif
         esp_timer
         esp_wifi
@@ -14,6 +15,7 @@ idf_component_register(
         json
         mbedtls
         nvs_flash
+        spiffs
         espressif__esp_video
         espressif__quirc
 )
