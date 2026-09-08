@@ -12,6 +12,7 @@
 #include "freertos/semphr.h"
 
 #include <array>
+#include <atomic>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
@@ -32,6 +33,7 @@ struct WebSnapshot {
 SemaphoreHandle_t g_lock = nullptr;
 httpd_handle_t g_server = nullptr;
 WebSnapshot g_snapshot{};
+std::atomic_bool g_starting{false};
 
 const char *mode_name(hub::CommunicationsMode mode)
 {
@@ -363,11 +365,9 @@ bool register_uri(const char *uri, httpd_method_t method, esp_err_t (*handler)(h
 
 }  // namespace
 
-bool start()
+bool start_server_now()
 {
     if (g_server != nullptr) return true;
-    if (g_lock == nullptr) g_lock = xSemaphoreCreateMutex();
-    if (g_lock == nullptr) return false;
 
     const esp_vfs_spiffs_conf_t filesystem{
         .base_path = kWebRoot,
@@ -423,6 +423,31 @@ bool start()
     ok &= register_uri("/*", HTTP_GET, wildcard_handler);
     ESP_LOGI(kTag, "P4 local dashboard listening on port 80 (%s)", ok ? "ready" : "partial");
     return ok;
+}
+
+bool start()
+{
+    if (g_server != nullptr || g_starting) return true;
+    if (g_lock == nullptr) g_lock = xSemaphoreCreateMutex();
+    if (g_lock == nullptr) return false;
+
+    // SPIFFS registration scans the large storage partition and can occupy the
+    // calling core for several seconds. Keep it away from app_main so CPU0's
+    // watched idle task can run while the dashboard comes online on CPU1.
+    g_starting = true;
+    const BaseType_t created = xTaskCreatePinnedToCore(
+        [](void *) {
+            if (!start_server_now()) ESP_LOGE(kTag, "Local dashboard initialization failed");
+            g_starting = false;
+            vTaskDelete(nullptr);
+        },
+        "p4_web_start", 6144, nullptr, 2, nullptr, 1);
+    if (created != pdPASS) {
+        g_starting = false;
+        ESP_LOGE(kTag, "Could not create local dashboard startup task");
+        return false;
+    }
+    return true;
 }
 
 void updateSnapshot(const CatStore &cats, const cloud::Status &cloud_status)
