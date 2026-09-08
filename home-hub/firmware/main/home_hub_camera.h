@@ -6,8 +6,9 @@
 namespace bluepaws::camera {
 
 constexpr uint32_t kPreviewWidth = 320;
-// Match the OV02C10's 1920x1080 aspect ratio so QR modules stay square.
-constexpr uint32_t kPreviewHeight = 180;
+// Show only the square centre crop consumed by the QR decoder. This keeps QR
+// modules square and avoids presenting the scanner as a general-purpose camera.
+constexpr uint32_t kPreviewHeight = 320;
 constexpr std::size_t kPreviewPixelCount = kPreviewWidth * kPreviewHeight;
 
 enum class State : uint8_t {
@@ -31,10 +32,13 @@ bool start();
 void stop();
 Status status();
 
-// Adjusts the grayscale image used by the QR decoder. -1 is darker, 0 cycles
-// automatically through useful exposure offsets, and +1 is brighter.
-void setScanBrightness(int8_t level);
-int8_t scanBrightness();
+// Software processing controls shared by the QR-only preview and decoder.
+void setScanBrightness(int16_t offset);
+int16_t scanBrightness();
+void setScanContrast(uint16_t percent);
+uint16_t scanContrast();
+void setScanZoom(uint16_t percent);
+uint16_t scanZoom();
 
 // Copies the latest RGB565 preview into caller-owned memory so LVGL never
 // renders from a V4L2 buffer that has already been returned to the camera.

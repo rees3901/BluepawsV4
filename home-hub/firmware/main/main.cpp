@@ -189,6 +189,9 @@ struct UiState {
     lv_obj_t *camera_scan_guide = nullptr;
     lv_obj_t *camera_result_label = nullptr;
     lv_obj_t *camera_apply_button = nullptr;
+    lv_obj_t *camera_brightness_value = nullptr;
+    lv_obj_t *camera_contrast_value = nullptr;
+    lv_obj_t *camera_zoom_value = nullptr;
     lv_obj_t *map_drawer = nullptr;
     lv_obj_t *layer_drawer = nullptr;
     lv_obj_t *brightness_popup = nullptr;
@@ -3436,12 +3439,78 @@ void camera_apply_wifi_clicked(lv_event_t *event)
 
 void camera_brightness_changed(lv_event_t *event)
 {
-    auto *button_matrix = static_cast<lv_obj_t *>(lv_event_get_target(event));
-    if (button_matrix == nullptr) return;
-    const uint32_t selected = lv_buttonmatrix_get_selected_button(button_matrix);
-    if (selected <= 2) {
-        bluepaws::camera::setScanBrightness(static_cast<int8_t>(selected) - 1);
+    auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
+    auto *slider = static_cast<lv_obj_t *>(lv_event_get_target(event));
+    if (ui == nullptr || slider == nullptr) return;
+    const int value = lv_slider_get_value(slider);
+    bluepaws::camera::setScanBrightness(value);
+    if (ui->camera_brightness_value != nullptr) {
+        lv_label_set_text_fmt(ui->camera_brightness_value, "%+d", value);
     }
+}
+
+void camera_contrast_changed(lv_event_t *event)
+{
+    auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
+    auto *slider = static_cast<lv_obj_t *>(lv_event_get_target(event));
+    if (ui == nullptr || slider == nullptr) return;
+    const int value = lv_slider_get_value(slider);
+    bluepaws::camera::setScanContrast(value);
+    if (ui->camera_contrast_value != nullptr) {
+        lv_label_set_text_fmt(ui->camera_contrast_value, "%d%%", value);
+    }
+}
+
+void camera_zoom_changed(lv_event_t *event)
+{
+    auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
+    auto *slider = static_cast<lv_obj_t *>(lv_event_get_target(event));
+    if (ui == nullptr || slider == nullptr) return;
+    const int value = lv_slider_get_value(slider);
+    bluepaws::camera::setScanZoom(value);
+    if (ui->camera_zoom_value != nullptr) {
+        lv_label_set_text_fmt(ui->camera_zoom_value, "%d%%", value);
+    }
+}
+
+lv_obj_t *create_camera_slider(lv_obj_t *parent,
+                               const char *title,
+                               int32_t minimum,
+                               int32_t maximum,
+                               int32_t value,
+                               lv_event_cb_t callback,
+                               UiState &ui,
+                               lv_obj_t **value_label)
+{
+    lv_obj_t *row = lv_obj_create(parent);
+    lv_obj_set_size(row, LV_PCT(100), 34);
+    lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(row, 0, 0);
+    lv_obj_set_style_pad_all(row, 0, 0);
+    lv_obj_set_style_pad_gap(row, 8, 0);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    lv_obj_t *label = make_label(row, title, lv_color_hex(0xD8E8F2));
+    lv_obj_set_width(label, 76);
+    lv_obj_set_style_text_font(label, &lv_font_montserrat_14, 0);
+
+    lv_obj_t *slider = lv_slider_create(row);
+    lv_obj_set_size(slider, 0, 12);
+    lv_obj_set_flex_grow(slider, 1);
+    lv_slider_set_range(slider, minimum, maximum);
+    lv_slider_set_value(slider, value, LV_ANIM_OFF);
+    lv_obj_set_style_bg_color(slider, lv_color_hex(0x40525F), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(slider, lv_color_hex(0x23B7C8), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(slider, lv_color_hex(0xF3F8FB), LV_PART_KNOB);
+    lv_obj_set_style_pad_all(slider, 5, LV_PART_KNOB);
+    lv_obj_add_event_cb(slider, callback, LV_EVENT_VALUE_CHANGED, &ui);
+
+    *value_label = make_label(row, "", lv_color_hex(0x80E6F2));
+    lv_obj_set_width(*value_label, 54);
+    lv_obj_set_style_text_align(*value_label, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_style_text_font(*value_label, &lv_font_montserrat_14, 0);
+    return slider;
 }
 
 void camera_success_flash_finished(lv_timer_t *timer)
@@ -3510,7 +3579,7 @@ void create_camera_page(UiState &ui)
     auto actions = page_actions(ui, true);
     actions.rotate = nullptr;
     lv_obj_t *content = bluepaws::ui::create_page_frame(
-        lv_screen_active(), "BluePaws | QR Scanner", "Starting camera...", ui.dark_mode,
+        lv_screen_active(), "BluePaws | QR Scanner", "Local processing only • nothing is saved or uploaded", ui.dark_mode,
         actions, &ui.status);
     lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(content, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -3530,61 +3599,85 @@ void create_camera_page(UiState &ui)
     }
 
     lv_obj_t *preview_panel = lv_obj_create(content);
-    lv_obj_set_size(preview_panel, 452, 370);
+    lv_obj_set_size(preview_panel, 452, 708);
     style_card(preview_panel, ui.dark_mode);
     lv_obj_set_style_pad_all(preview_panel, 10, 0);
+    lv_obj_remove_flag(preview_panel, LV_OBJ_FLAG_SCROLLABLE);
     ui.camera_preview_image = lv_image_create(preview_panel);
     if (ui.camera_preview_pixels != nullptr) {
         lv_image_set_src(ui.camera_preview_image, &ui.camera_preview_descriptor);
     }
-    // Fill the portrait width and deliberately stretch vertically. Fidelity is
-    // secondary here; the larger feedback image makes one-foot alignment easy.
-    lv_image_set_scale_x(ui.camera_preview_image, 346);
-    lv_image_set_scale_y(ui.camera_preview_image, 498);
-    lv_obj_center(ui.camera_preview_image);
+    lv_image_set_scale(ui.camera_preview_image, 346);
+    lv_obj_align(ui.camera_preview_image, LV_ALIGN_TOP_MID, 0, 0);
 
     ui.camera_scan_guide = lv_obj_create(preview_panel);
     lv_obj_set_size(ui.camera_scan_guide, 236, 236);
-    lv_obj_center(ui.camera_scan_guide);
+    lv_obj_align(ui.camera_scan_guide, LV_ALIGN_TOP_MID, 0, 98);
     lv_obj_set_style_bg_opa(ui.camera_scan_guide, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(ui.camera_scan_guide, 4, 0);
     lv_obj_set_style_border_color(ui.camera_scan_guide, lv_color_hex(0x39D3E6), 0);
     lv_obj_set_style_radius(ui.camera_scan_guide, 14, 0);
     lv_obj_remove_flag(ui.camera_scan_guide, LV_OBJ_FLAG_CLICKABLE);
 
-    lv_obj_t *result_panel = lv_obj_create(content);
-    lv_obj_set_size(result_panel, 452, 330);
-    style_card(result_panel, ui.dark_mode);
-    lv_obj_set_style_pad_all(result_panel, 18, 0);
-    lv_obj_set_flex_flow(result_panel, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(result_panel, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_t *privacy_badge = lv_obj_create(preview_panel);
+    lv_obj_set_size(privacy_badge, 350, 34);
+    lv_obj_align(privacy_badge, LV_ALIGN_TOP_MID, 0, 12);
+    lv_obj_set_style_bg_color(privacy_badge, lv_color_hex(0x071015), 0);
+    lv_obj_set_style_bg_opa(privacy_badge, 220, 0);
+    lv_obj_set_style_border_width(privacy_badge, 1, 0);
+    lv_obj_set_style_border_color(privacy_badge, lv_color_hex(0x35E06F), 0);
+    lv_obj_set_style_radius(privacy_badge, 17, 0);
+    lv_obj_set_style_pad_all(privacy_badge, 0, 0);
+    lv_obj_remove_flag(privacy_badge, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(privacy_badge, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_t *privacy_badge_label = make_label(
+        privacy_badge, "● LIVE LOCALLY  •  NO RECORDING", lv_color_hex(0xDDFBE7));
+    lv_obj_set_style_text_font(privacy_badge_label, &lv_font_montserrat_14, 0);
+    lv_obj_center(privacy_badge_label);
+
+    lv_obj_t *controls = lv_obj_create(preview_panel);
+    lv_obj_set_size(controls, 432, 286);
+    lv_obj_align(controls, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_style_bg_color(controls, lv_color_hex(0x0A151E), 0);
+    lv_obj_set_style_bg_opa(controls, 238, 0);
+    lv_obj_set_style_border_width(controls, 1, 0);
+    lv_obj_set_style_border_color(controls, lv_color_hex(0x315365), 0);
+    lv_obj_set_style_radius(controls, 16, 0);
+    lv_obj_set_style_pad_all(controls, 10, 0);
+    lv_obj_set_style_pad_gap(controls, 4, 0);
+    lv_obj_set_flex_flow(controls, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(controls, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+
+    lv_obj_t *privacy_text = make_label(
+        controls, "QR vision processes temporary frames in memory.\nNo photos, video, storage or network upload.",
+        lv_color_hex(0x8FB6C8));
+    lv_obj_set_width(privacy_text, LV_PCT(100));
+    lv_obj_set_style_text_font(privacy_text, &lv_font_montserrat_14, 0);
+    lv_label_set_long_mode(privacy_text, LV_LABEL_LONG_WRAP);
+
     ui.camera_result_label = make_label(
-        result_panel,
-        "Hold the QR code square inside the guide, about 15-60 cm away. Wi-Fi credentials are shown for confirmation before they are saved.",
-        ui.dark_mode ? lv_color_hex(0xF3F8FB) : lv_color_hex(0x17324D));
+        controls, "Align the three large QR corner squares inside the guide.",
+        lv_color_hex(0xF3F8FB));
     lv_obj_set_width(ui.camera_result_label, LV_PCT(100));
+    lv_obj_set_height(ui.camera_result_label, 50);
+    lv_obj_set_style_text_font(ui.camera_result_label, &lv_font_montserrat_14, 0);
     lv_label_set_long_mode(ui.camera_result_label, LV_LABEL_LONG_WRAP);
 
-    lv_obj_t *brightness_label = make_label(
-        result_panel, "QR scan brightness",
-        ui.dark_mode ? lv_color_hex(0xAFC5D6) : lv_color_hex(0x45657D));
-    lv_obj_set_style_text_font(brightness_label, &lv_font_montserrat_14, 0);
-    static const char *brightness_buttons[] = {"Darker", "Auto", "Brighter", ""};
-    lv_obj_t *brightness_matrix = lv_buttonmatrix_create(result_panel);
-    lv_buttonmatrix_set_map(brightness_matrix, brightness_buttons);
-    lv_buttonmatrix_set_one_checked(brightness_matrix, true);
-    lv_buttonmatrix_set_button_ctrl_all(brightness_matrix, LV_BUTTONMATRIX_CTRL_CHECKABLE);
-    const uint32_t brightness_selection =
-        static_cast<uint32_t>(bluepaws::camera::scanBrightness() + 1);
-    lv_buttonmatrix_set_selected_button(brightness_matrix, brightness_selection);
-    lv_buttonmatrix_set_button_ctrl(
-        brightness_matrix, brightness_selection, LV_BUTTONMATRIX_CTRL_CHECKED);
-    lv_obj_set_size(brightness_matrix, LV_PCT(100), 42);
-    lv_obj_add_event_cb(
-        brightness_matrix, camera_brightness_changed, LV_EVENT_VALUE_CHANGED, &ui);
+    create_camera_slider(controls, "Brightness", -80, 80,
+                         bluepaws::camera::scanBrightness(), camera_brightness_changed,
+                         ui, &ui.camera_brightness_value);
+    lv_label_set_text_fmt(ui.camera_brightness_value, "%+d", bluepaws::camera::scanBrightness());
+    create_camera_slider(controls, "Contrast", 80, 220,
+                         bluepaws::camera::scanContrast(), camera_contrast_changed,
+                         ui, &ui.camera_contrast_value);
+    lv_label_set_text_fmt(ui.camera_contrast_value, "%u%%", bluepaws::camera::scanContrast());
+    create_camera_slider(controls, "Zoom", 100, 200,
+                         bluepaws::camera::scanZoom(), camera_zoom_changed,
+                         ui, &ui.camera_zoom_value);
+    lv_label_set_text_fmt(ui.camera_zoom_value, "%u%%", bluepaws::camera::scanZoom());
 
-    ui.camera_apply_button = lv_button_create(result_panel);
-    lv_obj_set_size(ui.camera_apply_button, LV_PCT(100), 52);
+    ui.camera_apply_button = lv_button_create(controls);
+    lv_obj_set_size(ui.camera_apply_button, LV_PCT(100), 42);
     lv_obj_set_style_bg_color(ui.camera_apply_button, lv_color_hex(0x007D8A), 0);
     lv_obj_add_event_cb(ui.camera_apply_button, camera_apply_wifi_clicked, LV_EVENT_CLICKED, &ui);
     lv_obj_add_flag(ui.camera_apply_button, LV_OBJ_FLAG_HIDDEN);
@@ -3673,6 +3766,9 @@ void create_ui(UiState &ui)
     ui.camera_scan_guide = nullptr;
     ui.camera_result_label = nullptr;
     ui.camera_apply_button = nullptr;
+    ui.camera_brightness_value = nullptr;
+    ui.camera_contrast_value = nullptr;
+    ui.camera_zoom_value = nullptr;
     ui.map_drawer = nullptr;
     ui.layer_drawer = nullptr;
     ui.brightness_popup = nullptr;

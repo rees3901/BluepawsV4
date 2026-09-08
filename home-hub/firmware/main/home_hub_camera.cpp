@@ -51,7 +51,9 @@ bool g_video_initialized = false;
 uint32_t g_scan_attempts = 0;
 uint32_t g_scan_generation = 0;
 TickType_t g_capture_started_at = 0;
-volatile int8_t g_scan_brightness = 0;
+volatile int16_t g_scan_brightness = 0;
+volatile uint16_t g_scan_contrast = 140;
+volatile uint16_t g_scan_zoom = 100;
 volatile bool g_qr_found = false;
 
 void set_state(State state, const char *message)
@@ -73,10 +75,12 @@ uint8_t rgb565_gray(uint16_t pixel)
     return static_cast<uint8_t>((red * 77U + green * 150U + blue * 29U) >> 8U);
 }
 
-uint8_t adjusted_gray(uint8_t gray, int brightness_offset)
+uint8_t adjusted_gray(uint8_t gray, int brightness_offset, uint16_t contrast_percent)
 {
+    const int contrasted =
+        (static_cast<int>(gray) - 128) * static_cast<int>(contrast_percent) / 100 + 128;
     return static_cast<uint8_t>(std::clamp<int>(
-        static_cast<int>(gray) + brightness_offset, 0, 255));
+        contrasted + brightness_offset, 0, 255));
 }
 
 uint16_t gray_rgb565(uint8_t gray)
@@ -89,14 +93,25 @@ void publish_frame(const uint16_t *source, uint32_t width, uint32_t height, uint
 {
     if (source == nullptr || width == 0 || height == 0 || g_preview == nullptr) return;
     const uint32_t stride_pixels = stride_bytes >= width * 2U ? stride_bytes / 2U : width;
+    const uint16_t requested_zoom = g_scan_zoom;
+    const uint16_t zoom_percent = std::clamp<uint16_t>(requested_zoom, 100, 200);
+    const int brightness_offset = g_scan_brightness;
+    const uint16_t contrast_percent = g_scan_contrast;
+    const uint32_t crop_size = std::min(width, height) * 100U / zoom_percent;
+    const uint32_t crop_left = (width - crop_size) / 2U;
+    const uint32_t crop_top = (height - crop_size) / 2U;
     uint32_t captured_frames = 0;
     if (xSemaphoreTake(g_lock, pdMS_TO_TICKS(100)) != pdTRUE) return;
     for (uint32_t y = 0; y < kPreviewHeight; ++y) {
-        const uint32_t source_y = y * height / kPreviewHeight;
+        const uint32_t source_y = crop_top + y * crop_size / kPreviewHeight;
         for (uint32_t x = 0; x < kPreviewWidth; ++x) {
-            const uint32_t source_x = x * width / kPreviewWidth;
+            const uint32_t source_x = crop_left + x * crop_size / kPreviewWidth;
             const uint16_t pixel = source[source_y * stride_pixels + source_x];
-            g_preview[y * kPreviewWidth + x] = gray_rgb565(rgb565_gray(pixel));
+            const uint8_t processed = adjusted_gray(
+                rgb565_gray(pixel), brightness_offset, contrast_percent);
+            // The user-facing feed is intentionally binary "QR vision", not
+            // a normal camera image. The decoder retains full grayscale below.
+            g_preview[y * kPreviewWidth + x] = gray_rgb565(processed < 128 ? 0 : 255);
         }
     }
     ++g_status.preview_generation;
@@ -137,9 +152,6 @@ void publish_frame(const uint16_t *source, uint32_t width, uint32_t height, uint
     // image instead of accumulating a stale frame queue.
     if (g_qr_found || g_scan_frame == nullptr || g_scan_lock == nullptr ||
         xSemaphoreTake(g_scan_lock, 0) != pdTRUE) return;
-    const uint32_t crop_size = std::min(width, height);
-    const uint32_t crop_left = (width - crop_size) / 2U;
-    const uint32_t crop_top = (height - crop_size) / 2U;
     for (uint32_t y = 0; y < kScanHeight; ++y) {
         const uint32_t source_y = crop_top + y * crop_size / kScanHeight;
         for (uint32_t x = 0; x < kScanWidth; ++x) {
@@ -174,15 +186,13 @@ void decoder_task(void *)
             continue;
         }
 
-        const int8_t selected_brightness = g_scan_brightness;
-        // Auto cycles through normal, darker, and brighter grayscale once per
-        // scan. This handles phone-screen glare without changing sensor exposure.
-        const int brightness_offset = selected_brightness == 0
-            ? (g_scan_attempts % 3U == 0 ? 0 : (g_scan_attempts % 3U == 1 ? -40 : 40))
-            : selected_brightness * 40;
+        const int brightness_offset = g_scan_brightness +
+            (g_scan_attempts % 3U == 0 ? 0 : (g_scan_attempts % 3U == 1 ? -24 : 24));
+        const uint16_t contrast_percent = g_scan_contrast;
         uint8_t *gray = quirc_begin(decoder, nullptr, nullptr);
         for (std::size_t index = 0; index < kScanPixelCount; ++index) {
-            gray[index] = adjusted_gray(g_scan_frame[index], brightness_offset);
+            gray[index] = adjusted_gray(
+                g_scan_frame[index], brightness_offset, contrast_percent);
         }
         consumed_generation = g_scan_generation;
         xSemaphoreGive(g_scan_lock);
@@ -375,7 +385,7 @@ void camera_task(void *)
         set_state(State::Failed, "Camera stream did not start");
     } else {
         ESP_LOGI(kTag, "Camera stream started");
-        set_state(State::Streaming, "Point the camera at a Wi-Fi QR code");
+        set_state(State::Streaming, "Local QR processing • no frames saved or uploaded");
         uint32_t dequeue_failures = 0;
         while (!g_stop_requested) {
             v4l2_buffer buffer{};
@@ -476,16 +486,37 @@ Status status()
     return copy;
 }
 
-void setScanBrightness(int8_t level)
+void setScanBrightness(int16_t offset)
 {
-    g_scan_brightness = std::clamp<int8_t>(level, -1, 1);
-    ESP_LOGI(kTag, "QR scan brightness set to %s",
-             g_scan_brightness < 0 ? "darker" : (g_scan_brightness > 0 ? "brighter" : "auto"));
+    g_scan_brightness = std::clamp<int16_t>(offset, -80, 80);
+    ESP_LOGI(kTag, "QR scan brightness set to %+d", g_scan_brightness);
 }
 
-int8_t scanBrightness()
+int16_t scanBrightness()
 {
     return g_scan_brightness;
+}
+
+void setScanContrast(uint16_t percent)
+{
+    g_scan_contrast = std::clamp<uint16_t>(percent, 80, 220);
+    ESP_LOGI(kTag, "QR scan contrast set to %u%%", g_scan_contrast);
+}
+
+uint16_t scanContrast()
+{
+    return g_scan_contrast;
+}
+
+void setScanZoom(uint16_t percent)
+{
+    g_scan_zoom = std::clamp<uint16_t>(percent, 100, 200);
+    ESP_LOGI(kTag, "QR scan zoom set to %u%%", g_scan_zoom);
+}
+
+uint16_t scanZoom()
+{
+    return g_scan_zoom;
 }
 
 bool copyPreview(uint16_t *destination, std::size_t pixel_capacity, uint32_t &generation)
