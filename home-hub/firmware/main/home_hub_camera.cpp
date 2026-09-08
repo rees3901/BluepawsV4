@@ -53,7 +53,7 @@ uint32_t g_scan_generation = 0;
 TickType_t g_capture_started_at = 0;
 volatile int16_t g_scan_brightness = 0;
 volatile uint16_t g_scan_contrast = 100;
-volatile uint16_t g_scan_zoom = 100;
+volatile uint16_t g_scan_zoom = 125;
 volatile uint8_t g_auto_black = 0;
 volatile uint8_t g_auto_white = 255;
 volatile bool g_qr_found = false;
@@ -165,6 +165,11 @@ void publish_frame(const uint16_t *source, uint32_t width, uint32_t height, uint
         }
     }
 
+    // Preserve the full 15 fps user-facing preview. Preparing a 512x512 scan
+    // image is comparatively expensive, while the independent decoder cannot
+    // consume every camera frame anyway, so stage alternate captures only.
+    if ((captured_frames % 2U) == 0U) return;
+
     // Publish a fresh centre crop to the independent decoder worker. Task
     // notifications coalesce, so a busy decoder always receives the newest
     // image instead of accumulating a stale frame queue.
@@ -218,8 +223,8 @@ void decoder_task(void *)
         uint32_t histogram[256]{};
         constexpr uint32_t kMeterMargin = kScanWidth / 6U;
         uint32_t metered_pixels = 0;
-        for (uint32_t y = kMeterMargin; y < kScanHeight - kMeterMargin; ++y) {
-            for (uint32_t x = kMeterMargin; x < kScanWidth - kMeterMargin; ++x) {
+        for (uint32_t y = kMeterMargin; y < kScanHeight - kMeterMargin; y += 2U) {
+            for (uint32_t x = kMeterMargin; x < kScanWidth - kMeterMargin; x += 2U) {
                 ++histogram[g_scan_frame[y * kScanWidth + x]];
                 ++metered_pixels;
             }
@@ -253,12 +258,14 @@ void decoder_task(void *)
         const unsigned variant = g_scan_attempts % 3U;
         const bool auto_levels = variant != 0;
         const bool sharpen = variant == 2U;
+        const uint16_t contrast_percent = g_scan_contrast;
         uint8_t *gray = quirc_begin(decoder, nullptr, nullptr);
         for (uint32_t y = 0; y < kScanHeight; ++y) {
             for (uint32_t x = 0; x < kScanWidth; ++x) {
                 const std::size_t index = y * kScanWidth + x;
                 const uint8_t centre = auto_levels
-                    ? level_gray(g_scan_frame[index], black, white)
+                    ? adjusted_gray(level_gray(g_scan_frame[index], black, white),
+                                    0, contrast_percent)
                     : g_scan_frame[index];
                 if (!sharpen || x == 0 || y == 0 ||
                     x + 1U == kScanWidth || y + 1U == kScanHeight) {
@@ -266,10 +273,14 @@ void decoder_task(void *)
                     continue;
                 }
                 const int neighbours =
-                    level_gray(g_scan_frame[index - 1U], black, white) +
-                    level_gray(g_scan_frame[index + 1U], black, white) +
-                    level_gray(g_scan_frame[index - kScanWidth], black, white) +
-                    level_gray(g_scan_frame[index + kScanWidth], black, white);
+                    adjusted_gray(level_gray(g_scan_frame[index - 1U], black, white),
+                                  0, contrast_percent) +
+                    adjusted_gray(level_gray(g_scan_frame[index + 1U], black, white),
+                                  0, contrast_percent) +
+                    adjusted_gray(level_gray(g_scan_frame[index - kScanWidth], black, white),
+                                  0, contrast_percent) +
+                    adjusted_gray(level_gray(g_scan_frame[index + kScanWidth], black, white),
+                                  0, contrast_percent);
                 gray[index] = static_cast<uint8_t>(std::clamp<int>(
                     static_cast<int>(centre) * 2 - neighbours / 4, 0, 255));
             }
