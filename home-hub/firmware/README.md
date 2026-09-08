@@ -61,7 +61,9 @@ the sensor. QR mode processes alternate sensor frames for a 15 fps preview;
 `quirc` checks an independently downscaled grayscale frame only when its decoder
 worker is ready, so recognition cannot build a stale queue or needlessly consume
 every visible frame. Camera control shares the board's GPIO7/GPIO8 I2C bus with
-GT911 touch. Standard `WIFI:`
+GT911 touch. QR mode is fixed at the native 1x field of view so digital cropping
+cannot make alignment or fixed-focus blur worse; zoom remains available only in
+Photo mode. Standard `WIFI:`
 payloads are parsed with escaped separators, displayed with the password
 masked, and require a touch confirmation before replacing the primary network
 in NVS and asking the network task to reconnect. Raw QR contents are never

@@ -3506,7 +3506,7 @@ void camera_auto_tune(lv_event_t *event)
     if (ui->camera_contrast_value != nullptr) {
         lv_label_set_text(ui->camera_contrast_value, "100%");
     }
-    update_camera_zoom(*ui, 125 - bluepaws::camera::scanZoom());
+    update_camera_zoom(*ui, 100 - bluepaws::camera::scanZoom());
     if (ui->camera_result_label != nullptr) {
         lv_label_set_text(ui->camera_result_label,
                           "AUTO restored. Hold the complete QR code inside the guide.");
@@ -3581,7 +3581,7 @@ void set_camera_profile(UiState &ui, bluepaws::camera::Mode mode)
 {
     if (bluepaws::camera::mode() == mode) return;
     bluepaws::camera::setMode(mode);
-    bluepaws::camera::setScanZoom(mode == bluepaws::camera::Mode::Qr ? 125 : 100);
+    bluepaws::camera::setScanZoom(100);
     ui.pending_qr = {};
     ui.camera_result_generation = bluepaws::camera::status().result_generation;
     if (ui.camera_timer != nullptr) {
@@ -3766,14 +3766,16 @@ void create_camera_page(UiState &ui)
     lv_label_set_text_fmt(ui.camera_brightness_value, "%+d", bluepaws::camera::scanBrightness());
     create_camera_adjust_button(brightness_pill, "+", camera_brightness_up, ui);
 
-    lv_obj_t *zoom_pill = create_camera_control_pill(preview_panel, 224);
-    create_camera_adjust_button(zoom_pill, "-", camera_zoom_out, ui);
-    ui.camera_zoom_value = make_label(zoom_pill, "1x", lv_color_hex(0xFFFFFF));
-    lv_obj_set_width(ui.camera_zoom_value, 80);
-    lv_obj_set_style_text_align(ui.camera_zoom_value, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_font(ui.camera_zoom_value, &lv_font_montserrat_18, 0);
-    update_camera_zoom(ui, 0);
-    create_camera_adjust_button(zoom_pill, "+", camera_zoom_in, ui);
+    if (!qr_mode) {
+        lv_obj_t *zoom_pill = create_camera_control_pill(preview_panel, 224);
+        create_camera_adjust_button(zoom_pill, "-", camera_zoom_out, ui);
+        ui.camera_zoom_value = make_label(zoom_pill, "1x", lv_color_hex(0xFFFFFF));
+        lv_obj_set_width(ui.camera_zoom_value, 80);
+        lv_obj_set_style_text_align(ui.camera_zoom_value, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_style_text_font(ui.camera_zoom_value, &lv_font_montserrat_18, 0);
+        update_camera_zoom(ui, 0);
+        create_camera_adjust_button(zoom_pill, "+", camera_zoom_in, ui);
+    }
 
     lv_obj_t *controls = lv_obj_create(preview_panel);
     lv_obj_set_size(controls, 432, qr_mode ? 230 : 108);
