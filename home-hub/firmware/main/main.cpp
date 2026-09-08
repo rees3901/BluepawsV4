@@ -3482,6 +3482,19 @@ void camera_zoom_in(lv_event_t *event)
     if (ui != nullptr) update_camera_zoom(*ui, 25);
 }
 
+void camera_auto_tune(lv_event_t *event)
+{
+    auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
+    if (ui == nullptr) return;
+    update_camera_brightness(*ui, -bluepaws::camera::scanBrightness());
+    bluepaws::camera::setScanContrast(100);
+    update_camera_zoom(*ui, 100 - bluepaws::camera::scanZoom());
+    if (ui->camera_result_label != nullptr) {
+        lv_label_set_text(ui->camera_result_label,
+                          "AUTO restored. Hold the complete QR code inside the guide.");
+    }
+}
+
 lv_obj_t *create_camera_adjust_button(lv_obj_t *parent,
                                       const char *symbol,
                                       lv_event_cb_t callback,
@@ -3627,6 +3640,21 @@ void create_camera_page(UiState &ui)
     lv_obj_set_style_border_color(ui.camera_scan_guide, lv_color_hex(0x39D3E6), 0);
     lv_obj_set_style_radius(ui.camera_scan_guide, 14, 0);
     lv_obj_remove_flag(ui.camera_scan_guide, LV_OBJ_FLAG_CLICKABLE);
+
+    lv_obj_t *auto_button = lv_button_create(preview_panel);
+    lv_obj_set_size(auto_button, 76, 40);
+    lv_obj_align(auto_button, LV_ALIGN_TOP_RIGHT, -12, 12);
+    lv_obj_set_style_radius(auto_button, 20, 0);
+    lv_obj_set_style_bg_color(auto_button, lv_color_hex(0x071015), 0);
+    lv_obj_set_style_bg_opa(auto_button, LV_OPA_80, 0);
+    lv_obj_set_style_border_width(auto_button, 1, 0);
+    lv_obj_set_style_border_color(auto_button, lv_color_hex(0x6DDCE7), 0);
+    lv_obj_set_style_shadow_width(auto_button, 0, 0);
+    lv_obj_set_style_pad_all(auto_button, 0, 0);
+    lv_obj_add_event_cb(auto_button, camera_auto_tune, LV_EVENT_CLICKED, &ui);
+    lv_obj_t *auto_label = make_label(auto_button, "AUTO", lv_color_hex(0xFFFFFF));
+    lv_obj_set_style_text_font(auto_label, &lv_font_montserrat_14, 0);
+    lv_obj_center(auto_label);
 
     lv_obj_t *brightness_pill = create_camera_control_pill(preview_panel, 12);
     create_camera_adjust_button(brightness_pill, "-", camera_brightness_down, ui);

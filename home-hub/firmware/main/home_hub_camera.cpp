@@ -54,6 +54,8 @@ TickType_t g_capture_started_at = 0;
 volatile int16_t g_scan_brightness = 0;
 volatile uint16_t g_scan_contrast = 100;
 volatile uint16_t g_scan_zoom = 100;
+volatile uint8_t g_auto_black = 0;
+volatile uint8_t g_auto_white = 255;
 volatile bool g_qr_found = false;
 
 void set_state(State state, const char *message)
@@ -89,6 +91,16 @@ uint16_t gray_rgb565(uint8_t gray)
         ((gray >> 3U) << 11U) | ((gray >> 2U) << 5U) | (gray >> 3U));
 }
 
+uint8_t level_gray(uint8_t gray, uint8_t black, uint8_t white)
+{
+    if (white <= black + 24U) return gray;
+    if (gray <= black) return 0;
+    if (gray >= white) return 255;
+    return static_cast<uint8_t>(
+        (static_cast<uint32_t>(gray - black) * 255U + (white - black) / 2U) /
+        (white - black));
+}
+
 void publish_frame(const uint16_t *source, uint32_t width, uint32_t height, uint32_t stride_bytes)
 {
     if (source == nullptr || width == 0 || height == 0 || g_preview == nullptr) return;
@@ -97,6 +109,8 @@ void publish_frame(const uint16_t *source, uint32_t width, uint32_t height, uint
     const uint16_t zoom_percent = std::clamp<uint16_t>(requested_zoom, 100, 200);
     const int brightness_offset = g_scan_brightness;
     const uint16_t contrast_percent = g_scan_contrast;
+    const uint8_t auto_black = g_auto_black;
+    const uint8_t auto_white = g_auto_white;
     const uint32_t crop_size = std::min(width, height) * 100U / zoom_percent;
     const uint32_t crop_left = (width - crop_size) / 2U;
     const uint32_t crop_top = (height - crop_size) / 2U;
@@ -110,7 +124,8 @@ void publish_frame(const uint16_t *source, uint32_t width, uint32_t height, uint
             const uint32_t source_x = crop_left + x * crop_size / kPreviewWidth;
             const uint16_t pixel = source[source_y * stride_pixels + source_x];
             const uint8_t processed = adjusted_gray(
-                rgb565_gray(pixel), brightness_offset, contrast_percent);
+                level_gray(rgb565_gray(pixel), auto_black, auto_white),
+                brightness_offset, contrast_percent);
             // Keep the full grayscale range in the preview. Hard black/white
             // thresholding made sensor noise prominent and could visually merge
             // the small modules and quiet zone around a QR code.
@@ -197,24 +212,66 @@ void decoder_task(void *)
             continue;
         }
 
-        // Decode alternating untouched and mildly sharpened frames. The UI
-        // brightness setting intentionally affects only the preview, so a user
-        // adjustment cannot clip QR data or reduce recognition reliability.
-        const bool sharpen = (g_scan_attempts % 2U) != 0;
+        // Meter the centre of the guide instead of the surrounding room. A
+        // bright phone can otherwise occupy too little of the full camera view
+        // to influence exposure and contrast decisions.
+        uint32_t histogram[256]{};
+        constexpr uint32_t kMeterMargin = kScanWidth / 6U;
+        uint32_t metered_pixels = 0;
+        for (uint32_t y = kMeterMargin; y < kScanHeight - kMeterMargin; ++y) {
+            for (uint32_t x = kMeterMargin; x < kScanWidth - kMeterMargin; ++x) {
+                ++histogram[g_scan_frame[y * kScanWidth + x]];
+                ++metered_pixels;
+            }
+        }
+        const uint32_t low_target = metered_pixels / 20U;
+        const uint32_t high_target = metered_pixels - low_target;
+        uint32_t cumulative = 0;
+        uint8_t black = 0;
+        uint8_t white = 255;
+        bool black_found = false;
+        for (unsigned level = 0; level < 256U; ++level) {
+            cumulative += histogram[level];
+            if (!black_found && cumulative >= low_target) {
+                black = static_cast<uint8_t>(level);
+                black_found = true;
+            }
+            if (cumulative >= high_target) {
+                white = static_cast<uint8_t>(level);
+                break;
+            }
+        }
+        // Preserve headroom so AUTO improves separation without producing the
+        // harsh, grainy binary appearance used in the earlier experiment.
+        black = black > 8U ? static_cast<uint8_t>(black - 8U) : 0;
+        white = white < 247U ? static_cast<uint8_t>(white + 8U) : 255;
+        g_auto_black = black;
+        g_auto_white = white;
+
+        // Try raw, automatically levelled, and levelled plus mild sharpening
+        // in rotation. Manual brightness remains preview-only.
+        const unsigned variant = g_scan_attempts % 3U;
+        const bool auto_levels = variant != 0;
+        const bool sharpen = variant == 2U;
         uint8_t *gray = quirc_begin(decoder, nullptr, nullptr);
         for (uint32_t y = 0; y < kScanHeight; ++y) {
             for (uint32_t x = 0; x < kScanWidth; ++x) {
                 const std::size_t index = y * kScanWidth + x;
+                const uint8_t centre = auto_levels
+                    ? level_gray(g_scan_frame[index], black, white)
+                    : g_scan_frame[index];
                 if (!sharpen || x == 0 || y == 0 ||
                     x + 1U == kScanWidth || y + 1U == kScanHeight) {
-                    gray[index] = g_scan_frame[index];
+                    gray[index] = centre;
                     continue;
                 }
                 const int neighbours =
-                    g_scan_frame[index - 1U] + g_scan_frame[index + 1U] +
-                    g_scan_frame[index - kScanWidth] + g_scan_frame[index + kScanWidth];
+                    level_gray(g_scan_frame[index - 1U], black, white) +
+                    level_gray(g_scan_frame[index + 1U], black, white) +
+                    level_gray(g_scan_frame[index - kScanWidth], black, white) +
+                    level_gray(g_scan_frame[index + kScanWidth], black, white);
                 gray[index] = static_cast<uint8_t>(std::clamp<int>(
-                    static_cast<int>(g_scan_frame[index]) * 2 - neighbours / 4, 0, 255));
+                    static_cast<int>(centre) * 2 - neighbours / 4, 0, 255));
             }
         }
         consumed_generation = g_scan_generation;
@@ -226,8 +283,9 @@ void decoder_task(void *)
         if (count > 0) {
             ESP_LOGI(kTag, "QR finder candidates: %d", count);
         } else if (g_scan_attempts % 10U == 0) {
-            ESP_LOGI(kTag, "No QR finder candidate after %lu scan attempts",
-                     static_cast<unsigned long>(g_scan_attempts));
+            ESP_LOGI(kTag,
+                     "No QR finder candidate after %lu scan attempts (AUTO levels %u..%u)",
+                     static_cast<unsigned long>(g_scan_attempts), black, white);
         }
         for (int index = 0; index < count; ++index) {
             quirc_code code{};
@@ -488,6 +546,8 @@ bool start()
     g_scan_attempts = 0;
     g_scan_generation = 0;
     g_capture_started_at = 0;
+    g_auto_black = 0;
+    g_auto_white = 255;
     g_qr_found = false;
     return xTaskCreatePinnedToCore(
         camera_task, "camera_qr", 32768, nullptr, 3, &g_task, 1) == pdPASS;
