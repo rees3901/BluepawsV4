@@ -52,7 +52,7 @@ uint32_t g_scan_attempts = 0;
 uint32_t g_scan_generation = 0;
 TickType_t g_capture_started_at = 0;
 volatile int16_t g_scan_brightness = 0;
-volatile uint16_t g_scan_contrast = 140;
+volatile uint16_t g_scan_contrast = 100;
 volatile uint16_t g_scan_zoom = 100;
 volatile bool g_qr_found = false;
 
@@ -109,9 +109,10 @@ void publish_frame(const uint16_t *source, uint32_t width, uint32_t height, uint
             const uint16_t pixel = source[source_y * stride_pixels + source_x];
             const uint8_t processed = adjusted_gray(
                 rgb565_gray(pixel), brightness_offset, contrast_percent);
-            // The user-facing feed is intentionally binary "QR vision", not
-            // a normal camera image. The decoder retains full grayscale below.
-            g_preview[y * kPreviewWidth + x] = gray_rgb565(processed < 128 ? 0 : 255);
+            // Keep the full grayscale range in the preview. Hard black/white
+            // thresholding made sensor noise prominent and could visually merge
+            // the small modules and quiet zone around a QR code.
+            g_preview[y * kPreviewWidth + x] = gray_rgb565(processed);
         }
     }
     ++g_status.preview_generation;
@@ -187,7 +188,7 @@ void decoder_task(void *)
         }
 
         const int brightness_offset = g_scan_brightness +
-            (g_scan_attempts % 3U == 0 ? 0 : (g_scan_attempts % 3U == 1 ? -24 : 24));
+            (g_scan_attempts % 3U == 0 ? 0 : (g_scan_attempts % 3U == 1 ? -12 : 12));
         const uint16_t contrast_percent = g_scan_contrast;
         uint8_t *gray = quirc_begin(decoder, nullptr, nullptr);
         for (std::size_t index = 0; index < kScanPixelCount; ++index) {
@@ -499,7 +500,7 @@ int16_t scanBrightness()
 
 void setScanContrast(uint16_t percent)
 {
-    g_scan_contrast = std::clamp<uint16_t>(percent, 80, 220);
+    g_scan_contrast = std::clamp<uint16_t>(percent, 70, 160);
     ESP_LOGI(kTag, "QR scan contrast set to %u%%", g_scan_contrast);
 }
 

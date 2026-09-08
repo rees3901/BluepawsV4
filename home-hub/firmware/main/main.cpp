@@ -3619,22 +3619,6 @@ void create_camera_page(UiState &ui)
     lv_obj_set_style_radius(ui.camera_scan_guide, 14, 0);
     lv_obj_remove_flag(ui.camera_scan_guide, LV_OBJ_FLAG_CLICKABLE);
 
-    lv_obj_t *privacy_badge = lv_obj_create(preview_panel);
-    lv_obj_set_size(privacy_badge, 350, 34);
-    lv_obj_align(privacy_badge, LV_ALIGN_TOP_MID, 0, 12);
-    lv_obj_set_style_bg_color(privacy_badge, lv_color_hex(0x071015), 0);
-    lv_obj_set_style_bg_opa(privacy_badge, 220, 0);
-    lv_obj_set_style_border_width(privacy_badge, 1, 0);
-    lv_obj_set_style_border_color(privacy_badge, lv_color_hex(0x35E06F), 0);
-    lv_obj_set_style_radius(privacy_badge, 17, 0);
-    lv_obj_set_style_pad_all(privacy_badge, 0, 0);
-    lv_obj_remove_flag(privacy_badge, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_remove_flag(privacy_badge, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_t *privacy_badge_label = make_label(
-        privacy_badge, "● LIVE LOCALLY  •  NO RECORDING", lv_color_hex(0xDDFBE7));
-    lv_obj_set_style_text_font(privacy_badge_label, &lv_font_montserrat_14, 0);
-    lv_obj_center(privacy_badge_label);
-
     lv_obj_t *controls = lv_obj_create(preview_panel);
     lv_obj_set_size(controls, 432, 286);
     lv_obj_align(controls, LV_ALIGN_BOTTOM_MID, 0, 0);
@@ -3667,7 +3651,7 @@ void create_camera_page(UiState &ui)
                          bluepaws::camera::scanBrightness(), camera_brightness_changed,
                          ui, &ui.camera_brightness_value);
     lv_label_set_text_fmt(ui.camera_brightness_value, "%+d", bluepaws::camera::scanBrightness());
-    create_camera_slider(controls, "Contrast", 80, 220,
+    create_camera_slider(controls, "Contrast", 70, 160,
                          bluepaws::camera::scanContrast(), camera_contrast_changed,
                          ui, &ui.camera_contrast_value);
     lv_label_set_text_fmt(ui.camera_contrast_value, "%u%%", bluepaws::camera::scanContrast());
