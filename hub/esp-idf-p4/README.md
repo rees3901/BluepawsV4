@@ -53,10 +53,17 @@ reconnects and remains selected until the user chooses another mode.
 Passwords remain in local NVS, are masked in the UI, and are never copied to SD
 or written to the serial log.
 
-The launcher **QR Scanner** page starts the fitted 2 MP OV02C10 through the
-ESP32-P4's two-lane MIPI-CSI/ISP path and shows a 320 x 240 RGB565 preview.
-Camera control shares the board's GPIO7/GPIO8 I2C bus with GT911 touch. `quirc`
-checks a downscaled grayscale frame every fifth capture. Standard `WIFI:`
+The launcher **Camera** page starts the fitted 2 MP OV02C10 through the
+ESP32-P4's two-lane MIPI-CSI/ISP path and shows a 432 x 432 colour RGB565
+preview. It opens in the explicit Photo profile at 30 fps with QR recognition
+paused. The overlaid Photo and QR controls switch profiles without restarting
+the sensor. QR mode processes alternate sensor frames for a 15 fps preview;
+`quirc` checks an independently downscaled grayscale frame only when its decoder
+worker is ready, so recognition cannot build a stale queue or needlessly consume
+every visible frame. Camera control shares the board's GPIO7/GPIO8 I2C bus with
+GT911 touch. QR mode is fixed at the native 1x field of view so digital cropping
+cannot make alignment or fixed-focus blur worse; zoom remains available only in
+Photo mode. Standard `WIFI:`
 payloads are parsed with escaped separators, displayed with the password
 masked, and require a touch confirmation before replacing the primary network
 in NVS and asking the network task to reconnect. Raw QR contents are never
