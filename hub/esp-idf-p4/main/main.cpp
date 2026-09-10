@@ -157,7 +157,12 @@ struct UiState {
     std::array<lv_obj_t *, bluepaws::kMaximumCats> overview_distance_labels{};
     std::array<lv_obj_t *, bluepaws::kMaximumCats> overview_age_labels{};
     lv_obj_t *overview_summary_label = nullptr;
+    lv_obj_t *overview_header = nullptr;
+    lv_obj_t *overview_mode_title = nullptr;
     lv_obj_t *overview_mode_dropdown = nullptr;
+    lv_obj_t *overview_mode_confirmation = nullptr;
+    lv_obj_t *overview_mode_confirmation_title = nullptr;
+    lv_obj_t *overview_mode_confirmation_body = nullptr;
     lv_obj_t *overview_clock_label = nullptr;
     lv_obj_t *overview_header_signal_image = nullptr;
     lv_obj_t *overview_header_battery_image = nullptr;
@@ -241,6 +246,8 @@ struct UiState {
     bool cloud_enabled = false;
     SettingsField editing_field = SettingsField::PrimarySsid;
     bluepaws::hub::Settings settings = bluepaws::hub::defaultSettings();
+    bluepaws::hub::CommunicationsMode pending_communications_mode =
+        bluepaws::hub::CommunicationsMode::Home;
     bluepaws::qr::ParsedPayload pending_qr{};
     uint16_t *camera_preview_pixels = nullptr;
     lv_image_dsc_t camera_preview_descriptor{};
@@ -600,6 +607,41 @@ lv_color_t signal_colour(int16_t rssi)
 {
     return rssi > -80 ? lv_color_hex(0x2BC48A)
         : (rssi > -95 ? lv_color_hex(0xF2B134) : lv_color_hex(0xEF5A67));
+}
+
+struct OverviewModeTheme {
+    uint32_t header;
+    uint32_t control;
+    uint32_t accent;
+};
+
+OverviewModeTheme overview_mode_theme(bluepaws::hub::CommunicationsMode mode)
+{
+    switch (mode) {
+    case bluepaws::hub::CommunicationsMode::Portable:
+        return {0x123C3A, 0x18504C, 0x62D5B1};
+    case bluepaws::hub::CommunicationsMode::OffGrid:
+        return {0x543214, 0x70451C, 0xF3A63A};
+    case bluepaws::hub::CommunicationsMode::Home:
+    default:
+        return {0x102A3C, 0x173B52, 0x80C9F2};
+    }
+}
+
+void apply_overview_mode_theme(UiState &ui, bluepaws::hub::CommunicationsMode mode)
+{
+    const OverviewModeTheme theme = overview_mode_theme(mode);
+    if (ui.overview_header != nullptr) {
+        lv_obj_set_style_bg_color(ui.overview_header, lv_color_hex(theme.header), 0);
+        lv_obj_set_style_border_color(ui.overview_header, lv_color_hex(theme.accent), 0);
+    }
+    if (ui.overview_mode_dropdown != nullptr) {
+        lv_obj_set_style_bg_color(ui.overview_mode_dropdown, lv_color_hex(theme.control), 0);
+        lv_obj_set_style_border_color(ui.overview_mode_dropdown, lv_color_hex(theme.accent), 0);
+    }
+    if (ui.overview_mode_title != nullptr) {
+        lv_obj_set_style_text_color(ui.overview_mode_title, lv_color_hex(theme.accent), 0);
+    }
 }
 
 void update_ui(UiState &ui)
@@ -1047,6 +1089,11 @@ void update_ui(UiState &ui)
                               static_cast<unsigned>(ui.cats.size()));
         break;
     case AppPage::Overview:
+        apply_overview_mode_theme(
+            ui,
+            cloud_status.automatic_off_grid
+                ? bluepaws::hub::CommunicationsMode::OffGrid
+                : ui.settings.communications_mode);
         if (ui.overview_clock_label != nullptr) {
             const std::time_t wall_time = std::time(nullptr);
             std::tm local_time{};
@@ -2829,9 +2876,9 @@ void overview_wake_clicked(lv_event_t *event)
     navigate_to(*ui, AppPage::Launcher);
 }
 
-void set_communications_mode(UiState &ui, bluepaws::hub::CommunicationsMode mode)
+bool set_communications_mode(UiState &ui, bluepaws::hub::CommunicationsMode mode)
 {
-    if (ui.settings.communications_mode == mode) return;
+    if (ui.settings.communications_mode == mode) return true;
     const bluepaws::hub::CommunicationsMode previous = ui.settings.communications_mode;
     ESP_LOGI(kTag, "Hub mode requested: %s -> %s",
              bluepaws::hub::communicationsModeName(previous),
@@ -2846,12 +2893,56 @@ void set_communications_mode(UiState &ui, bluepaws::hub::CommunicationsMode mode
         ESP_LOGE(kTag, "Hub mode save failed; restored %s",
                  bluepaws::hub::communicationsModeName(previous));
         if (ui.status != nullptr) lv_label_set_text(ui.status, "Could not save hub mode");
-        return;
+        return false;
     }
     bluepaws::cloud::applyNetworkSettings(ui.settings);
+    apply_overview_mode_theme(ui, mode);
     lv_display_trigger_activity(ui.display);
     ESP_LOGI(kTag, "Hub mode saved and applied: %s",
              bluepaws::hub::communicationsModeName(mode));
+    return true;
+}
+
+const char *mode_confirmation_body(bluepaws::hub::CommunicationsMode mode)
+{
+    switch (mode) {
+    case bluepaws::hub::CommunicationsMode::Home:
+        return "Stops the local hotspot, prefers your primary home Wi-Fi, and resumes normal cloud relay when online.";
+    case bluepaws::hub::CommunicationsMode::Portable:
+        return "Prefers your secondary phone hotspot, keeps cloud relay available, and identifies this hub as portable.";
+    case bluepaws::hub::CommunicationsMode::OffGrid:
+        return "Stops internet Wi-Fi attempts and starts the hub hotspot, local dashboard, and offline operation.";
+    }
+    return "Apply this communications profile?";
+}
+
+void close_mode_confirmation(UiState &ui)
+{
+    if (ui.overview_mode_confirmation != nullptr) {
+        lv_obj_add_flag(ui.overview_mode_confirmation, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (ui.overview_mode_dropdown != nullptr) {
+        lv_dropdown_set_selected(
+            ui.overview_mode_dropdown,
+            static_cast<uint32_t>(ui.settings.communications_mode));
+    }
+}
+
+void mode_confirmation_cancelled(lv_event_t *event)
+{
+    auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
+    if (ui != nullptr) close_mode_confirmation(*ui);
+}
+
+void mode_confirmation_accepted(lv_event_t *event)
+{
+    auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
+    if (ui == nullptr) return;
+    const bluepaws::hub::CommunicationsMode requested = ui->pending_communications_mode;
+    close_mode_confirmation(*ui);
+    if (set_communications_mode(*ui, requested) && ui->overview_mode_dropdown != nullptr) {
+        lv_dropdown_set_selected(ui->overview_mode_dropdown, static_cast<uint32_t>(requested));
+    }
 }
 
 void mode_dropdown_changed(lv_event_t *event)
@@ -2861,7 +2952,95 @@ void mode_dropdown_changed(lv_event_t *event)
     if (ui == nullptr || dropdown == nullptr) return;
     const uint32_t selected = lv_dropdown_get_selected(dropdown);
     if (selected > static_cast<uint32_t>(bluepaws::hub::CommunicationsMode::OffGrid)) return;
-    set_communications_mode(*ui, static_cast<bluepaws::hub::CommunicationsMode>(selected));
+    const auto requested = static_cast<bluepaws::hub::CommunicationsMode>(selected);
+    if (requested == ui->settings.communications_mode) return;
+    ui->pending_communications_mode = requested;
+    lv_dropdown_set_selected(
+        dropdown, static_cast<uint32_t>(ui->settings.communications_mode));
+    if (ui->overview_mode_confirmation_title != nullptr) {
+        lv_label_set_text_fmt(ui->overview_mode_confirmation_title,
+                              "Switch to %s mode?",
+                              bluepaws::hub::communicationsModeName(requested));
+    }
+    if (ui->overview_mode_confirmation_body != nullptr) {
+        lv_label_set_text(ui->overview_mode_confirmation_body,
+                          mode_confirmation_body(requested));
+    }
+    if (ui->overview_mode_confirmation != nullptr) {
+        lv_obj_remove_flag(ui->overview_mode_confirmation, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(ui->overview_mode_confirmation);
+    }
+}
+
+void create_mode_confirmation(UiState &ui)
+{
+    lv_obj_t *overlay = lv_obj_create(lv_screen_active());
+    lv_obj_set_size(overlay, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_pos(overlay, 0, 0);
+    lv_obj_set_style_bg_color(overlay, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(overlay, LV_OPA_70, 0);
+    lv_obj_set_style_border_width(overlay, 0, 0);
+    lv_obj_set_style_radius(overlay, 0, 0);
+    lv_obj_set_style_pad_all(overlay, 0, 0);
+    lv_obj_remove_flag(overlay, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(overlay, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(overlay, LV_OBJ_FLAG_FLOATING);
+
+    lv_obj_t *dialog = lv_obj_create(overlay);
+    lv_obj_set_size(dialog, ui.portrait ? 426 : 520, 224);
+    lv_obj_center(dialog);
+    lv_obj_set_style_bg_color(dialog, lv_color_hex(0x12232F), 0);
+    lv_obj_set_style_bg_opa(dialog, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(dialog, lv_color_hex(0x80C9F2), 0);
+    lv_obj_set_style_border_width(dialog, 2, 0);
+    lv_obj_set_style_radius(dialog, 14, 0);
+    lv_obj_set_style_pad_all(dialog, 18, 0);
+    lv_obj_remove_flag(dialog, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *eyebrow = make_label(dialog, "HUB MODE", lv_color_hex(0x80C9F2));
+    lv_obj_set_pos(eyebrow, 0, 0);
+    lv_obj_set_style_text_font(eyebrow, &lv_font_montserrat_14, 0);
+
+    ui.overview_mode_confirmation_title =
+        make_label(dialog, "Switch hub mode?", lv_color_hex(0xFFFFFF));
+    lv_obj_set_pos(ui.overview_mode_confirmation_title, 0, 27);
+    lv_obj_set_width(ui.overview_mode_confirmation_title, LV_PCT(100));
+    lv_obj_set_style_text_font(ui.overview_mode_confirmation_title,
+                               &lv_font_montserrat_22, 0);
+
+    ui.overview_mode_confirmation_body =
+        make_label(dialog, "Apply this communications profile?", lv_color_hex(0xB8CAD4));
+    lv_obj_set_pos(ui.overview_mode_confirmation_body, 0, 65);
+    lv_obj_set_width(ui.overview_mode_confirmation_body, LV_PCT(100));
+    lv_label_set_long_mode(ui.overview_mode_confirmation_body, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_font(ui.overview_mode_confirmation_body,
+                               &lv_font_montserrat_14, 0);
+
+    lv_obj_t *cancel = lv_button_create(dialog);
+    lv_obj_set_size(cancel, 120, 44);
+    lv_obj_align(cancel, LV_ALIGN_BOTTOM_RIGHT, -136, 0);
+    lv_obj_set_style_bg_color(cancel, lv_color_hex(0x243746), 0);
+    lv_obj_set_style_border_color(cancel, lv_color_hex(0x60788C), 0);
+    lv_obj_set_style_border_width(cancel, 1, 0);
+    lv_obj_set_style_radius(cancel, 9, 0);
+    lv_obj_add_event_cb(cancel, mode_confirmation_cancelled, LV_EVENT_CLICKED, &ui);
+    lv_obj_t *cancel_label = make_label(cancel, "Cancel", lv_color_hex(0xE4EDF2));
+    lv_obj_set_style_text_font(cancel_label, &lv_font_montserrat_14, 0);
+    lv_obj_center(cancel_label);
+
+    lv_obj_t *confirm = lv_button_create(dialog);
+    lv_obj_set_size(confirm, 128, 44);
+    lv_obj_align(confirm, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+    lv_obj_set_style_bg_color(confirm, lv_color_hex(0x1D8BC2), 0);
+    lv_obj_set_style_border_width(confirm, 0, 0);
+    lv_obj_set_style_radius(confirm, 9, 0);
+    lv_obj_add_event_cb(confirm, mode_confirmation_accepted, LV_EVENT_CLICKED, &ui);
+    lv_obj_t *confirm_label = make_label(confirm, "OK", lv_color_hex(0xFFFFFF));
+    lv_obj_set_style_text_font(confirm_label, &lv_font_montserrat_14, 0);
+    lv_obj_center(confirm_label);
+
+    ui.overview_mode_confirmation = overlay;
+    lv_obj_add_flag(overlay, LV_OBJ_FLAG_HIDDEN);
 }
 
 void create_overview_cat_card(lv_obj_t *parent, size_t slot, UiState &ui)
@@ -2965,6 +3144,7 @@ void create_overview_page(UiState &ui)
         {},
         &ui.status);
     lv_obj_t *header = lv_obj_get_parent(ui.status);
+    ui.overview_header = header;
     lv_obj_add_flag(ui.status, LV_OBJ_FLAG_HIDDEN);
     lv_obj_t *title = lv_obj_get_child(header, 0);
     lv_obj_set_pos(title, ui.portrait ? 8 : 12, 5);
@@ -2979,6 +3159,7 @@ void create_overview_page(UiState &ui)
     lv_obj_set_pos(mode_title, ui.portrait ? 100 : 305, 3);
     lv_obj_set_style_text_font(mode_title, &lv_font_montserrat_14, 0);
     if (ui.portrait) lv_obj_add_flag(mode_title, LV_OBJ_FLAG_HIDDEN);
+    ui.overview_mode_title = mode_title;
     lv_obj_t *mode_dropdown = lv_dropdown_create(header);
     lv_dropdown_set_options(mode_dropdown, "Home Hub\nPortable\nOff-Grid");
     lv_dropdown_set_selected(mode_dropdown, static_cast<uint32_t>(ui.settings.communications_mode));
@@ -2992,15 +3173,16 @@ void create_overview_page(UiState &ui)
     lv_obj_set_style_text_font(mode_dropdown, &lv_font_montserrat_14, 0);
     lv_obj_add_event_cb(mode_dropdown, mode_dropdown_changed, LV_EVENT_VALUE_CHANGED, &ui);
     ui.overview_mode_dropdown = mode_dropdown;
+    apply_overview_mode_theme(ui, ui.settings.communications_mode);
 
     ui.overview_header_signal_image = make_drawer_image(header, bluepaws::ui::icon_signal_full);
-    lv_obj_set_pos(ui.overview_header_signal_image, ui.portrait ? 252 : 516, 17);
+    lv_obj_set_pos(ui.overview_header_signal_image, ui.portrait ? 252 : 538, 17);
     lv_image_set_scale(ui.overview_header_signal_image, ui.portrait ? 320 : 384);
     ui.overview_header_battery_image = make_drawer_image(header, bluepaws::ui::icon_battery_full);
-    lv_obj_set_pos(ui.overview_header_battery_image, ui.portrait ? 297 : 571, 17);
+    lv_obj_set_pos(ui.overview_header_battery_image, ui.portrait ? 297 : 578, 17);
     lv_image_set_scale(ui.overview_header_battery_image, ui.portrait ? 320 : 384);
     ui.overview_header_battery_label = make_label(header, "--%", lv_color_hex(0xAFC3CE));
-    lv_obj_set_pos(ui.overview_header_battery_label, ui.portrait ? 326 : 602, 18);
+    lv_obj_set_pos(ui.overview_header_battery_label, ui.portrait ? 326 : 610, 18);
     lv_obj_set_style_text_font(ui.overview_header_battery_label, &lv_font_montserrat_18, 0);
     ui.overview_clock_label = make_label(header, "--:-- --", lv_color_hex(0xFFFFFF));
     lv_obj_set_pos(ui.overview_clock_label, ui.portrait ? 363 : 642, 17);
@@ -3106,6 +3288,7 @@ void create_overview_page(UiState &ui)
     for (size_t i = 0; i < ui.overview_cards.size(); ++i) {
         create_overview_cat_card(summary, i, ui);
     }
+    create_mode_confirmation(ui);
 }
 
 const char *settings_field_title(SettingsField field)
@@ -3908,7 +4091,12 @@ void create_ui(UiState &ui)
     ui.overview_distance_labels.fill(nullptr);
     ui.overview_age_labels.fill(nullptr);
     ui.overview_summary_label = nullptr;
+    ui.overview_header = nullptr;
+    ui.overview_mode_title = nullptr;
     ui.overview_mode_dropdown = nullptr;
+    ui.overview_mode_confirmation = nullptr;
+    ui.overview_mode_confirmation_title = nullptr;
+    ui.overview_mode_confirmation_body = nullptr;
     ui.overview_clock_label = nullptr;
     ui.overview_header_signal_image = nullptr;
     ui.overview_header_battery_image = nullptr;

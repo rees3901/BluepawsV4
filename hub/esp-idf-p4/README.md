@@ -59,8 +59,12 @@ or written to the serial log.
 The P4 now also packages the proven static off-grid dashboard from `hub/data`
 into its 7 MB `storage` SPIFFS partition. When the hub's access point is active,
 clients can open `http://192.168.4.1`; common Android, Apple and Windows captive
-portal probes are redirected to the local welcome page. The first compatibility
-milestone serves live P4 collar snapshots and hub/network status. It deliberately
+portal probes are redirected to the local welcome page. The P4 also advertises
+`/welcome` with DHCP captive-portal option 114 and answers wildcard IPv4 DNS
+locally. This lets Windows NCSI reach its HTTP probe
+without waiting for public DNS to time out on the intentionally offline network.
+The first compatibility milestone serves live P4 collar snapshots and hub/network
+status. It deliberately
 reports collar commands, history export, configuration writes and Bluetooth as
 unavailable until the SX1262/GNSS daughterboard and the crash-safe P4 journal are
 connected. Server-sent events also fall back to the dashboard's established

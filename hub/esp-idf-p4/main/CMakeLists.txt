@@ -1,5 +1,6 @@
 idf_component_register(
     SRCS "main.cpp" "app_shell.cpp" "ui_icons.cpp" "home_hub_cloud.cpp" "home_hub_web.cpp"
+         "home_hub_captive_dns.cpp"
          "home_hub_settings_store.cpp" "home_hub_camera.cpp"
     INCLUDE_DIRS "."
     REQUIRES
@@ -13,6 +14,7 @@ idf_component_register(
         esp_wifi
         guition_jc4880p443c
         json
+        lwip
         mbedtls
         nvs_flash
         spiffs

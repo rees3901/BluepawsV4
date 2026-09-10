@@ -4,6 +4,7 @@
 #include "home_hub_secrets.h"
 #endif
 #include "home_hub_config.h"
+#include "home_hub_captive_dns.h"
 
 #include "cJSON.h"
 #include "esp_crt_bundle.h"
@@ -20,6 +21,7 @@
 #include "freertos/queue.h"
 #include "freertos/task.h"
 #include "nvs_flash.h"
+#include "lwip/inet.h"
 
 #include <algorithm>
 #include <array>
@@ -77,6 +79,7 @@ hub::Settings g_network_settings{};
 bool g_wifi_initialized = false;
 bool g_cloud_authorized = false;
 std::atomic_bool g_station_allowed{false};
+char g_captive_portal_uri[64]{};
 
 void time_sync_notification(struct timeval *) {
     portENTER_CRITICAL(&g_status_lock);
@@ -386,6 +389,37 @@ hub::Settings network_settings() {
     return copy;
 }
 
+void configure_captive_portal_discovery()
+{
+    esp_netif_t *access_point = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
+    esp_netif_ip_info_t ip_info{};
+    char ip_address[16]{};
+    if (access_point == nullptr || esp_netif_get_ip_info(access_point, &ip_info) != ESP_OK ||
+        inet_ntoa_r(ip_info.ip.addr, ip_address, sizeof(ip_address)) == nullptr) {
+        ESP_LOGW(kTag, "Could not read SoftAP address for captive discovery");
+        return;
+    }
+    std::snprintf(g_captive_portal_uri, sizeof(g_captive_portal_uri),
+                  "http://%s/welcome", ip_address);
+
+    const esp_err_t stop_result = esp_netif_dhcps_stop(access_point);
+    if (stop_result != ESP_OK && stop_result != ESP_ERR_ESP_NETIF_DHCP_ALREADY_STOPPED) {
+        ESP_LOGW(kTag, "Could not pause SoftAP DHCP: %s", esp_err_to_name(stop_result));
+    }
+    const esp_err_t option_result = esp_netif_dhcps_option(
+        access_point, ESP_NETIF_OP_SET, ESP_NETIF_CAPTIVEPORTAL_URI,
+        g_captive_portal_uri, std::strlen(g_captive_portal_uri));
+    const esp_err_t start_result = esp_netif_dhcps_start(access_point);
+    if (option_result != ESP_OK ||
+        (start_result != ESP_OK && start_result != ESP_ERR_ESP_NETIF_DHCP_ALREADY_STARTED)) {
+        ESP_LOGW(kTag, "Captive DHCP hint failed: option=%s start=%s",
+                 esp_err_to_name(option_result), esp_err_to_name(start_result));
+    } else {
+        ESP_LOGI(kTag, "Captive DHCP URL advertised: %s", g_captive_portal_uri);
+    }
+    bluepaws::captive_dns::start();
+}
+
 bool configure_wifi(const hub::Settings &settings, unsigned network_index, bool restart,
                     bool off_grid_access_point, bool station_allowed = true) {
     const hub::WifiNetwork &requested = network_index == 1
@@ -437,6 +471,7 @@ bool configure_wifi(const hub::Settings &settings, unsigned network_index, bool 
     const bool started = esp_wifi_start() == ESP_OK;
     if (started) {
         g_wifi_initialized = true;
+        if (access_point_enabled) configure_captive_portal_discovery();
         ESP_LOGI(kTag, "Wi-Fi applied: station=%s off_grid_ap=%s",
                  station_enabled ? station.ssid : "disabled",
                  access_point_enabled ? settings.access_point_ssid : "disabled");
