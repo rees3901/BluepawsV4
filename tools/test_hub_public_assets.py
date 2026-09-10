@@ -93,13 +93,15 @@ class PublicAssetTests(unittest.TestCase):
         self.assertIn("data.entity === 'hub' ? ' marker-hub' : ''", js)
         self.assertIn('.bp-marker.marker-hub', css)
 
-    def test_p4_offgrid_http_server_has_browser_socket_headroom(self):
+    def test_p4_offgrid_http_server_stops_eventsource_reconnect_churn(self):
         server = (ROOT / 'hub/esp-idf-p4/main/home_hub_web.cpp').read_text(encoding='utf-8')
-        defaults = (ROOT / 'hub/esp-idf-p4/sdkconfig.defaults').read_text(encoding='utf-8')
-        self.assertIn('config.max_open_sockets = 12', server)
-        self.assertIn('config.backlog_conn = 8', server)
-        self.assertIn('"204 No Content"', server)
-        self.assertIn('CONFIG_LWIP_MAX_SOCKETS=20', defaults)
+        events_handler = server.split('esp_err_t events_handler', 1)[1].split(
+            'esp_err_t captive_handler', 1
+        )[0]
+        self.assertIn('config.max_open_sockets = 4', server)
+        self.assertIn('config.lru_purge_enable = true', server)
+        self.assertIn('"204 No Content"', events_handler)
+        self.assertNotIn('httpd_resp_set_status(request, "503', events_handler)
 
     def test_mdns_hostname_is_not_redirected_as_foreign(self):
         source = (ROOT / 'hub/platformio/src/main.cpp').read_text(encoding='utf-8')

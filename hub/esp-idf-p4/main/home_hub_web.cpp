@@ -552,10 +552,11 @@ bool start_server_now()
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.stack_size = 8192;
-    // Modern browsers open several asset connections in parallel. Leave room
-    // for two local dashboard tabs while LRU purging protects the AP server.
-    config.max_open_sockets = 12;
-    config.backlog_conn = 8;
+    // Hosted Wi-Fi, captive DNS and mDNS share lwIP's small descriptor pool.
+    // Keep HTTP below that ceiling and let LRU purging rotate browser asset
+    // connections instead of allowing accept() to exhaust every descriptor.
+    config.max_open_sockets = 4;
+    config.backlog_conn = 4;
     config.max_uri_handlers = 32;
     config.lru_purge_enable = true;
     config.uri_match_fn = httpd_uri_match_wildcard;
