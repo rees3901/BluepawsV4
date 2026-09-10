@@ -1251,6 +1251,14 @@ body.light .leaflet-map-btn:focus-visible .fit-markers-icon { filter: none; }
 .card-avatar-wrap:focus-within .card-avatar-edit { opacity: 1; transform: scale(1); pointer-events: auto; }
 .device-card.expanded .card-avatar-edit { display: grid; font-size: 42px; }
 
+@media (hover: none), (pointer: coarse) {
+    .device-card.expanded .card-avatar-edit {
+        opacity: .28;
+        transform: scale(1);
+        pointer-events: auto;
+    }
+}
+
 .collar-awake { display: inline-grid; min-width: 1.5em; place-items: center; font-size: 1.5em; line-height: 1; }
 .device-card.stale .collar-awake { opacity: .32; filter: grayscale(1) saturate(.15); }
 
@@ -1295,8 +1303,15 @@ body.light .btn-bluetooth.active { border-color: #64a978; background: #d8eaf6; c
     background: var(--bg-card);
     color: var(--text-primary);
     box-shadow: 0 8px 28px rgb(0 0 0 / 30%);
-    transform: translateX(-50%);
+    opacity: 0;
+    transform: translate(-50%, 10px);
     font-size: .78rem;
+    transition: opacity .55s ease, transform .55s cubic-bezier(.22, 1, .36, 1);
+}
+
+.ui-toast.visible {
+    opacity: 1;
+    transform: translate(-50%, 0);
 }
 
 .map-context-popup .leaflet-popup-content-wrapper { min-width: 250px; }

@@ -40,6 +40,7 @@
     var allTrailsVisible = true;
     var allTrailsButton = null;
     var toastTimer = null;
+    var toastHideTimer = null;
     var temporaryPins = new Map();
     var nextTemporaryPinId = 1;
     var hubMode = 'home';          // home | portable | off_grid
@@ -1443,7 +1444,6 @@
 
                     '<div class="log-btn-row">' +
                         '<button class="btn-device-log btn-secondary" data-logid="' + dev.id + '">Message Log</button>' +
-                        '<button class="btn-device-appearance btn-secondary" data-deviceid="' + dev.id + '">Local appearance</button>' +
                         '<button class="btn-log-export btn-export-device" data-logid="' + dev.id + '" title="Export log as CSV"><svg class="icon-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M12 4v12m0 0l-4-4m4 4l4-4"/><path d="M5 20h14"/></svg></button>' +
                     '</div>' +
                     '<div id="deviceLogPanel-' + dev.id + '" class="device-log-panel hidden">' +
@@ -1517,13 +1517,6 @@
                     if (isHub) { HubPresencePanel.report(true); return; }
                     var did = parseInt(exportBtn.getAttribute('data-logid'), 10);
                     window.location.href = '/api/history.csv?device=' + encodeURIComponent(did);
-                });
-            }
-            var appearanceBtn = card.querySelector('.btn-device-appearance');
-            if (appearanceBtn) {
-                appearanceBtn.addEventListener('click', function (e) {
-                    e.stopPropagation();
-                    editLocalAppearance(dev.id);
                 });
             }
         }
@@ -1707,9 +1700,20 @@
         var toast = document.getElementById('uiToast');
         if (!toast) return;
         window.clearTimeout(toastTimer);
+        window.clearTimeout(toastHideTimer);
         toast.textContent = message;
+        toast.classList.remove('visible');
         toast.classList.remove('hidden');
-        toastTimer = window.setTimeout(function () { toast.classList.add('hidden'); }, 2200);
+        // Restart the entrance transition even when a second notification
+        // replaces one that is already visible.
+        void toast.offsetWidth;
+        window.requestAnimationFrame(function () { toast.classList.add('visible'); });
+        toastTimer = window.setTimeout(function () {
+            toast.classList.remove('visible');
+            toastHideTimer = window.setTimeout(function () {
+                toast.classList.add('hidden');
+            }, 700);
+        }, 4400);
     }
 
     function copyText(value) {
