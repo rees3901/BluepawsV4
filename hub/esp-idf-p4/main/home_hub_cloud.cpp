@@ -474,7 +474,7 @@ bool configure_wifi(const hub::Settings &settings, unsigned network_index, bool 
         for (const char *key : {"WIFI_AP_DEF", "WIFI_STA_DEF"}) {
             esp_netif_t *network_interface = esp_netif_get_handle_from_ifkey(key);
             if (network_interface != nullptr) {
-                esp_netif_set_hostname(network_interface, "blueports");
+                esp_netif_set_hostname(network_interface, "bluepaws");
             }
         }
         bluepaws::captive_dns::start_mdns();

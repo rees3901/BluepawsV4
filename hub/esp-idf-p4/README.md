@@ -60,7 +60,7 @@ The P4 now also packages the proven static off-grid dashboard from `hub/data`
 into its 7 MB `storage` SPIFFS partition. When the hub's access point is active,
 clients can open `http://192.168.4.1`; common Android, Apple and Windows captive
 portal probes are redirected to the local welcome page. The dashboard is
-advertised as `http://blueports.local/` using a lightweight mDNS responder. The
+advertised as `http://bluepaws.local/` using a lightweight mDNS responder. The
 P4 also advertises `/welcome` with DHCP captive-portal option 114
 and answers wildcard IPv4 DNS locally. This lets Windows NCSI reach its HTTP probe
 without waiting for public DNS to time out on the intentionally offline network.

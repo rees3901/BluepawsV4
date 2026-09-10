@@ -24,8 +24,7 @@ constexpr std::size_t kPacketBytes = 512;
 constexpr uint32_t kAnswerTtlSeconds = 60;
 constexpr uint16_t kMdnsPort = 5353;
 constexpr char kMdnsGroup[] = "224.0.0.251";
-constexpr char kLocalHostname[] = "blueports.local";
-constexpr char kLegacyHostname[] = "bluepaws.local";
+constexpr char kLocalHostname[] = "bluepaws.local";
 
 struct __attribute__((packed)) DnsHeader {
     uint16_t id;
@@ -162,7 +161,6 @@ std::size_t make_mdns_reply(const uint8_t *query, std::size_t received,
         query_class = ntohs(query_class) & 0x7FFFU;
         if (query_class == 1U && (query_type == 1U || query_type == 255U)) {
             if (strcasecmp(name, kLocalHostname) == 0) matched_name = kLocalHostname;
-            else if (strcasecmp(name, kLegacyHostname) == 0) matched_name = kLegacyHostname;
         }
     }
     uint32_t address = 0;
