@@ -46,6 +46,10 @@
     var hubMode = 'home';          // home | portable | off_grid
     var hubPortableMode = false;   // true when hub scans for BLE find beacons
     var fallbackPollingTimer = null;
+    var localHubLinkMode = false;
+    var localLinkPollingTimer = null;
+    var localLinkFailures = 0;
+    var LOCAL_LINK_POLL_MS = 5000;
     var localSessionToken = sessionStorage.getItem('bluepawsLocalSession') || '';
     var bleResults = {};           // Map of device_id → { rssi, age_ms }
     var blePollingTimer = null;    // Interval ID for BLE result polling
@@ -730,6 +734,7 @@
         };
 
         evtSource.onerror = function () {
+            if (localHubLinkMode) return;
             resetCommandFeedback();
             logEvent('SYS', 'SSE disconnected');
             clearTimeout(heartbeatTimer);
@@ -743,8 +748,72 @@
     function fetchDeviceSnapshot() {
         refreshHubStatus(); // also recover mode state for clients using polling
         fetchCommandFeedback();
-        return fetch('/api/devices').then(function (r) { return r.json(); })
+        return fetchDevicesOnly();
+    }
+
+    function fetchDevicesOnly() {
+        return fetch('/api/devices', {cache: 'no-store'}).then(function (r) {
+            if (!r.ok) throw new Error('Device snapshot unavailable');
+            return r.json();
+        })
             .then(function (items) { items.forEach(updateDevice); });
+    }
+
+    // The P4 Off-Grid page is served by the hub itself. Its status indicator is
+    // therefore a browser-to-hub confidence check, independent of Internet and
+    // cloud connectivity. One missed five-second poll is amber; two consecutive
+    // misses are red. Any successful response restores Connected immediately.
+    function pollLocalHubLink() {
+        var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        // A local AP response should be effectively immediate. Allow a short
+        // grace period for tile traffic without making the warning lag far
+        // beyond the five-second poll boundary.
+        var timeout = controller ? setTimeout(function () { controller.abort(); }, 1500) : null;
+        return fetch('/api/status', {
+            cache: 'no-store',
+            signal: controller ? controller.signal : undefined
+        }).then(function (response) {
+            if (!response.ok) throw new Error('Hub status unavailable');
+            return response.json();
+        }).then(function (status) {
+            if (timeout) clearTimeout(timeout);
+            localLinkFailures = 0;
+            setStatus('connected', 'Hub connected');
+            renderHubStatus(status);
+            fetchDevicesOnly().catch(function () {});
+            fetchCommandFeedback();
+            return status;
+        }).catch(function () {
+            if (timeout) clearTimeout(timeout);
+            localLinkFailures += 1;
+            if (localLinkFailures === 1) {
+                setStatus('reconnecting', 'Trying to reconnect');
+            } else {
+                setStatus('disconnected', 'Disconnected');
+            }
+        });
+    }
+
+    function startLocalHubLinkMonitor(initialStatus) {
+        if (localHubLinkMode) {
+            localLinkFailures = 0;
+            setStatus('connected', 'Hub connected');
+            return;
+        }
+        localHubLinkMode = true;
+        if (evtSource) {
+            evtSource.close();
+            evtSource = null;
+        }
+        if (fallbackPollingTimer) {
+            clearInterval(fallbackPollingTimer);
+            fallbackPollingTimer = null;
+        }
+        localLinkFailures = 0;
+        setStatus('connected', 'Hub connected');
+        if (initialStatus) renderHubStatus(initialStatus);
+        if (localLinkPollingTimer) clearInterval(localLinkPollingTimer);
+        localLinkPollingTimer = setInterval(pollLocalHubLink, LOCAL_LINK_POLL_MS);
     }
 
     function protectedFetch(url, options) {
@@ -872,7 +941,7 @@
         banner.classList.remove('faded');
         clearTimeout(statusFadeTimer);
 
-        if (state === 'connected') {
+        if (state === 'connected' && !localHubLinkMode) {
             // Auto-fade after 20 seconds when connected
             statusFadeTimer = setTimeout(function () {
                 banner.classList.add('faded');
@@ -2001,33 +2070,41 @@
 
     function refreshHubStatus() {
         // Fetch hub status to display diagnostics in the modal
-        return fetch('/api/status')
-            .then(function (r) { return r.json(); })
+        return fetch('/api/status', {cache: 'no-store'})
+            .then(function (r) {
+                if (!r.ok) throw new Error('Hub status unavailable');
+                return r.json();
+            })
             .then(function (s) {
-                var provisioning = s.provisioning_mode === true && s.hubMode !== 'off_grid';
-                document.getElementById('provisioningFields').classList.toggle('hidden', !provisioning);
-                document.getElementById('btnSaveConfig').classList.toggle('hidden', !provisioning);
-                document.getElementById('hubStatus').innerHTML =
-                    'Uptime: ' + formatAge(s.uptime) + '<br>' +
-                    'Packets RX: ' + s.rxCount + '<br>' +
-                    'Commands TX: ' + s.txCount + '<br>' +
-                    'CRC Fails: ' + s.crcFails + '<br>' +
-                    'Devices: ' + s.devices + '<br>' +
-                    'Log entries: ' + s.logEntries + '<br>' +
-                    'Free heap: ' + (s.freeHeap / 1024).toFixed(1) + ' KB<br>' +
-                    'WiFi STA: ' + (s.staConnected ? s.staIP : 'Not connected') + '<br>' +
-                    'Network: ' + (s.network_phase || 'Unknown') + '<br>' +
-                    'Recovery remaining: ' + Math.ceil((s.recovery_remaining_ms || 0) / 1000) + ' s<br>' +
-                    'AP IP: ' + s.apIP + '<br>' +
-                    'AP clients: ' + (s.ap_clients || 0) + ' / 8 · channel ' + (s.ap_channel || '—') + '<br>' +
-                    'AP start failures: ' + (s.ap_start_failures || 0) + '<br>' +
-                    'Network / web stack spare: ' + (s.network_stack_free || 0) + ' / ' + (s.web_stack_free || 0) + ' bytes';
-                // Sync hub mode state from server
-                syncHubModeState(s);
+                renderHubStatus(s);
+                if (s.localLink === true) startLocalHubLinkMonitor(s);
+                return s;
             })
             .catch(function () {
                 document.getElementById('hubStatus').textContent = 'Failed to load status';
             });
+    }
+
+    function renderHubStatus(s) {
+        var provisioning = s.provisioning_mode === true && s.hubMode !== 'off_grid';
+        document.getElementById('provisioningFields').classList.toggle('hidden', !provisioning);
+        document.getElementById('btnSaveConfig').classList.toggle('hidden', !provisioning);
+        document.getElementById('hubStatus').innerHTML =
+            'Uptime: ' + formatAge(s.uptime) + '<br>' +
+            'Packets RX: ' + s.rxCount + '<br>' +
+            'Commands TX: ' + s.txCount + '<br>' +
+            'CRC Fails: ' + s.crcFails + '<br>' +
+            'Devices: ' + s.devices + '<br>' +
+            'Log entries: ' + s.logEntries + '<br>' +
+            'Free heap: ' + (s.freeHeap / 1024).toFixed(1) + ' KB<br>' +
+            'WiFi STA: ' + (s.staConnected ? s.staIP : 'Not connected') + '<br>' +
+            'Network: ' + (s.network_phase || 'Unknown') + '<br>' +
+            'Recovery remaining: ' + Math.ceil((s.recovery_remaining_ms || 0) / 1000) + ' s<br>' +
+            'AP IP: ' + s.apIP + '<br>' +
+            'AP clients: ' + (s.ap_clients || 0) + ' / 8 · channel ' + (s.ap_channel || '—') + '<br>' +
+            'AP start failures: ' + (s.ap_start_failures || 0) + '<br>' +
+            'Network / web stack spare: ' + (s.network_stack_free || 0) + ' / ' + (s.web_stack_free || 0) + ' bytes';
+        syncHubModeState(s);
     }
 
     function closeSettings() {

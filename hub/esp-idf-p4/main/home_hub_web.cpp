@@ -184,6 +184,10 @@ esp_err_t status_handler(httpd_req_t *request)
     const WebSnapshot state = snapshot();
     cJSON *json = cJSON_CreateObject();
     cJSON_AddNumberToObject(json, "uptime", esp_timer_get_time() / 1000000);
+    // Tells the shared web UI that this endpoint is the physical hub itself.
+    // Connection confidence must therefore reflect browser-to-hub reachability,
+    // not Internet or cloud state.
+    cJSON_AddBoolToObject(json, "localLink", true);
     cJSON_AddNumberToObject(json, "devices", state.count);
     cJSON_AddNumberToObject(json, "freeHeap", esp_get_free_heap_size());
     cJSON_AddStringToObject(json, "mode", mode_name(state.cloud.effective_mode));
@@ -332,6 +336,7 @@ bool public_path(const char *uri)
         "/leaflet.js", "/leaflet.css", "/basemap.json", "/feedback.js",
         "/hub-presence.js", "/hub-presence.css", "/favicon.svg", "/brand-favicon.ico",
         "/brand-mascot.avif", "/location-fit-markers.png", "/map-location.png",
+        "/map-layers.png",
         "/images/marker-icon.png", "/images/marker-icon-2x.png", "/images/marker-shadow.png",
     };
     for (const char *candidate : allowed) {
