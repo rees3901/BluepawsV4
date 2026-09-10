@@ -36,6 +36,7 @@
     let followedDeviceId = null;   // Device ID being auto-followed on map (null = none)
     var deviceCardOrder = [];
     var pinnedDeviceId = null;
+    var hasPinnedDevicePreference = false;
     var draggingDeviceId = null;
     var allTrailsVisible = true;
     var allTrailsButton = null;
@@ -1006,6 +1007,17 @@
             devices[id] = dev;
         }
 
+        // The Home Hub is the natural anchor for the local dashboard. Pin it
+        // on first use, while preserving any later explicit unpin/reorder.
+        if (data.entity === 'hub' && !hasPinnedDevicePreference) {
+            pinnedDeviceId = id;
+            hasPinnedDevicePreference = true;
+            deviceCardOrder = [id].concat(deviceCardOrder.filter(function (item) {
+                return item !== id;
+            }));
+            saveDeviceCardPreferences();
+        }
+
         dev.name = data.name || dev.name;
         if (data.entity === 'hub' && !savedAppearance) {
             dev.avatar = hubModeAvatar(data.hub && data.hub.mode);
@@ -1337,18 +1349,20 @@
             var savedOrder = JSON.parse(localStorage.getItem('bp_offline_device_order') || '[]');
             deviceCardOrder = Array.isArray(savedOrder) ? savedOrder.map(Number).filter(Number.isFinite) : [];
             var savedPin = localStorage.getItem('bp_offline_pinned_device');
-            pinnedDeviceId = savedPin === null ? null : Number(savedPin);
+            hasPinnedDevicePreference = savedPin !== null;
+            pinnedDeviceId = savedPin === null || savedPin === 'none' ? null : Number(savedPin);
             if (!Number.isFinite(pinnedDeviceId)) pinnedDeviceId = null;
         } catch (e) {
             deviceCardOrder = [];
             pinnedDeviceId = null;
+            hasPinnedDevicePreference = false;
         }
     }
 
     function saveDeviceCardPreferences() {
         try {
             localStorage.setItem('bp_offline_device_order', JSON.stringify(deviceCardOrder));
-            if (pinnedDeviceId === null) localStorage.removeItem('bp_offline_pinned_device');
+            if (pinnedDeviceId === null) localStorage.setItem('bp_offline_pinned_device', 'none');
             else localStorage.setItem('bp_offline_pinned_device', String(pinnedDeviceId));
         } catch (e) {}
     }
@@ -1430,6 +1444,7 @@
         var order = normalizedDeviceOrder();
         if (deviceId !== pinnedDeviceId && order[0] !== deviceId) return;
         pinnedDeviceId = pinnedDeviceId === deviceId ? null : deviceId;
+        hasPinnedDevicePreference = true;
         applyDeviceCardOrder(true);
         saveDeviceCardPreferences();
         refreshCardOrderControls();
