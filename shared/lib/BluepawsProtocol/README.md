@@ -7,7 +7,7 @@ This folder contains the shared protocol code used by the collar and hub firmwar
 The current canonical packet specification is:
 
 ```text
-docs/TLV_PROTOCOL_V1_2.md
+docs/protocol/TLV_PROTOCOL_V1_2.md
 ```
 
 That document supersedes older notes that referred to:
@@ -53,7 +53,7 @@ maximum = 64 bytes
 
 ## Implementation warning
 
-Keep protocol constants, encoder, decoder, README files, hub parser, collar transmitter, cloud parser and simulator payloads aligned with `docs/TLV_PROTOCOL_V1_2.md`.
+Keep protocol constants, encoder, decoder, README files, hub parser, collar transmitter, cloud parser and simulator payloads aligned with `docs/protocol/TLV_PROTOCOL_V1_2.md`.
 
 If this library still contains legacy constants or packet helpers, update the implementation before treating firmware output as v1.2 compliant.
 

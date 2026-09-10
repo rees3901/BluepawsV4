@@ -10,7 +10,7 @@ import {collarFault} from '../web/src/lib/collarFault.ts';
 
 // Execute the real renderer, not a reimplementation. The tiny DOM surface keeps
 // this regression runnable without a browser or a powered-up hub.
-const source = readFileSync(new URL('../hub/data/app.js', import.meta.url), 'utf8');
+const source = readFileSync(new URL('../hub/platformio/data/app.js', import.meta.url), 'utf8');
 const renderer = source.slice(source.indexOf('    function renderDeviceCard(dev) {'),
     source.indexOf('    // Human-friendly time display'));
 
@@ -31,7 +31,7 @@ function fixture(roaming, bleResults = {}) {
         renderBleProximity: rssi => `BLE:${rssi}`, ICON_HOME_DIST: '', ICON_STOPWATCH: '', ICON_ANTENNA: '',
         buildActionButtons: () => '', wireActionButtons() {},
     });
-    vm.runInContext(readFileSync(new URL('../hub/data/feedback.js', import.meta.url), 'utf8'), context);
+    vm.runInContext(readFileSync(new URL('../hub/platformio/data/feedback.js', import.meta.url), 'utf8'), context);
     vm.runInContext(source.slice(source.indexOf('    function escapeHtml(value) {'),
         source.indexOf('    function hubDetailRows(data) {')), context);
     vm.runInContext(renderer, context);
@@ -129,7 +129,7 @@ test('local fault reasons refresh and clear independently of the retained GPS po
 
 test('real firmware JSON serializers preserve diagnostics for live, reconnect and API paths',()=>{
     const root=fileURLToPath(new URL('../',import.meta.url));
-    const firmware=readFileSync(resolve(root,'hub/src/main.cpp'),'utf8').replaceAll('\r\n','\n');
+    const firmware=readFileSync(resolve(root,'hub/platformio/src/main.cpp'),'utf8').replaceAll('\r\n','\n');
     const live=firmware.match(/static void buildDeviceJson\(const uint8_t \*buf[^;{]*\) \{[\s\S]*?\n}/)[0];
     const state=firmware.match(/struct device_state_t \{[\s\S]*?\n};/)[0];
     const snapshots=['handleEvents','handleApiDevices'].map(name=>{

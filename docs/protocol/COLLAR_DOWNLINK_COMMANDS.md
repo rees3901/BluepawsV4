@@ -153,7 +153,7 @@ sent
 failed
 ```
 
-New customer power-profile commands expire ten minutes after creation. The local Home Hub also expires its commands after ten minutes and respects an earlier cloud expiry. Queueing a newer profile command for the same collar cancels any older unacknowledged profile command so a stale selection cannot be applied later. Per-card feedback disappears fifteen minutes after submission, not fifteen minutes after expiry. See [Collar UI feedback](COLLAR_UI_FEEDBACK.md) for source and freshness rules.
+New customer power-profile commands expire ten minutes after creation. The local Home Hub also expires its commands after ten minutes and respects an earlier cloud expiry. Queueing a newer profile command for the same collar cancels any older unacknowledged profile command so a stale selection cannot be applied later. Per-card feedback disappears fifteen minutes after submission, not fifteen minutes after expiry. See [Collar UI feedback](../firmware/collar/COLLAR_UI_FEEDBACK.md) for source and freshness rules.
 
 ## Security notes
 

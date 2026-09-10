@@ -2,7 +2,7 @@
   Bluepaws V4 — Home Hub bench configuration
 
   Do not put production secrets in this file. For bench testing, create a local
-  hub/include/hub_secrets.h file; it is ignored by Git and may override any of
+  hub/platformio/include/hub_secrets.h file; it is ignored by Git and may override any of
   these macros before the defaults below are applied.
 */
 

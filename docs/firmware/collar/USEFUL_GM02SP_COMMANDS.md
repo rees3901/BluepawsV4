@@ -1008,7 +1008,7 @@ The Edge Function currently limits request bodies to 4096 bytes, which is comfor
 3. **BluePaws V4 repository**
    - `supabase/functions/ingest-position/index.ts`
    - `tools/tlv_packet_codec.py`
-   - `docs/TLV_INGESTION_RUNBOOK.md`
+   - `docs/operations/TLV_INGESTION_RUNBOOK.md`
 
 ---
 

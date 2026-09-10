@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 
 const collar = readFileSync('collar/src/main.cpp', 'utf8').replaceAll('\r\n', '\n');
-const hub = readFileSync('hub/src/main.cpp', 'utf8').replaceAll('\r\n', '\n');
+const hub = readFileSync('hub/platformio/src/main.cpp', 'utf8').replaceAll('\r\n', '\n');
 const calls = [...collar.matchAll(/pkt_init\(buf, MY_DEVICE_ID,[\s\S]*?;/g)].map(m => m[0]);
 assert.equal(calls.length, 7, 'review any new packet send path');
 assert.equal(calls.filter(c => c.includes('MY_HOME_HUB_ID')).length, 4);

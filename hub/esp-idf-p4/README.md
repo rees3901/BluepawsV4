@@ -96,7 +96,7 @@ restores the overlay and restarts that cycle.
 From an ESP-IDF 5.5.4 shell:
 
 ```powershell
-cd home-hub/firmware
+cd hub/esp-idf-p4
 idf.py set-target esp32p4
 idf.py build
 idf.py -p COMx flash monitor
@@ -148,4 +148,4 @@ node tools/test_home_hub_core.mjs
 ```
 
 Board provenance, package checksum, confirmed pins and bring-up checkpoints are
-recorded in `docs/HOME_HUB_P4_TESTBED.md`.
+recorded in `docs/firmware/home-hub/HOME_HUB_P4_TESTBED.md`.

@@ -102,15 +102,15 @@ an accidental rerun cannot silently mix or overwrite packs.
 ## OpenStreetMap-style Gloucestershire pack
 
 Large source archives and rendered packs belong under the ignored
-`home-hub/maps/work/` directory. Using the current Protomaps CLI, extract the
+`hub/maps/work/` directory. Using the current Protomaps CLI, extract the
 county rather than downloading the approximately 120 GB planet archive:
 
 ```powershell
 pmtiles extract https://build.protomaps.com/20260829.pmtiles `
-  home-hub/maps/work/sources/gloucestershire-20260829.pmtiles `
+  hub/maps/work/sources/gloucestershire-20260829.pmtiles `
   --bbox=-2.72,51.55,-1.62,52.15 --maxzoom=15 --download-threads=8
-pmtiles verify home-hub/maps/work/sources/gloucestershire-20260829.pmtiles
-pmtiles serve home-hub/maps/work/sources --interface=127.0.0.1 --port=8077 `
+pmtiles verify hub/maps/work/sources/gloucestershire-20260829.pmtiles
+pmtiles serve hub/maps/work/sources --interface=127.0.0.1 --port=8077 `
   --public-url=http://127.0.0.1:8077
 ```
 
@@ -119,16 +119,16 @@ In another terminal, generate the QGIS-compatible style and render a fixture:
 ```powershell
 npm --prefix tools/protomaps-style install
 node tools/protomaps-style/build-style.mjs `
-  '--output=home-hub/maps/work/styles/osm-bluepaws-carto.json' `
+  '--output=hub/maps/work/styles/osm-bluepaws-carto.json' `
   '--flavor=bluepaws-carto' `
   '--tile-url=http://127.0.0.1:8077/gloucestershire-20260829/{z}/{x}/{y}.mvt'
 
 & 'C:\Program Files\QGIS 3.44.13\bin\python-qgis-ltr.bat' `
   tools/build_home_hub_map_pack.py `
   '--tile-url=http://127.0.0.1:8077/gloucestershire-20260829/{z}/{x}/{y}.mvt' `
-  --mapbox-style home-hub/maps/work/styles/osm-bluepaws-carto.json `
-  --output home-hub/maps/work/osm-fixture/tiles `
-  --manifest home-hub/maps/work/osm-fixture/map_manifest.json `
+  --mapbox-style hub/maps/work/styles/osm-bluepaws-carto.json `
+  --output hub/maps/work/osm-fixture/tiles `
+  --manifest hub/maps/work/osm-fixture/map_manifest.json `
   --profile fixture
 ```
 
@@ -147,14 +147,14 @@ vegetation, water, road casings and label halos than the earlier pastel pack:
 
 ```powershell
 node tools/protomaps-style/build-style.mjs `
-  '--output=home-hub/maps/work/styles/osm-bluepaws-road.json' `
+  '--output=hub/maps/work/styles/osm-bluepaws-road.json' `
   '--flavor=bluepaws-road' `
   '--tile-url=http://127.0.0.1:8077/gloucestershire-20260829/{z}/{x}/{y}.mvt'
 
 & 'C:\Program Files\QGIS 3.44.13\bin\python-qgis-ltr.bat' `
   tools/build_home_hub_map_pack.py `
   '--tile-url=http://127.0.0.1:8077/gloucestershire-20260829/{z}/{x}/{y}.mvt' `
-  --mapbox-style home-hub/maps/work/styles/osm-bluepaws-road.json `
+  --mapbox-style hub/maps/work/styles/osm-bluepaws-road.json `
   --output 'D:\bluepaws\maps\layers\osm-road-v2\tiles' `
   --manifest 'D:\bluepaws\maps\layers\osm-road-v2\map_manifest.json' `
   --profile gloucester --quality 90 --name 'BluePaws OpenStreetMap Road'
@@ -253,11 +253,11 @@ avoids:
 ```powershell
 & 'C:\Program Files\QGIS 3.44.13\bin\python-qgis-ltr.bat' `
   tools\build_home_hub_aerial_composite.py `
-  --aerial home-hub\maps\work\packs\aerial\tiles `
-  --satellite home-hub\maps\work\packs\satellite\tiles `
-  --output home-hub\maps\work\packs\aerial-composite\tiles `
-  --aerial-manifest home-hub\maps\work\packs\aerial\map_manifest.json `
-  --output-manifest home-hub\maps\work\packs\aerial-composite\map_manifest.json
+  --aerial hub\maps\work\packs\aerial\tiles `
+  --satellite hub\maps\work\packs\satellite\tiles `
+  --output hub\maps\work\packs\aerial-composite\tiles `
+  --aerial-manifest hub\maps\work\packs\aerial\map_manifest.json `
+  --output-manifest hub\maps\work\packs\aerial-composite\map_manifest.json
 ```
 
 At z15-z17 the fallback is cropped and scaled from the z14 Sentinel parent, so
@@ -271,8 +271,8 @@ bounded downloader is deliberately profile-based:
 python tools\download_home_hub_raster_tiles.py `
   --profile western-england `
   --url-template 'https://tiles.maps.eox.at/wmts/1.0.0/s2cloudless_3857/default/g/{z}/{row}/{col}.jpg' `
-  --output home-hub\maps\work\packs\satellite\tiles `
-  --manifest home-hub\maps\work\packs\satellite\map_manifest.json `
+  --output hub\maps\work\packs\satellite\tiles `
+  --manifest hub\maps\work\packs\satellite\map_manifest.json `
   --name 'BluePaws Sentinel-2 cloudless 2016/2017' `
   --attribution 'Sentinel-2 cloudless by EOX IT Services GmbH (Contains modified Copernicus Sentinel data 2016 & 2017), CC BY 4.0' `
   --source-url 'https://eox.at/2017/08/sentinel-2-global-cloudless-mosaic/'

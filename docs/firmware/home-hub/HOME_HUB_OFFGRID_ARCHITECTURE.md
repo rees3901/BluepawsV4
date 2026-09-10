@@ -129,8 +129,8 @@ radio-channel contention; see [Espressif Wi-Fi guidance](https://docs.espressif.
   slow HTTP clients, BLE scanning, and power-cycle. Phone OS captive discovery
   and long-duration RF soak remain physical-device tests, not native-test claims.
 
-Native policy tests: compile `hub/tests/wifi_failover_test.cpp` with
-`-std=c++17 -Ihub/include`. They cover the 30-second boundary, primary/secondary
+Native policy tests: compile `hub/platformio/tests/wifi_failover_test.cpp` with
+`-std=c++17 -Ihub/platformio/include`. They cover the 30-second boundary, primary/secondary
 success, outage restart, absent credentials, confirmed retry policy and millis
 wraparound. `py -3.11 -m unittest tools.test_hub_public_assets` checks ownership,
 configuration privacy and asynchronous mode API wiring.

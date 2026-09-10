@@ -3,8 +3,8 @@ tools/devices.json
 tools/devices.provision.sql
 tools/*devices*.json
 tools/*.provision.sql
-hub/include/hub_secrets.h
-home-hub/firmware/main/home_hub_secrets.h
+hub/platformio/include/hub_secrets.h
+hub/esp-idf-p4/main/home_hub_secrets.h
 collar/include/collar_secrets.h
 collar/walter/include/walter_secrets.h
 
@@ -17,13 +17,13 @@ __pycache__/
 .pio/
 
 # ESP-IDF Home Hub build artefacts and generated configuration.
-home-hub/firmware/build/
-home-hub/firmware/managed_components/
-home-hub/firmware/sdkconfig
-home-hub/firmware/sdkconfig.old
+hub/esp-idf-p4/build/
+hub/esp-idf-p4/managed_components/
+hub/esp-idf-p4/sdkconfig
+hub/esp-idf-p4/sdkconfig.old
 
 # Large local source archives and rendered Home Hub map packs.
-home-hub/maps/work/
+hub/maps/work/
 tools/protomaps-style/node_modules/
 
 # Local Supabase CLI link and runtime state.

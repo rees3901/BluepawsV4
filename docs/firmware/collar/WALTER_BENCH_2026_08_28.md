@@ -525,7 +525,7 @@ All three test commands (2,3,4) have one delivery attempt and are acknowledged.
 
 Final serial `bench on` / `status`: device1010, hub16, profileNormal, offline1,
 busy0/running0, no recurring transmissions. COM26 closed. WisMesh/COM23, hub/COM7,
-sniffer/COM11, PCB files, SIM-account settings, credentials and backend schema/
+diagnostics/t190-radio-monitor/COM11, PCB files, SIM-account settings, credentials and backend schema/
 functions were not changed. This proves the tested GNSS-to-cloud path and both
 prequeued/in-window profile commands; it is not a long-duration reliability,
 battery-life, precise-position or production provisioning certification.

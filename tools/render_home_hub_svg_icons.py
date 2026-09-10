@@ -30,7 +30,7 @@ def main() -> None:
     parser.add_argument(
         "--assets",
         type=Path,
-        default=Path("home-hub/firmware/assets/icons"),
+        default=Path("hub/esp-idf-p4/assets/icons"),
     )
     args = parser.parse_args()
     assets = args.assets.resolve()

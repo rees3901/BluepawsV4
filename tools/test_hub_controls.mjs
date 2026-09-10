@@ -112,7 +112,7 @@ function localHarness() {
       if(unreachable) throw Error('network lost');
       return {ok:true,json:async()=>({...state})};
     }});
-  vm.runInContext(readFileSync(new URL('../hub/data/hub-presence.js',import.meta.url),'utf8'),ctx);
+  vm.runInContext(readFileSync(new URL('../hub/platformio/data/hub-presence.js',import.meta.url),'utf8'),ctx);
   const panel=ctx.HubPresencePanel;
   panel.start(async(url,options)=>{
     assert.equal(url,'/api/hub-preferences');

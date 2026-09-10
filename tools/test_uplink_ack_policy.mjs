@@ -6,7 +6,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-const hub = readFileSync('hub/src/main.cpp', 'utf8').replaceAll('\r\n', '\n');
+const hub = readFileSync('hub/platformio/src/main.cpp', 'utf8').replaceAll('\r\n', '\n');
 const collar = readFileSync('collar/src/main.cpp', 'utf8').replaceAll('\r\n', '\n');
 
 const handler = hub.match(/static void handlePacket\([^]*?\n}\n\n\/\/ A receipt ACK/)[0];

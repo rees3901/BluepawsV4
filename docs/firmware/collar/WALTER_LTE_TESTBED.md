@@ -192,7 +192,7 @@ provisioning SQL. The following checklist also describes setup for another board
 which must use a different spare identity.
 
 1. Confirm the selected spare device ID and its owner/animal/hub association.
-   Follow the existing [TLV ingestion runbook](TLV_INGESTION_RUNBOOK.md) to provision
+   Follow the existing [TLV ingestion runbook](../../operations/TLV_INGESTION_RUNBOOK.md) to provision
    a **new per-device bearer token and independent 32-byte HMAC key**. Do not reuse
    collar1001/simulator credentials. Do not put a Supabase service-role/secret key
    in firmware. The existing endpoint validates its own device bearer and HMAC;
@@ -236,7 +236,7 @@ which must use a different spare identity.
    without HMAC validation). No need to send a simulator report.
 7. Compare device1010's `cellular_direct` observation in Supabase against raw bytes,
    sequence, UTC, payload hash, GNSS flags/coordinates and signature. Confirm the
-   sniffer/hub saw **no Walter LoRa packet**. A real valid fix should update its own
+   diagnostics/t190-radio-monitor/hub saw **no Walter LoRa packet**. A real valid fix should update its own
    position; a no-fix report may be accepted without a position update.
 8. Test `start`/`stop`, unplug/reboot idle behavior, independent credentials, home
    simulation and each profile cadence. Record modem firmware, SIM/RAT/APN (without
