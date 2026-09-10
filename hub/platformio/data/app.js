@@ -45,6 +45,21 @@
     var nextTemporaryPinId = 1;
     var hubMode = 'home';          // home | portable | off_grid
     var hubPortableMode = false;   // true when hub scans for BLE find beacons
+    var pendingHubMode = null;
+    var HUB_MODE_DETAILS = {
+        home: {
+            label: 'Home Hub',
+            body: 'Stops the local hotspot, prefers your primary home Wi-Fi, and resumes normal cloud relay when online. This page will disconnect as the hotspot closes.'
+        },
+        portable: {
+            label: 'Portable',
+            body: 'Prefers your saved secondary phone hotspot, keeps cloud relay available, and identifies this hub as portable.'
+        },
+        off_grid: {
+            label: 'Off-Grid',
+            body: 'Stops internet Wi-Fi attempts and starts the Bluepaws local hotspot, local dashboard, and offline operation.'
+        }
+    };
     var fallbackPollingTimer = null;
     var localHubLinkMode = false;
     var localLinkPollingTimer = null;
@@ -1681,7 +1696,7 @@
         if (awake) {
             var seconds = Math.max(0, Math.ceil(((dev.rxUntil || 0) - performance.now()) / 1000));
             awake.hidden = false;
-            awake.textContent = seconds ? '💡' : '💤';
+            awake.textContent = seconds ? '💡 ' + seconds + 's' : '💤';
             awake.className = 'collar-awake ' + (seconds ? 'awake' : 'sleeping');
             awake.title = seconds ? 'Recently heard — expected command receive window, not a guarantee of delivery' : 'Receive window ended — collar probably sleeping; sleep is not directly confirmed';
             awake.setAttribute('aria-label', seconds ? 'Recently heard; expected receive window ' + seconds + ' seconds' : 'Collar probably sleeping');
@@ -2143,15 +2158,35 @@
     // scanning for collar BLE find beacons. We poll GET /api/ble every
     // 2 seconds to get RSSI proximity data for the device cards.
     // ═══════════════════════════════════════════════
+    function requestHubMode(mode) {
+        if (!HUB_MODE_DETAILS[mode] || mode === hubMode) return;
+        pendingHubMode = mode;
+        document.getElementById('hubModeConfirmTitle').textContent =
+            'Switch to ' + HUB_MODE_DETAILS[mode].label + ' mode?';
+        document.getElementById('hubModeConfirmBody').textContent = HUB_MODE_DETAILS[mode].body;
+        document.getElementById('hubModeConfirmModal').classList.remove('hidden');
+    }
+
+    function closeHubModeConfirmation() {
+        pendingHubMode = null;
+        document.getElementById('hubModeConfirmModal').classList.add('hidden');
+    }
+
+    function confirmHubModeChange() {
+        var mode = pendingHubMode;
+        closeHubModeConfirmation();
+        if (mode) setHubMode(mode);
+    }
+
     function setHubMode(mode) {
         var leavingOffGrid = hubMode === 'off_grid' && mode !== 'off_grid';
-        if (leavingOffGrid && !window.confirm('Leave Off-Grid mode? Collar states, including Lost Alert, will not be changed.')) return;
         protectedFetch('/api/hub-mode', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: 'mode=' + mode + (leavingOffGrid ? '&confirm=true' : '')
         }).then(function (r) { return r.json(); })
           .then(function (d) {
+              if (d.error) throw new Error(d.error);
               if (d.pending) {
                   document.getElementById('hubStatus').textContent =
                       'Switching network. Leaving Off-Grid disconnects this hotspot; join the selected Wi-Fi. If neither network connects, the hotspot returns after 30 seconds.';
@@ -2172,8 +2207,9 @@
                   stopBlePolling();
               }
           })
-          .catch(function () {
-              logEvent('ERR', 'Failed to set hub mode');
+          .catch(function (error) {
+              logEvent('ERR', 'Failed to set hub mode: ' + error.message);
+              showToast('Could not switch hub mode');
           });
     }
 
@@ -2187,19 +2223,22 @@
             btnOffGrid.classList.toggle('active', hubMode === 'off_grid');
         }
 
-        // Show/hide portable banner in sidebar header
+        document.body.classList.remove('hub-mode-home', 'hub-mode-portable', 'hub-mode-off-grid');
+        document.body.classList.add('hub-mode-' + hubMode.replace('_', '-'));
+
+        // Keep a consistent, colour-coded mode indicator below the sidebar header.
         var banner = document.getElementById('portableBanner');
-        if (!banner && hubPortableMode) {
+        if (!banner) {
             banner = document.createElement('div');
             banner.id = 'portableBanner';
             banner.className = 'portable-banner';
-            banner.textContent = hubMode === 'off_grid' ? 'OFF-GRID MODE' : 'PORTABLE MODE';
             var panel = document.getElementById('panelHeader');
             if (panel) panel.after(banner);
         }
         if (banner) {
-            banner.style.display = hubPortableMode ? '' : 'none';
-            banner.textContent = hubMode === 'off_grid' ? 'OFF-GRID MODE' : 'PORTABLE MODE';
+            banner.className = 'portable-banner mode-' + hubMode.replace('_', '-');
+            banner.textContent = hubMode === 'off_grid' ? 'OFF-GRID MODE' :
+                (hubMode === 'portable' ? 'PORTABLE MODE' : 'HOME HUB MODE');
         }
     }
 
@@ -2433,9 +2472,14 @@
         document.getElementById('btnExportConsoleLog').addEventListener('click', function () {
             exportLogCsv(consoleLogData, 'bluepaws_console_' + new Date().toISOString().slice(0, 10) + '.csv');
         });
-        document.getElementById('btnHomeMode').addEventListener('click', function () { setHubMode('home'); });
-        document.getElementById('btnPortableMode').addEventListener('click', function () { setHubMode('portable'); });
-        document.getElementById('btnOffGridMode').addEventListener('click', function () { setHubMode('off_grid'); });
+        document.getElementById('btnHomeMode').addEventListener('click', function () { requestHubMode('home'); });
+        document.getElementById('btnPortableMode').addEventListener('click', function () { requestHubMode('portable'); });
+        document.getElementById('btnOffGridMode').addEventListener('click', function () { requestHubMode('off_grid'); });
+        document.getElementById('btnCancelHubMode').addEventListener('click', closeHubModeConfirmation);
+        document.getElementById('btnConfirmHubMode').addEventListener('click', confirmHubModeChange);
+        document.getElementById('hubModeConfirmModal').addEventListener('click', function (event) {
+            if (event.target === event.currentTarget) closeHubModeConfirmation();
+        });
         document.getElementById('btnSetLocalPin').addEventListener('click', function () { setLocalPin(true); });
         document.getElementById('btnDisableLocalPin').addEventListener('click', function () { setLocalPin(false); });
         document.getElementById('cfgSSID').addEventListener('input', validateConfigForm);
