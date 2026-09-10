@@ -150,9 +150,19 @@ body.panel-open #map {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    gap: 10px;
     padding: 12px 14px;
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
+}
+
+.panel-header-left {
+    display: flex;
+    min-width: 0;
+    flex: 1 1 auto;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
 }
 
 .panel-title {
@@ -163,12 +173,18 @@ body.panel-open #map {
 
 .panel-header-btns {
     display: flex;
+    align-items: center;
+    justify-content: flex-start;
     gap: 6px;
 }
 
 #deviceCards {
     flex: 1;
+    min-height: 0;
     overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+    -webkit-overflow-scrolling: touch;
     padding: 10px;
     display: flex;
     flex-direction: column;
@@ -240,6 +256,7 @@ body.panel-open .hamburger-btn {
 
 /* ── Device Card (collapsible) ── */
 .device-card {
+    flex: 0 0 auto;
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius);
@@ -260,14 +277,41 @@ body.panel-open .hamburger-btn {
     border-color: var(--accent);
 }
 
+.device-card.collar-sleeping {
+    opacity: .86;
+    filter: grayscale(.08) saturate(.72) brightness(.94);
+    background: color-mix(in srgb, var(--bg-card) 94%, #090f16);
+}
+
 .device-card.stale {
-    opacity: 0.5;
+    opacity: .56;
+    filter: grayscale(.45) saturate(.32) brightness(.86);
+}
+
+.device-card.offline {
+    opacity: .48;
+    filter: grayscale(.9) saturate(.08) brightness(.78);
+    border-color: color-mix(in srgb, var(--text-dim) 55%, var(--border));
+}
+
+.device-card.offline .card-avatar,
+.bp-marker.marker-offline {
+    filter: grayscale(1) saturate(0);
+    opacity: .52;
+}
+
+.card-offline-summary {
+    margin-top: 5px;
+    color: var(--text-dim);
+    font-size: .78rem;
+    font-weight: 650;
 }
 
 /* ── Compact summary row (always visible) ── */
 .card-summary {
     display: flex;
-    align-items: center;
+    min-height: 150px;
+    align-items: flex-start;
     gap: 8px;
     padding: 10px 12px;
 }
@@ -1091,8 +1135,7 @@ body.light .leaflet-control-scale-line {
     gap: 3px;
 }
 
-.panel-brand-mark,
-.panel-brand-mascot {
+.panel-brand-mark {
     display: block;
     flex: 0 0 auto;
     background-position: center;
@@ -1101,18 +1144,55 @@ body.light .leaflet-control-scale-line {
 }
 
 .panel-brand-mark {
-    width: 37px;
-    height: 37px;
-    background-image: url('/brand-favicon.ico');
-}
-
-.panel-brand-mascot {
-    width: 56px;
-    height: 56px;
-    background-image: url('/brand-mascot.avif');
+    width: 54px;
+    height: 44px;
+    background-image: url('/favicon.svg');
 }
 
 .panel-brand .panel-title { white-space: nowrap; }
+
+.panel-brand-mascot {
+    display: block;
+    width: 134px;
+    height: 78px;
+    margin-left: auto;
+    object-fit: contain;
+    flex: 0 0 auto;
+}
+
+.leaflet-control-layers-toggle {
+    width: 53px !important;
+    height: 53px !important;
+    background-image: none !important;
+    position: relative;
+}
+
+.leaflet-control-layers-toggle::after {
+    content: "";
+    position: absolute;
+    inset: 8px;
+    background: var(--accent);
+    -webkit-mask: url("/map-layers.png") center / contain no-repeat;
+    mask: url("/map-layers.png") center / contain no-repeat;
+}
+
+.transport-rf {
+    color: var(--accent);
+    font-weight: 800;
+    letter-spacing: .08em;
+}
+
+.appearance-editor-content { max-width: 440px; }
+.appearance-editor-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:18px; }
+.appearance-editor-eyebrow { color:var(--accent); font-size:.66rem; font-weight:800; letter-spacing:.14em; }
+.appearance-editor-close { border:0; background:transparent; color:var(--text-secondary); font-size:2rem; line-height:1; cursor:pointer; }
+.appearance-emoji-grid { display:grid; grid-template-columns:repeat(5, 1fr); gap:8px; margin-top:8px; }
+.appearance-emoji-grid button { min-height:52px; border:1px solid var(--border); border-radius:10px; background:var(--bg-primary); color:var(--text-primary); font-size:1.65rem; cursor:pointer; }
+.appearance-emoji-grid button:hover,
+.appearance-emoji-grid button.active { border-color:var(--accent); background:rgb(29 155 240 / 16%); box-shadow:0 0 0 2px rgb(29 155 240 / 14%); }
+.appearance-colour-row { display:flex; align-items:center; justify-content:space-between; gap:18px; }
+.appearance-colour-row input[type=color] { width:62px; height:44px; padding:3px; border:1px solid var(--border); border-radius:9px; background:var(--bg-primary); cursor:pointer; }
+.appearance-preview { display:flex; align-items:center; gap:12px; margin:14px 0 8px; padding:12px; border:1px solid var(--border); border-radius:10px; background:var(--bg-primary); font-weight:700; }
 
 #statusBanner.connected #statusIcon {
     animation: live-breathe 4.8s ease-in-out infinite;
@@ -1206,7 +1286,18 @@ body.light .leaflet-map-btn:focus-visible .fit-markers-icon { filter: none; }
 .card-avatar-wrap:focus-within .card-avatar-edit { opacity: 1; transform: scale(1); pointer-events: auto; }
 .device-card.expanded .card-avatar-edit { display: grid; font-size: 42px; }
 
+@media (hover: none), (pointer: coarse) {
+    .device-card.expanded .card-avatar-edit {
+        opacity: .28;
+        transform: scale(1);
+        pointer-events: auto;
+    }
+}
+
 .collar-awake { display: inline-grid; min-width: 1.5em; place-items: center; font-size: 1.5em; line-height: 1; }
+.collar-awake.awake { opacity: 1; filter: none; }
+.collar-awake.sleeping { opacity: .58; filter: grayscale(1) saturate(0) brightness(.76); }
+body.light .collar-awake.sleeping { opacity: .52; filter: grayscale(1) saturate(0) brightness(.68); }
 .device-card.stale .collar-awake { opacity: .32; filter: grayscale(1) saturate(.15); }
 
 .btn-bluetooth { position: relative; min-height: 32px; }
@@ -1250,8 +1341,15 @@ body.light .btn-bluetooth.active { border-color: #64a978; background: #d8eaf6; c
     background: var(--bg-card);
     color: var(--text-primary);
     box-shadow: 0 8px 28px rgb(0 0 0 / 30%);
-    transform: translateX(-50%);
+    opacity: 0;
+    transform: translate(-50%, 10px);
     font-size: .78rem;
+    transition: opacity .55s ease, transform .55s cubic-bezier(.22, 1, .36, 1);
+}
+
+.ui-toast.visible {
+    opacity: 1;
+    transform: translate(-50%, 0);
 }
 
 .map-context-popup .leaflet-popup-content-wrapper { min-width: 250px; }
@@ -1282,9 +1380,9 @@ body.light .btn-bluetooth.active { border-color: #64a978; background: #d8eaf6; c
 .temporary-map-pin-emoji { display: block; width: 36px; height: 42px; filter: drop-shadow(0 2px 3px rgb(0 0 0 / 55%)); font-family: 'Apple Color Emoji','Segoe UI Emoji','Noto Color Emoji',sans-serif; font-size: 34px; line-height: 40px; text-align: center; }
 
 @media (max-width: 768px) {
-    #panelHeader { flex-wrap: wrap; gap: 6px 0; padding: 10px 12px; }
-    .panel-brand { width: 100%; flex: 0 0 100%; }
-    .panel-header-btns { width: 100%; flex: 0 0 100%; align-items: center; justify-content: flex-end; }
+    #panelHeader { gap: 8px; padding: 10px 12px; }
+    .panel-header-left { gap: 6px; }
+    .panel-header-btns { align-items: center; justify-content: flex-start; }
     .map-context-actions button { min-height: 42px; padding: 9px 10px; font-size: .76rem; }
 }
 

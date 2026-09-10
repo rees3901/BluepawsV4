@@ -40,6 +40,7 @@
     var allTrailsVisible = true;
     var allTrailsButton = null;
     var toastTimer = null;
+    var toastHideTimer = null;
     var temporaryPins = new Map();
     var nextTemporaryPinId = 1;
     var hubMode = 'home';          // home | portable | off_grid
@@ -67,6 +68,40 @@
         { emoji: '\u{1F422}', color: '#84cc16', label: 'Turtle'  },
         { emoji: '\u{1F439}', color: '#ec4899', label: 'Hamster' }
     ];
+
+    const APPEARANCE_EMOJIS = [
+        '\u{1F431}', '\u{1F408}', '\u{1F63A}', '\u{1F43E}', '\u{1F436}',
+        '\u{1F430}', '\u{1F98A}', '\u{1F439}', '\u{1F422}', '\u{1F426}',
+        '\u{1F989}', '\u{1F43C}', '\u{1F981}', '\u{1F42F}', '\u{1F43A}'
+    ];
+    var localAppearances = loadLocalAppearances();
+    var appearanceEditingId = null;
+    var appearanceSelectedEmoji = '\u{1F431}';
+
+    function loadLocalAppearances() {
+        try { return JSON.parse(localStorage.getItem('bluepawsOfflineAppearances') || '{}') || {}; }
+        catch (error) { return {}; }
+    }
+
+    function saveLocalAppearances() {
+        localStorage.setItem('bluepawsOfflineAppearances', JSON.stringify(localAppearances));
+    }
+
+    function stableAvatar(deviceId) {
+        var numericId = Math.abs(Math.trunc(Number(deviceId) || 0));
+        return AVATARS[numericId % AVATARS.length];
+    }
+
+    function hubModeAvatar(mode) {
+        return mode === 'home'
+            ? { emoji: '\u{1F3E0}', color: '#22c55e', label: 'Home Hub' }
+            : { emoji: '\u{1F4F1}', color: '#06b6d4', label: 'Portable Hub' };
+    }
+
+    function validAvatarSymbol(value) {
+        var symbol = String(value || '').trim().toLowerCase();
+        return !!symbol && ['bp', 'bluepaws', 'hub', 'home'].indexOf(symbol) < 0;
+    }
 
     const TRAIL_COLORS = [
         '#1d9bf0', '#ff6b35', '#a855f7', '#22c55e',
@@ -352,9 +387,8 @@
             zoomControl: false        // We add our own zoom control below
         });
 
-        // Local map-source abstraction. The first implementation is a bundled
-        // vector skeleton and coordinate grid; a future SD source can replace
-        // it without changing marker/trail code.
+        // Start with the bundled vector skeleton so the map remains useful if
+        // the SD card is absent. P4 hubs replace it with SD-backed raster tiles.
         var SkeletonGrid = L.GridLayer.extend({
             createTile: function () {
                 var tile = document.createElement('canvas');
@@ -374,14 +408,55 @@
         var mapSources = {
             skeleton: new SkeletonGrid({ attribution: 'Bluepaws offline map', maxZoom: 19 })
         };
+        var usingSdMaps = false;
+        var fallbackCoastline = null;
         mapSources.skeleton.addTo(map);
         fetch('/basemap.json').then(function (response) { return response.json(); }).then(function (data) {
-            L.geoJSON(data, {
+            fallbackCoastline = L.geoJSON(data, {
                 style: function () {
                     return { color: '#5f8498', weight: 2, fillColor: '#b8cfad', fillOpacity: 0.52 };
                 }
-            }).addTo(map);
+            });
+            if (!usingSdMaps) fallbackCoastline.addTo(map);
         }).catch(function () { addConsoleLog('Offline coastline unavailable'); });
+
+        fetch('/api/map-layers', {cache: 'no-store'})
+            .then(function (response) {
+                if (!response.ok) throw new Error('SD map catalogue unavailable');
+                return response.json();
+            })
+            .then(function (catalogue) {
+                var layers = catalogue && Array.isArray(catalogue.layers) ? catalogue.layers : [];
+                if (!layers.length) throw new Error('No SD map packs found');
+                var baseLayers = {};
+                layers.forEach(function (source) {
+                    if (!source || !source.name || !source.url) return;
+                    baseLayers[source.name] = L.tileLayer(source.url, {
+                        minZoom: Number(source.minZoom) || 0,
+                        maxZoom: Number(source.maxZoom) || 19,
+                        tileSize: 256,
+                        noWrap: true,
+                        attribution: 'Bluepaws offline SD map'
+                    });
+                });
+                var names = Object.keys(baseLayers);
+                if (!names.length) throw new Error('No valid SD map packs found');
+                usingSdMaps = true;
+                map.removeLayer(mapSources.skeleton);
+                if (fallbackCoastline) map.removeLayer(fallbackCoastline);
+                baseLayers[names[0]].addTo(map);
+                L.control.layers(baseLayers, null, {position: 'topright'}).addTo(map);
+                map.on('baselayerchange', function (event) {
+                    var options = event.layer && event.layer.options ? event.layer.options : {};
+                    if (Number.isFinite(options.minZoom) && map.getZoom() < options.minZoom) {
+                        map.setZoom(options.minZoom);
+                    } else if (Number.isFinite(options.maxZoom) && map.getZoom() > options.maxZoom) {
+                        map.setZoom(options.maxZoom);
+                    }
+                });
+                addConsoleLog('MAP', names.length + ' SD map layer' + (names.length === 1 ? '' : 's') + ' ready');
+            })
+            .catch(function () { addConsoleLog('MAP', 'Using compact fallback map'); });
 
         // Zoom control (bottom-left to avoid hamburger overlap)
         L.control.zoom({ position: 'bottomleft' }).addTo(map);
@@ -696,16 +771,73 @@
         });
     }
 
+    function refreshAppearancePreview() {
+        var dev = devices[appearanceEditingId];
+        var preview = document.getElementById('appearancePreviewAvatar');
+        var colour = document.getElementById('appearanceColour').value;
+        preview.textContent = appearanceSelectedEmoji;
+        preview.style.borderColor = colour;
+        document.getElementById('appearancePreviewName').textContent =
+            document.getElementById('appearanceName').value.trim() ||
+            (dev && dev.data.entity === 'hub' ? 'Home Hub' : 'Collar');
+    }
+
+    function closeAppearanceEditor() {
+        document.getElementById('appearanceModal').classList.add('hidden');
+        appearanceEditingId = null;
+    }
+
     function editLocalAppearance(deviceId) {
         var dev = devices[deviceId];
         if (!dev) return;
-        if (dev.data.entity === 'hub') { HubPresencePanel.edit(); return; }
-        var name = window.prompt('Local collar name (stored only on this Home Hub)', dev.data.name || ('Device ' + deviceId));
-        if (!name) return;
-        var emoji = window.prompt('Emoji or short symbol', dev.avatar.emoji || '🐾');
-        if (!emoji) return;
-        var colour = window.prompt('Marker colour as a hex value', dev.avatar.color || '#1d9bf0');
-        if (!colour) return;
+        appearanceEditingId = deviceId;
+        appearanceSelectedEmoji = dev.avatar.emoji || stableAvatar(deviceId).emoji;
+        document.getElementById('appearanceTitle').textContent =
+            dev.data.entity === 'hub' ? 'Customise Home Hub' : 'Customise collar';
+        document.getElementById('appearanceName').value = dev.data.name || ('Device ' + deviceId);
+        document.getElementById('appearanceColour').value = dev.avatar.color || '#1d9bf0';
+        var grid = document.getElementById('appearanceEmojiGrid');
+        var choices = dev.data.entity === 'hub'
+            ? ['\u{1F4F1}', '\u{1F3E0}', '\u{1F9ED}'].concat(APPEARANCE_EMOJIS)
+            : APPEARANCE_EMOJIS;
+        grid.innerHTML = choices.map(function (emoji) {
+            return '<button type="button" role="option" data-emoji="' + emoji + '" aria-label="Use ' + emoji + '"' +
+                (emoji === appearanceSelectedEmoji ? ' class="active" aria-selected="true"' : ' aria-selected="false"') + '>' + emoji + '</button>';
+        }).join('');
+        Array.prototype.forEach.call(grid.querySelectorAll('button'), function (button) {
+            button.onclick = function () {
+                appearanceSelectedEmoji = button.getAttribute('data-emoji');
+                Array.prototype.forEach.call(grid.querySelectorAll('button'), function (candidate) {
+                    var selected = candidate === button;
+                    candidate.classList.toggle('active', selected);
+                    candidate.setAttribute('aria-selected', selected ? 'true' : 'false');
+                });
+                refreshAppearancePreview();
+            };
+        });
+        refreshAppearancePreview();
+        document.getElementById('appearanceModal').classList.remove('hidden');
+        document.getElementById('appearanceName').focus();
+    }
+
+    function saveAppearanceEditor() {
+        var deviceId = appearanceEditingId;
+        var dev = devices[deviceId];
+        if (!dev) return closeAppearanceEditor();
+        var name = document.getElementById('appearanceName').value.trim();
+        var emoji = appearanceSelectedEmoji;
+        var colour = document.getElementById('appearanceColour').value;
+        if (!name) { document.getElementById('appearanceName').focus(); return; }
+
+        localAppearances[String(deviceId)] = { name: name, emoji: emoji, colour: colour };
+        saveLocalAppearances();
+        dev.data.name = name;
+        dev.data.emoji = emoji;
+        dev.data.colour = colour;
+        dev.avatar = { emoji: emoji, color: colour, label: 'Local' };
+        updateDevice(dev.data);
+        closeAppearanceEditor();
+        showToast('Appearance saved');
 
         var body = new URLSearchParams({
             device: String(deviceId),
@@ -718,16 +850,11 @@
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: body
         }).then(function (response) {
-            if (!response.ok) throw new Error('Appearance was not saved (' + response.status + ')');
+            // P4 currently stores the override in this browser; legacy hubs also
+            // persist it device-wide through this endpoint.
+            if (!response.ok) return null;
             return response.json();
-        }).then(function (appearance) {
-            dev.data.name = appearance.name;
-            dev.data.emoji = appearance.emoji;
-            dev.data.colour = appearance.colour;
-            updateDevice(dev.data);
-        }).catch(function (error) {
-            window.alert(error.message);
-        });
+        }).catch(function () { return null; });
     }
 
     // Update the connection status indicator (in sidebar header).
@@ -766,13 +893,19 @@
     function updateDevice(data) {
         var id = data.id;
         if (id < 0 && data.entity !== 'hub') return;
+        var savedAppearance = localAppearances[String(id)];
+        if (savedAppearance) {
+            data.name = savedAppearance.name;
+            data.emoji = savedAppearance.emoji;
+            data.colour = savedAppearance.colour;
+        }
         var dev = devices[id];
 
         // First time seeing this device — create a new entry with
         // an assigned avatar emoji and trail color
         if (!dev) {
-            var av = AVATARS[avatarIndex % AVATARS.length];
-            if (data.emoji) av = { emoji: data.emoji, color: data.colour || av.color, label: 'Local' };
+            var av = data.entity === 'hub' ? hubModeAvatar(data.hub && data.hub.mode) : stableAvatar(id);
+            if (validAvatarSymbol(data.emoji)) av = { emoji: data.emoji, color: data.colour || av.color, label: 'Local' };
             else if (data.colour) av = { emoji: av.emoji, color: data.colour, label: av.label };
             var tc = TRAIL_COLORS[avatarIndex % TRAIL_COLORS.length];
             dev = {
@@ -790,7 +923,10 @@
         }
 
         dev.name = data.name || dev.name;
-        if (data.emoji) dev.avatar.emoji = data.emoji;
+        if (data.entity === 'hub' && !savedAppearance) {
+            dev.avatar = hubModeAvatar(data.hub && data.hub.mode);
+        }
+        if (validAvatarSymbol(data.emoji)) dev.avatar.emoji = data.emoji;
         if (data.colour) {
             dev.avatar.color = data.colour;
             dev.trailColor = data.colour;
@@ -867,6 +1003,8 @@
                 markerEl.style.borderColor = dev.avatar.color;
                 if (data.status === 'Home') markerEl.classList.add('status-home');
                 if (data.status === 'Lost' || data.status === 'LostTimeout' || data.status === 'LostAlert') markerEl.classList.add('status-lost');
+                if (data.entity !== 'hub') updateMarkerFreshness(dev, collarFreshness(dev,
+                    Math.max(0, Math.floor((Date.now() - dev.lastUpdate) / 1000))));
             }
 
             // ── Trail breadcrumb line ──
@@ -940,7 +1078,19 @@
         'lost':  { emoji: '\u2757\u2757', label: 'Lost', css: 'status-lost'  }
     };
     var STATUS_OFFLINE = { emoji: '\u26AB', label: 'Offline', css: 'status-offline' };
-    var OFFLINE_THRESHOLD_MS = 600000;  // Fixed 10-minute local stale threshold
+    var COLLAR_STALE_AFTER_SECONDS = 10 * 60;
+    var COLLAR_OFFLINE_AFTER_SECONDS = 4 * 60 * 60;
+
+    function collarFreshness(dev, ageSeconds) {
+        if (ageSeconds >= COLLAR_OFFLINE_AFTER_SECONDS) return 'offline';
+        if (ageSeconds >= COLLAR_STALE_AFTER_SECONDS) return 'stale';
+        return (dev.rxUntil || 0) > performance.now() ? 'active' : 'sleeping';
+    }
+
+    function updateMarkerFreshness(dev, freshness) {
+        var marker = document.getElementById('marker-' + dev.id);
+        if (marker) marker.classList.toggle('marker-offline', freshness === 'offline');
+    }
 
     function getCollarStatus(dev) {
         if (dev.data.entity === 'hub') return {
@@ -948,7 +1098,7 @@
             label: dev.data.status, css: dev.data.hub.mode === 'home' ? 'status-home' : 'status-out'
         };
         var age = Date.now() - dev.lastUpdate;
-        if (age >= OFFLINE_THRESHOLD_MS) return STATUS_OFFLINE;
+        if (age >= COLLAR_OFFLINE_AFTER_SECONDS * 1000) return STATUS_OFFLINE;
         var key = (dev.data.status || '').toLowerCase();
         if (key === 'losttimeout' || key === 'lost alert' || key === 'lost_alert') key = 'lost';
         return STATUS_MAP[key] || { emoji: '?', label: 'Unknown', css: 'status-unknown' };
@@ -1231,11 +1381,18 @@
             isNew = true;
         }
 
-        // Calculate time since last update — cards older than 10 minutes get dimmed
+        // Match the main web GUI: receive window, sleeping, stale at ten
+        // minutes, then offline after the four-hour Power Save grace period.
         var age = Math.floor((Date.now() - dev.lastUpdate) / 1000);
-        var stale = age >= (isHub ? 15 : 600); // Local hub polled every 5s; collars retain 10 minutes.
+        var freshness = isHub ? null : collarFreshness(dev, age);
+        var stale = isHub ? age >= 15 : freshness === 'stale';
+        var offline = freshness === 'offline';
+        if (offline) fault = null;
         var isExpanded = expandedCardIds.indexOf(dev.id) >= 0;
-        card.className = 'device-card' + (stale ? ' stale' : '') + (isExpanded ? ' expanded' : '');
+        card.className = 'device-card' +
+            (freshness === 'sleeping' ? ' collar-sleeping' : '') +
+            (stale ? ' stale' : '') + (offline ? ' offline' : '') +
+            (isExpanded ? ' expanded' : '');
 
         var st = getCollarStatus(dev);
         var isFollowed = (followedDeviceId === dev.id);
@@ -1272,14 +1429,14 @@
                     '<div class="card-name-row">' +
                         '<span class="card-name">' + escapeHtml(data.name) + '</span>' +
                         '<span class="card-status ' + st.css + '">' + st.emoji + ' ' + st.label + '</span>' +
-                        '<span class="card-profile ' + profileClass + '">' + profileLabel + '</span>' +
-                        (data.verification === 'pending' ? '<span class="verification-badge pending">Locally received — verification pending</span>' : '') +
+                        (offline ? '' : '<span class="card-profile ' + profileClass + '">' + profileLabel + '</span>') +
                         (data.verification === 'rejected' ? '<span class="verification-badge rejected">Rejected by cloud</span>' : '') +
                     '</div>' +
                     (fault ? '<div class="card-fault-row"><span class="error-badge" title="' + escapeHtml(fault.title) + '" aria-label="' + escapeHtml(fault.title) + '">' + escapeHtml(fault.label) + '</span></div>' : '') +
+                    (offline ? '<div class="card-offline-summary">No reports for ' + lastSeenStr + '</div>' :
                     '<div class="card-indicators">' +
                         '<span class="card-indicator-group">' + renderBatteryBars(isHub ? null : data.batt) + '</span>' +
-                        '<span class="card-indicator-group">' + (isHub ? hubSignal(data, stale) : renderSignalBars(data.rssi, data.snr)) + '</span>' +
+                        '<span class="card-indicator-group">' + (isHub ? hubSignal(data, stale) : renderSignalBars(data.rssi, data.snr) + '<span class="transport-badge transport-rf" title="Received directly from the collar by local radio">RF</span>') + '</span>' +
                         (isHub ? '' : '<span class="collar-awake" data-awake="' + dev.id + '" hidden></span>') +
                         (hubPortableMode && bleResults[dev.id] ? '<span class="card-indicator-group">' + renderBleProximity(bleResults[dev.id].rssi) + '</span>' : '') +
                     '</div>' +
@@ -1292,7 +1449,7 @@
                             ICON_STOPWATCH +
                             '<span class="card-lastseen-value">' + lastSeenStr + '</span>' +
                         '</span>' +
-                    '</div>' +
+                    '</div>') +
                 '</div>' +
                 '<span class="card-chevron">' + (isExpanded ? '&#9650;' : '&#9660;') + '</span>' +
             '</div>';
@@ -1325,7 +1482,6 @@
 
                     '<div class="log-btn-row">' +
                         '<button class="btn-device-log btn-secondary" data-logid="' + dev.id + '">Message Log</button>' +
-                        '<button class="btn-device-appearance btn-secondary" data-deviceid="' + dev.id + '">Local appearance</button>' +
                         '<button class="btn-log-export btn-export-device" data-logid="' + dev.id + '" title="Export log as CSV"><svg class="icon-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M12 4v12m0 0l-4-4m4 4l4-4"/><path d="M5 20h14"/></svg></button>' +
                     '</div>' +
                     '<div id="deviceLogPanel-' + dev.id + '" class="device-log-panel hidden">' +
@@ -1401,13 +1557,6 @@
                     window.location.href = '/api/history.csv?device=' + encodeURIComponent(did);
                 });
             }
-            var appearanceBtn = card.querySelector('.btn-device-appearance');
-            if (appearanceBtn) {
-                appearanceBtn.addEventListener('click', function (e) {
-                    e.stopPropagation();
-                    editLocalAppearance(dev.id);
-                });
-            }
         }
 
         // Sheen animation on update
@@ -1464,6 +1613,7 @@
             var seconds = Math.max(0, Math.ceil(((dev.rxUntil || 0) - performance.now()) / 1000));
             awake.hidden = false;
             awake.textContent = seconds ? '💡' : '💤';
+            awake.className = 'collar-awake ' + (seconds ? 'awake' : 'sleeping');
             awake.title = seconds ? 'Recently heard — expected command receive window, not a guarantee of delivery' : 'Receive window ended — collar probably sleeping; sleep is not directly confirmed';
             awake.setAttribute('aria-label', seconds ? 'Recently heard; expected receive window ' + seconds + ' seconds' : 'Collar probably sleeping');
         }
@@ -1491,9 +1641,16 @@
             var dev = devices[id], card = document.getElementById('card-' + dev.id);
             if (!card) continue;
             var age = Math.max(0, Math.floor((Date.now() - dev.lastUpdate) / 1000));
-            var stale = age >= (dev.data.entity === 'hub' ? 15 : 600);
-            if (dev.data.entity === 'hub' && card.classList.contains('stale') !== stale) {
-                renderDeviceCard(dev); // Update signal/buttons once when contact becomes overdue.
+            var isHub = dev.data.entity === 'hub';
+            var stale = age >= (isHub ? 15 : COLLAR_STALE_AFTER_SECONDS);
+            var freshness = isHub ? null : collarFreshness(dev, age);
+            var freshnessChanged = !isHub &&
+                (card.classList.contains('collar-sleeping') !== (freshness === 'sleeping') ||
+                 card.classList.contains('stale') !== (freshness === 'stale') ||
+                 card.classList.contains('offline') !== (freshness === 'offline'));
+            if ((isHub && card.classList.contains('stale') !== stale) || freshnessChanged) {
+                if (!isHub) updateMarkerFreshness(dev, freshness);
+                renderDeviceCard(dev); // Re-render only when a lifecycle boundary is crossed.
                 continue;
             }
             card.classList.toggle('stale', stale);
@@ -1589,9 +1746,20 @@
         var toast = document.getElementById('uiToast');
         if (!toast) return;
         window.clearTimeout(toastTimer);
+        window.clearTimeout(toastHideTimer);
         toast.textContent = message;
+        toast.classList.remove('visible');
         toast.classList.remove('hidden');
-        toastTimer = window.setTimeout(function () { toast.classList.add('hidden'); }, 2200);
+        // Restart the entrance transition even when a second notification
+        // replaces one that is already visible.
+        void toast.offsetWidth;
+        window.requestAnimationFrame(function () { toast.classList.add('visible'); });
+        toastTimer = window.setTimeout(function () {
+            toast.classList.remove('visible');
+            toastHideTimer = window.setTimeout(function () {
+                toast.classList.add('hidden');
+            }, 700);
+        }, 4400);
     }
 
     function copyText(value) {
@@ -2205,6 +2373,14 @@
         document.getElementById('findLedEnabled').addEventListener('change', updateFindToggles);
         document.getElementById('findDurUp').addEventListener('click', function () { adjustFindDuration(1); });
         document.getElementById('findDurDown').addEventListener('click', function () { adjustFindDuration(-1); });
+        document.getElementById('btnCloseAppearance').addEventListener('click', closeAppearanceEditor);
+        document.getElementById('btnCancelAppearance').addEventListener('click', closeAppearanceEditor);
+        document.getElementById('btnSaveAppearance').addEventListener('click', saveAppearanceEditor);
+        document.getElementById('appearanceName').addEventListener('input', refreshAppearancePreview);
+        document.getElementById('appearanceColour').addEventListener('input', refreshAppearancePreview);
+        document.getElementById('appearanceModal').addEventListener('click', function (event) {
+            if (event.target === event.currentTarget) closeAppearanceEditor();
+        });
 
         // After sidebar CSS transition completes, tell Leaflet to recalculate map size
         setTimeout(function () { map.invalidateSize(); }, 350);

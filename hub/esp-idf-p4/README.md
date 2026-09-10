@@ -50,8 +50,32 @@ configured uplink before starting the automatic local-AP fallback. The fallback
 continues probing known uplinks and closes after one reconnects. Manually
 selecting Off-Grid is separate: it starts the AP immediately, disables station
 reconnects and remains selected until the user chooses another mode.
+The selected Home or Portable profile also remains the hub's displayed/map
+identity if recovery temporarily uses the other configured SSID; the active
+uplink is connectivity state and does not silently rewrite explicit user state.
 Passwords remain in local NVS, are masked in the UI, and are never copied to SD
 or written to the serial log.
+
+The P4 now also packages the proven static off-grid dashboard from `hub/data`
+into its 7 MB `storage` SPIFFS partition. When the hub's access point is active,
+clients can open `http://192.168.4.1`; common Android, Apple and Windows captive
+portal probes are redirected to the local welcome page. The dashboard is
+advertised as `http://bluepaws.local/` using a lightweight mDNS responder. The
+P4 also advertises `/welcome` with DHCP captive-portal option 114
+and answers wildcard IPv4 DNS locally. This lets Windows NCSI reach its HTTP probe
+without waiting for public DNS to time out on the intentionally offline network.
+The first compatibility milestone serves live P4 collar snapshots and hub/network
+status. It deliberately
+reports collar commands, history export, configuration writes and Bluetooth as
+unavailable until the SX1262/GNSS daughterboard and the crash-safe P4 journal are
+connected. Server-sent events also fall back to the dashboard's established
+10-second device polling path. No Wi-Fi passwords, gateway credentials or journal
+records are included in the SPIFFS image or exposed as static files.
+The browser map discovers the installed map packs through `/api/map-layers` and
+streams only validated XYZ JPEG tile requests from the SD card. OpenStreetMap,
+Ordnance Survey, Satellite and Aerial use the same directories and zoom limits
+as the touchscreen map; unavailable packs are omitted and the compact bundled
+coastline/grid remains the fallback when no supported pack is present.
 
 The launcher **Camera** page starts the fitted 2 MP OV02C10 through the
 ESP32-P4's two-lane MIPI-CSI/ISP path and shows a 432 x 432 colour RGB565
