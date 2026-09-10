@@ -572,9 +572,13 @@ void refresh_map_tiles(UiState &ui)
 
 const lv_image_dsc_t *battery_icon(uint8_t percent)
 {
-    return percent >= 85 ? &bluepaws::ui::icon_battery_full
-        : (percent >= 60 ? &bluepaws::ui::icon_battery_medium
-        : (percent >= 20 ? &bluepaws::ui::icon_battery_low
+    // Keep the four-state physical display aligned with the percentage bands
+    // used by the main web GUI.  In particular, a half-full battery must not
+    // use the red low-battery artwork, and the warning icon is reserved for a
+    // genuinely critical battery.
+    return percent >= 70 ? &bluepaws::ui::icon_battery_full
+        : (percent >= 40 ? &bluepaws::ui::icon_battery_medium
+        : (percent >= 15 ? &bluepaws::ui::icon_battery_low
                          : &bluepaws::ui::icon_battery_error));
 }
 

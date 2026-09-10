@@ -1159,11 +1159,17 @@ body.light .leaflet-control-scale-line {
 .leaflet-control-layers-toggle {
     width: 53px !important;
     height: 53px !important;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Cg fill='none' stroke='%231d9bf0' stroke-width='3' stroke-linejoin='round'%3E%3Cpath d='M8 12l19-7 13 7-19 7z'/%3E%3Cpath d='M8 21l13 7 19-7'/%3E%3Cpath d='M8 30l13 7 19-7'/%3E%3C/g%3E%3C/svg%3E") !important;
-    background-position: center !important;
-    background-repeat: no-repeat !important;
-    background-size: 36px 36px !important;
+    background-image: none !important;
     position: relative;
+}
+
+.leaflet-control-layers-toggle::after {
+    content: "";
+    position: absolute;
+    inset: 8px;
+    background: var(--accent);
+    -webkit-mask: url("/map-layers.png") center / contain no-repeat;
+    mask: url("/map-layers.png") center / contain no-repeat;
 }
 
 .transport-rf {
