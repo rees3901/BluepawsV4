@@ -4,7 +4,7 @@ Status: working design, suitable for prototype firmware.
 
 Hardware target: RAKwireless RAK4631/WisMesh Board 1 testbed using the RAK4630 module family: Nordic nRF52840 MCU, Semtech SX1262 LoRa radio, BLE, and an external LTE/GNSS modem path for the final collar design.
 
-PlatformIO note: the `collar` environment now uses the `wiscore_rak4631` board definition. Because that board is not always bundled with PlatformIO's default Nordic platform install, the repo carries the small RAKwireless board/variant support files under `rakwireless/`. These are project-local board-support files, not Bluepaws protocol code.
+PlatformIO note: the `collar` environment now uses the `wiscore_rak4631` board definition. Because that board is not always bundled with PlatformIO's default Nordic platform install, the repo carries the small RAKwireless board/variant support files under `boards/`. These are project-local board-support files, not BluePaws protocol code.
 
 ## Terminology
 
