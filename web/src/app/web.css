@@ -506,8 +506,12 @@ button#statusBanner {
 }
 
 .panel-status-row {
+  display: flex;
   width: 100%;
   flex: 0 0 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .panel-brand {
@@ -515,11 +519,12 @@ button#statusBanner {
   flex: 0 0 100%;
 }
 
-.panel-header-btns {
-  width: 100%;
-  flex: 0 0 100%;
+.panel-header-actions {
+  display: flex;
+  flex: 0 0 auto;
   align-items: center;
-  justify-content: flex-end;
+  gap: 6px;
+  margin-left: auto;
 }
 
 @media (max-width: 768px) {
