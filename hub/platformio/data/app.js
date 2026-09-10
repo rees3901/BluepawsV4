@@ -1248,7 +1248,8 @@
         return '<span class="label">Hub ID</span><span class="value">' + escapeHtml(data.hub.gateway_guid16) + '</span>' +
             '<span class="label">Reporting profile</span><span class="value">' + escapeHtml(({power_save:'Power Save',normal:'Normal',active:'Active'})[data.hub.reporting_profile] || 'Normal') + '</span>' +
             '<span class="label">GPS fix</span><span class="value">' +
-            (data.hasGps ? escapeHtml(data.hub.fix_age_s) + 's old' : 'Not acquired') + '</span>' +
+            (data.hub.position_source === 'starter' ? 'Starter location' :
+                (data.hasGps ? escapeHtml(data.hub.fix_age_s) + 's old' : 'Not acquired')) + '</span>' +
             '<span class="label">Home beacon</span><span class="value">' +
             (data.hub.ble_advertising ? 'Advertising' : 'Off') + '</span>';
     }

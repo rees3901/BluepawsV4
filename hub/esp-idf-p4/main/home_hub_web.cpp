@@ -1,6 +1,7 @@
 #include "home_hub_web.h"
 
 #include "bluepaws/hub_settings.h"
+#include "home_hub_defaults.h"
 
 #include "cJSON.h"
 #include "esp_heap_caps.h"
@@ -245,8 +246,9 @@ esp_err_t hub_presence_handler(httpd_req_t *request)
     cJSON_AddStringToObject(json, "display_name", "Home Hub");
     cJSON_AddStringToObject(json, "mode", mode_name(state.cloud.effective_mode));
     cJSON_AddStringToObject(json, "reporting_profile", "normal");
-    cJSON_AddNullToObject(json, "latitude");
-    cJSON_AddNullToObject(json, "longitude");
+    cJSON_AddNumberToObject(json, "latitude", defaults::kStarterLocation.latitude);
+    cJSON_AddNumberToObject(json, "longitude", defaults::kStarterLocation.longitude);
+    cJSON_AddStringToObject(json, "position_source", "starter");
     cJSON_AddNullToObject(json, "fix_age_s");
     cJSON_AddNullToObject(json, "wifi_rssi_dbm");
     cJSON_AddBoolToObject(json, "ble_advertising", false);
