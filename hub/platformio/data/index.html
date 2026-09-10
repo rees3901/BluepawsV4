@@ -10,7 +10,7 @@
     <link rel="stylesheet" href="/leaflet.css">
 
     <!-- Our custom styles (served from hub's LittleFS flash) -->
-    <link rel="stylesheet" href="/style.css">
+    <link rel="stylesheet" href="/style.css?v=20260910-offgrid-ui2">
     <link rel="stylesheet" href="/hub-presence.css">
 
     <!-- Safety net: ensure modals stay hidden even if CSS fails to load -->
@@ -41,7 +41,6 @@
             <div class="panel-brand" aria-label="Bluepaws V4">
                 <span class="panel-brand-mark" aria-hidden="true"></span>
                 <span class="panel-title">Bluepaws V4</span>
-                <span class="panel-brand-mascot" aria-hidden="true"></span>
             </div>
             <div class="panel-header-btns">
                 <span id="statusBanner" class="disconnected">
@@ -219,6 +218,43 @@
         </div>
     </div>
 
+    <!-- Offline appearance editor — deliberately self-contained (no cloud/CDN). -->
+    <div id="appearanceModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="appearanceTitle">
+        <div class="modal-content appearance-editor-content">
+            <div class="appearance-editor-heading">
+                <div>
+                    <span class="appearance-editor-eyebrow">OFFLINE APPEARANCE</span>
+                    <h2 id="appearanceTitle">Customise collar</h2>
+                </div>
+                <button id="btnCloseAppearance" class="appearance-editor-close" type="button" aria-label="Close">&times;</button>
+            </div>
+            <div class="form-group">
+                <label for="appearanceName">Display name</label>
+                <input id="appearanceName" type="text" maxlength="32" autocomplete="off">
+            </div>
+            <div class="form-group">
+                <label>Animal avatar</label>
+                <div id="appearanceEmojiGrid" class="appearance-emoji-grid" role="listbox" aria-label="Animal avatar"></div>
+            </div>
+            <div class="form-group appearance-colour-row">
+                <div>
+                    <label for="appearanceColour">Marker colour</label>
+                    <small class="form-hint">Used for the map marker and trail.</small>
+                </div>
+                <input id="appearanceColour" type="color" value="#1d9bf0" aria-label="Marker colour">
+            </div>
+            <div class="appearance-preview" aria-label="Avatar preview">
+                <span id="appearancePreviewAvatar" class="card-avatar">🐱</span>
+                <span id="appearancePreviewName">Collar</span>
+            </div>
+            <p class="form-hint">Saved on this browser and, where supported, on the Home Hub.</p>
+            <div class="modal-actions">
+                <button id="btnSaveAppearance" class="btn-primary" type="button">Save appearance</button>
+                <button id="btnCancelAppearance" class="btn-secondary" type="button">Cancel</button>
+            </div>
+        </div>
+    </div>
+
     <div id="connectionAvailable" class="connection-prompt hidden">
         <strong>Connection available</strong>
         <span>A known Wi-Fi network is reachable. Off-Grid remains active until you choose to leave it.</span>
@@ -232,6 +268,6 @@
     <!-- Our app — served from hub's LittleFS flash -->
     <script src="feedback.js"></script>
     <script src="hub-presence.js"></script>
-    <script src="app.js"></script>
+    <script src="app.js?v=20260910-offgrid-ui2"></script>
 </body>
 </html>

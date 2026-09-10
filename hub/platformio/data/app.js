@@ -68,6 +68,33 @@
         { emoji: '\u{1F439}', color: '#ec4899', label: 'Hamster' }
     ];
 
+    const APPEARANCE_EMOJIS = [
+        '\u{1F431}', '\u{1F408}', '\u{1F63A}', '\u{1F43E}', '\u{1F436}',
+        '\u{1F430}', '\u{1F98A}', '\u{1F439}', '\u{1F422}', '\u{1F426}',
+        '\u{1F989}', '\u{1F43C}', '\u{1F981}', '\u{1F42F}', '\u{1F43A}'
+    ];
+    var localAppearances = loadLocalAppearances();
+    var appearanceEditingId = null;
+    var appearanceSelectedEmoji = '\u{1F431}';
+
+    function loadLocalAppearances() {
+        try { return JSON.parse(localStorage.getItem('bluepawsOfflineAppearances') || '{}') || {}; }
+        catch (error) { return {}; }
+    }
+
+    function saveLocalAppearances() {
+        localStorage.setItem('bluepawsOfflineAppearances', JSON.stringify(localAppearances));
+    }
+
+    function stableAvatar(deviceId) {
+        var numericId = Math.abs(Math.trunc(Number(deviceId) || 0));
+        return AVATARS[numericId % AVATARS.length];
+    }
+
+    function validAvatarSymbol(value) {
+        return !!value && value !== 'BP' && value !== 'Bluepaws';
+    }
+
     const TRAIL_COLORS = [
         '#1d9bf0', '#ff6b35', '#a855f7', '#22c55e',
         '#f97316', '#06b6d4', '#84cc16', '#ec4899'
@@ -736,16 +763,67 @@
         });
     }
 
+    function refreshAppearancePreview() {
+        var preview = document.getElementById('appearancePreviewAvatar');
+        var colour = document.getElementById('appearanceColour').value;
+        preview.textContent = appearanceSelectedEmoji;
+        preview.style.borderColor = colour;
+        document.getElementById('appearancePreviewName').textContent =
+            document.getElementById('appearanceName').value.trim() || 'Collar';
+    }
+
+    function closeAppearanceEditor() {
+        document.getElementById('appearanceModal').classList.add('hidden');
+        appearanceEditingId = null;
+    }
+
     function editLocalAppearance(deviceId) {
         var dev = devices[deviceId];
         if (!dev) return;
         if (dev.data.entity === 'hub') { HubPresencePanel.edit(); return; }
-        var name = window.prompt('Local collar name (stored only on this Home Hub)', dev.data.name || ('Device ' + deviceId));
-        if (!name) return;
-        var emoji = window.prompt('Emoji or short symbol', dev.avatar.emoji || '🐾');
-        if (!emoji) return;
-        var colour = window.prompt('Marker colour as a hex value', dev.avatar.color || '#1d9bf0');
-        if (!colour) return;
+        appearanceEditingId = deviceId;
+        appearanceSelectedEmoji = dev.avatar.emoji || stableAvatar(deviceId).emoji;
+        document.getElementById('appearanceName').value = dev.data.name || ('Device ' + deviceId);
+        document.getElementById('appearanceColour').value = dev.avatar.color || '#1d9bf0';
+        var grid = document.getElementById('appearanceEmojiGrid');
+        grid.innerHTML = APPEARANCE_EMOJIS.map(function (emoji) {
+            return '<button type="button" role="option" data-emoji="' + emoji + '" aria-label="Use ' + emoji + '"' +
+                (emoji === appearanceSelectedEmoji ? ' class="active" aria-selected="true"' : ' aria-selected="false"') + '>' + emoji + '</button>';
+        }).join('');
+        Array.prototype.forEach.call(grid.querySelectorAll('button'), function (button) {
+            button.onclick = function () {
+                appearanceSelectedEmoji = button.getAttribute('data-emoji');
+                Array.prototype.forEach.call(grid.querySelectorAll('button'), function (candidate) {
+                    var selected = candidate === button;
+                    candidate.classList.toggle('active', selected);
+                    candidate.setAttribute('aria-selected', selected ? 'true' : 'false');
+                });
+                refreshAppearancePreview();
+            };
+        });
+        refreshAppearancePreview();
+        document.getElementById('appearanceModal').classList.remove('hidden');
+        document.getElementById('appearanceName').focus();
+    }
+
+    function saveAppearanceEditor() {
+        var deviceId = appearanceEditingId;
+        var dev = devices[deviceId];
+        if (!dev) return closeAppearanceEditor();
+        var name = document.getElementById('appearanceName').value.trim();
+        var emoji = appearanceSelectedEmoji;
+        var colour = document.getElementById('appearanceColour').value;
+        if (!name) { document.getElementById('appearanceName').focus(); return; }
+
+        localAppearances[String(deviceId)] = { name: name, emoji: emoji, colour: colour };
+        saveLocalAppearances();
+        dev.data.name = name;
+        dev.data.emoji = emoji;
+        dev.data.colour = colour;
+        dev.avatar = { emoji: emoji, color: colour, label: 'Local' };
+        updateDevice(dev.data);
+        closeAppearanceEditor();
+        showToast('Appearance saved');
 
         var body = new URLSearchParams({
             device: String(deviceId),
@@ -758,16 +836,11 @@
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: body
         }).then(function (response) {
-            if (!response.ok) throw new Error('Appearance was not saved (' + response.status + ')');
+            // P4 currently stores the override in this browser; legacy hubs also
+            // persist it device-wide through this endpoint.
+            if (!response.ok) return null;
             return response.json();
-        }).then(function (appearance) {
-            dev.data.name = appearance.name;
-            dev.data.emoji = appearance.emoji;
-            dev.data.colour = appearance.colour;
-            updateDevice(dev.data);
-        }).catch(function (error) {
-            window.alert(error.message);
-        });
+        }).catch(function () { return null; });
     }
 
     // Update the connection status indicator (in sidebar header).
@@ -806,13 +879,19 @@
     function updateDevice(data) {
         var id = data.id;
         if (id < 0 && data.entity !== 'hub') return;
+        var savedAppearance = localAppearances[String(id)];
+        if (savedAppearance && data.entity !== 'hub') {
+            data.name = savedAppearance.name;
+            data.emoji = savedAppearance.emoji;
+            data.colour = savedAppearance.colour;
+        }
         var dev = devices[id];
 
         // First time seeing this device — create a new entry with
         // an assigned avatar emoji and trail color
         if (!dev) {
-            var av = AVATARS[avatarIndex % AVATARS.length];
-            if (data.emoji) av = { emoji: data.emoji, color: data.colour || av.color, label: 'Local' };
+            var av = data.entity === 'hub' ? AVATARS[0] : stableAvatar(id);
+            if (validAvatarSymbol(data.emoji)) av = { emoji: data.emoji, color: data.colour || av.color, label: 'Local' };
             else if (data.colour) av = { emoji: av.emoji, color: data.colour, label: av.label };
             var tc = TRAIL_COLORS[avatarIndex % TRAIL_COLORS.length];
             dev = {
@@ -830,7 +909,7 @@
         }
 
         dev.name = data.name || dev.name;
-        if (data.emoji) dev.avatar.emoji = data.emoji;
+        if (validAvatarSymbol(data.emoji)) dev.avatar.emoji = data.emoji;
         if (data.colour) {
             dev.avatar.color = data.colour;
             dev.trailColor = data.colour;
@@ -1313,13 +1392,12 @@
                         '<span class="card-name">' + escapeHtml(data.name) + '</span>' +
                         '<span class="card-status ' + st.css + '">' + st.emoji + ' ' + st.label + '</span>' +
                         '<span class="card-profile ' + profileClass + '">' + profileLabel + '</span>' +
-                        (data.verification === 'pending' ? '<span class="verification-badge pending">Locally received — verification pending</span>' : '') +
                         (data.verification === 'rejected' ? '<span class="verification-badge rejected">Rejected by cloud</span>' : '') +
                     '</div>' +
                     (fault ? '<div class="card-fault-row"><span class="error-badge" title="' + escapeHtml(fault.title) + '" aria-label="' + escapeHtml(fault.title) + '">' + escapeHtml(fault.label) + '</span></div>' : '') +
                     '<div class="card-indicators">' +
                         '<span class="card-indicator-group">' + renderBatteryBars(isHub ? null : data.batt) + '</span>' +
-                        '<span class="card-indicator-group">' + (isHub ? hubSignal(data, stale) : renderSignalBars(data.rssi, data.snr)) + '</span>' +
+                        '<span class="card-indicator-group">' + (isHub ? hubSignal(data, stale) : renderSignalBars(data.rssi, data.snr) + '<span class="transport-badge transport-rf" title="Received directly from the collar by local radio">RF</span>') + '</span>' +
                         (isHub ? '' : '<span class="collar-awake" data-awake="' + dev.id + '" hidden></span>') +
                         (hubPortableMode && bleResults[dev.id] ? '<span class="card-indicator-group">' + renderBleProximity(bleResults[dev.id].rssi) + '</span>' : '') +
                     '</div>' +
@@ -2245,6 +2323,14 @@
         document.getElementById('findLedEnabled').addEventListener('change', updateFindToggles);
         document.getElementById('findDurUp').addEventListener('click', function () { adjustFindDuration(1); });
         document.getElementById('findDurDown').addEventListener('click', function () { adjustFindDuration(-1); });
+        document.getElementById('btnCloseAppearance').addEventListener('click', closeAppearanceEditor);
+        document.getElementById('btnCancelAppearance').addEventListener('click', closeAppearanceEditor);
+        document.getElementById('btnSaveAppearance').addEventListener('click', saveAppearanceEditor);
+        document.getElementById('appearanceName').addEventListener('input', refreshAppearancePreview);
+        document.getElementById('appearanceColour').addEventListener('input', refreshAppearancePreview);
+        document.getElementById('appearanceModal').addEventListener('click', function (event) {
+            if (event.target === event.currentTarget) closeAppearanceEditor();
+        });
 
         // After sidebar CSS transition completes, tell Leaflet to recalculate map size
         setTimeout(function () { map.invalidateSize(); }, 350);

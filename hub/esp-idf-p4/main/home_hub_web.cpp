@@ -109,11 +109,10 @@ void add_device_json(cJSON *array, const CatRecord &cat)
     cJSON *item = cJSON_CreateObject();
     cJSON_AddNumberToObject(item, "id", cat.device_id);
     cJSON_AddStringToObject(item, "name", cat.name[0] == '\0' ? "Collar" : cat.name);
-    cJSON_AddStringToObject(item, "emoji",
-                            cat.appearance.emoji[0] == '\0' ? "BP" : cat.appearance.emoji);
-    cJSON_AddStringToObject(item, "colour",
-                            cat.appearance.marker_colour[0] == '\0'
-                                ? "#1d9bf0" : cat.appearance.marker_colour);
+    // Empty means the offline UI assigns a stable, device-specific animal avatar.
+    // "BP" used to make every unconfigured collar look identical.
+    cJSON_AddStringToObject(item, "emoji", cat.appearance.emoji);
+    cJSON_AddStringToObject(item, "colour", cat.appearance.marker_colour);
     cJSON_AddNumberToObject(item, "seq", cat.latest.sequence);
     cJSON_AddNumberToObject(item, "time", cat.latest.observed_at);
     cJSON_AddStringToObject(item, "status", status_name(cat.latest.status_code));
@@ -347,12 +346,15 @@ esp_err_t serve_file(httpd_req_t *request, const char *uri)
     FILE *file = std::fopen(path, "rb");
     if (file == nullptr) return httpd_resp_send_err(request, HTTPD_404_NOT_FOUND, "Not found");
     httpd_resp_set_type(request, content_type(uri));
+    const char *extension = std::strrchr(uri, '.');
+    const bool live_ui_asset = extension != nullptr &&
+        (std::strcmp(extension, ".html") == 0 ||
+         std::strcmp(extension, ".css") == 0 ||
+         std::strcmp(extension, ".js") == 0);
+    // The hub UI is flashed frequently during development. Never let an old
+    // stylesheet survive a firmware update and make new markup look broken.
     httpd_resp_set_hdr(request, "Cache-Control",
-                       std::strcmp(uri, "/index.html") == 0 ||
-                       std::strcmp(uri, "/welcome.html") == 0 ||
-                       std::strcmp(uri, "/app.js") == 0 ||
-                       std::strcmp(uri, "/welcome.js") == 0
-                           ? "no-store" : "public, max-age=86400");
+                       live_ui_asset ? "no-store" : "public, max-age=86400");
     char buffer[2048];
     std::size_t count = 0;
     esp_err_t result = ESP_OK;
@@ -435,8 +437,20 @@ esp_err_t captive_handler(httpd_req_t *request)
 
 esp_err_t wildcard_handler(httpd_req_t *request)
 {
-    if (public_path(request->uri)) return serve_file(request, request->uri);
-    if (std::strncmp(request->uri, "/tiles/", 7) == 0) return serve_map_tile(request);
+    // HTTPD leaves the query string in request->uri. Strip it before matching
+    // static files so cache-busting URLs such as style.css?v=... still resolve.
+    char uri[192]{};
+    const char *query = std::strchr(request->uri, '?');
+    const std::size_t length = query == nullptr
+        ? std::strlen(request->uri)
+        : static_cast<std::size_t>(query - request->uri);
+    if (length >= sizeof(uri)) {
+        return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "URI too long");
+    }
+    std::memcpy(uri, request->uri, length);
+    uri[length] = '\0';
+    if (public_path(uri)) return serve_file(request, uri);
+    if (std::strncmp(uri, "/tiles/", 7) == 0) return serve_map_tile(request);
     return httpd_resp_send_err(request, HTTPD_404_NOT_FOUND, "Not found");
 }
 
