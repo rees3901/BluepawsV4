@@ -135,6 +135,7 @@ void add_device_json(cJSON *array, const CatRecord &cat)
     const uint32_t age = now_ms >= cat.latest.received_at_ms
         ? (now_ms - cat.latest.received_at_ms) / 1000U : 0;
     cJSON_AddNumberToObject(item, "age", age);
+    cJSON_AddNumberToObject(item, "rxWindowMs", age >= 10U ? 0U : (10U - age) * 1000U);
     cJSON_AddBoolToObject(item, "stale", age >= 600U);
     cJSON_AddNumberToObject(item, "localId", cat.latest.revision);
     cJSON_AddNumberToObject(item, "gatewayRxTime", cat.latest.observed_at);

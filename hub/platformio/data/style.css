@@ -271,8 +271,34 @@ body.panel-open .hamburger-btn {
     border-color: var(--accent);
 }
 
+.device-card.collar-sleeping {
+    opacity: .86;
+    filter: grayscale(.08) saturate(.72) brightness(.94);
+    background: color-mix(in srgb, var(--bg-card) 94%, #090f16);
+}
+
 .device-card.stale {
-    opacity: 0.5;
+    opacity: .56;
+    filter: grayscale(.45) saturate(.32) brightness(.86);
+}
+
+.device-card.offline {
+    opacity: .48;
+    filter: grayscale(.9) saturate(.08) brightness(.78);
+    border-color: color-mix(in srgb, var(--text-dim) 55%, var(--border));
+}
+
+.device-card.offline .card-avatar,
+.bp-marker.marker-offline {
+    filter: grayscale(1) saturate(0);
+    opacity: .52;
+}
+
+.card-offline-summary {
+    margin-top: 5px;
+    color: var(--text-dim);
+    font-size: .78rem;
+    font-weight: 650;
 }
 
 /* ── Compact summary row (always visible) ── */
@@ -1121,25 +1147,24 @@ body.light .leaflet-control-scale-line {
 
 .panel-brand .panel-title { white-space: nowrap; }
 
+.panel-brand-mascot {
+    display: block;
+    width: 96px;
+    height: 56px;
+    margin-left: auto;
+    object-fit: contain;
+    flex: 0 0 auto;
+}
+
 .leaflet-control-layers-toggle {
     width: 53px !important;
     height: 53px !important;
-    background-image: none !important;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Cg fill='none' stroke='%231d9bf0' stroke-width='3' stroke-linejoin='round'%3E%3Cpath d='M8 12l19-7 13 7-19 7z'/%3E%3Cpath d='M8 21l13 7 19-7'/%3E%3Cpath d='M8 30l13 7 19-7'/%3E%3C/g%3E%3C/svg%3E") !important;
+    background-position: center !important;
+    background-repeat: no-repeat !important;
+    background-size: 36px 36px !important;
     position: relative;
 }
-.leaflet-control-layers-toggle::before,
-.leaflet-control-layers-toggle::after {
-    content: '';
-    position: absolute;
-    left: 15px;
-    width: 23px;
-    height: 15px;
-    border: 2px solid var(--accent);
-    border-radius: 3px;
-    transform: skewY(-18deg) rotate(-8deg);
-}
-.leaflet-control-layers-toggle::before { top: 13px; background: rgb(29 155 240 / 28%); }
-.leaflet-control-layers-toggle::after { top: 22px; background: var(--bg-card); }
 
 .transport-rf {
     color: var(--accent);
@@ -1260,6 +1285,9 @@ body.light .leaflet-map-btn:focus-visible .fit-markers-icon { filter: none; }
 }
 
 .collar-awake { display: inline-grid; min-width: 1.5em; place-items: center; font-size: 1.5em; line-height: 1; }
+.collar-awake.awake { opacity: 1; filter: none; }
+.collar-awake.sleeping { opacity: .58; filter: grayscale(1) saturate(0) brightness(.76); }
+body.light .collar-awake.sleeping { opacity: .52; filter: grayscale(1) saturate(0) brightness(.68); }
 .device-card.stale .collar-awake { opacity: .32; filter: grayscale(1) saturate(.15); }
 
 .btn-bluetooth { position: relative; min-height: 32px; }
