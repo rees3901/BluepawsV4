@@ -1039,13 +1039,21 @@
             if (!dev.marker) {
                 // First GPS fix for this device — create a map marker
                 // using a custom div icon with the device's emoji avatar
+                var isHubMarker = data.entity === 'hub';
                 var icon = L.divIcon({
                     className: '',
-                    html: '<div class="bp-marker" id="marker-' + id + '" style="border-color:' + escapeHtml(dev.avatar.color) + '">' + escapeHtml(dev.avatar.emoji) + '</div>',
+                    html: '<div class="bp-marker' + (isHubMarker ? ' marker-hub' : '') + '" id="marker-' + id + '" style="border-color:' + escapeHtml(dev.avatar.color) + '">' + escapeHtml(dev.avatar.emoji) + '</div>',
                     iconSize: [32, 32],
                     iconAnchor: [16, 16]  // Center the icon on the position
                 });
-                dev.marker = L.marker(latlng, { icon: icon }).addTo(map);
+                dev.marker = L.marker(latlng, {
+                    icon: icon,
+                    // The hub is the map anchor. Keep it visible if a collar has
+                    // the same starter coordinates or later crosses its position.
+                    zIndexOffset: isHubMarker ? 600 : 0,
+                    riseOnHover: true,
+                    riseOffset: isHubMarker ? 900 : 250
+                }).addTo(map);
                 dev.marker.bindPopup('', { minWidth: 240, autoPanPadding: [20, 20] });
 
                 // If this is the first device ever, auto-zoom to it
@@ -1094,7 +1102,7 @@
             // Apply status-based marker styles (green border for home, red pulse for lost)
             var markerEl = document.getElementById('marker-' + id);
             if (markerEl) {
-                markerEl.className = 'bp-marker';
+                markerEl.className = 'bp-marker' + (data.entity === 'hub' ? ' marker-hub' : '');
                 markerEl.textContent = dev.avatar.emoji;
                 markerEl.style.borderColor = dev.avatar.color;
                 if (data.status === 'Home') markerEl.classList.add('status-home');
@@ -2441,17 +2449,66 @@
     // Called on DOMContentLoaded. Sets up the map, SSE connection,
     // fetches initial device list, and wires up all button handlers.
     // ═══════════════════════════════════════════════
+    function startHubPresence() {
+        function onHubUpdate(data) {
+            hubHomeLat = data.hasGps ? data.lat : null;
+            hubHomeLon = data.hasGps ? data.lon : null;
+            updateDevice(data);
+        }
+
+        if (typeof HubPresencePanel !== 'undefined') {
+            HubPresencePanel.start(protectedFetch, onHubUpdate, function(id) {
+                if (devices[id]) renderDeviceCard(devices[id]);
+            });
+            return;
+        }
+
+        // The hub adapter is a small, separately served enhancement. If a browser
+        // misses that request while joining the AP, keep the essential hub card,
+        // location and marker alive from the main application bundle.
+        var busy = false;
+        function loadFallbackHubPresence() {
+            if (busy || document.hidden) return;
+            busy = true;
+            fetch('/api/hub-presence', {cache: 'no-store'})
+                .then(function(response) {
+                    if (!response.ok) throw new Error('Hub presence unavailable');
+                    return response.json();
+                })
+                .then(function(s) {
+                    var guid = parseInt(s.gateway_guid16, 16);
+                    if (!Number.isInteger(guid) || guid <= 0 || guid > 65535) return;
+                    var hasGps = Number.isFinite(s.latitude) && Number.isFinite(s.longitude);
+                    onHubUpdate({
+                        id: -guid,
+                        entity: 'hub',
+                        hub: s,
+                        name: s.display_name || 'Home Hub',
+                        emoji: s.mode === 'home' ? (s.home_emoji || '🏠') : (s.portable_emoji || '📱'),
+                        colour: /^#[0-9a-f]{6}$/i.test(s.marker_colour) ? s.marker_colour : '#38bdf8',
+                        hasGps: hasGps,
+                        lat: s.latitude,
+                        lon: s.longitude,
+                        age: 0,
+                        status: s.mode === 'home' ? 'Home' : (s.mode === 'portable' ? 'Portable' : 'Off-Grid'),
+                        rssi: s.wifi_rssi_dbm,
+                        snr: null
+                    });
+                })
+                .catch(function() {})
+                .finally(function() { busy = false; });
+        }
+        loadFallbackHubPresence();
+        setInterval(loadFallbackHubPresence, 5000);
+        document.addEventListener('visibilitychange', loadFallbackHubPresence);
+    }
+
     function init() {
         refreshHubStatus();
         loadDeviceCardPreferences();
         loadTheme();     // Restore dark/light preference from localStorage
         initMap();       // Create Leaflet map with tile layers
-        if (typeof HubPresencePanel !== 'undefined') HubPresencePanel.start(protectedFetch, function(data) {
-            hubHomeLat=data.hasGps ? data.lat : null; hubHomeLon=data.hasGps ? data.lon : null;
-            updateDevice(data); // Shared cards, markers, popups and navigation.
-        }, function(id) {
-            if (devices[id]) renderDeviceCard(devices[id]); // Feedback must not reset last contact.
-        });
+        startHubPresence();
         connectSSE();    // Open SSE connection for real-time updates
 
         // On desktop (>768px), show sidebar by default. On mobile, hide it.

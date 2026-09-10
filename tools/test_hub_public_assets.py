@@ -78,11 +78,28 @@ class PublicAssetTests(unittest.TestCase):
         defaults = (ROOT / 'hub/esp-idf-p4/main/home_hub_defaults.h').read_text(encoding='utf-8')
         server = (ROOT / 'hub/esp-idf-p4/main/home_hub_web.cpp').read_text(encoding='utf-8')
         adapter = (ROOT / 'hub/platformio/data/hub-presence.js').read_text(encoding='utf-8')
-        self.assertIn('51.907055, -2.256660', defaults)
+        self.assertIn('51.905857, -2.239923', defaults)
         self.assertIn('defaults::kStarterLocation.latitude', server)
         self.assertIn('defaults::kStarterLocation.longitude', server)
         self.assertIn('"position_source", "starter"', server)
         self.assertIn("s.position_source === 'starter'", adapter)
+
+    def test_hub_marker_survives_optional_adapter_failure_and_overlap(self):
+        js = (ROOT / 'hub/platformio/data/app.js').read_text(encoding='utf-8')
+        css = (ROOT / 'hub/platformio/data/style.css').read_text(encoding='utf-8')
+        self.assertIn("function startHubPresence()", js)
+        self.assertIn("fetch('/api/hub-presence', {cache: 'no-store'})", js)
+        self.assertIn("zIndexOffset: isHubMarker ? 600 : 0", js)
+        self.assertIn("data.entity === 'hub' ? ' marker-hub' : ''", js)
+        self.assertIn('.bp-marker.marker-hub', css)
+
+    def test_p4_offgrid_http_server_has_browser_socket_headroom(self):
+        server = (ROOT / 'hub/esp-idf-p4/main/home_hub_web.cpp').read_text(encoding='utf-8')
+        defaults = (ROOT / 'hub/esp-idf-p4/sdkconfig.defaults').read_text(encoding='utf-8')
+        self.assertIn('config.max_open_sockets = 12', server)
+        self.assertIn('config.backlog_conn = 8', server)
+        self.assertIn('"204 No Content"', server)
+        self.assertIn('CONFIG_LWIP_MAX_SOCKETS=20', defaults)
 
     def test_mdns_hostname_is_not_redirected_as_foreign(self):
         source = (ROOT / 'hub/platformio/src/main.cpp').read_text(encoding='utf-8')

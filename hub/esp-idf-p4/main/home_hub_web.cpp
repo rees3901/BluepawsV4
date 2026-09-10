@@ -487,9 +487,11 @@ esp_err_t welcome_handler(httpd_req_t *request)
 
 esp_err_t events_handler(httpd_req_t *request)
 {
-    httpd_resp_set_hdr(request, "Retry-After", "10");
-    httpd_resp_set_status(request, "503 Service Unavailable");
-    return httpd_resp_sendstr(request, "Live stream pending; use polling fallback");
+    // HTTP 204 tells EventSource not to reconnect. The P4 dashboard deliberately
+    // uses its five-second REST confidence poll until native SSE is implemented;
+    // a 503 made every open browser tab reconnect forever and churn sockets.
+    httpd_resp_set_status(request, "204 No Content");
+    return httpd_resp_send(request, nullptr, 0);
 }
 
 esp_err_t captive_handler(httpd_req_t *request)
@@ -550,6 +552,10 @@ bool start_server_now()
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.stack_size = 8192;
+    // Modern browsers open several asset connections in parallel. Leave room
+    // for two local dashboard tabs while LRU purging protects the AP server.
+    config.max_open_sockets = 12;
+    config.backlog_conn = 8;
     config.max_uri_handlers = 32;
     config.lru_purge_enable = true;
     config.uri_match_fn = httpd_uri_match_wildcard;

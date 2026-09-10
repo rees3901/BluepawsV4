@@ -937,6 +937,15 @@ body.light .measure-label {
     transition: transform 0.3s ease;
 }
 
+.bp-marker.marker-hub {
+    width: 36px;
+    height: 36px;
+    margin: -2px 0 0 -2px;
+    border-width: 4px;
+    font-size: 18px;
+    box-shadow: 0 0 0 2px rgba(15, 23, 42, .8), 0 3px 12px rgba(0, 0, 0, .58);
+}
+
 .bp-marker.updated {
     animation: marker-pop 0.4s ease-out;
 }
