@@ -10,6 +10,10 @@ namespace bluepaws::web {
 // hub's Off-Grid access point as network roles change.
 bool start();
 
+// Transfers a mode request from the HTTP task to the LVGL/main task. Network
+// settings and UI state are applied together there, never from the web task.
+bool takeRequestedMode(hub::CommunicationsMode &mode);
+
 // Publishes an immutable copy for the web task. Call only from the LVGL/main
 // task after applying cloud or local telemetry updates.
 void updateSnapshot(const CatStore &cats, const cloud::Status &cloud_status);

@@ -257,6 +257,7 @@ struct UiState {
 
 void rebuild_current_page(void *user_data);
 void navigate_to(UiState &ui, AppPage page);
+bool set_communications_mode(UiState &ui, bluepaws::hub::CommunicationsMode mode);
 
 const UiLayout &current_layout(const UiState &ui)
 {
@@ -680,6 +681,14 @@ void update_ui(UiState &ui)
         ui.simulator.update(now_ms, ui.cats);
     } else if (cloud_updates > 0) {
         ui.tiles_dirty = true;
+    }
+    bluepaws::hub::CommunicationsMode web_requested_mode{};
+    if (bluepaws::web::takeRequestedMode(web_requested_mode)) {
+        set_communications_mode(ui, web_requested_mode);
+        if (ui.overview_mode_dropdown != nullptr) {
+            lv_dropdown_set_selected(ui.overview_mode_dropdown,
+                                     static_cast<uint32_t>(ui.settings.communications_mode));
+        }
     }
     const bluepaws::cloud::Status cloud_status = bluepaws::cloud::status();
     bluepaws::web::updateSnapshot(ui.cats, cloud_status);

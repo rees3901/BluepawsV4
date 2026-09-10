@@ -50,6 +50,7 @@ SemaphoreHandle_t g_lock = nullptr;
 httpd_handle_t g_server = nullptr;
 WebSnapshot g_snapshot{};
 std::atomic_bool g_starting{false};
+std::atomic_int g_requested_mode{-1};
 
 const char *mode_name(hub::CommunicationsMode mode)
 {
@@ -304,6 +305,62 @@ esp_err_t unavailable_handler(httpd_req_t *request)
     return result;
 }
 
+esp_err_t hub_mode_handler(httpd_req_t *request)
+{
+    if (request->content_len == 0 || request->content_len >= 96) {
+        return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "Invalid mode request");
+    }
+    char body[96]{};
+    std::size_t received = 0;
+    while (received < request->content_len) {
+        const int count = httpd_req_recv(request, body + received,
+                                         request->content_len - received);
+        if (count <= 0) return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST,
+                                                   "Could not read request");
+        received += static_cast<std::size_t>(count);
+    }
+    body[received] = '\0';
+
+    char requested[16]{};
+    if (httpd_query_key_value(body, "mode", requested, sizeof(requested)) != ESP_OK) {
+        return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "Missing hub mode");
+    }
+    hub::CommunicationsMode mode{};
+    if (std::strcmp(requested, "home") == 0) mode = hub::CommunicationsMode::Home;
+    else if (std::strcmp(requested, "portable") == 0) mode = hub::CommunicationsMode::Portable;
+    else if (std::strcmp(requested, "off_grid") == 0 ||
+             std::strcmp(requested, "off-grid") == 0) mode = hub::CommunicationsMode::OffGrid;
+    else return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "Unknown hub mode");
+
+    const WebSnapshot state = snapshot();
+    if (state.cloud.effective_mode == hub::CommunicationsMode::OffGrid &&
+        mode != hub::CommunicationsMode::OffGrid) {
+        char confirmation[8]{};
+        if (httpd_query_key_value(body, "confirm", confirmation, sizeof(confirmation)) != ESP_OK ||
+            std::strcmp(confirmation, "true") != 0) {
+            cJSON *json = cJSON_CreateObject();
+            cJSON_AddStringToObject(json, "error", "confirmation_required");
+            const esp_err_t result = send_json(request, json, "409 Conflict");
+            cJSON_Delete(json);
+            return result;
+        }
+    }
+
+    int expected = -1;
+    if (!g_requested_mode.compare_exchange_strong(expected, static_cast<int>(mode))) {
+        cJSON *json = cJSON_CreateObject();
+        cJSON_AddStringToObject(json, "error", "mode_change_pending");
+        const esp_err_t result = send_json(request, json, "409 Conflict");
+        cJSON_Delete(json);
+        return result;
+    }
+    cJSON *json = cJSON_CreateObject();
+    cJSON_AddBoolToObject(json, "pending", true);
+    const esp_err_t result = send_json(request, json, "202 Accepted");
+    cJSON_Delete(json);
+    return result;
+}
+
 esp_err_t history_handler(httpd_req_t *request)
 {
     cJSON *json = cJSON_CreateObject();
@@ -515,7 +572,7 @@ bool start_server_now()
     ok &= register_uri("/api/command", HTTP_POST, unavailable_handler);
     ok &= register_uri("/api/find", HTTP_POST, unavailable_handler);
     ok &= register_uri("/api/device-status", HTTP_POST, unavailable_handler);
-    ok &= register_uri("/api/hub-mode", HTTP_POST, unavailable_handler);
+    ok &= register_uri("/api/hub-mode", HTTP_POST, hub_mode_handler);
     ok &= register_uri("/api/config", HTTP_POST, unavailable_handler);
     ok &= register_uri("/api/hub-preferences", HTTP_POST, unavailable_handler);
     ok &= register_uri("/api/device-meta", HTTP_POST, unavailable_handler);
@@ -556,6 +613,15 @@ bool start()
         ESP_LOGE(kTag, "Could not create local dashboard startup task");
         return false;
     }
+    return true;
+}
+
+bool takeRequestedMode(hub::CommunicationsMode &mode)
+{
+    const int requested = g_requested_mode.exchange(-1);
+    if (requested < static_cast<int>(hub::CommunicationsMode::Home) ||
+        requested > static_cast<int>(hub::CommunicationsMode::OffGrid)) return false;
+    mode = static_cast<hub::CommunicationsMode>(requested);
     return true;
 }
 

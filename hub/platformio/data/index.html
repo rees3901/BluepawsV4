@@ -116,10 +116,10 @@
                 </div>
                 <small class="form-hint">Viewing remains open. The PIN protects collar commands and is erased on reboot or when Off-Grid ends.</small>
             </div>
-            <div class="form-group">
-                <label>Hub Status</label>
+            <details class="hub-status-disclosure">
+                <summary><span>Hub Status</span><small>Diagnostics</small></summary>
                 <div id="hubStatus" class="status-info">Loading...</div>
-            </div>
+            </details>
             <div class="form-group">
                 <div class="log-btn-row">
                     <button id="btnConsoleLog" class="btn-secondary" style="flex:1">Console Log</button>
@@ -132,6 +132,18 @@
             <div class="modal-actions">
                 <button id="btnSaveConfig" class="btn-primary hidden" disabled>Save &amp; Restart</button>
                 <button id="btnCloseSettings" class="btn-secondary">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="hubModeConfirmModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="hubModeConfirmTitle">
+        <div class="modal-content mode-confirm-content">
+            <span class="mode-confirm-eyebrow">HUB MODE</span>
+            <h2 id="hubModeConfirmTitle">Switch hub mode?</h2>
+            <p id="hubModeConfirmBody"></p>
+            <div class="modal-actions">
+                <button id="btnCancelHubMode" class="btn-secondary" type="button">Cancel</button>
+                <button id="btnConfirmHubMode" class="btn-primary" type="button">Switch mode</button>
             </div>
         </div>
     </div>
@@ -271,6 +283,6 @@
     <!-- Our app — served from hub's LittleFS flash -->
     <script src="feedback.js"></script>
     <script src="hub-presence.js"></script>
-    <script src="app.js?v=20260910-offgrid-ui9"></script>
+    <script src="app.js?v=20260910-offgrid-ui12"></script>
 </body>
 </html>
