@@ -652,24 +652,29 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
       <aside id="panel" className={sidebarOpen ? "open" : ""} onClick={handlePanelBlankClick}>
         <div id="panelHeader">
           <div className="panel-status-row">
-            {tutorialMode && !tutorialOpen ? (
-              <button id="statusBanner" className="tutorial tutorial-exit-ready" type="button" data-panel-static title="Tutorial Mode active — select to return to Live Mode" aria-label="Tutorial Mode active. Return to Live Mode" onClick={() => handleTutorialModeChange(false)}>
-                <span id="statusIcon">●</span><span id="statusText">Exit Tutorial</span>
+            <div>
+              {tutorialMode && !tutorialOpen ? (
+                <button id="statusBanner" className="tutorial tutorial-exit-ready" type="button" data-panel-static title="Tutorial Mode active — select to return to Live Mode" aria-label="Tutorial Mode active. Return to Live Mode" onClick={() => handleTutorialModeChange(false)}>
+                  <span id="statusIcon">●</span><span id="statusText">Exit Tutorial</span>
+                </button>
+              ) : (
+                <span id="statusBanner" className={statusClass} data-panel-static title={connected && !tutorialMode ? "Live Supabase Realtime connection active" : statusText} aria-label={connected && !tutorialMode ? "Live connection active" : statusText}>
+                  <span id="statusIcon">●</span><span id="statusText">{statusText}</span>
+                </span>
+              )}
+            </div>
+            <div className="panel-header-actions">
+              <button className="ctrl-btn" type="button" title={darkMode ? "Use light theme" : "Use dark theme"} aria-label={darkMode ? "Use light theme" : "Use dark theme"} onClick={handleThemeToggle}>
+                {darkMode ? <MoonIcon /> : <SunIcon />}
               </button>
-            ) : (
-              <span id="statusBanner" className={statusClass} data-panel-static title={connected && !tutorialMode ? "Live Supabase Realtime connection active" : statusText} aria-label={connected && !tutorialMode ? "Live connection active" : statusText}>
-                <span id="statusIcon">●</span><span id="statusText">{statusText}</span>
-              </span>
-            )}
+              <AccountMenu email={userEmail} familyName={familyName} familyRole={familyRole} onSignOut={handleSignOut} />
+              <button className="ctrl-btn" data-tour="settings" title="Settings" aria-label="Settings" onClick={() => setSettingsOpen(true)}><SettingsIcon /></button>
+            </div>
           </div>
           <div className="panel-brand" aria-label="Bluepaws V4">
             <span className="panel-brand-mark" aria-hidden="true" />
             <span className="panel-title">Bluepaws V4</span>
             <span className="panel-brand-mascot" aria-hidden="true" />
-          </div>
-          <div className="panel-header-btns">
-            <AccountMenu email={userEmail} familyName={familyName} familyRole={familyRole} onSignOut={handleSignOut} />
-            <button className="ctrl-btn" data-tour="settings" title="Settings" aria-label="Settings" onClick={() => setSettingsOpen(true)}><SettingsIcon /></button>
           </div>
         </div>
         {tutorialMode && <div className="tutorial-mode-banner">TUTORIAL MODE — SIMULATED DATA</div>}
@@ -741,12 +746,10 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
           userEmail={userEmail}
           familyName={familyName}
           familyRole={familyRole}
-          darkMode={darkMode}
           onTutorialModeChange={handleTutorialModeChange}
           onSearchPartyModeChange={handleSearchPartyModeChange}
           onReplayTutorial={replayTutorial}
           onModeChange={setPortableMode}
-          onThemeToggle={handleThemeToggle}
           onSignOut={handleSignOut}
           onClose={() => setSettingsOpen(false)}
         />
@@ -809,27 +812,20 @@ interface SettingsModalProps {
   userEmail: string | null;
   familyName: string | null;
   familyRole: FamilyRole | null;
-  darkMode: boolean;
   onTutorialModeChange: (enabled: boolean) => void;
   onSearchPartyModeChange: (enabled: boolean) => void;
   onReplayTutorial: () => void;
   onModeChange: (portable: boolean) => void;
-  onThemeToggle: () => void;
   onSignOut: () => void;
   onClose: () => void;
 }
 
-function SettingsModal({ logs, portableMode, devices, tutorialMode, searchPartyMode, searchPartyAvailable, connected, liveTelemetryError, connectionDetail, userEmail, familyName, familyRole, darkMode, onTutorialModeChange, onSearchPartyModeChange, onReplayTutorial, onModeChange, onThemeToggle, onSignOut, onClose }: SettingsModalProps) {
+function SettingsModal({ logs, portableMode, devices, tutorialMode, searchPartyMode, searchPartyAvailable, connected, liveTelemetryError, connectionDetail, userEmail, familyName, familyRole, onTutorialModeChange, onSearchPartyModeChange, onReplayTutorial, onModeChange, onSignOut, onClose }: SettingsModalProps) {
   const [consoleOpen, setConsoleOpen] = useState(false);
   return (
     <div className="modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
       <div className="modal-content">
-        <div className="modal-header">
-          <h2 id="settings-title">Hub Settings</h2>
-          <button className="ctrl-btn settings-theme-btn" type="button" title="Toggle dark/light theme" aria-label="Toggle theme" onClick={onThemeToggle}>
-            {darkMode ? <MoonIcon /> : <SunIcon />}
-          </button>
-        </div>
+        <div className="modal-header"><h2 id="settings-title">Hub Settings</h2></div>
         <div className="form-group"><label htmlFor="cfgSSID">WiFi SSID</label><input id="cfgSSID" type="text" placeholder="Home network name" /></div>
         <div className="form-group"><label htmlFor="cfgPass">WiFi Password</label><input id="cfgPass" type="password" placeholder="Password" /></div>
         <div className="form-group"><label htmlFor="cfgCloud">Cloud Endpoint</label><input id="cfgCloud" type="url" placeholder="https://..." /></div>
