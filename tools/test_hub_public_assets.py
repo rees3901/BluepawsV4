@@ -68,6 +68,12 @@ class PublicAssetTests(unittest.TestCase):
         self.assertIn('.card-avatar-wrap:hover .card-avatar-edit', css)
         self.assertIn('@media (max-width: 768px)', css)
 
+    def test_offgrid_hub_is_default_pin_but_explicit_unpin_persists(self):
+        js = (ROOT / 'hub/platformio/data/app.js').read_text(encoding='utf-8')
+        self.assertIn("data.entity === 'hub' && !hasPinnedDevicePreference", js)
+        self.assertIn("localStorage.setItem('bp_offline_pinned_device', 'none')", js)
+        self.assertIn("savedPin === null || savedPin === 'none'", js)
+
     def test_mdns_hostname_is_not_redirected_as_foreign(self):
         source = (ROOT / 'hub/platformio/src/main.cpp').read_text(encoding='utf-8')
         host = source.split('static bool hasForeignPortalHost() {', 1)[1].split(
