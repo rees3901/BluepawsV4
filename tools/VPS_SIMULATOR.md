@@ -127,5 +127,5 @@ different packet reuses the same device, sequence, and packet timestamp.
 Send it as `application/json` with `Authorization: Bearer <device-token>`. Never
 put the Supabase service-role key on a VPS, collar, hub, browser, or in Git.
 
-See `docs/TLV_INGESTION_RUNBOOK.md` for HMAC key provisioning, LoRa gateway
+See `docs/operations/TLV_INGESTION_RUNBOOK.md` for HMAC key provisioning, LoRa gateway
 credentials, migration/deployment steps, and validation queries.

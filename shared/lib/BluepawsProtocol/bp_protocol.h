@@ -1,7 +1,7 @@
 /*
   BLUEPAWS V4 - TLV TELEMETRY PROTOCOL v1.2
   Shared collar/home-hub binary packet contract
-  Canonical source: docs/TLV_PROTOCOL_V1_2.md
+  Canonical source: docs/protocol/TLV_PROTOCOL_V1_2.md
 
   Layout:
     [32-byte fixed header] + [0-24 bytes TLV] + [8-byte HMAC tag]

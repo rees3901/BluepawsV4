@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Bluepaws V4 — Mock Hub Server for local GUI preview.
-Serves hub/data/ files and simulates collar telemetry via SSE.
+Serves hub/platformio/data/ files and simulates collar telemetry via SSE.
 
 Usage:
     python3 mock_server.py
@@ -177,7 +177,7 @@ if __name__ == '__main__':
     t.start()
 
     print(f"Bluepaws V4 Mock Server")
-    print(f"Serving hub/data/ from: {DATA_DIR}")
+    print(f"Serving hub/platformio/data/ from: {DATA_DIR}")
     print(f"Open http://localhost:{PORT} in your browser")
     print(f"Simulating {len(COLLARS)} collars with live telemetry")
     print()

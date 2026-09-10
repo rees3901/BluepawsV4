@@ -146,12 +146,12 @@ def main() -> None:
     parser.add_argument(
         "--source",
         type=Path,
-        default=Path("home-hub/firmware/assets/icons"),
+        default=Path("hub/esp-idf-p4/assets/icons"),
     )
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("home-hub/firmware/main"),
+        default=Path("hub/esp-idf-p4/main"),
     )
     args = parser.parse_args()
     generate(args.source.resolve(), args.output.resolve())

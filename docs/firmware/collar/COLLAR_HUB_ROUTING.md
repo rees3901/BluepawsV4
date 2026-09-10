@@ -28,7 +28,7 @@ compilation. This is bench provisioning, not a new end-user pairing flow.
   hub in its Family, then performs the existing HMAC and deduplication checks.
 - The hub still uses its **gateway** bearer, not the collar's bearer.
 
-See [the canonical v1.2 contract](TLV_PROTOCOL_V1_2.md), section 8.
+See [the canonical v1.2 contract](../../protocol/TLV_PROTOCOL_V1_2.md), section 8.
 
 ## Independent timestamp bug
 

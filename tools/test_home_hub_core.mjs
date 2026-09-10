@@ -11,14 +11,14 @@ const executable = resolve(outputDirectory,
     process.platform === 'win32' ? 'home_hub_core_test.exe' : 'home_hub_core_test');
 const compiler = process.env.CXX ||
     (process.platform === 'win32' ? 'C:/ProgramData/mingw64/mingw64/bin/g++.exe' : 'g++');
-const component = resolve(root, 'home-hub/firmware/components/bluepaws_core');
+const component = resolve(root, 'hub/esp-idf-p4/components/bluepaws_core');
 const sources = [
     resolve(component, 'src/map_engine.cpp'),
     resolve(component, 'src/cat_store.cpp'),
     resolve(component, 'src/cat_simulator.cpp'),
     resolve(component, 'src/hub_settings.cpp'),
     resolve(component, 'src/qr_payload.cpp'),
-    resolve(root, 'home-hub/tests/home_hub_core_test.cpp'),
+    resolve(root, 'hub/tests/esp-idf-p4/home_hub_core_test.cpp'),
 ];
 const compiled = spawnSync(compiler, [
     '-std=c++17', '-Wall', '-Wextra', '-Werror',

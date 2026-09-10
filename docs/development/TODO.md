@@ -132,7 +132,7 @@ Hub health is gateway telemetry, not collar telemetry. It should therefore use a
 
 - [x] ~~Implement baseline NORMAL, POWERSAVE, ACTIVE and LOST firmware profiles.~~
 - [x] ~~Implement profile-specific sleep intervals, LoRa TX power and cellular ratios in shared configuration.~~
-- [x] ~~Formalise the distinction between **status** (`home`, `out`, `lost`, etc.) and **power/communications profile** (`powersave`, `normal`, `active`, `lost`) in `docs/COLLAR_RUNTIME_DECISIONS.md`.~~
+- [x] ~~Formalise the distinction between **status** (`home`, `out`, `lost`, etc.) and **power/communications profile** (`powersave`, `normal`, `active`, `lost`) in `docs/firmware/collar/COLLAR_RUNTIME_DECISIONS.md`.~~
 - [ ] Keep LoRa as the primary transport for routine communications.
 - [ ] Use LTE-M / NB-IoT as the secondary direct-to-cloud path.
 - [ ] Maintain identical logical collar payloads regardless of LoRa/Home Hub or direct cellular ingress.
@@ -202,8 +202,8 @@ The original power-saving design was: wake, scan for the BLE home beacon, and if
 ## 5. TLV Protocol
 
 - [x] ~~Binary TLV protocol library exists and is shared by hub/collar.~~
-- [x] ~~Canonical protocol documentation exists at `docs/TLV_PROTOCOL_V1_2.md`.~~
-- [x] ~~Ingestion runbook exists at `docs/TLV_INGESTION_RUNBOOK.md`.~~
+- [x] ~~Canonical protocol documentation exists at `docs/protocol/TLV_PROTOCOL_V1_2.md`.~~
+- [x] ~~Ingestion runbook exists at `docs/operations/TLV_INGESTION_RUNBOOK.md`.~~
 - [x] ~~`msg_seq_id` is used by the ingestion/deduplication model.~~
 - [x] ~~Ingress RF/network metadata is represented outside the collar payload by the backend ingest model.~~
 - [x] ~~Keep protocol documentation synchronised with the newest wake-check-in TX reason and resulting presence-packet behaviour.~~
@@ -415,12 +415,12 @@ The current shared configuration contains a consecutive-detection threshold. The
 
 ## 22. Documentation
 
-- [x] ~~Master `docs/TODO.md` backlog created.~~
+- [x] ~~Master `docs/development/TODO.md` backlog created.~~
 - [x] ~~TLV protocol document exists.~~
 - [x] ~~TLV ingestion runbook exists.~~
 - [x] ~~Simulator documentation exists.~~
 - [ ] Create a dedicated **Hub Communications Modes** design document after the TODO design is finalised.
-- [x] ~~Create a dedicated **Collar Wake / BLE Home Behaviour** state-machine document at `docs/COLLAR_RUNTIME_DECISIONS.md`.~~
+- [x] ~~Create a dedicated **Collar Wake / BLE Home Behaviour** state-machine document at `docs/firmware/collar/COLLAR_RUNTIME_DECISIONS.md`.~~
 - [ ] Document the production HTTP ingress wrapper schema.
 - [ ] Add architecture diagrams for LoRa-via-hub and cellular-direct paths.
 - [ ] Add Security Architecture / Threat Model.

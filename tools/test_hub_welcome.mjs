@@ -3,7 +3,7 @@ import vm from 'node:vm';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-const source = readFileSync(new URL('../hub/data/welcome.js', import.meta.url), 'utf8');
+const source = readFileSync(new URL('../hub/platformio/data/welcome.js', import.meta.url), 'utf8');
 const fixture = {hub_id:'0010', recent_collars:2, known_collars:5, last_report_age_s:90, time_synced:true};
 const flush = () => new Promise(resolve => setImmediate(resolve));
 function boot({hidden=false, response=fixture, fail=false, pending=false}={}) {

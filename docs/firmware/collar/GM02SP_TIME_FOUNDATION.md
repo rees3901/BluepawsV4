@@ -119,7 +119,7 @@ handover and sleep/wake clock continuity. Compare against an independent UTC clo
   LPGNSSUTCTIME no-clock response and FIXREADY timestamp field.
 - [QuickSpot GNSS reference](https://github.com/QuickSpot/walter-documentation/blob/main/walter-modem/arduino_esp-idf/reference/gnss.md).
 - [Sequans GNSS/LTE concurrency guidance](https://forum.sequans.com/t/can-i-use-gnss-positioning-while-maintaining-lte-m-or-nb-iot-connectivity-simultaneously/209).
-- `docs/USEFUL_GM02SP_COMMANDS.md`: project's Sequans manual-derived reference.
+- `docs/firmware/collar/USEFUL_GM02SP_COMMANDS.md`: project's Sequans manual-derived reference.
 
 The implementation here is original Bluepaws code, not a copied Walter driver;
 no Walter-only library or ESP32 pin assignments are added to the nRF52840 build.

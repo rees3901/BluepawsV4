@@ -1,4 +1,4 @@
-// Host-only scheduler tests: g++ -std=c++17 -Ihub/include tools/test_hub_reporting.cpp -o <test-output>
+// Host-only scheduler tests: g++ -std=c++17 -Ihub/platformio/include tools/test_hub_reporting.cpp -o <test-output>
 #include <cassert>
 #include <cstdio>
 #include <initializer_list>

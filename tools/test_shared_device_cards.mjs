@@ -138,11 +138,11 @@ test('hub uses same ordering, pin and four-card expansion rules without ID colli
 });
 test('offline adapter shares renderer but never invents collar telemetry',()=>{
   const context=vm.createContext({});
-  vm.runInContext(readFileSync(new URL('../hub/data/hub-presence.js',import.meta.url),'utf8'),context);
+  vm.runInContext(readFileSync(new URL('../hub/platformio/data/hub-presence.js',import.meta.url),'utf8'),context);
   const h=context.HubPresencePanel.view({gateway_guid16:'0010',mode:'portable',latitude:null,longitude:null});
   assert.equal(h.id,-16);assert.equal(h.emoji,'📱');assert.equal(h.hasGps,false);
   for (const key of ['profile','batt','rxWindowMs','errorPresent','verification']) assert.equal(h[key],undefined);
-  const js=readFileSync(new URL('../hub/data/app.js',import.meta.url),'utf8');
+  const js=readFileSync(new URL('../hub/platformio/data/app.js',import.meta.url),'utf8');
   assert.match(js,/HubPresencePanel.start\(protectedFetch/);
   assert.match(js,/updateDevice\(data\); \/\/ Shared cards/);
   assert.doesNotMatch(js,/hub-map-icon|HubPresencePanel.point/);

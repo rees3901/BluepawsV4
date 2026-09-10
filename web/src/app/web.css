@@ -1,4 +1,4 @@
-/* Web-only additions. The parity styling is imported unchanged from hub/data/style.css. */
+/* Web-only additions. The parity styling is imported unchanged from hub/platformio/data/style.css. */
 button, input, select {
   font: inherit;
 }

@@ -31,19 +31,25 @@ The Sequans GM02SP replaces the previous BG77 + L76K combination. A single modul
 The separate `walter` PlatformIO target exercises real GM02SP LTE/GNSS on an
 ESP32-S3 Walter board, with a simulated LoRa transmit step and its own independent
 collar ID **1010**. It does not replace or alter the WisMesh collar firmware.
-See [Walter setup and commissioning](docs/WALTER_LTE_TESTBED.md) before provisioning
+See [Walter setup and commissioning](docs/firmware/collar/WALTER_LTE_TESTBED.md) before provisioning
 credentials or flashing. It boots idle and is not a default build/upload target.
 
 ## Repository Structure
+
+The top level is organised by responsibility. Firmware stays under the physical
+product it runs on; the two Home Hub implementations are grouped together so
+that `hub` and `home-hub` no longer appear to be separate products.
 
 ```text
 BluepawsV4/
 ├── README.md                         # Repository overview
 ├── docs/
-│   ├── TLV_PROTOCOL_V1_2.md          # Canonical TLV packet specification
-│   ├── DEV_TO_PROD_STRATEGY.md       # Environment promotion strategy
-│   ├── ENVIRONMENT_MATRIX.md         # DEV vs PROD separation rules
-│   └── PRODUCTION_READINESS_CHECKLIST.md # Go-live checklist
+│   ├── protocol/                     # Wire formats and commands
+│   ├── firmware/collar/              # Collar design and test notes
+│   ├── firmware/home-hub/            # Home Hub design and test notes
+│   ├── operations/                   # Runbooks and release readiness
+│   └── development/                  # Environment strategy and backlog
+├── pcb/collar/                       # Collar PCB projects and vendor libraries
 ├── platformio.ini                    # Multi-environment build config
 ├── shared/lib/BluepawsProtocol/      # Shared protocol & config
 │   ├── README.md                     # Protocol implementation notes
@@ -53,13 +59,13 @@ BluepawsV4/
 ├── collar/                           # nRF52840 collar firmware
 │   ├── src/main.cpp
 │   └── include/collar_pins.h
-├── hub/                              # ESP32-S3 home hub firmware
-│   ├── src/main.cpp
-│   ├── include/hub_pins.h
-│   └── data/                         # LittleFS web GUI (HTML/CSS/JS)
-│       ├── index.html
-│       ├── style.css
-│       └── app.js
+├── hub/                              # All Home Hub implementations
+│   ├── platformio/                   # Heltec ESP32-S3 prototype + LittleFS UI
+│   ├── esp-idf-p4/                   # ESP32-P4 production testbed
+│   ├── maps/                         # Offline map-pack inputs and guidance
+│   └── tests/esp-idf-p4/             # Host tests for the P4 core
+├── diagnostics/
+│   └── t190-radio-monitor/           # Passive LoRa/TLV receiver (formerly sniffer)
 ├── tools/
 │   ├── mock-server.js                # Node.js mock hub for local GUI dev
 │   ├── vps_position_simulator.py     # Legacy JSON HTTPS simulator
@@ -71,7 +77,8 @@ BluepawsV4/
 │   ├── src/components/               # React dashboard and Leaflet map
 │   ├── src/data/                     # Typed development telemetry
 │   └── src/lib/telemetry.ts          # Future Supabase adapter boundary
-└── mock_server.py                    # Python mock server (legacy)
+├── mock_server.py                    # Python mock server (legacy)
+└── supabase/                         # Cloud schema, migrations, and Edge Functions
 ```
 
 ## Web GUI
@@ -112,7 +119,7 @@ node tools/mock-server.js
 
 ## Customer Web App
 
-`web/` contains the Vercel-ready Next.js and TypeScript refactor of the hub dashboard. It preserves the embedded GUI in `hub/data/`, reads the latest live positions from Supabase by default, and confines mock telemetry to tutorial mode.
+`web/` contains the Vercel-ready Next.js and TypeScript refactor of the hub dashboard. It preserves the embedded GUI in `hub/platformio/data/`, reads the latest live positions from Supabase by default, and confines mock telemetry to tutorial mode.
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Frees3901%2FBluepawsV4&root-directory=web)
 
@@ -134,16 +141,16 @@ The same GitHub repository and Vercel project are used for both environments, wi
 
 See:
 
-- [`docs/DEV_TO_PROD_STRATEGY.md`](docs/DEV_TO_PROD_STRATEGY.md) for the authoritative promotion strategy and decision record.
-- [`docs/ENVIRONMENT_MATRIX.md`](docs/ENVIRONMENT_MATRIX.md) for DEV vs PROD separation rules.
-- [`docs/PRODUCTION_READINESS_CHECKLIST.md`](docs/PRODUCTION_READINESS_CHECKLIST.md) for the pre-launch security and operational checklist.
+- [`docs/development/DEV_TO_PROD_STRATEGY.md`](docs/development/DEV_TO_PROD_STRATEGY.md) for the authoritative promotion strategy and decision record.
+- [`docs/development/ENVIRONMENT_MATRIX.md`](docs/development/ENVIRONMENT_MATRIX.md) for DEV vs PROD separation rules.
+- [`docs/operations/PRODUCTION_READINESS_CHECKLIST.md`](docs/operations/PRODUCTION_READINESS_CHECKLIST.md) for the pre-launch security and operational checklist.
 
 ## TLV Protocol v1.2
 
 The canonical protocol document is:
 
 ```text
-docs/TLV_PROTOCOL_V1_2.md
+docs/protocol/TLV_PROTOCOL_V1_2.md
 ```
 
 The system is moving away from production JSON telemetry. JSON remains useful for debugging, logs, exports and admin APIs, but LoRa and cellular telemetry should use the compact binary TLV packet.

@@ -76,7 +76,7 @@ window, it can poll for the next pending command for that device, transmit it
 over LoRa, and wait for the collar's TLV ACK.
 
 The canonical command contract is
-[`COLLAR_DOWNLINK_COMMANDS.md`](COLLAR_DOWNLINK_COMMANDS.md). The first Home Hub
+[`COLLAR_DOWNLINK_COMMANDS.md`](../../protocol/COLLAR_DOWNLINK_COMMANDS.md). The first Home Hub
 implementation can poll; a later version can replace polling with Supabase
 Realtime/WebSocket command delivery while keeping the same database command
 state machine.

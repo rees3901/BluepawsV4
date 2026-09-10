@@ -3,7 +3,7 @@ import vm from 'node:vm';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 const context = vm.createContext({performance});
-vm.runInContext(readFileSync(new URL('../hub/data/feedback.js', import.meta.url), 'utf8'), context);
+vm.runInContext(readFileSync(new URL('../hub/platformio/data/feedback.js', import.meta.url), 'utf8'), context);
 const {createStore, receiveWindow, profileLabel} = context.HubFeedback;
 const command = (extra = {}) => ({device:1001, cmdSeq:1, type:'profile', profile:'Active', status:'queued', age_ms:0, ...extra});
 

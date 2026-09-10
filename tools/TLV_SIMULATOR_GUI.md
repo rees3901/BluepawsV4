@@ -117,4 +117,4 @@ devices. A negative test should be rejected and should not move a live marker.
 - `tlv_simulator_gui.py`: Tk/ttk desktop interface.
 - `tlv_telemetry_simulator.py`: headless multi-device CLI simulator.
 - `test_tlv_packet_codec.py`: locked-contract unit tests.
-- `../docs/TLV_PROTOCOL_V1_1.md`: canonical protocol specification.
+- `../docs/protocol/TLV_PROTOCOL_V1_1.md`: canonical protocol specification.

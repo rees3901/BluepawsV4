@@ -81,7 +81,7 @@ pre-v3 ESP32-P4 silicon.
 
 ## Implemented boundary
 
-`home-hub/firmware` is now a complete ESP-IDF project rather than only a
+`hub/esp-idf-p4` is now a complete ESP-IDF project rather than only a
 portable library. It contains:
 
 - `bluepaws_core`: bounded Web Mercator, tile layout, cat state and simulator.

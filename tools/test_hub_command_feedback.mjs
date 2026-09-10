@@ -3,7 +3,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
-const source = readFileSync('hub/src/main.cpp', 'utf8').replaceAll('\r\n', '\n');
+const source = readFileSync('hub/platformio/src/main.cpp', 'utf8').replaceAll('\r\n', '\n');
 function fn(name) {
   const match = source.match(new RegExp(`^static [^\\n]*\\b${name}\\([^;]*?\\) \\{`, 'm'));
   if (!match) throw new Error(`Missing function ${name}`);
