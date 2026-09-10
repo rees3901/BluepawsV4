@@ -489,8 +489,8 @@ button#statusBanner {
 }
 
 .panel-brand-mascot {
-  width: 107px;
-  height: 107px;
+  width: 64px;
+  height: 64px;
   margin-left: 0;
   background-image: url("/brand/main-logo-podge-carrie.avif");
 }
@@ -505,6 +505,11 @@ button#statusBanner {
   gap: 6px;
 }
 
+.panel-status-row {
+  width: 100%;
+  flex: 0 0 100%;
+}
+
 .panel-brand {
   width: 100%;
   flex: 0 0 100%;
@@ -514,10 +519,7 @@ button#statusBanner {
   width: 100%;
   flex: 0 0 100%;
   align-items: center;
-}
-
-.panel-header-btns #statusBanner {
-  margin-right: auto;
+  justify-content: flex-end;
 }
 
 @media (max-width: 768px) {
