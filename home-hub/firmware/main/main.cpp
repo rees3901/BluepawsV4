@@ -189,6 +189,9 @@ struct UiState {
     lv_obj_t *camera_scan_guide = nullptr;
     lv_obj_t *camera_result_label = nullptr;
     lv_obj_t *camera_apply_button = nullptr;
+    lv_obj_t *camera_brightness_value = nullptr;
+    lv_obj_t *camera_contrast_value = nullptr;
+    lv_obj_t *camera_zoom_value = nullptr;
     lv_obj_t *map_drawer = nullptr;
     lv_obj_t *layer_drawer = nullptr;
     lv_obj_t *brightness_popup = nullptr;
@@ -1590,6 +1593,8 @@ void navigate_to(UiState &ui, AppPage page)
             ui.viewport.resize(layout.map_width, layout.map_height);
             ui.tiles_dirty = true;
         }
+        bluepaws::camera::setMode(bluepaws::camera::Mode::Photo);
+        bluepaws::camera::setScanZoom(100);
         bluepaws::camera::start();
     }
     ui.active_page = page;
@@ -2200,7 +2205,7 @@ void create_launcher(UiState &ui)
     bluepaws::ui::create_app_tile(content,
                                   tile_width,
                                   tile_height,
-                                  "QR Scanner",
+                                  "Camera",
                                   nullptr,
                                   "QR",
                                   false,
@@ -3434,14 +3439,118 @@ void camera_apply_wifi_clicked(lv_event_t *event)
     lv_obj_add_flag(ui->camera_apply_button, LV_OBJ_FLAG_HIDDEN);
 }
 
-void camera_brightness_changed(lv_event_t *event)
+void update_camera_brightness(UiState &ui, int delta)
 {
-    auto *button_matrix = static_cast<lv_obj_t *>(lv_event_get_target(event));
-    if (button_matrix == nullptr) return;
-    const uint32_t selected = lv_buttonmatrix_get_selected_button(button_matrix);
-    if (selected <= 2) {
-        bluepaws::camera::setScanBrightness(static_cast<int8_t>(selected) - 1);
+    const int value = std::clamp<int>(bluepaws::camera::scanBrightness() + delta, -48, 48);
+    bluepaws::camera::setScanBrightness(value);
+    if (ui.camera_brightness_value != nullptr) {
+        lv_label_set_text_fmt(ui.camera_brightness_value, "%+d", value);
     }
+}
+
+void update_camera_zoom(UiState &ui, int delta)
+{
+    const int value = std::clamp<int>(bluepaws::camera::scanZoom() + delta, 100, 200);
+    bluepaws::camera::setScanZoom(value);
+    if (ui.camera_zoom_value != nullptr) {
+        if (value % 100 == 0) {
+            lv_label_set_text_fmt(ui.camera_zoom_value, "%dx", value / 100);
+        } else {
+            lv_label_set_text_fmt(ui.camera_zoom_value, "%d.%02dx", value / 100, value % 100);
+        }
+    }
+}
+
+void camera_brightness_down(lv_event_t *event)
+{
+    auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
+    if (ui != nullptr) update_camera_brightness(*ui, -8);
+}
+
+void camera_brightness_up(lv_event_t *event)
+{
+    auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
+    if (ui != nullptr) update_camera_brightness(*ui, 8);
+}
+
+void camera_zoom_out(lv_event_t *event)
+{
+    auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
+    if (ui != nullptr) update_camera_zoom(*ui, -25);
+}
+
+void camera_zoom_in(lv_event_t *event)
+{
+    auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
+    if (ui != nullptr) update_camera_zoom(*ui, 25);
+}
+
+void camera_contrast_changed(lv_event_t *event)
+{
+    auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
+    auto *slider = static_cast<lv_obj_t *>(lv_event_get_target(event));
+    if (ui == nullptr || slider == nullptr) return;
+    const int value = lv_slider_get_value(slider);
+    bluepaws::camera::setScanContrast(value);
+    if (ui->camera_contrast_value != nullptr) {
+        lv_label_set_text_fmt(ui->camera_contrast_value, "%d%%", value);
+    }
+}
+
+void camera_auto_tune(lv_event_t *event)
+{
+    auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
+    if (ui == nullptr) return;
+    update_camera_brightness(*ui, -bluepaws::camera::scanBrightness());
+    bluepaws::camera::setScanContrast(100);
+    if (ui->camera_contrast_value != nullptr) {
+        lv_label_set_text(ui->camera_contrast_value, "100%");
+    }
+    update_camera_zoom(*ui, 100 - bluepaws::camera::scanZoom());
+    if (ui->camera_result_label != nullptr) {
+        lv_label_set_text(ui->camera_result_label,
+                          "AUTO restored. Hold the complete QR code inside the guide.");
+    }
+}
+
+lv_obj_t *create_camera_adjust_button(lv_obj_t *parent,
+                                      const char *symbol,
+                                      lv_event_cb_t callback,
+                                      UiState &ui)
+{
+    lv_obj_t *button = lv_button_create(parent);
+    lv_obj_set_size(button, 48, 48);
+    lv_obj_set_style_radius(button, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(button, lv_color_hex(0x172731), 0);
+    lv_obj_set_style_bg_opa(button, LV_OPA_90, 0);
+    lv_obj_set_style_border_width(button, 1, 0);
+    lv_obj_set_style_border_color(button, lv_color_hex(0x6DDCE7), 0);
+    lv_obj_set_style_shadow_width(button, 0, 0);
+    lv_obj_set_style_pad_all(button, 0, 0);
+    lv_obj_add_event_cb(button, callback, LV_EVENT_CLICKED, &ui);
+    lv_obj_t *label = make_label(button, symbol, lv_color_hex(0xFFFFFF));
+    lv_obj_set_style_text_font(label, &lv_font_montserrat_22, 0);
+    lv_obj_center(label);
+    return button;
+}
+
+lv_obj_t *create_camera_control_pill(lv_obj_t *parent, int16_t x)
+{
+    lv_obj_t *pill = lv_obj_create(parent);
+    lv_obj_set_size(pill, 196, 58);
+    lv_obj_align(pill, LV_ALIGN_TOP_LEFT, x, 360);
+    lv_obj_set_style_bg_color(pill, lv_color_hex(0x071015), 0);
+    lv_obj_set_style_bg_opa(pill, LV_OPA_80, 0);
+    lv_obj_set_style_border_width(pill, 1, 0);
+    lv_obj_set_style_border_color(pill, lv_color_hex(0x456777), 0);
+    lv_obj_set_style_radius(pill, 29, 0);
+    lv_obj_set_style_pad_all(pill, 4, 0);
+    lv_obj_set_style_pad_gap(pill, 4, 0);
+    lv_obj_set_flex_flow(pill, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(pill, LV_FLEX_ALIGN_SPACE_BETWEEN,
+                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_remove_flag(pill, LV_OBJ_FLAG_SCROLLABLE);
+    return pill;
 }
 
 void camera_success_flash_finished(lv_timer_t *timer)
@@ -3468,6 +3577,54 @@ void flash_camera_success(UiState &ui)
     ui.camera_success_timer = lv_timer_create(camera_success_flash_finished, 1200, &ui);
 }
 
+void set_camera_profile(UiState &ui, bluepaws::camera::Mode mode)
+{
+    if (bluepaws::camera::mode() == mode) return;
+    bluepaws::camera::setMode(mode);
+    bluepaws::camera::setScanZoom(100);
+    ui.pending_qr = {};
+    ui.camera_result_generation = bluepaws::camera::status().result_generation;
+    if (ui.camera_timer != nullptr) {
+        lv_timer_set_period(ui.camera_timer,
+                            mode == bluepaws::camera::Mode::Photo ? 34 : 67);
+    }
+    lv_async_call(rebuild_current_page, &ui);
+}
+
+void camera_photo_mode_clicked(lv_event_t *event)
+{
+    auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
+    if (ui != nullptr) set_camera_profile(*ui, bluepaws::camera::Mode::Photo);
+}
+
+void camera_qr_mode_clicked(lv_event_t *event)
+{
+    auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
+    if (ui != nullptr) set_camera_profile(*ui, bluepaws::camera::Mode::Qr);
+}
+
+lv_obj_t *create_camera_mode_button(lv_obj_t *parent,
+                                    const char *label_text,
+                                    bool active,
+                                    lv_event_cb_t callback,
+                                    UiState &ui)
+{
+    lv_obj_t *button = lv_button_create(parent);
+    lv_obj_set_size(button, 62, 46);
+    lv_obj_set_style_radius(button, 23, 0);
+    lv_obj_set_style_bg_color(button, lv_color_hex(active ? 0x00AFC1 : 0x071015), 0);
+    lv_obj_set_style_bg_opa(button, active ? LV_OPA_COVER : LV_OPA_80, 0);
+    lv_obj_set_style_border_width(button, active ? 2 : 1, 0);
+    lv_obj_set_style_border_color(button, lv_color_hex(0x8AF1FA), 0);
+    lv_obj_set_style_shadow_width(button, 0, 0);
+    lv_obj_set_style_pad_all(button, 0, 0);
+    lv_obj_add_event_cb(button, callback, LV_EVENT_CLICKED, &ui);
+    lv_obj_t *label = make_label(button, label_text, lv_color_hex(0xFFFFFF));
+    lv_obj_set_style_text_font(label, &lv_font_montserrat_18, 0);
+    lv_obj_center(label);
+    return button;
+}
+
 void camera_page_timer(lv_timer_t *timer)
 {
     auto *ui = static_cast<UiState *>(lv_timer_get_user_data(timer));
@@ -3479,6 +3636,7 @@ void camera_page_timer(lv_timer_t *timer)
         lv_obj_invalidate(ui->camera_preview_image);
     }
 
+    if (bluepaws::camera::mode() != bluepaws::camera::Mode::Qr) return;
     const auto camera_status = bluepaws::camera::status();
     if (camera_status.result_generation == 0 ||
         camera_status.result_generation == ui->camera_result_generation) return;
@@ -3510,7 +3668,7 @@ void create_camera_page(UiState &ui)
     auto actions = page_actions(ui, true);
     actions.rotate = nullptr;
     lv_obj_t *content = bluepaws::ui::create_page_frame(
-        lv_screen_active(), "BluePaws | QR Scanner", "Starting camera...", ui.dark_mode,
+        lv_screen_active(), "BluePaws | Camera", "Choose Photo or QR mode", ui.dark_mode,
         actions, &ui.status);
     lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(content, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -3530,69 +3688,173 @@ void create_camera_page(UiState &ui)
     }
 
     lv_obj_t *preview_panel = lv_obj_create(content);
-    lv_obj_set_size(preview_panel, 452, 370);
+    lv_obj_set_size(preview_panel, 452, 708);
     style_card(preview_panel, ui.dark_mode);
     lv_obj_set_style_pad_all(preview_panel, 10, 0);
+    lv_obj_remove_flag(preview_panel, LV_OBJ_FLAG_SCROLLABLE);
     ui.camera_preview_image = lv_image_create(preview_panel);
     if (ui.camera_preview_pixels != nullptr) {
         lv_image_set_src(ui.camera_preview_image, &ui.camera_preview_descriptor);
     }
-    // Fill the portrait width and deliberately stretch vertically. Fidelity is
-    // secondary here; the larger feedback image makes one-foot alignment easy.
-    lv_image_set_scale_x(ui.camera_preview_image, 346);
-    lv_image_set_scale_y(ui.camera_preview_image, 498);
-    lv_obj_center(ui.camera_preview_image);
+    lv_image_set_scale(ui.camera_preview_image, 256);
+    lv_obj_align(ui.camera_preview_image, LV_ALIGN_TOP_MID, 0, 0);
 
-    ui.camera_scan_guide = lv_obj_create(preview_panel);
-    lv_obj_set_size(ui.camera_scan_guide, 236, 236);
-    lv_obj_center(ui.camera_scan_guide);
-    lv_obj_set_style_bg_opa(ui.camera_scan_guide, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(ui.camera_scan_guide, 4, 0);
-    lv_obj_set_style_border_color(ui.camera_scan_guide, lv_color_hex(0x39D3E6), 0);
-    lv_obj_set_style_radius(ui.camera_scan_guide, 14, 0);
-    lv_obj_remove_flag(ui.camera_scan_guide, LV_OBJ_FLAG_CLICKABLE);
+    const bool qr_mode = bluepaws::camera::mode() == bluepaws::camera::Mode::Qr;
+    lv_obj_t *mode_switch = lv_obj_create(preview_panel);
+    lv_obj_set_size(mode_switch, 140, 54);
+    lv_obj_align(mode_switch, LV_ALIGN_TOP_LEFT, 10, 10);
+    lv_obj_set_style_bg_color(mode_switch, lv_color_hex(0x071015), 0);
+    lv_obj_set_style_bg_opa(mode_switch, LV_OPA_80, 0);
+    lv_obj_set_style_border_width(mode_switch, 1, 0);
+    lv_obj_set_style_border_color(mode_switch, lv_color_hex(0x456777), 0);
+    lv_obj_set_style_radius(mode_switch, 27, 0);
+    lv_obj_set_style_pad_all(mode_switch, 3, 0);
+    lv_obj_set_style_pad_gap(mode_switch, 6, 0);
+    lv_obj_set_flex_flow(mode_switch, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(mode_switch, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_remove_flag(mode_switch, LV_OBJ_FLAG_SCROLLABLE);
+    create_camera_mode_button(mode_switch, LV_SYMBOL_IMAGE, !qr_mode,
+                              camera_photo_mode_clicked, ui);
+    create_camera_mode_button(mode_switch, "QR", qr_mode,
+                              camera_qr_mode_clicked, ui);
 
-    lv_obj_t *result_panel = lv_obj_create(content);
-    lv_obj_set_size(result_panel, 452, 330);
-    style_card(result_panel, ui.dark_mode);
-    lv_obj_set_style_pad_all(result_panel, 18, 0);
-    lv_obj_set_flex_flow(result_panel, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(result_panel, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    if (qr_mode) {
+        ui.camera_scan_guide = lv_obj_create(preview_panel);
+        lv_obj_set_size(ui.camera_scan_guide, 236, 236);
+        lv_obj_align(ui.camera_scan_guide, LV_ALIGN_TOP_MID, 0, 98);
+        lv_obj_set_style_bg_opa(ui.camera_scan_guide, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(ui.camera_scan_guide, 4, 0);
+        lv_obj_set_style_border_color(ui.camera_scan_guide, lv_color_hex(0x39D3E6), 0);
+        lv_obj_set_style_radius(ui.camera_scan_guide, 14, 0);
+        lv_obj_remove_flag(ui.camera_scan_guide, LV_OBJ_FLAG_CLICKABLE);
+    }
+
+    lv_obj_t *auto_button = qr_mode ? lv_button_create(preview_panel) : nullptr;
+    if (auto_button != nullptr) {
+    lv_obj_set_size(auto_button, 76, 40);
+    lv_obj_align(auto_button, LV_ALIGN_TOP_RIGHT, -12, 12);
+    lv_obj_set_style_radius(auto_button, 20, 0);
+    lv_obj_set_style_bg_color(auto_button, lv_color_hex(0x071015), 0);
+    lv_obj_set_style_bg_opa(auto_button, LV_OPA_80, 0);
+    lv_obj_set_style_border_width(auto_button, 1, 0);
+    lv_obj_set_style_border_color(auto_button, lv_color_hex(0x6DDCE7), 0);
+    lv_obj_set_style_shadow_width(auto_button, 0, 0);
+    lv_obj_set_style_pad_all(auto_button, 0, 0);
+    lv_obj_add_event_cb(auto_button, camera_auto_tune, LV_EVENT_CLICKED, &ui);
+    lv_obj_t *auto_label = make_label(auto_button, "AUTO", lv_color_hex(0xFFFFFF));
+    lv_obj_set_style_text_font(auto_label, &lv_font_montserrat_14, 0);
+    lv_obj_center(auto_label);
+    }
+
+    lv_obj_t *brightness_pill = create_camera_control_pill(preview_panel, 12);
+    create_camera_adjust_button(brightness_pill, "-", camera_brightness_down, ui);
+    lv_obj_t *brightness_readout = lv_obj_create(brightness_pill);
+    lv_obj_set_size(brightness_readout, 80, 48);
+    lv_obj_set_style_bg_opa(brightness_readout, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(brightness_readout, 0, 0);
+    lv_obj_set_style_pad_all(brightness_readout, 0, 0);
+    lv_obj_remove_flag(brightness_readout, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t *brightness_icon = lv_image_create(brightness_readout);
+    lv_image_set_src(brightness_icon, &bluepaws::ui::icon_brightness);
+    lv_obj_set_style_image_recolor(brightness_icon, lv_color_hex(0xFFD35C), 0);
+    lv_obj_set_style_image_recolor_opa(brightness_icon, LV_OPA_COVER, 0);
+    lv_obj_align(brightness_icon, LV_ALIGN_LEFT_MID, 3, 0);
+    ui.camera_brightness_value = make_label(brightness_readout, "", lv_color_hex(0xFFFFFF));
+    lv_obj_set_style_text_font(ui.camera_brightness_value, &lv_font_montserrat_14, 0);
+    lv_obj_align(ui.camera_brightness_value, LV_ALIGN_RIGHT_MID, -3, 0);
+    lv_label_set_text_fmt(ui.camera_brightness_value, "%+d", bluepaws::camera::scanBrightness());
+    create_camera_adjust_button(brightness_pill, "+", camera_brightness_up, ui);
+
+    if (!qr_mode) {
+        lv_obj_t *zoom_pill = create_camera_control_pill(preview_panel, 224);
+        create_camera_adjust_button(zoom_pill, "-", camera_zoom_out, ui);
+        ui.camera_zoom_value = make_label(zoom_pill, "1x", lv_color_hex(0xFFFFFF));
+        lv_obj_set_width(ui.camera_zoom_value, 80);
+        lv_obj_set_style_text_align(ui.camera_zoom_value, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_style_text_font(ui.camera_zoom_value, &lv_font_montserrat_18, 0);
+        update_camera_zoom(ui, 0);
+        create_camera_adjust_button(zoom_pill, "+", camera_zoom_in, ui);
+    }
+
+    lv_obj_t *controls = lv_obj_create(preview_panel);
+    lv_obj_set_size(controls, 432, qr_mode ? 230 : 108);
+    lv_obj_align(controls, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_style_bg_color(controls, lv_color_hex(0x0A151E), 0);
+    lv_obj_set_style_bg_opa(controls, 238, 0);
+    lv_obj_set_style_border_width(controls, 1, 0);
+    lv_obj_set_style_border_color(controls, lv_color_hex(0x315365), 0);
+    lv_obj_set_style_radius(controls, 16, 0);
+    lv_obj_set_style_pad_all(controls, 10, 0);
+    lv_obj_set_style_pad_gap(controls, 4, 0);
+    lv_obj_set_flex_flow(controls, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(controls, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+
+    lv_obj_t *privacy_text = make_label(
+        controls,
+        qr_mode
+            ? "QR mode • Wi-Fi and BluePaws recognition is active."
+            : "Photo mode • fluid colour preview • QR recognition is off.",
+        lv_color_hex(0x8FB6C8));
+    lv_obj_set_width(privacy_text, LV_PCT(100));
+    lv_obj_set_style_text_font(privacy_text, &lv_font_montserrat_14, 0);
+    lv_label_set_long_mode(privacy_text, LV_LABEL_LONG_WRAP);
+
     ui.camera_result_label = make_label(
-        result_panel,
-        "Hold the QR code square inside the guide, about 15-60 cm away. Wi-Fi credentials are shown for confirmation before they are saved.",
-        ui.dark_mode ? lv_color_hex(0xF3F8FB) : lv_color_hex(0x17324D));
+        controls,
+        qr_mode
+            ? "Align the three large QR corner squares inside the guide."
+            : "Frame your pet, then switch to QR only when you want to scan a code.",
+        lv_color_hex(0xF3F8FB));
     lv_obj_set_width(ui.camera_result_label, LV_PCT(100));
+    lv_obj_set_height(ui.camera_result_label, 50);
+    lv_obj_set_style_text_font(ui.camera_result_label, &lv_font_montserrat_14, 0);
     lv_label_set_long_mode(ui.camera_result_label, LV_LABEL_LONG_WRAP);
 
-    lv_obj_t *brightness_label = make_label(
-        result_panel, "QR scan brightness",
-        ui.dark_mode ? lv_color_hex(0xAFC5D6) : lv_color_hex(0x45657D));
-    lv_obj_set_style_text_font(brightness_label, &lv_font_montserrat_14, 0);
-    static const char *brightness_buttons[] = {"Darker", "Auto", "Brighter", ""};
-    lv_obj_t *brightness_matrix = lv_buttonmatrix_create(result_panel);
-    lv_buttonmatrix_set_map(brightness_matrix, brightness_buttons);
-    lv_buttonmatrix_set_one_checked(brightness_matrix, true);
-    lv_buttonmatrix_set_button_ctrl_all(brightness_matrix, LV_BUTTONMATRIX_CTRL_CHECKABLE);
-    const uint32_t brightness_selection =
-        static_cast<uint32_t>(bluepaws::camera::scanBrightness() + 1);
-    lv_buttonmatrix_set_selected_button(brightness_matrix, brightness_selection);
-    lv_buttonmatrix_set_button_ctrl(
-        brightness_matrix, brightness_selection, LV_BUTTONMATRIX_CTRL_CHECKED);
-    lv_obj_set_size(brightness_matrix, LV_PCT(100), 42);
-    lv_obj_add_event_cb(
-        brightness_matrix, camera_brightness_changed, LV_EVENT_VALUE_CHANGED, &ui);
+    lv_obj_t *contrast_row = qr_mode ? lv_obj_create(controls) : nullptr;
+    if (contrast_row != nullptr) {
+    lv_obj_set_size(contrast_row, LV_PCT(100), 34);
+    lv_obj_set_style_bg_opa(contrast_row, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(contrast_row, 0, 0);
+    lv_obj_set_style_pad_all(contrast_row, 0, 0);
+    lv_obj_set_style_pad_gap(contrast_row, 8, 0);
+    lv_obj_set_flex_flow(contrast_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(contrast_row, LV_FLEX_ALIGN_START,
+                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_t *contrast_label = make_label(contrast_row, "Contrast", lv_color_hex(0xD8E8F2));
+    lv_obj_set_width(contrast_label, 72);
+    lv_obj_set_style_text_font(contrast_label, &lv_font_montserrat_14, 0);
+    lv_obj_t *contrast_slider = lv_slider_create(contrast_row);
+    lv_obj_set_size(contrast_slider, 0, 12);
+    lv_obj_set_flex_grow(contrast_slider, 1);
+    lv_slider_set_range(contrast_slider, 70, 160);
+    lv_slider_set_value(contrast_slider, bluepaws::camera::scanContrast(), LV_ANIM_OFF);
+    lv_obj_set_style_bg_color(contrast_slider, lv_color_hex(0x40525F), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(contrast_slider, lv_color_hex(0x23B7C8), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(contrast_slider, lv_color_hex(0xF3F8FB), LV_PART_KNOB);
+    lv_obj_set_style_pad_all(contrast_slider, 5, LV_PART_KNOB);
+    lv_obj_add_event_cb(contrast_slider, camera_contrast_changed, LV_EVENT_VALUE_CHANGED, &ui);
+    ui.camera_contrast_value = make_label(contrast_row, "100%", lv_color_hex(0x80E6F2));
+    lv_obj_set_width(ui.camera_contrast_value, 52);
+    lv_obj_set_style_text_align(ui.camera_contrast_value, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_style_text_font(ui.camera_contrast_value, &lv_font_montserrat_14, 0);
+    lv_label_set_text_fmt(ui.camera_contrast_value, "%u%%", bluepaws::camera::scanContrast());
+    }
 
-    ui.camera_apply_button = lv_button_create(result_panel);
-    lv_obj_set_size(ui.camera_apply_button, LV_PCT(100), 52);
+    ui.camera_apply_button = qr_mode ? lv_button_create(controls) : nullptr;
+    if (ui.camera_apply_button != nullptr) {
+    lv_obj_set_size(ui.camera_apply_button, LV_PCT(100), 42);
     lv_obj_set_style_bg_color(ui.camera_apply_button, lv_color_hex(0x007D8A), 0);
     lv_obj_add_event_cb(ui.camera_apply_button, camera_apply_wifi_clicked, LV_EVENT_CLICKED, &ui);
     lv_obj_add_flag(ui.camera_apply_button, LV_OBJ_FLAG_HIDDEN);
     lv_obj_t *button_label = make_label(ui.camera_apply_button, "Save and connect", lv_color_hex(0xFFFFFF));
     lv_obj_center(button_label);
+    }
 
     if (ui.camera_timer == nullptr) {
-        ui.camera_timer = lv_timer_create(camera_page_timer, 100, &ui);
+        ui.camera_timer = lv_timer_create(camera_page_timer, qr_mode ? 67 : 34, &ui);
+    } else {
+        lv_timer_set_period(ui.camera_timer, qr_mode ? 67 : 34);
     }
 }
 
@@ -3673,6 +3935,9 @@ void create_ui(UiState &ui)
     ui.camera_scan_guide = nullptr;
     ui.camera_result_label = nullptr;
     ui.camera_apply_button = nullptr;
+    ui.camera_brightness_value = nullptr;
+    ui.camera_contrast_value = nullptr;
+    ui.camera_zoom_value = nullptr;
     ui.map_drawer = nullptr;
     ui.layer_drawer = nullptr;
     ui.brightness_popup = nullptr;
