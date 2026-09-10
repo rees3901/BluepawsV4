@@ -50,6 +50,9 @@ configured uplink before starting the automatic local-AP fallback. The fallback
 continues probing known uplinks and closes after one reconnects. Manually
 selecting Off-Grid is separate: it starts the AP immediately, disables station
 reconnects and remains selected until the user chooses another mode.
+The selected Home or Portable profile also remains the hub's displayed/map
+identity if recovery temporarily uses the other configured SSID; the active
+uplink is connectivity state and does not silently rewrite explicit user state.
 Passwords remain in local NVS, are masked in the UI, and are never copied to SD
 or written to the serial log.
 

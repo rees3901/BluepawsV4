@@ -150,11 +150,19 @@ body.panel-open #map {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 7px;
+    gap: 10px;
     padding: 12px 14px;
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
+}
+
+.panel-header-left {
+    display: flex;
+    min-width: 0;
+    flex: 1 1 auto;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
 }
 
 .panel-title {
@@ -165,10 +173,8 @@ body.panel-open #map {
 
 .panel-header-btns {
     display: flex;
-    width: 100%;
-    flex: 0 0 100%;
     align-items: center;
-    justify-content: flex-end;
+    justify-content: flex-start;
     gap: 6px;
 }
 
@@ -1124,8 +1130,6 @@ body.light .leaflet-control-scale-line {
 /* ── Web/off-grid interaction parity ── */
 .panel-brand {
     display: flex;
-    flex: 0 0 100%;
-    width: 100%;
     min-width: 0;
     align-items: center;
     gap: 3px;
@@ -1149,8 +1153,8 @@ body.light .leaflet-control-scale-line {
 
 .panel-brand-mascot {
     display: block;
-    width: 96px;
-    height: 56px;
+    width: 134px;
+    height: 78px;
     margin-left: auto;
     object-fit: contain;
     flex: 0 0 auto;
@@ -1376,9 +1380,9 @@ body.light .btn-bluetooth.active { border-color: #64a978; background: #d8eaf6; c
 .temporary-map-pin-emoji { display: block; width: 36px; height: 42px; filter: drop-shadow(0 2px 3px rgb(0 0 0 / 55%)); font-family: 'Apple Color Emoji','Segoe UI Emoji','Noto Color Emoji',sans-serif; font-size: 34px; line-height: 40px; text-align: center; }
 
 @media (max-width: 768px) {
-    #panelHeader { flex-wrap: wrap; gap: 6px 0; padding: 10px 12px; }
-    .panel-brand { width: 100%; flex: 0 0 100%; }
-    .panel-header-btns { width: 100%; flex: 0 0 100%; align-items: center; justify-content: flex-end; }
+    #panelHeader { gap: 8px; padding: 10px 12px; }
+    .panel-header-left { gap: 6px; }
+    .panel-header-btns { align-items: center; justify-content: flex-start; }
     .map-context-actions button { min-height: 42px; padding: 9px 10px; font-size: .76rem; }
 }
 

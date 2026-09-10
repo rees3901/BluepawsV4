@@ -453,10 +453,6 @@ unsigned preferred_network(const hub::Settings &settings) {
     return settings.communications_mode == hub::CommunicationsMode::Portable ? 1U : 0U;
 }
 
-hub::CommunicationsMode network_mode(unsigned index) {
-    return index == 1 ? hub::CommunicationsMode::Portable : hub::CommunicationsMode::Home;
-}
-
 unsigned first_available_network(const hub::Settings &settings, unsigned preferred) {
     if (network_available(settings, preferred)) return preferred;
     const unsigned alternate = preferred == 0 ? 1U : 0U;
@@ -492,7 +488,7 @@ bool start_wifi(const hub::Settings &settings) {
         !network_available(settings, 0) && !network_available(settings, 1);
     set_effective_mode(explicit_off_grid || automatic_off_grid
                            ? hub::CommunicationsMode::OffGrid
-                           : network_mode(network_index),
+                           : settings.communications_mode,
                        automatic_off_grid);
     return configure_wifi(settings, network_index, false,
                           explicit_off_grid || automatic_off_grid, !explicit_off_grid);
@@ -549,7 +545,7 @@ void sync_task(void *) {
                 (!network_available(settings, 0) && !network_available(settings, 1));
             tried_alternate = network_index != preferred;
             set_effective_mode(off_grid_active ? hub::CommunicationsMode::OffGrid
-                                               : network_mode(network_index),
+                                               : settings.communications_mode,
                                off_grid_active && !explicit_off_grid);
             configure_wifi(settings, network_index, true, off_grid_active, !explicit_off_grid);
             cloud_delay_ms = HOME_HUB_SYNC_INTERVAL_MS;
@@ -570,9 +566,9 @@ void sync_task(void *) {
                 network_index = alternate;
                 tried_alternate = true;
                 set_state(ConnectionState::Connecting);
-                set_effective_mode(network_mode(network_index));
+                set_effective_mode(settings.communications_mode);
                 ESP_LOGI(kTag, "Preferred Wi-Fi timed out; trying %s uplink",
-                         hub::communicationsModeName(network_mode(network_index)));
+                         network_index == 1 ? "secondary" : "primary");
                 configure_wifi(settings, network_index, true, false);
                 continue;
             }
@@ -593,12 +589,12 @@ void sync_task(void *) {
             if (esp_wifi_set_mode(WIFI_MODE_STA) == ESP_OK) {
                 off_grid_active = false;
                 tried_alternate = network_index != preferred;
-                set_effective_mode(network_mode(network_index));
+                set_effective_mode(settings.communications_mode);
                 ESP_LOGI(kTag, "Trusted Wi-Fi restored; automatic off-grid AP stopped");
             }
             cloud_delay_ms = HOME_HUB_SYNC_INTERVAL_MS;
         } else if (!g_cloud_authorized || fetch_snapshot()) {
-            set_effective_mode(network_mode(network_index));
+            set_effective_mode(settings.communications_mode);
             cloud_delay_ms = HOME_HUB_SYNC_INTERVAL_MS;
         } else {
             cloud_delay_ms = std::min(cloud_delay_ms * 2U,
