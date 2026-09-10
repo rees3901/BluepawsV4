@@ -8,6 +8,7 @@
 #include "ui_icons.h"
 #include "home_hub_cloud.h"
 #include "home_hub_config.h"
+#include "home_hub_defaults.h"
 #include "home_hub_settings_store.h"
 #include "home_hub_web.h"
 #include "home_hub_camera.h"
@@ -53,7 +54,7 @@ extern "C" void __wrap_vApplicationGetTimerTaskMemory(
 
 namespace {
 
-constexpr bluepaws::map::GeoPoint kTestOrigin{51.8642, -2.2382};
+constexpr bluepaws::map::GeoPoint kTestOrigin = bluepaws::defaults::kStarterLocation;
 constexpr int32_t kMapLeft = 0;
 constexpr int32_t kMapTop = 0;
 constexpr int32_t kMarkerSize = 28;

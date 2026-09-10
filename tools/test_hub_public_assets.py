@@ -74,6 +74,16 @@ class PublicAssetTests(unittest.TestCase):
         self.assertIn("localStorage.setItem('bp_offline_pinned_device', 'none')", js)
         self.assertIn("savedPin === null || savedPin === 'none'", js)
 
+    def test_p4_hub_starter_position_creates_a_map_marker(self):
+        defaults = (ROOT / 'hub/esp-idf-p4/main/home_hub_defaults.h').read_text(encoding='utf-8')
+        server = (ROOT / 'hub/esp-idf-p4/main/home_hub_web.cpp').read_text(encoding='utf-8')
+        adapter = (ROOT / 'hub/platformio/data/hub-presence.js').read_text(encoding='utf-8')
+        self.assertIn('51.907055, -2.256660', defaults)
+        self.assertIn('defaults::kStarterLocation.latitude', server)
+        self.assertIn('defaults::kStarterLocation.longitude', server)
+        self.assertIn('"position_source", "starter"', server)
+        self.assertIn("s.position_source === 'starter'", adapter)
+
     def test_mdns_hostname_is_not_redirected_as_foreign(self):
         source = (ROOT / 'hub/platformio/src/main.cpp').read_text(encoding='utf-8')
         host = source.split('static bool hasForeignPortalHost() {', 1)[1].split(
