@@ -56,6 +56,10 @@ CONFIG_ESP_HOSTED_SDIO_GPIO_RESET_SLAVE=54
 CONFIG_ESP_HOSTED_SDIO_RESET_ACTIVE_HIGH=y
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
 
+# Reserve enough lwIP descriptors for the HTTP server plus Hosted Wi-Fi, DNS
+# and mDNS. The ESP-IDF default of 10 is too small for parallel browser assets.
+CONFIG_LWIP_MAX_SOCKETS=20
+
 # LVGL 9 settings used by the first landscape testbed UI.
 CONFIG_LV_USE_CLIB_MALLOC=y
 CONFIG_LV_USE_CLIB_STRING=y
