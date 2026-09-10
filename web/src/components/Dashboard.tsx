@@ -651,12 +651,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
 
       <aside id="panel" className={sidebarOpen ? "open" : ""} onClick={handlePanelBlankClick}>
         <div id="panelHeader">
-          <div className="panel-brand" aria-label="Bluepaws V4">
-            <span className="panel-brand-mark" aria-hidden="true" />
-            <span className="panel-title">Bluepaws V4</span>
-            <span className="panel-brand-mascot" aria-hidden="true" />
-          </div>
-          <div className="panel-header-btns">
+          <div className="panel-status-row">
             {tutorialMode && !tutorialOpen ? (
               <button id="statusBanner" className="tutorial tutorial-exit-ready" type="button" data-panel-static title="Tutorial Mode active — select to return to Live Mode" aria-label="Tutorial Mode active. Return to Live Mode" onClick={() => handleTutorialModeChange(false)}>
                 <span id="statusIcon">●</span><span id="statusText">Exit Tutorial</span>
@@ -666,6 +661,13 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
                 <span id="statusIcon">●</span><span id="statusText">{statusText}</span>
               </span>
             )}
+          </div>
+          <div className="panel-brand" aria-label="Bluepaws V4">
+            <span className="panel-brand-mark" aria-hidden="true" />
+            <span className="panel-title">Bluepaws V4</span>
+            <span className="panel-brand-mascot" aria-hidden="true" />
+          </div>
+          <div className="panel-header-btns">
             <AccountMenu email={userEmail} familyName={familyName} familyRole={familyRole} onSignOut={handleSignOut} />
             <button className="ctrl-btn" data-tour="settings" title="Settings" aria-label="Settings" onClick={() => setSettingsOpen(true)}><SettingsIcon /></button>
           </div>
