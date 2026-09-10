@@ -489,8 +489,8 @@ button#statusBanner {
 }
 
 .panel-brand-mascot {
-  width: 73px;
-  height: 73px;
+  width: 107px;
+  height: 107px;
   margin-left: 0;
   background-image: url("/brand/main-logo-podge-carrie.avif");
 }
@@ -505,9 +505,19 @@ button#statusBanner {
   gap: 6px;
 }
 
+.panel-brand {
+  width: 100%;
+  flex: 0 0 100%;
+}
+
 .panel-header-btns {
-  flex: 0 0 auto;
-  margin-left: auto;
+  width: 100%;
+  flex: 0 0 100%;
+  align-items: center;
+}
+
+.panel-header-btns #statusBanner {
+  margin-right: auto;
 }
 
 @media (max-width: 768px) {
@@ -517,17 +527,6 @@ button#statusBanner {
     padding: 10px 12px;
   }
 
-  .panel-brand {
-    width: 100%;
-    flex: 0 0 100%;
-  }
-
-  .panel-header-btns {
-    width: 100%;
-    flex: 0 0 100%;
-    align-items: center;
-    justify-content: flex-end;
-  }
 }
 
 .transport-wifi {
