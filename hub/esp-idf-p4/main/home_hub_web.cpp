@@ -431,7 +431,7 @@ esp_err_t events_handler(httpd_req_t *request)
 esp_err_t captive_handler(httpd_req_t *request)
 {
     httpd_resp_set_status(request, "302 Found");
-    httpd_resp_set_hdr(request, "Location", "http://192.168.4.1/welcome");
+    httpd_resp_set_hdr(request, "Location", "http://blueports.local/welcome");
     httpd_resp_set_hdr(request, "Cache-Control", "no-store");
     return httpd_resp_send(request, nullptr, 0);
 }

@@ -20,8 +20,8 @@
 #include "freertos/event_groups.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
-#include "nvs_flash.h"
 #include "lwip/inet.h"
+#include "nvs_flash.h"
 
 #include <algorithm>
 #include <array>
@@ -471,6 +471,13 @@ bool configure_wifi(const hub::Settings &settings, unsigned network_index, bool 
     const bool started = esp_wifi_start() == ESP_OK;
     if (started) {
         g_wifi_initialized = true;
+        for (const char *key : {"WIFI_AP_DEF", "WIFI_STA_DEF"}) {
+            esp_netif_t *network_interface = esp_netif_get_handle_from_ifkey(key);
+            if (network_interface != nullptr) {
+                esp_netif_set_hostname(network_interface, "blueports");
+            }
+        }
+        bluepaws::captive_dns::start_mdns();
         if (access_point_enabled) configure_captive_portal_discovery();
         ESP_LOGI(kTag, "Wi-Fi applied: station=%s off_grid_ap=%s",
                  station_enabled ? station.ssid : "disabled",
