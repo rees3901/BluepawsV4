@@ -325,33 +325,33 @@ body.light .device-card.offline {
 }
 
 .marker-pin.collar-sleeping {
-    opacity: 0.97;
+    opacity: 0.97 !important;
     filter: grayscale(0.02) saturate(0.94) brightness(0.99);
 }
 
 .marker-pin.freshness-subdued {
-    opacity: 0.92;
+    opacity: 0.92 !important;
     filter: grayscale(0.1) saturate(0.8) brightness(0.96);
 }
 
 .marker-pin.freshness-faded {
-    opacity: 0.84;
+    opacity: 0.84 !important;
     filter: grayscale(0.22) saturate(0.62) brightness(0.92);
 }
 
 .marker-pin.stale {
-    opacity: 0.75;
+    opacity: 0.75 !important;
     filter: grayscale(0.42) saturate(0.42) brightness(0.88);
 }
 
 .marker-pin.freshness-greyed {
-    opacity: 0.62;
+    opacity: 0.62 !important;
     filter: grayscale(0.95) saturate(0.08) brightness(0.82);
 }
 
 .marker-pin.offline {
     filter: grayscale(1) saturate(0);
-    opacity: 0.52;
+    opacity: 0.52 !important;
 }
 
 /* ── Compact summary row (always visible) ── */

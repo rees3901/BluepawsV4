@@ -730,7 +730,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
         </div>
       </aside>
 
-      <TrackingMap devices={mapDevices} avatars={mapAvatars} presenceNow={Math.floor(now / 60_000) * 60_000} sidebarOpen={sidebarOpen} followedId={followedId} trailIds={trailIds} trailHistory={trailHistory}
+      <TrackingMap devices={mapDevices} avatars={mapAvatars} presenceNow={Math.floor(now / 10_000) * 10_000} sidebarOpen={sidebarOpen} followedId={followedId} trailIds={trailIds} trailHistory={trailHistory}
         allTrailsVisible={allTrailsVisible} trailsAvailable={mapDevices.length > 0} command={mapCommand} onAction={handleAction}
         onAllTrailsToggle={handleAllTrailsToggle} onUserNavigation={handleMapUserNavigation} onNotice={setMapNotice} />
 
