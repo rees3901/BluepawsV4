@@ -371,11 +371,19 @@ body.light .leaflet-map-btn:focus-visible .fit-markers-icon {
   background-image: linear-gradient(28deg, transparent 45%, #9fc9dc 46% 55%, transparent 56%), linear-gradient(152deg, transparent 40%, #fff 41% 44%, transparent 45%), radial-gradient(circle at 72% 35%, #b9d99f 0 18%, transparent 19%);
 }
 
+.map-style-preview-live {
+  overflow: hidden;
+  pointer-events: none;
+  background: var(--bg-primary);
+}
+
+.map-style-preview-live .leaflet-control-container { display: none; }
+
 .map-style-preview-image.raster-satellite { background-color: #506744; filter: saturate(0.8); }
 .map-style-preview-image.raster-topographic { background-color: #eee4c8; background-image: repeating-radial-gradient(ellipse at 45% 55%, transparent 0 9px, #b69767 10px 11px); }
 .map-style-preview-image.vector-online { background-color: #edf0e7; background-image: linear-gradient(28deg, transparent 45%, #94cfe0 46% 55%, transparent 56%), linear-gradient(152deg, transparent 40%, #fff 41% 44%, transparent 45%), linear-gradient(80deg, transparent 46%, #bac6b7 47% 48%, transparent 49%); }
 
-.map-style-menu { padding: 7px 3px 3px; }
+.map-style-menu { padding: 3px; }
 .map-style-tabs { display: grid; grid-template-columns: 1fr 1fr; overflow: hidden; border: 1px solid var(--border); border-radius: 7px; }
 .map-style-tabs button { padding: 7px; background: var(--bg-primary); color: var(--text-secondary); font-size: 0.7rem; font-weight: 800; }
 .map-style-tabs button.active { background: var(--accent); color: #fff; }
@@ -413,6 +421,14 @@ body.panel-open .maplibre-zoom-stack { left: calc(var(--panel-width) + 10px); }
 .maplibre-zoom-stack button:hover,
 .maplibre-zoom-stack button:focus-visible { background: var(--accent); color: #fff; }
 .measure-popup .maplibregl-popup-content { padding: 6px 9px; border-radius: 6px; font-weight: 800; }
+.maplibre-map-context-popup .maplibregl-popup-content {
+  min-width: 250px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  color: var(--text-primary);
+}
 @media (max-width: 768px) {
   body.panel-open .maplibre-tool-stack,
   body.panel-open .maplibre-zoom-stack { left: 10px; }

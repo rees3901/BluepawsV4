@@ -7,6 +7,8 @@ import { useEffect, useRef, useState, type MutableRefObject } from "react";
 import { emojiImageUrl } from "@/lib/emoji";
 import { COLLAR_FRESHNESS_CLASS_NAMES, COLLAR_RECEIVE_WINDOW_SECONDS, collarCardFreshness, collarFreshnessClass, type CollarCardFreshness } from "@/lib/devicePresence";
 import { mapLibreStyle } from "@/lib/mapLibreStyle";
+import { formatMapCoordinates } from "@/lib/mapLocation";
+import { contextMenuHtml, copyTextToClipboard, temporaryPinPopupHtml } from "@/lib/mapLocationPopup";
 import { EMPTY_MAP_CENTER, EMPTY_MAP_ZOOM } from "@/lib/mapViewport";
 import { normalizeMarkerColor } from "@/lib/markerColor";
 import { mapPopupHtml } from "@/lib/mapPopup";
@@ -32,6 +34,9 @@ export default function MapLibreMap(props: ConfiguredMapRendererProps) {
   const measurementPointsRef = useRef<[number, number][]>([]);
   const measurementPopupRef = useRef<maplibregl.Popup | null>(null);
   const devicePopupRef = useRef<maplibregl.Popup | null>(null);
+  const locationPopupRef = useRef<maplibregl.Popup | null>(null);
+  const temporaryPinsRef = useRef(new Map<number, maplibregl.Marker>());
+  const nextTemporaryPinIdRef = useRef(1);
   const propsRef = useRef(props);
   const [measuring, setMeasuring] = useState(false);
 
@@ -39,6 +44,7 @@ export default function MapLibreMap(props: ConfiguredMapRendererProps) {
 
   useEffect(() => {
     if (!containerRef.current) return;
+    const temporaryPins = temporaryPinsRef.current;
     if (!protocolRegistered) {
       const protocol = new Protocol();
       maplibregl.addProtocol("pmtiles", protocol.tile);
@@ -58,12 +64,82 @@ export default function MapLibreMap(props: ConfiguredMapRendererProps) {
     };
     map.on("dragstart", stopFollowingForGesture);
     map.on("zoomstart", stopFollowingForGesture);
+    const reportViewport = () => {
+      const center = map.getCenter();
+      propsRef.current.onViewportChange?.({ latitude: center.lat, longitude: center.lng, zoom: map.getZoom() });
+    };
+    map.on("moveend", reportViewport);
+    reportViewport();
+    const startMeasurementAt = (longitude: number, latitude: number) => {
+      clearMeasurement(map, measurementPointsRef, measurementPopupRef);
+      measurementPointsRef.current.push([longitude, latitude]);
+      renderMeasurement(map, measurementPointsRef.current);
+      setMeasuring(true);
+      propsRef.current.onNotice?.("Choose the next measurement point");
+    };
+    const addTemporaryPin = (longitude: number, latitude: number) => {
+      const pinId = nextTemporaryPinIdRef.current++;
+      const markerElement = document.createElement("div");
+      markerElement.className = "temporary-map-pin-icon";
+      markerElement.innerHTML = '<span class="temporary-map-pin-emoji" aria-hidden="true">📍</span>';
+      markerElement.setAttribute("aria-label", "Temporary meeting point");
+      const marker = new maplibregl.Marker({ element: markerElement, anchor: "bottom" })
+        .setLngLat([longitude, latitude])
+        .addTo(map);
+      const content = locationPopupContent(latitude, longitude, pinId, {
+        onMeasure: () => {
+          marker.getPopup()?.remove();
+          startMeasurementAt(longitude, latitude);
+        },
+        onRemove: () => {
+          marker.remove();
+          temporaryPins.delete(pinId);
+        },
+      });
+      marker.setPopup(new maplibregl.Popup({ offset: 36, maxWidth: "290px", className: "maplibre-map-context-popup" }).setDOMContent(content));
+      temporaryPins.set(pinId, marker);
+      marker.togglePopup();
+      propsRef.current.onNotice?.("Temporary pin dropped");
+    };
+    const openLocationMenu = (event: maplibregl.MapMouseEvent) => {
+      event.preventDefault();
+      const { lat, lng } = event.lngLat;
+      const coordinates = formatMapCoordinates(lat, lng, 6);
+      void copyTextToClipboard(coordinates).then(copied => {
+        propsRef.current.onNotice?.(copied ? "Coordinates copied to clipboard" : "Unable to copy coordinates");
+      });
+      const content = locationPopupContent(lat, lng, null, {
+        onDropPin: () => {
+          locationPopupRef.current?.remove();
+          addTemporaryPin(lng, lat);
+        },
+        onMeasure: () => {
+          locationPopupRef.current?.remove();
+          startMeasurementAt(lng, lat);
+        },
+      });
+      locationPopupRef.current?.remove();
+      const popup = new maplibregl.Popup({ maxWidth: "290px", className: "maplibre-map-context-popup" })
+        .setLngLat(event.lngLat)
+        .setDOMContent(content)
+        .addTo(map);
+      locationPopupRef.current = popup;
+      popup.on("close", () => {
+        if (locationPopupRef.current === popup) locationPopupRef.current = null;
+      });
+    };
+    map.on("contextmenu", openLocationMenu);
     mapRef.current = map;
     const markers = markersRef.current;
     return () => {
       markers.forEach(marker => marker.remove());
       markers.clear();
       measurementPopupRef.current?.remove();
+      locationPopupRef.current?.remove();
+      temporaryPins.forEach(marker => marker.remove());
+      temporaryPins.clear();
+      map.off("contextmenu", openLocationMenu);
+      map.off("moveend", reportViewport);
       map.remove();
       mapRef.current = null;
     };
@@ -194,6 +270,23 @@ export default function MapLibreMap(props: ConfiguredMapRendererProps) {
       <button type="button" aria-label="Zoom out" onClick={() => zoomBy(-1)}>−</button>
     </div>
   </>;
+}
+
+type LocationPopupActions = {
+  onDropPin?: () => void;
+  onMeasure: () => void;
+  onRemove?: () => void;
+};
+
+function locationPopupContent(latitude: number, longitude: number, pinId: number | null, actions: LocationPopupActions) {
+  const template = document.createElement("template");
+  const point = { lat: latitude, lng: longitude };
+  template.innerHTML = pinId === null ? contextMenuHtml(point) : temporaryPinPopupHtml(point, pinId);
+  const content = template.content.firstElementChild as HTMLElement;
+  content.querySelector<HTMLButtonElement>('[data-location-action="drop-pin"]')?.addEventListener("click", () => actions.onDropPin?.());
+  content.querySelector<HTMLButtonElement>('[data-location-action="measure"]')?.addEventListener("click", actions.onMeasure);
+  content.querySelector<HTMLButtonElement>('[data-location-action="remove-pin"]')?.addEventListener("click", () => actions.onRemove?.());
+  return content;
 }
 
 function renderMeasurement(map: MapLibre, points: [number, number][]) {

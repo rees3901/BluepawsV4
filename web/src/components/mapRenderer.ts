@@ -4,6 +4,12 @@ import type { MapLayerPickerName } from "@/lib/mapLayers";
 export type MapRendererName = "leaflet" | "maplibre";
 export type VectorSourceName = "online" | "pmtiles";
 
+export interface MapViewport {
+  latitude: number;
+  longitude: number;
+  zoom: number;
+}
+
 export interface MapRendererProps {
   devices: TelemetryDevice[];
   avatars: Record<number, DeviceAvatar>;
@@ -19,6 +25,7 @@ export interface MapRendererProps {
   onAllTrailsToggle?: () => void;
   onUserNavigation?: () => void;
   onNotice?: (message: string) => void;
+  onViewportChange?: (viewport: MapViewport) => void;
   readOnly?: boolean;
 }
 
