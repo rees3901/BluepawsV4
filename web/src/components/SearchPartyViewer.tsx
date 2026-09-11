@@ -136,6 +136,8 @@ export function SearchPartyViewer({ token, initialSnapshot, previewMode = false,
     });
   }, [allTrailsVisible, trailCapableIds]);
 
+  const handleMapUserNavigation = useCallback(() => setFollowedId(null), []);
+
   const expiresText = previewMode ? "Local preview" : snapshot.expiresAt ? new Date(snapshot.expiresAt).toLocaleString() : "soon";
   const refreshedText = lastRefresh ? lastRefresh.toLocaleTimeString() : "loading";
 
@@ -170,6 +172,7 @@ export function SearchPartyViewer({ token, initialSnapshot, previewMode = false,
         command={mapCommand}
         onAction={handleAction}
         onAllTrailsToggle={toggleAllTrails}
+        onUserNavigation={handleMapUserNavigation}
         onNotice={setMapNotice}
         readOnly
       />

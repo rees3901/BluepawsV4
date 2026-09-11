@@ -3,7 +3,7 @@
 import * as maplibregl from "maplibre-gl";
 import type { GeoJSONSource, LngLatBoundsLike, Map as MapLibre } from "maplibre-gl";
 import { Protocol } from "pmtiles";
-import { useEffect, useRef, type MutableRefObject } from "react";
+import { useEffect, useRef, useState, type MutableRefObject } from "react";
 import { emojiImageUrl } from "@/lib/emoji";
 import { isCollarOffline } from "@/lib/devicePresence";
 import { mapLibreStyle } from "@/lib/mapLibreStyle";
@@ -16,6 +16,9 @@ import type { DeviceAction, DeviceAvatar, TelemetryDevice } from "@/types/teleme
 const JUMP_TO_ZOOM = 17;
 const TRAILS_SOURCE = "bluepaws-trails";
 const TRAILS_LAYER = "bluepaws-trails";
+const MEASURE_SOURCE = "bluepaws-measurement";
+const MEASURE_LINE_LAYER = "bluepaws-measurement-line";
+const MEASURE_POINT_LAYER = "bluepaws-measurement-points";
 let protocolRegistered = false;
 
 maplibregl.setWorkerUrl("/maplibre/maplibre-gl-worker.mjs");
@@ -25,7 +28,10 @@ export default function MapLibreMap(props: ConfiguredMapRendererProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibre | null>(null);
   const markersRef = useRef(new Map<number, maplibregl.Marker>());
+  const measurementPointsRef = useRef<[number, number][]>([]);
+  const measurementPopupRef = useRef<maplibregl.Popup | null>(null);
   const propsRef = useRef(props);
+  const [measuring, setMeasuring] = useState(false);
 
   useEffect(() => { propsRef.current = props; }, [props]);
 
@@ -43,17 +49,44 @@ export default function MapLibreMap(props: ConfiguredMapRendererProps) {
       zoom: EMPTY_MAP_ZOOM,
       attributionControl: {},
     });
-    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-right");
+    map.addControl(new maplibregl.ScaleControl({ unit: "imperial" }), "bottom-right");
     map.on("error", event => onNotice?.(`Vector map: ${event.error?.message ?? "source failed"}`));
+    const stopFollowingForGesture = (event: maplibregl.MapLibreEvent<MouseEvent | TouchEvent | WheelEvent | undefined>) => {
+      if (event.originalEvent && propsRef.current.followedId !== null) propsRef.current.onUserNavigation?.();
+    };
+    map.on("dragstart", stopFollowingForGesture);
+    map.on("zoomstart", stopFollowingForGesture);
     mapRef.current = map;
     const markers = markersRef.current;
     return () => {
       markers.forEach(marker => marker.remove());
       markers.clear();
+      measurementPopupRef.current?.remove();
       map.remove();
       mapRef.current = null;
     };
   }, [onNotice, vectorSource]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    map.getCanvas().style.cursor = measuring ? "crosshair" : "";
+    if (!measuring) clearMeasurement(map, measurementPointsRef, measurementPopupRef);
+    const addPoint = (event: maplibregl.MapMouseEvent) => {
+      if (!measuring) return;
+      measurementPointsRef.current.push([event.lngLat.lng, event.lngLat.lat]);
+      renderMeasurement(map, measurementPointsRef.current);
+      if (measurementPointsRef.current.length < 2) return;
+      const total = measurementDistanceMetres(measurementPointsRef.current);
+      measurementPopupRef.current?.remove();
+      measurementPopupRef.current = new maplibregl.Popup({ closeButton: false, closeOnClick: false, offset: 12, className: "measure-popup" })
+        .setLngLat(event.lngLat)
+        .setText(formatDistance(total))
+        .addTo(map);
+    };
+    map.on("click", addPoint);
+    return () => { map.off("click", addPoint); };
+  }, [measuring, vectorSource]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => mapRef.current?.resize(), 340);
@@ -103,17 +136,97 @@ export default function MapLibreMap(props: ConfiguredMapRendererProps) {
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !command) return;
-    const visible = locatedDevices(devices);
-    if (command.type === "fit") fitDevices(map, visible, sidebarOpen);
+    const currentProps = propsRef.current;
+    const visible = locatedDevices(currentProps.devices);
+    if (command.type === "fit") fitDevices(map, visible, currentProps.sidebarOpen);
     if ((command.type === "jump" || command.type === "open") && command.deviceId !== undefined) {
       const device = visible.find(item => item.id === command.deviceId);
       const marker = markersRef.current.get(command.deviceId);
       if (device) map.easeTo({ center: [device.lon, device.lat], zoom: Math.max(map.getZoom(), JUMP_TO_ZOOM) });
       if (marker && command.type === "open") openPopup(map, marker, command.deviceId, propsRef);
     }
-  }, [command, devices, sidebarOpen]);
+  }, [command]);
 
-  return <div ref={containerRef} id="map" className="maplibre-map" aria-label="Live animal tracking vector map" />;
+  const stopFollowing = () => {
+    if (propsRef.current.followedId !== null) propsRef.current.onUserNavigation?.();
+  };
+  const centerHome = () => {
+    const map = mapRef.current;
+    const homeHub = propsRef.current.devices.find(device => device.entity === "hub" && device.hasGps);
+    if (!map || !homeHub) {
+      propsRef.current.onNotice?.("Home Hub location is not available yet");
+      return;
+    }
+    stopFollowing();
+    map.easeTo({ center: [homeHub.lon, homeHub.lat], zoom: Math.max(map.getZoom(), JUMP_TO_ZOOM) });
+  };
+  const fitAll = () => {
+    const map = mapRef.current;
+    if (!map) return;
+    stopFollowing();
+    fitDevices(map, locatedDevices(propsRef.current.devices), propsRef.current.sidebarOpen);
+  };
+  const zoomBy = (delta: number) => {
+    const map = mapRef.current;
+    if (!map) return;
+    stopFollowing();
+    map.easeTo({ zoom: map.getZoom() + delta });
+  };
+
+  return <>
+    <div ref={containerRef} id="map" className="maplibre-map" aria-label="Live animal tracking vector map" />
+    <div className="maplibre-tool-stack" aria-label="Vector map tools">
+      <button type="button" className="leaflet-map-btn" title="Center on Home Hub" aria-label="Center map on Home Hub" data-tour="map-home" onClick={centerHome}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="8" cy="8" r="5"/><path d="M8 1v3m0 8v3M1 8h3m8 0h3"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/></svg></button>
+      <button type="button" className="leaflet-map-btn" title="Fit all markers into view" aria-label="Fit all markers into view" data-tour="map-fit" onClick={fitAll}><span className="fit-markers-icon maplibre-fit-markers-icon" aria-hidden="true" /></button>
+      {props.onAllTrailsToggle ? <button type="button" className={`leaflet-map-btn global-trails-btn${props.allTrailsVisible ? " active" : ""}`} title={props.allTrailsVisible ? "Hide all breadcrumb trails" : "Show all breadcrumb trails"} aria-label={props.allTrailsVisible ? "Hide all breadcrumb trails" : "Show all breadcrumb trails"} aria-pressed={props.allTrailsVisible} disabled={!props.trailsAvailable} data-tour="map-trails" onClick={props.onAllTrailsToggle}><span className="global-trails-icon" aria-hidden="true" /></button> : null}
+      <button type="button" className={`leaflet-map-btn${measuring ? " active" : ""}`} title="Measure distance (click points on map)" aria-label="Measure distance on the map" aria-pressed={measuring} data-tour="map-measure" onClick={() => setMeasuring(active => !active)}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="1" y="7" width="22" height="10" rx="1"/><path d="M5 7v5M9 7v3M13 7v5M17 7v3M21 7v5"/></svg></button>
+    </div>
+    <div className="maplibre-zoom-stack" aria-label="Map zoom controls">
+      <button type="button" aria-label="Zoom in" onClick={() => zoomBy(1)}>+</button>
+      <button type="button" aria-label="Zoom out" onClick={() => zoomBy(-1)}>−</button>
+    </div>
+  </>;
+}
+
+function renderMeasurement(map: MapLibre, points: [number, number][]) {
+  const features = [
+    ...(points.length > 1 ? [{ type: "Feature" as const, properties: {}, geometry: { type: "LineString" as const, coordinates: points } }] : []),
+    ...points.map(coordinates => ({ type: "Feature" as const, properties: {}, geometry: { type: "Point" as const, coordinates } })),
+  ];
+  const data = { type: "FeatureCollection" as const, features };
+  const source = map.getSource(MEASURE_SOURCE) as GeoJSONSource | undefined;
+  if (source) source.setData(data);
+  else {
+    map.addSource(MEASURE_SOURCE, { type: "geojson", data });
+    map.addLayer({ id: MEASURE_LINE_LAYER, type: "line", source: MEASURE_SOURCE, filter: ["==", ["geometry-type"], "LineString"], paint: { "line-color": "#1d9bf0", "line-width": 2, "line-dasharray": [3, 2] } });
+    map.addLayer({ id: MEASURE_POINT_LAYER, type: "circle", source: MEASURE_SOURCE, filter: ["==", ["geometry-type"], "Point"], paint: { "circle-radius": 4, "circle-color": "#1d9bf0", "circle-stroke-color": "#ffffff", "circle-stroke-width": 1 } });
+  }
+}
+
+function clearMeasurement(map: MapLibre, pointsRef: MutableRefObject<[number, number][]>, popupRef: MutableRefObject<maplibregl.Popup | null>) {
+  pointsRef.current = [];
+  const source = map.getSource(MEASURE_SOURCE) as GeoJSONSource | undefined;
+  source?.setData({ type: "FeatureCollection", features: [] });
+  popupRef.current?.remove();
+  popupRef.current = null;
+}
+
+function measurementDistanceMetres(points: [number, number][]) {
+  const earthRadius = 6_371_000;
+  return points.slice(1).reduce((total, point, index) => {
+    const previous = points[index];
+    const lat1 = previous[1] * Math.PI / 180;
+    const lat2 = point[1] * Math.PI / 180;
+    const deltaLat = lat2 - lat1;
+    const deltaLon = (point[0] - previous[0]) * Math.PI / 180;
+    const a = Math.sin(deltaLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(deltaLon / 2) ** 2;
+    return total + earthRadius * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }, 0);
+}
+
+function formatDistance(metres: number) {
+  if (metres < 1_000) return `${Math.round(metres)} m`;
+  return `${(metres / 1_000).toFixed(metres < 10_000 ? 2 : 1)} km`;
 }
 
 function markerElement(avatar: DeviceAvatar, color: string, status: TelemetryDevice["status"], offline: boolean) {

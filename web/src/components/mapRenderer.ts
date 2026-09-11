@@ -17,6 +17,7 @@ export interface MapRendererProps {
   command: MapCommand | null;
   onAction: (device: TelemetryDevice, action: DeviceAction) => void;
   onAllTrailsToggle?: () => void;
+  onUserNavigation?: () => void;
   onNotice?: (message: string) => void;
   readOnly?: boolean;
 }
