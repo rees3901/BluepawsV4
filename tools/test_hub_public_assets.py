@@ -93,13 +93,50 @@ class PublicAssetTests(unittest.TestCase):
         self.assertIn("data.entity === 'hub' ? ' marker-hub' : ''", js)
         self.assertIn('.bp-marker.marker-hub', css)
 
-    def test_p4_offgrid_http_server_has_browser_socket_headroom(self):
+    def test_p4_offgrid_http_server_stops_eventsource_reconnect_churn(self):
         server = (ROOT / 'hub/esp-idf-p4/main/home_hub_web.cpp').read_text(encoding='utf-8')
         defaults = (ROOT / 'hub/esp-idf-p4/sdkconfig.defaults').read_text(encoding='utf-8')
-        self.assertIn('config.max_open_sockets = 12', server)
-        self.assertIn('config.backlog_conn = 8', server)
+        self.assertIn('config.max_open_sockets = 4', server)
+        self.assertIn('config.backlog_conn = 4', server)
+        self.assertIn('config.lru_purge_enable = true', server)
         self.assertIn('"204 No Content"', server)
-        self.assertIn('CONFIG_LWIP_MAX_SOCKETS=20', defaults)
+        self.assertNotIn('CONFIG_LWIP_MAX_SOCKETS=20', defaults)
+
+    def test_p4_offgrid_pmtiles_is_default_with_raster_fallbacks(self):
+        server = (ROOT / 'hub/esp-idf-p4/main/home_hub_web.cpp').read_text(encoding='utf-8')
+        html = (ROOT / 'hub/platformio/data/index.html').read_text(encoding='utf-8')
+        js = (ROOT / 'hub/platformio/data/app.js').read_text(encoding='utf-8')
+        css = (ROOT / 'hub/platformio/data/style.css').read_text(encoding='utf-8')
+        bootstrap = (ROOT / 'hub/platformio/data/map-bootstrap.mjs').read_text(encoding='utf-8')
+        for asset in [
+            'maplibre-gl.mjs', 'maplibre-gl-shared.mjs', 'maplibre-gl-worker.mjs',
+            'maplibre-gl.css', 'leaflet-maplibre-gl.js', 'pmtiles.js', 'map-style.json',
+            'noto-sans-regular-0-255.pbf', 'noto-sans-regular-256-511.pbf',
+        ]:
+            self.assertTrue((ROOT / 'hub/platformio/data' / asset).is_file(), asset)
+        self.assertIn('type="module" src="/map-bootstrap.mjs', html)
+        self.assertIn("maplibregl.addProtocol('pmtiles'", bootstrap)
+        self.assertIn("format === 'pmtiles'", js)
+        self.assertIn("initialName = vectorLayer ?", js)
+        self.assertIn('OFFLINE_VECTOR_DISPLAY_MAX_ZOOM = 22', js)
+        self.assertIn('maxZoom: OFFLINE_VECTOR_DISPLAY_MAX_ZOOM', js)
+        self.assertIn('maxzoom: nativeMaxZoom', js)
+        self.assertIn('background: var(--text-primary)', css)
+        self.assertIn('"format", "pmtiles"', server)
+        self.assertIn('"/maps/uk.pmtiles"', server)
+
+    def test_p4_pmtiles_ranges_use_unsigned_fatfs_offsets(self):
+        server = (ROOT / 'hub/esp-idf-p4/main/home_hub_web.cpp').read_text(encoding='utf-8')
+        handler = server.split('esp_err_t serve_pmtiles_range', 1)[1].split(
+            'esp_err_t serve_map_font', 1
+        )[0]
+        self.assertIn('f_open(&file, kPmtilesFatFsPath, FA_READ)', handler)
+        self.assertIn('static_cast<FSIZE_t>(start)', handler)
+        self.assertIn('206 Partial Content', handler)
+        self.assertIn('Accept-Ranges', handler)
+        self.assertIn('Content-Range', handler)
+        self.assertIn('valid_pmtiles_archive(&file)', handler)
+        self.assertIn('section_length > size - section_start', server)
 
     def test_mdns_hostname_is_not_redirected_as_foreign(self):
         source = (ROOT / 'hub/platformio/src/main.cpp').read_text(encoding='utf-8')

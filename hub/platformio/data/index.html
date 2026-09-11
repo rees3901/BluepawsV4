@@ -8,9 +8,10 @@
 
     <!-- Leaflet is bundled into LittleFS so Off-Grid never needs a CDN. -->
     <link rel="stylesheet" href="/leaflet.css">
+    <link rel="stylesheet" href="/maplibre-gl.css">
 
     <!-- Our custom styles (served from hub's LittleFS flash) -->
-    <link rel="stylesheet" href="/style.css?v=20260910-offgrid-ui12">
+    <link rel="stylesheet" href="/style.css?v=20260911-map-picker-white1">
     <link rel="stylesheet" href="/hub-presence.css">
 
     <!-- Safety net: ensure modals stay hidden even if CSS fails to load -->
@@ -280,9 +281,12 @@
     <!-- Locally bundled mapping library. -->
     <script src="leaflet.js"></script>
 
+    <!-- PMTiles and MapLibre are local; the captive GUI never needs a CDN. -->
+    <script src="/pmtiles.js"></script>
+
     <!-- Our app — served from hub's LittleFS flash -->
     <script src="feedback.js"></script>
     <script src="hub-presence.js?v=20260910-starter-position"></script>
-    <script src="app.js?v=20260910-offgrid-ui15"></script>
+    <script type="module" src="/map-bootstrap.mjs?v=20260911-pmtiles2"></script>
 </body>
 </html>

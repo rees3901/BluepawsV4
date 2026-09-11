@@ -5,7 +5,14 @@ The prototype SD-card layout is:
 ```text
 /bluepaws/maps/map_manifest.json
 /bluepaws/maps/tiles/{z}/{x}/{y}.jpg
+/bluepaws/maps/vector/united-kingdom.pmtiles
 ```
+
+`vector/united-kingdom.pmtiles` is now the preferred basemap for the local
+browser dashboard. The ESP32-P4 serves byte ranges from the archive and the
+bundled MapLibre/PMTiles client renders them without an internet connection.
+The existing JPEG XYZ packs remain selectable fallbacks and remain the native
+LVGL display format.
 
 The August 2026 multi-layer test card extends that without breaking the current
 firmware's hard-coded road path:
@@ -55,8 +62,12 @@ from current OpenStreetMap data. The hardware pack uses the BluePaws
 `bluepaws-carto` style: warm land, strong water/woodland/building fills, an
 OSM-Carto-like coloured road hierarchy and dark, haloed labels. The original
 Protomaps `light` render was technically correct but too pale on the hub LCD.
-The PC renders that vector source to the same hardware-friendly JPEG XYZ layout;
-the P4 does not need to parse PMTiles or run a map server. Do not bulk-download
+The local web dashboard reads that PMTiles source directly through the P4's
+HTTP Range endpoint. The PC also renders the same source to the
+hardware-friendly JPEG XYZ layout used by LVGL; LVGL does not provide a WebGL
+or MapLibre renderer, so native vector drawing on the physical display would
+require a separate MVT geometry, styling, text-atlas and label-collision engine.
+Do not bulk-download
 `tile.openstreetmap.org`, whose usage policy prohibits offline prefetching.
 OpenStreetMap's [downloading data](https://wiki.openstreetmap.org/wiki/Downloading_data)
 guide recommends starting with a regional extract and using extract providers
@@ -80,8 +91,37 @@ cost, and reveal little additional detail in these vector sources.
 The FAT32 volume is about 31.24 GiB. Keep normal map payloads below 20-24 GiB
 to leave room for update staging, indexes, telemetry and filesystem headroom.
 The 4 GB pilot therefore fits comfortably. QGIS is a preparation tool on the
-Windows PC only; the hub will read pre-rendered tiles directly from SD and does
-not run a map server.
+Windows PC only. The touchscreen reads pre-rendered tiles directly from SD;
+the local web server additionally supports efficient PMTiles byte ranges.
+
+## United Kingdom PMTiles archive
+
+The current all-UK archive is a bounded extract of the 10 September 2026
+Protomaps planet build:
+
+- Bounds: `-8.7,49.8,1.8,60.9`
+- Zoom range: 0-15
+- Browser display zoom: 0-22 (z15 vector tiles are over-zoomed above their
+  native level; this improves close inspection without increasing card usage)
+- Installed path: `/bluepaws/maps/vector/united-kingdom.pmtiles`
+- Size: `2,978,574,900` bytes (below FAT32's 4 GiB single-file limit)
+- Tile entries: `901,702`
+- SHA-256: `1E4CFED267E4F5E787EB0C6FAFBB3DA74552C7B9AE600A97940C7D858151B2AD`
+
+Build and verify a replacement with the current PMTiles CLI:
+
+```powershell
+pmtiles extract https://build.protomaps.com/20260910.pmtiles `
+  hub/maps/work/sources/united-kingdom-20260910-z15.pmtiles `
+  --bbox=-8.7,49.8,1.8,60.9 --maxzoom=15 --download-threads=8
+pmtiles verify hub/maps/work/sources/united-kingdom-20260910-z15.pmtiles
+Get-FileHash hub/maps/work/sources/united-kingdom-20260910-z15.pmtiles -Algorithm SHA256
+```
+
+If a future card genuinely lacks space, remove an optional satellite layer
+only after checking the intended absolute SD path and preserving the road and
+vector packs. The present test card had about 9.4 GB free before this 3.0 GB
+archive, so no satellite deletion was necessary.
 
 On Windows, render a quick fixture through the installed QGIS LTR environment:
 

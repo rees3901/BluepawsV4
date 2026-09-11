@@ -397,9 +397,47 @@
 
     // ═══════════════════════════════════════════════
     // Map Initialisation
-    // Creates a Leaflet map with 3 tile layer options.
-    // Default center is London — will auto-recenter when first device data arrives.
+    // Leaflet retains markers, trails and tools. MapLibre renders the default
+    // SD-backed PMTiles vector basemap underneath those familiar overlays.
     // ═══════════════════════════════════════════════
+    // The UK archive stores source tiles through z15, but vector geometry can
+    // be over-zoomed without fetching additional tiles. Keep these two limits
+    // separate so close-range collar and building inspection is not capped by
+    // the archive's native zoom.
+    var OFFLINE_VECTOR_DISPLAY_MAX_ZOOM = 22;
+
+    function createOfflineVectorLayer(source) {
+        if (!source || !window.maplibregl || !window.pmtiles || !L.maplibreGL) {
+            return Promise.reject(new Error('Vector renderer unavailable'));
+        }
+        return fetch(source.style || '/map-style.json', {cache: 'no-store'})
+            .then(function (response) {
+                if (!response.ok) throw new Error('Vector style unavailable');
+                return response.json();
+            })
+            .then(function (style) {
+                var sourceName = Object.keys(style.sources || {})[0];
+                if (!sourceName) throw new Error('Vector style has no source');
+                style.glyphs = location.origin + '/fonts/{fontstack}/{range}.pbf';
+                delete style.sprite;
+                var nativeMaxZoom = Number(source.maxZoom) || 15;
+                style.sources[sourceName] = {
+                    type: 'vector',
+                    url: 'pmtiles://' + location.origin + source.url,
+                    minzoom: Number(source.minZoom) || 0,
+                    maxzoom: nativeMaxZoom,
+                    attribution: '© OpenStreetMap contributors'
+                };
+                return L.maplibreGL({
+                    style: style,
+                    interactive: false,
+                    pane: 'tilePane',
+                    minZoom: Number(source.minZoom) || 0,
+                    maxZoom: OFFLINE_VECTOR_DISPLAY_MAX_ZOOM
+                });
+            });
+    }
+
     function initMap() {
         map = L.map('map', {
             center: [54.5, -3.2],  // UK overview until cached/live collars are available
@@ -429,6 +467,7 @@
             skeleton: new SkeletonGrid({ attribution: 'Bluepaws offline map', maxZoom: 19 })
         };
         var usingSdMaps = false;
+        var activeMapMaxZoom = 17;
         var fallbackCoastline = null;
         mapSources.skeleton.addTo(map);
         fetch('/basemap.json').then(function (response) { return response.json(); }).then(function (data) {
@@ -438,7 +477,7 @@
                 }
             });
             if (!usingSdMaps) fallbackCoastline.addTo(map);
-        }).catch(function () { addConsoleLog('Offline coastline unavailable'); });
+        }).catch(function (error) { console.warn('Offline coastline unavailable', error); });
 
         fetch('/api/map-layers', {cache: 'no-store'})
             .then(function (response) {
@@ -449,8 +488,11 @@
                 var layers = catalogue && Array.isArray(catalogue.layers) ? catalogue.layers : [];
                 if (!layers.length) throw new Error('No SD map packs found');
                 var baseLayers = {};
+                var vectorSource = layers.find(function (source) {
+                    return source && source.format === 'pmtiles' && source.url;
+                });
                 layers.forEach(function (source) {
-                    if (!source || !source.name || !source.url) return;
+                    if (!source || source.format === 'pmtiles' || !source.name || !source.url) return;
                     baseLayers[source.name] = L.tileLayer(source.url, {
                         minZoom: Number(source.minZoom) || 0,
                         maxZoom: Number(source.maxZoom) || 19,
@@ -459,24 +501,49 @@
                         attribution: 'Bluepaws offline SD map'
                     });
                 });
-                var names = Object.keys(baseLayers);
-                if (!names.length) throw new Error('No valid SD map packs found');
-                usingSdMaps = true;
-                map.removeLayer(mapSources.skeleton);
-                if (fallbackCoastline) map.removeLayer(fallbackCoastline);
-                baseLayers[names[0]].addTo(map);
-                L.control.layers(baseLayers, null, {position: 'topright'}).addTo(map);
-                map.on('baselayerchange', function (event) {
-                    var options = event.layer && event.layer.options ? event.layer.options : {};
-                    if (Number.isFinite(options.minZoom) && map.getZoom() < options.minZoom) {
-                        map.setZoom(options.minZoom);
-                    } else if (Number.isFinite(options.maxZoom) && map.getZoom() > options.maxZoom) {
-                        map.setZoom(options.maxZoom);
-                    }
-                });
-                addConsoleLog('MAP', names.length + ' SD map layer' + (names.length === 1 ? '' : 's') + ' ready');
+                return (vectorSource ? createOfflineVectorLayer(vectorSource) : Promise.resolve(null))
+                    .catch(function (error) {
+                        console.warn('Vector map unavailable', error);
+                        return null;
+                    })
+                    .then(function (vectorLayer) {
+                        if (vectorLayer) baseLayers[vectorSource.name || 'Vector (UK)'] = vectorLayer;
+                        var names = Object.keys(baseLayers);
+                        if (!names.length) throw new Error('No valid SD map packs found');
+                        usingSdMaps = true;
+                        map.removeLayer(mapSources.skeleton);
+                        if (fallbackCoastline) map.removeLayer(fallbackCoastline);
+
+                        // PMTiles is the default whenever the archive is present;
+                        // raster layers remain selectable as an instant fallback.
+                        var initialName = vectorLayer ? (vectorSource.name || 'Vector (UK)') : names[0];
+                        var initialLayer = baseLayers[initialName];
+                        var initialOptions = initialLayer.options || {};
+                        if (Number.isFinite(initialOptions.maxZoom)) activeMapMaxZoom = initialOptions.maxZoom;
+                        if (Number.isFinite(initialOptions.minZoom)) map.setMinZoom(initialOptions.minZoom);
+                        if (Number.isFinite(initialOptions.maxZoom)) map.setMaxZoom(initialOptions.maxZoom);
+                        if (Number.isFinite(initialOptions.minZoom) && map.getZoom() < initialOptions.minZoom) {
+                            map.setZoom(initialOptions.minZoom);
+                        } else if (Number.isFinite(initialOptions.maxZoom) && map.getZoom() > initialOptions.maxZoom) {
+                            map.setZoom(initialOptions.maxZoom);
+                        }
+                        initialLayer.addTo(map);
+                        L.control.layers(baseLayers, null, {position: 'topright'}).addTo(map);
+                        map.on('baselayerchange', function (event) {
+                            var options = event.layer && event.layer.options ? event.layer.options : {};
+                            if (Number.isFinite(options.maxZoom)) activeMapMaxZoom = options.maxZoom;
+                            if (Number.isFinite(options.minZoom)) map.setMinZoom(options.minZoom);
+                            if (Number.isFinite(options.maxZoom)) map.setMaxZoom(options.maxZoom);
+                            if (Number.isFinite(options.minZoom) && map.getZoom() < options.minZoom) {
+                                map.setZoom(options.minZoom);
+                            } else if (Number.isFinite(options.maxZoom) && map.getZoom() > options.maxZoom) {
+                                map.setZoom(options.maxZoom);
+                            }
+                        });
+                        console.info('Offline map ready:', initialName, names.length, 'layer(s)');
+                    });
             })
-            .catch(function () { addConsoleLog('MAP', 'Using compact fallback map'); });
+            .catch(function (error) { console.warn('Using compact fallback map', error); });
 
         // Zoom control (bottom-left to avoid hamburger overlap)
         L.control.zoom({ position: 'bottomleft' }).addTo(map);
@@ -2063,7 +2130,7 @@
             }
         }
         if (bounds.length > 0) {
-            map.fitBounds(L.latLngBounds(bounds).pad(0.2));
+            map.fitBounds(L.latLngBounds(bounds).pad(0.2), { maxZoom: activeMapMaxZoom });
         }
     }
 
