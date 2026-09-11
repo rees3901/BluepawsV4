@@ -54,8 +54,8 @@ export default function MapContainer(props: MapRendererProps) {
         </button>
         {pickerOpen && <div className="map-style-menu">
           <div className="map-style-options" aria-label="Map styles">
-            {MAP_LAYER_PICKER_NAMES.map(name => <button type="button" key={name} className={renderer === "leaflet" && rasterLayer === name ? "active" : ""} onClick={() => chooseRaster(name)}>{RASTER_LABELS[name]}</button>)}
-            <button type="button" className={renderer === "maplibre" ? "active" : ""} onClick={() => chooseRenderer("maplibre")}>Vector</button>
+            {MAP_LAYER_PICKER_NAMES.map(name => <button type="button" key={name} className={renderer === "leaflet" && rasterLayer === name ? "active" : ""} onClick={() => chooseRaster(name)}><span className="map-style-option-title">{RASTER_LABELS[name]}</span><span className="map-style-option-description">{RASTER_DESCRIPTIONS[name]}</span></button>)}
+            <button type="button" className={renderer === "maplibre" ? "active" : ""} onClick={() => chooseRenderer("maplibre")}><span className="map-style-option-title">Vector</span><span className="map-style-option-description">Smooth map with rotate and tilt controls.</span></button>
           </div>
         </div>}
       </div>
@@ -67,4 +67,10 @@ const RASTER_LABELS: Record<MapLayerPickerName, string> = {
   Street: "Street",
   Satellite: "Satellite",
   Topographic: "Topographic",
+};
+
+const RASTER_DESCRIPTIONS: Record<MapLayerPickerName, string> = {
+  Street: "Clear roads, paths and place names.",
+  Satellite: "Aerial imagery for matching landmarks.",
+  Topographic: "Contours and terrain detail for reading relief.",
 };
