@@ -113,10 +113,7 @@ export default function MapLibreMap(props: ConfiguredMapRendererProps) {
           element.addEventListener("click", () => openPopup(map, marker!, device.id, propsRef));
         } else {
           marker.setLngLat([device.lon, device.lat]);
-          const replacement = markerElement(avatar, normalizeMarkerColor(avatar.color), device.status, isCollarOffline(device, presenceNow));
-          marker.getElement().className = replacement.className;
-          marker.getElement().replaceChildren(...replacement.childNodes);
-          marker.getElement().style.cssText = replacement.style.cssText;
+          updateMarkerElement(marker.getElement(), avatar, normalizeMarkerColor(avatar.color), device.status, isCollarOffline(device, presenceNow));
         }
       }
       syncTrails(map, visible, avatars, trailIds, trailHistory);
@@ -231,17 +228,31 @@ function formatDistance(metres: number) {
 
 function markerElement(avatar: DeviceAvatar, color: string, status: TelemetryDevice["status"], offline: boolean) {
   const pin = document.createElement("div");
-  pin.className = `marker-pin bp-marker maplibre-marker status-${status.toLowerCase()}${offline ? " marker-offline" : ""}`;
-  pin.style.setProperty("--marker-color", color);
-  const face = document.createElement("span");
+  pin.className = "marker-pin bp-marker maplibre-marker";
+  updateMarkerElement(pin, avatar, color, status, offline);
+  return pin;
+}
+
+function updateMarkerElement(element: HTMLElement, avatar: DeviceAvatar, color: string, status: TelemetryDevice["status"], offline: boolean) {
+  element.classList.remove("status-home", "status-out", "status-lost", "status-error");
+  element.classList.add(`status-${status.toLowerCase()}`);
+  element.classList.toggle("marker-offline", offline);
+  element.style.setProperty("--marker-color", color);
+
+  const face = document.createElement("div");
   face.className = "card-avatar marker-pin-face";
   if (avatar.kind === "photo" && avatar.photoUrl) {
-    const image = document.createElement("img"); image.src = avatar.photoUrl; image.alt = ""; face.appendChild(image);
+    face.classList.add("has-photo");
+    face.style.backgroundImage = `url(${JSON.stringify(avatar.photoUrl)})`;
   } else {
-    const image = document.createElement("img"); image.src = emojiImageUrl(avatar.emoji); image.alt = ""; face.appendChild(image);
+    const image = document.createElement("img");
+    image.className = "avatar-emoji-image";
+    image.src = emojiImageUrl(avatar.emoji);
+    image.alt = avatar.emoji;
+    image.draggable = false;
+    face.append(image);
   }
-  pin.appendChild(face);
-  return pin;
+  element.replaceChildren(face);
 }
 
 function openPopup(map: MapLibre, marker: maplibregl.Marker, deviceId: number, propsRef: MutableRefObject<ConfiguredMapRendererProps>) {
