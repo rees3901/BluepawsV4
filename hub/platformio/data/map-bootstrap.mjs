@@ -22,4 +22,4 @@ try {
     console.warn('Offline vector renderer unavailable; using raster fallback.', error);
 }
 
-await import('./app.js?v=20260911-pmtiles1');
+await import('./app.js?v=20260911-pmtiles2');

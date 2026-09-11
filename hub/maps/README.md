@@ -101,6 +101,8 @@ Protomaps planet build:
 
 - Bounds: `-8.7,49.8,1.8,60.9`
 - Zoom range: 0-15
+- Browser display zoom: 0-22 (z15 vector tiles are over-zoomed above their
+  native level; this improves close inspection without increasing card usage)
 - Installed path: `/bluepaws/maps/vector/united-kingdom.pmtiles`
 - Size: `2,978,574,900` bytes (below FAT32's 4 GiB single-file limit)
 - Tile entries: `901,702`

@@ -400,6 +400,12 @@
     // Leaflet retains markers, trails and tools. MapLibre renders the default
     // SD-backed PMTiles vector basemap underneath those familiar overlays.
     // ═══════════════════════════════════════════════
+    // The UK archive stores source tiles through z15, but vector geometry can
+    // be over-zoomed without fetching additional tiles. Keep these two limits
+    // separate so close-range collar and building inspection is not capped by
+    // the archive's native zoom.
+    var OFFLINE_VECTOR_DISPLAY_MAX_ZOOM = 22;
+
     function createOfflineVectorLayer(source) {
         if (!source || !window.maplibregl || !window.pmtiles || !L.maplibreGL) {
             return Promise.reject(new Error('Vector renderer unavailable'));
@@ -414,11 +420,12 @@
                 if (!sourceName) throw new Error('Vector style has no source');
                 style.glyphs = location.origin + '/fonts/{fontstack}/{range}.pbf';
                 delete style.sprite;
+                var nativeMaxZoom = Number(source.maxZoom) || 15;
                 style.sources[sourceName] = {
                     type: 'vector',
                     url: 'pmtiles://' + location.origin + source.url,
                     minzoom: Number(source.minZoom) || 0,
-                    maxzoom: Number(source.maxZoom) || 15,
+                    maxzoom: nativeMaxZoom,
                     attribution: '© OpenStreetMap contributors'
                 };
                 return L.maplibreGL({
@@ -426,7 +433,7 @@
                     interactive: false,
                     pane: 'tilePane',
                     minZoom: Number(source.minZoom) || 0,
-                    maxZoom: Number(source.maxZoom) || 15
+                    maxZoom: OFFLINE_VECTOR_DISPLAY_MAX_ZOOM
                 });
             });
     }

@@ -117,6 +117,9 @@ class PublicAssetTests(unittest.TestCase):
         self.assertIn("maplibregl.addProtocol('pmtiles'", bootstrap)
         self.assertIn("format === 'pmtiles'", js)
         self.assertIn("initialName = vectorLayer ?", js)
+        self.assertIn('OFFLINE_VECTOR_DISPLAY_MAX_ZOOM = 22', js)
+        self.assertIn('maxZoom: OFFLINE_VECTOR_DISPLAY_MAX_ZOOM', js)
+        self.assertIn('maxzoom: nativeMaxZoom', js)
         self.assertIn('"format", "pmtiles"', server)
         self.assertIn('"/maps/uk.pmtiles"', server)
 
