@@ -106,6 +106,7 @@ class PublicAssetTests(unittest.TestCase):
         server = (ROOT / 'hub/esp-idf-p4/main/home_hub_web.cpp').read_text(encoding='utf-8')
         html = (ROOT / 'hub/platformio/data/index.html').read_text(encoding='utf-8')
         js = (ROOT / 'hub/platformio/data/app.js').read_text(encoding='utf-8')
+        css = (ROOT / 'hub/platformio/data/style.css').read_text(encoding='utf-8')
         bootstrap = (ROOT / 'hub/platformio/data/map-bootstrap.mjs').read_text(encoding='utf-8')
         for asset in [
             'maplibre-gl.mjs', 'maplibre-gl-shared.mjs', 'maplibre-gl-worker.mjs',
@@ -120,6 +121,7 @@ class PublicAssetTests(unittest.TestCase):
         self.assertIn('OFFLINE_VECTOR_DISPLAY_MAX_ZOOM = 22', js)
         self.assertIn('maxZoom: OFFLINE_VECTOR_DISPLAY_MAX_ZOOM', js)
         self.assertIn('maxzoom: nativeMaxZoom', js)
+        self.assertIn('background: var(--text-primary)', css)
         self.assertIn('"format", "pmtiles"', server)
         self.assertIn('"/maps/uk.pmtiles"', server)
 
