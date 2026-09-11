@@ -18,6 +18,8 @@ const TRAILS_SOURCE = "bluepaws-trails";
 const TRAILS_LAYER = "bluepaws-trails";
 let protocolRegistered = false;
 
+maplibregl.setWorkerUrl("/maplibre/maplibre-gl-worker.mjs");
+
 export default function MapLibreMap(props: ConfiguredMapRendererProps) {
   const { devices, avatars, presenceNow, sidebarOpen, followedId, trailIds, trailHistory, vectorSource, command, onNotice } = props;
   const containerRef = useRef<HTMLDivElement | null>(null);
