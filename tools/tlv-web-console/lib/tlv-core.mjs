@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import fetchHttp from "node-fetch";
 import fs from "node:fs/promises";
 import path from "node:path";
 
@@ -449,7 +450,7 @@ export async function sendPacket({ deviceSettings, credential, gatewayCredential
     body_size_bytes: Buffer.byteLength(requestBody, "utf8"),
   };
   const started = Date.now();
-  const response = await fetch(cleanEndpoint, {
+  const response = await fetchHttp(cleanEndpoint, {
     method: "POST",
     headers,
     body: requestBody,

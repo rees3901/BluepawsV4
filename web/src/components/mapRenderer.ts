@@ -1,6 +1,8 @@
 import type { DeviceAction, DeviceAvatar, MapCommand, TelemetryDevice, TrailPoint } from "@/types/telemetry";
+import type { MapLayerPickerName } from "@/lib/mapLayers";
 
 export type MapRendererName = "leaflet" | "maplibre";
+export type VectorSourceName = "online" | "pmtiles";
 
 export interface MapRendererProps {
   devices: TelemetryDevice[];
@@ -17,6 +19,11 @@ export interface MapRendererProps {
   onAllTrailsToggle?: () => void;
   onNotice?: (message: string) => void;
   readOnly?: boolean;
+}
+
+export interface ConfiguredMapRendererProps extends MapRendererProps {
+  rasterLayer: MapLayerPickerName;
+  vectorSource: VectorSourceName;
 }
 
 export function locatedDevices(devices: TelemetryDevice[]) {

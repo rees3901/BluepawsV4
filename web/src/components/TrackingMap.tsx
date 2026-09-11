@@ -7,12 +7,12 @@ import { collarFault } from "@/lib/collarFault";
 import { emojiImageUrl } from "@/lib/emoji";
 import { COLLAR_RECEIVE_WINDOW_SECONDS, collarCardFreshness, isCollarOffline } from "@/lib/devicePresence";
 import { formatHomeDistance, formatMapCoordinates, googleMapsUrl, homeDistanceMetres } from "@/lib/mapLocation";
-import { alternatePreviewMapLayer, MAP_LAYER_DEFINITIONS, MAP_LAYER_PICKER_NAMES, previewMapZoom, type MapLayerName, type MapLayerPickerName } from "@/lib/mapLayers";
+import { MAP_LAYER_DEFINITIONS, type MapLayerName } from "@/lib/mapLayers";
 import { EMPTY_MAP_CENTER, EMPTY_MAP_ZOOM } from "@/lib/mapViewport";
 import { normalizeMarkerColor } from "@/lib/markerColor";
 import { transportPresentation } from "@/lib/transportPath";
 import { appendTrailPoint, VISIBLE_TRAIL_POINT_LIMIT, type TrailLatLng } from "@/lib/trailPoints";
-import { locatedDevices, type MapRendererProps } from "@/components/mapRenderer";
+import { locatedDevices, type ConfiguredMapRendererProps } from "@/components/mapRenderer";
 import {
   type DeviceAction,
   type DeviceAvatar,
@@ -23,9 +23,10 @@ const JUMP_TO_ZOOM = 17;
 const MARKER_SLIDE_DURATION_MS = 750;
 const MAX_ANIMATED_MARKER_DISTANCE_METRES = 2_000;
 
-export default function LeafletMap(props: MapRendererProps) {
-  const { devices, avatars, presenceNow, sidebarOpen, followedId, trailIds, trailHistory, allTrailsVisible = false, trailsAvailable = false, command, onAction, onAllTrailsToggle, onNotice, readOnly = false } = props;
+export default function LeafletMap(props: ConfiguredMapRendererProps) {
+  const { devices, avatars, presenceNow, sidebarOpen, followedId, trailIds, trailHistory, rasterLayer, allTrailsVisible = false, trailsAvailable = false, command, onAction, onAllTrailsToggle, onNotice, readOnly = false } = props;
   const mapRef = useRef<L.Map | null>(null);
+  const baseLayerRef = useRef<L.TileLayer | null>(null);
   const markersRef = useRef(new Map<number, L.Marker>());
   const markerAnimationsRef = useRef(new Map<number, number>());
   const trailsRef = useRef(new Map<number, L.Polyline>());
@@ -76,89 +77,7 @@ export default function LeafletMap(props: MapRendererProps) {
         maxZoom: definition.maxZoom,
       });
     };
-    const baseLayers = Object.fromEntries(
-      MAP_LAYER_PICKER_NAMES.map((name) => [
-        name,
-        createTileLayer(name),
-      ]),
-    ) as Record<MapLayerPickerName, L.TileLayer>;
-    baseLayers.Street.addTo(map);
-    let currentLayerName: MapLayerName = "Street";
-    let layerPreviewMap: L.Map | null = null;
-    let layerPreviewLayer: L.TileLayer | null = null;
-    let layerPreviewUpdateTimer: number | null = null;
-    let layerPreviewInvalidateTimer: number | null = null;
-    const layerControl = L.control.layers(baseLayers, undefined, { position: "topright", collapsed: true }).addTo(map);
-    const layerControlElement = layerControl.getContainer();
-    let layerControlOpen = false;
-    const setLayerControlOpen = (open: boolean) => {
-      layerControlOpen = open;
-      layerControlElement?.classList.toggle("bp-layer-open", open);
-      if (open) layerControl.expand();
-      else layerControl.collapse();
-    };
-    const updateLayerPreview = () => {
-      if (!layerPreviewMap) return;
-      const previewLayerName = alternatePreviewMapLayer(currentLayerName);
-      const previewDefinition = MAP_LAYER_DEFINITIONS[previewLayerName];
-      const center = map.getCenter();
-      const zoom = previewMapZoom(map.getZoom(), previewLayerName);
-      if (layerPreviewLayer) layerPreviewLayer.removeFrom(layerPreviewMap);
-      layerPreviewLayer = createTileLayer(previewLayerName).addTo(layerPreviewMap);
-      layerPreviewMap.setMaxZoom(previewDefinition.maxZoom);
-      layerPreviewMap.setView(center, zoom, { animate: false });
-      if (layerPreviewInvalidateTimer !== null) window.clearTimeout(layerPreviewInvalidateTimer);
-      const previewMap = layerPreviewMap;
-      layerPreviewInvalidateTimer = window.setTimeout(() => {
-        layerPreviewInvalidateTimer = null;
-        if (layerPreviewMap === previewMap) previewMap.invalidateSize();
-      }, 0);
-    };
-    const scheduleLayerPreviewUpdate = () => {
-      if (layerPreviewUpdateTimer !== null) window.clearTimeout(layerPreviewUpdateTimer);
-      layerPreviewUpdateTimer = window.setTimeout(() => {
-        layerPreviewUpdateTimer = null;
-        updateLayerPreview();
-      }, 350);
-    };
-    if (layerControlElement) {
-      layerControlElement.classList.add("bp-click-layer-control");
-      layerControlElement.setAttribute("data-tour", "map-layers");
-      const toggle = layerControlElement.querySelector<HTMLElement>(".leaflet-control-layers-toggle");
-      const previewButton = L.DomUtil.create("button", "bp-layer-preview-toggle", layerControlElement) as HTMLButtonElement;
-      previewButton.type = "button";
-      previewButton.title = "Preview alternate map style and choose map layer";
-      previewButton.setAttribute("aria-label", "Preview alternate map style and choose map layer");
-      const previewMapElement = L.DomUtil.create("span", "bp-layer-preview-map", previewButton);
-      L.DomEvent.disableClickPropagation(layerControlElement);
-      L.DomEvent.disableScrollPropagation(layerControlElement);
-      L.DomEvent.on(previewButton, "click", (event: Event) => {
-        L.DomEvent.stop(event);
-        setLayerControlOpen(!layerControlOpen);
-      });
-      L.DomEvent.on(toggle ?? layerControlElement, "click", (event: Event) => {
-        L.DomEvent.stop(event);
-        setLayerControlOpen(!layerControlOpen);
-      });
-      layerPreviewMap = L.map(previewMapElement, {
-        attributionControl: false,
-        boxZoom: false,
-        center: map.getCenter(),
-        doubleClickZoom: false,
-        dragging: false,
-        keyboard: false,
-        scrollWheelZoom: false,
-        zoom: previewMapZoom(map.getZoom(), alternatePreviewMapLayer(currentLayerName)),
-        zoomControl: false,
-      });
-      updateLayerPreview();
-    }
-    map.on("baselayerchange", (event: L.LeafletEvent & { name?: string }) => {
-      if (isMapLayerName(event.name)) currentLayerName = event.name;
-      setLayerControlOpen(false);
-      scheduleLayerPreviewUpdate();
-    });
-    map.on("moveend zoomend", scheduleLayerPreviewUpdate);
+    baseLayerRef.current = createTileLayer("Street").addTo(map);
     L.control.zoom({ position: "bottomleft" }).addTo(map);
 
     const HomeControl = L.Control.extend({
@@ -303,7 +222,6 @@ export default function LeafletMap(props: MapRendererProps) {
       }
     });
     map.on("click", (event) => {
-      if (layerControlOpen) setLayerControlOpen(false);
       if (!measuring) return;
       addMeasurementPoint(event.latlng);
     });
@@ -389,11 +307,6 @@ export default function LeafletMap(props: MapRendererProps) {
 
     return () => {
       mapContainer.removeEventListener("click", handleMapAction);
-      if (layerPreviewUpdateTimer !== null) window.clearTimeout(layerPreviewUpdateTimer);
-      if (layerPreviewInvalidateTimer !== null) window.clearTimeout(layerPreviewInvalidateTimer);
-      layerPreviewMap?.remove();
-      layerPreviewMap = null;
-      layerPreviewLayer = null;
       markerAnimations.forEach((frameId) => window.cancelAnimationFrame(frameId));
       markerAnimations.clear();
       map.remove();
@@ -403,8 +316,21 @@ export default function LeafletMap(props: MapRendererProps) {
       trails.clear();
       trailPoints.clear();
       temporaryPins.clear();
+      baseLayerRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    baseLayerRef.current?.removeFrom(map);
+    const definition = MAP_LAYER_DEFINITIONS[rasterLayer];
+    baseLayerRef.current = L.tileLayer(definition.url, {
+      attribution: definition.attribution,
+      maxNativeZoom: definition.maxNativeZoom,
+      maxZoom: definition.maxZoom,
+    }).addTo(map);
+  }, [rasterLayer]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -782,9 +708,6 @@ function formatDistance(metres: number) {
   return metres >= 1000 ? `${(metres / 1000).toFixed(2)} km` : `${Math.round(metres)} m`;
 }
 
-function isMapLayerName(value: unknown): value is MapLayerName {
-  return typeof value === "string" && value in MAP_LAYER_DEFINITIONS;
-}
 
 function escapeHtml(value: string) {
   return value.replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character] ?? character);
