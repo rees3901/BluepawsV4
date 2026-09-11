@@ -37,7 +37,7 @@ function DashboardDeviceCard({ hub, onHubSaved, ...cardProps }: DeviceCardProps 
   return hub ? <HubCard hub={hub} onSaved={onHubSaved} cardProps={cardProps} /> : <DeviceCard {...cardProps} />;
 }
 
-const TrackingMap = dynamic(() => import("@/components/TrackingMap"), {
+const TrackingMap = dynamic(() => import("@/components/MapContainer"), {
   ssr: false,
   loading: () => <div className="map-loading">Loading map…</div>,
 });

@@ -29,6 +29,26 @@ npm run lint
 npm run build
 ```
 
+## Map renderers
+
+The dashboard keeps the established Leaflet renderer as **Classic** and offers
+MapLibre GL JS as the **Vector** option. The selector is stored in the browser;
+both renderers receive the same devices, avatars, trails, commands and action
+callbacks from the dashboard, so changing renderer does not move tracker
+business logic into the map implementation.
+
+MapLibre uses the hosted OpenFreeMap Liberty vector style by default. To use a
+Protomaps-compatible PMTiles archive instead, configure its public URL in the
+deployment environment:
+
+```text
+NEXT_PUBLIC_BLUEPAWS_PMTILES_URL=https://example.com/bluepaws.pmtiles
+```
+
+The PMTiles protocol runs entirely in the browser and uses HTTP range requests,
+so the archive host must allow range access and cross-origin requests from the
+dashboard origin.
+
 ## Vercel
 
 Import the repository into Vercel and set **Root Directory** to `web`. This is
