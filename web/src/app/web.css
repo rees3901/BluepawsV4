@@ -1955,6 +1955,13 @@ body.light .collar-awake.sleeping {
   color: var(--danger);
 }
 
+@media (hover: none), (pointer: coarse), (max-width: 768px) {
+  .account-menu a,
+  .account-menu > button {
+    min-height: 44px;
+  }
+}
+
 /* Keep cursor coordinates out of the way until they are deliberately inspected. */
 .leaflet-cursor-coords {
   display: flex;
