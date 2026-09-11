@@ -445,6 +445,28 @@
             zoomControl: false        // We add our own zoom control below
         });
 
+        var activeLayerBadge = L.control({position: 'topright'});
+        var activeLayerBadgeElement = null;
+        activeLayerBadge.onAdd = function () {
+            var container = L.DomUtil.create('div', 'active-map-layer-badge');
+            var format = L.DomUtil.create('span', 'active-map-layer-format', container);
+            var name = L.DomUtil.create('span', 'active-map-layer-name', container);
+            format.textContent = 'OFFLINE MAP';
+            name.textContent = 'Loading basemap';
+            activeLayerBadgeElement = container;
+            L.DomEvent.disableClickPropagation(container);
+            return container;
+        };
+        activeLayerBadge.addTo(map);
+
+        function updateActiveLayerBadge(format, name, vector) {
+            if (!activeLayerBadgeElement) return;
+            activeLayerBadgeElement.classList.toggle('vector', Boolean(vector));
+            activeLayerBadgeElement.querySelector('.active-map-layer-format').textContent = format;
+            activeLayerBadgeElement.querySelector('.active-map-layer-name').textContent = name;
+            activeLayerBadgeElement.setAttribute('aria-label', 'Active map layer: ' + format + ', ' + name);
+        }
+
         // Start with the bundled vector skeleton so the map remains useful if
         // the SD card is absent. P4 hubs replace it with SD-backed raster tiles.
         var SkeletonGrid = L.GridLayer.extend({
@@ -470,6 +492,7 @@
         var activeMapMaxZoom = 17;
         var fallbackCoastline = null;
         mapSources.skeleton.addTo(map);
+        updateActiveLayerBadge('OFFLINE MAP', 'Compact fallback', false);
         fetch('/basemap.json').then(function (response) { return response.json(); }).then(function (data) {
             fallbackCoastline = L.geoJSON(data, {
                 style: function () {
@@ -528,6 +551,11 @@
                             map.setZoom(initialOptions.maxZoom);
                         }
                         initialLayer.addTo(map);
+                        updateActiveLayerBadge(
+                            vectorLayer ? 'VECTOR • PMTILES' : 'RASTER • JPEG',
+                            initialName,
+                            Boolean(vectorLayer)
+                        );
                         L.control.layers(baseLayers, null, {position: 'topright'}).addTo(map);
                         map.on('baselayerchange', function (event) {
                             var options = event.layer && event.layer.options ? event.layer.options : {};
@@ -539,6 +567,12 @@
                             } else if (Number.isFinite(options.maxZoom) && map.getZoom() > options.maxZoom) {
                                 map.setZoom(options.maxZoom);
                             }
+                            var selectedVector = event.layer === vectorLayer;
+                            updateActiveLayerBadge(
+                                selectedVector ? 'VECTOR • PMTILES' : 'RASTER • JPEG',
+                                event.name || (selectedVector ? 'Vector (UK)' : 'Offline raster'),
+                                selectedVector
+                            );
                         });
                         console.info('Offline map ready:', initialName, names.length, 'layer(s)');
                     });

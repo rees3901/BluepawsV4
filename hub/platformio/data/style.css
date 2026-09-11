@@ -883,6 +883,50 @@ body.panel-open .hamburger-btn {
     color: var(--text-primary);
 }
 
+.active-map-layer-badge {
+    display: flex;
+    min-width: 132px;
+    padding: 7px 10px;
+    flex-direction: column;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    background: rgb(15 29 42 / 92%);
+    box-shadow: var(--shadow);
+    color: #d6e5ee;
+    line-height: 1.15;
+    pointer-events: none;
+}
+
+.active-map-layer-badge.vector {
+    border-color: #20b8dd;
+    background: linear-gradient(135deg, rgb(10 49 71 / 95%), rgb(11 82 108 / 95%));
+}
+
+.active-map-layer-format {
+    color: #55d8f2;
+    font-size: .67rem;
+    font-weight: 800;
+    letter-spacing: .08em;
+}
+
+.active-map-layer-name {
+    margin-top: 3px;
+    overflow: hidden;
+    font-size: .68rem;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+body.light .active-map-layer-badge {
+    background: rgb(246 251 253 / 94%);
+    color: #173447;
+}
+
+body.light .active-map-layer-badge.vector {
+    background: linear-gradient(135deg, rgb(226 246 251 / 96%), rgb(200 237 246 / 96%));
+}
+
 .leaflet-popup-content-wrapper {
     background: var(--bg-card) !important;
     color: var(--text-primary) !important;
