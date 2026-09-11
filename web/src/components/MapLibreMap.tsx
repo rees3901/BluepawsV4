@@ -31,6 +31,7 @@ export default function MapLibreMap(props: ConfiguredMapRendererProps) {
   const markersRef = useRef(new Map<number, maplibregl.Marker>());
   const measurementPointsRef = useRef<[number, number][]>([]);
   const measurementPopupRef = useRef<maplibregl.Popup | null>(null);
+  const devicePopupRef = useRef<maplibregl.Popup | null>(null);
   const propsRef = useRef(props);
   const [measuring, setMeasuring] = useState(false);
 
@@ -111,7 +112,7 @@ export default function MapLibreMap(props: ConfiguredMapRendererProps) {
           const element = markerElement(device.name, avatar, normalizeMarkerColor(avatar.color), device.status, isCollarOffline(device, presenceNow));
           marker = new maplibregl.Marker({ element, anchor: "bottom" }).setLngLat([device.lon, device.lat]).addTo(map);
           markersRef.current.set(device.id, marker);
-          const openMarker = () => openPopup(map, marker!, device.id, propsRef);
+          const openMarker = () => openPopup(map, marker!, device.id, propsRef, devicePopupRef);
           element.addEventListener("click", event => { event.stopPropagation(); openMarker(); });
           element.addEventListener("keydown", event => {
             if (event.key !== "Enter" && event.key !== " ") return;
@@ -148,7 +149,7 @@ export default function MapLibreMap(props: ConfiguredMapRendererProps) {
       const device = visible.find(item => item.id === command.deviceId);
       const marker = markersRef.current.get(command.deviceId);
       if (device) map.easeTo({ center: [device.lon, device.lat], zoom: Math.max(map.getZoom(), JUMP_TO_ZOOM) });
-      if (marker && command.type === "open") openPopup(map, marker, command.deviceId, propsRef);
+      if (marker && command.type === "open") openPopup(map, marker, command.deviceId, propsRef, devicePopupRef);
     }
   }, [command]);
 
@@ -267,7 +268,7 @@ function updateMarkerElement(element: HTMLElement, name: string, avatar: DeviceA
   element.replaceChildren(face);
 }
 
-function openPopup(map: MapLibre, marker: maplibregl.Marker, deviceId: number, propsRef: MutableRefObject<ConfiguredMapRendererProps>) {
+function openPopup(map: MapLibre, marker: maplibregl.Marker, deviceId: number, propsRef: MutableRefObject<ConfiguredMapRendererProps>, popupRef: MutableRefObject<maplibregl.Popup | null>) {
   const props = propsRef.current;
   const device = props.devices.find(item => item.id === deviceId);
   const avatar = props.avatars[deviceId];
@@ -284,10 +285,15 @@ function openPopup(map: MapLibre, marker: maplibregl.Marker, deviceId: number, p
     const currentDevice = currentProps.devices.find(item => item.id === deviceId);
     if (currentDevice) currentProps.onAction(currentDevice, action.dataset.mapAction as Parameters<ConfiguredMapRendererProps["onAction"]>[1]);
   });
-  new maplibregl.Popup({ offset: 38, maxWidth: "380px", className: "device-marker-popup maplibre-device-marker-popup" })
+  popupRef.current?.remove();
+  const popup = new maplibregl.Popup({ offset: 38, maxWidth: "380px", className: "device-marker-popup maplibre-device-marker-popup" })
     .setDOMContent(content)
     .setLngLat(marker.getLngLat())
     .addTo(map);
+  popupRef.current = popup;
+  popup.on("close", () => {
+    if (popupRef.current === popup) popupRef.current = null;
+  });
 }
 
 function syncTrails(map: MapLibre, devices: TelemetryDevice[], avatars: Record<number, DeviceAvatar>, trailIds: Set<number>, history: ConfiguredMapRendererProps["trailHistory"]) {
