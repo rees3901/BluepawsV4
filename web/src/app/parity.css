@@ -483,9 +483,8 @@ body.light .device-card.offline {
 
 .card-indicators-primary > .collar-awake {
     flex: 0 0 auto;
-    min-width: 1.25em;
-    margin-left: auto;
-    font-size: 1.15em;
+    min-width: 1.3em;
+    font-size: 1.3em;
 }
 
 .card-indicator-group {
