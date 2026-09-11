@@ -5,7 +5,7 @@ import type { GeoJSONSource, LngLatBoundsLike, Map as MapLibre } from "maplibre-
 import { Protocol } from "pmtiles";
 import { useEffect, useRef, useState, type MutableRefObject } from "react";
 import { emojiImageUrl } from "@/lib/emoji";
-import { isCollarOffline } from "@/lib/devicePresence";
+import { COLLAR_FRESHNESS_CLASS_NAMES, COLLAR_RECEIVE_WINDOW_SECONDS, collarCardFreshness, collarFreshnessClass, type CollarCardFreshness } from "@/lib/devicePresence";
 import { mapLibreStyle } from "@/lib/mapLibreStyle";
 import { EMPTY_MAP_CENTER, EMPTY_MAP_ZOOM } from "@/lib/mapViewport";
 import { normalizeMarkerColor } from "@/lib/markerColor";
@@ -107,9 +107,11 @@ export default function MapLibreMap(props: ConfiguredMapRendererProps) {
       for (const device of visible) {
         const avatar = avatars[device.id];
         if (!avatar) continue;
+        const ageSeconds = Math.max(0, Math.floor((presenceNow - device.lastUpdate) / 1000));
+        const freshness = device.entity === "hub" ? null : collarCardFreshness(ageSeconds, ageSeconds < COLLAR_RECEIVE_WINDOW_SECONDS);
         let marker = markersRef.current.get(device.id);
         if (!marker) {
-          const element = markerElement(device.name, avatar, normalizeMarkerColor(avatar.color), device.status, isCollarOffline(device, presenceNow));
+          const element = markerElement(device.name, avatar, normalizeMarkerColor(avatar.color), device.status, freshness);
           marker = new maplibregl.Marker({ element, anchor: "bottom" }).setLngLat([device.lon, device.lat]).addTo(map);
           markersRef.current.set(device.id, marker);
           const openMarker = () => openPopup(map, marker!, device.id, propsRef, devicePopupRef);
@@ -122,7 +124,7 @@ export default function MapLibreMap(props: ConfiguredMapRendererProps) {
           });
         } else {
           marker.setLngLat([device.lon, device.lat]);
-          updateMarkerElement(marker.getElement(), device.name, avatar, normalizeMarkerColor(avatar.color), device.status, isCollarOffline(device, presenceNow));
+          updateMarkerElement(marker.getElement(), device.name, avatar, normalizeMarkerColor(avatar.color), device.status, freshness);
         }
       }
       syncTrails(map, visible, avatars, trailIds, trailHistory);
@@ -235,19 +237,21 @@ function formatDistance(metres: number) {
   return `${(metres / 1_000).toFixed(metres < 10_000 ? 2 : 1)} km`;
 }
 
-function markerElement(name: string, avatar: DeviceAvatar, color: string, status: TelemetryDevice["status"], offline: boolean) {
+function markerElement(name: string, avatar: DeviceAvatar, color: string, status: TelemetryDevice["status"], freshness: CollarCardFreshness | null) {
   const pin = document.createElement("div");
   pin.className = "marker-pin bp-marker maplibre-marker";
   pin.tabIndex = 0;
   pin.setAttribute("role", "button");
-  updateMarkerElement(pin, name, avatar, color, status, offline);
+  updateMarkerElement(pin, name, avatar, color, status, freshness);
   return pin;
 }
 
-function updateMarkerElement(element: HTMLElement, name: string, avatar: DeviceAvatar, color: string, status: TelemetryDevice["status"], offline: boolean) {
+function updateMarkerElement(element: HTMLElement, name: string, avatar: DeviceAvatar, color: string, status: TelemetryDevice["status"], freshness: CollarCardFreshness | null) {
   element.classList.remove("status-home", "status-out", "status-lost", "status-error");
+  element.classList.remove(...COLLAR_FRESHNESS_CLASS_NAMES);
   element.classList.add(`status-${status.toLowerCase()}`);
-  element.classList.toggle("marker-offline", offline);
+  const freshnessClass = collarFreshnessClass(freshness);
+  if (freshnessClass) element.classList.add(freshnessClass);
   element.style.setProperty("--marker-color", color);
   element.setAttribute("aria-label", `Open ${name} map marker`);
   element.title = name;

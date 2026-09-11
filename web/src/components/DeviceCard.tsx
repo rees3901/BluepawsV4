@@ -7,7 +7,7 @@ import { formatMapCoordinates, googleMapsUrl } from "@/lib/mapLocation";
 import type { DeviceAction, DeviceAvatar, TelemetryDevice } from "@/types/telemetry";
 import type { commandMessage } from "@/lib/collarFeedback";
 import { collarFault, type CollarFaultReport } from "@/lib/collarFault";
-import { collarCardFreshness } from "@/lib/devicePresence";
+import { collarCardFreshness, collarFreshnessClass } from "@/lib/devicePresence";
 
 const STATUS = {
   home: { emoji: "🏠", label: "Home", css: "status-home" },
@@ -57,7 +57,7 @@ export function DeviceCard(props: DeviceCardProps) {
   const collarAwake = !isHub && (props.awakeSeconds ?? 0) > 0;
   const freshness = isHub ? null : collarCardFreshness(ageSeconds, collarAwake);
   const offline = freshness === "offline";
-  const freshnessClass = freshness === "sleeping" ? " collar-sleeping" : freshness === "stale" ? " stale" : "";
+  const freshnessClass = collarFreshnessClass(freshness);
   const hasGps = !isHub || device.hasGps;
   const status = isHub
     ? { emoji: device.hubMode === "home" ? "🏡" : "📱", label: device.hubMode === "home" ? "Home" : device.hubMode === "portable" ? "Portable" : "Off-Grid", css: device.hubMode === "home" ? "status-home" : "status-out" }
@@ -78,7 +78,7 @@ export function DeviceCard(props: DeviceCardProps) {
   return (
     <article
       data-device-card-id={device.id}
-      className={`device-card${isHub && ageSeconds >= hubContactGrace(device.hubReportingProfile) ? " stale" : ""}${freshnessClass}${offline ? " offline" : ""}${expanded ? " expanded" : ""}${dragging ? " dragging" : ""}${dragOver ? " drag-over" : ""}`}
+      className={`device-card${isHub && ageSeconds >= hubContactGrace(device.hubReportingProfile) ? " stale" : ""}${freshnessClass ? ` ${freshnessClass}` : ""}${expanded ? " expanded" : ""}${dragging ? " dragging" : ""}${dragOver ? " drag-over" : ""}`}
       onDragOver={(event) => {
         event.preventDefault();
       }}
