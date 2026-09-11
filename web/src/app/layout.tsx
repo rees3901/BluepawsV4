@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "leaflet/dist/leaflet.css";
+import "maplibre-gl/dist/maplibre-gl.css";
 import "./parity.css";
 import "./web.css";
 import "./hub-presence.css";

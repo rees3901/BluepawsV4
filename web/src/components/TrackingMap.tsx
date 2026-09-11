@@ -12,36 +12,18 @@ import { EMPTY_MAP_CENTER, EMPTY_MAP_ZOOM } from "@/lib/mapViewport";
 import { normalizeMarkerColor } from "@/lib/markerColor";
 import { transportPresentation } from "@/lib/transportPath";
 import { appendTrailPoint, VISIBLE_TRAIL_POINT_LIMIT, type TrailLatLng } from "@/lib/trailPoints";
+import { locatedDevices, type MapRendererProps } from "@/components/mapRenderer";
 import {
   type DeviceAction,
   type DeviceAvatar,
-  type MapCommand,
   type TelemetryDevice,
-  type TrailPoint,
 } from "@/types/telemetry";
-
-interface TrackingMapProps {
-  devices: TelemetryDevice[];
-  avatars: Record<number, DeviceAvatar>;
-  presenceNow: number;
-  sidebarOpen: boolean;
-  followedId: number | null;
-  trailIds: Set<number>;
-  trailHistory: Record<number, TrailPoint[]>;
-  allTrailsVisible?: boolean;
-  trailsAvailable?: boolean;
-  command: MapCommand | null;
-  onAction: (device: TelemetryDevice, action: DeviceAction) => void;
-  onAllTrailsToggle?: () => void;
-  onNotice?: (message: string) => void;
-  readOnly?: boolean;
-}
 
 const JUMP_TO_ZOOM = 17;
 const MARKER_SLIDE_DURATION_MS = 750;
 const MAX_ANIMATED_MARKER_DISTANCE_METRES = 2_000;
 
-export default function TrackingMap(props: TrackingMapProps) {
+export default function LeafletMap(props: MapRendererProps) {
   const { devices, avatars, presenceNow, sidebarOpen, followedId, trailIds, trailHistory, allTrailsVisible = false, trailsAvailable = false, command, onAction, onAllTrailsToggle, onNotice, readOnly = false } = props;
   const mapRef = useRef<L.Map | null>(null);
   const markersRef = useRef(new Map<number, L.Marker>());
@@ -439,8 +421,8 @@ export default function TrackingMap(props: TrackingMapProps) {
 
     // Collar coordinates already come from last-position history. Hub rows may
     // exist before their first fix, so their numeric adapter placeholders aren't locations.
-    const locatedDevices = devices.filter(device => (device.entity !== "hub" || device.hasGps) && Number.isFinite(device.lat) && Number.isFinite(device.lon));
-    const activeDeviceIds = new Set(locatedDevices.map((device) => device.id));
+    const visibleDevices = locatedDevices(devices);
+    const activeDeviceIds = new Set(visibleDevices.map((device) => device.id));
     markersRef.current.forEach((marker, deviceId) => {
       if (activeDeviceIds.has(deviceId)) return;
       cancelMarkerAnimation(markerAnimationsRef.current, deviceId);
@@ -454,7 +436,7 @@ export default function TrackingMap(props: TrackingMapProps) {
       trailPointsRef.current.delete(deviceId);
     });
 
-    locatedDevices.forEach((device) => {
+    visibleDevices.forEach((device) => {
       const avatar = avatars[device.id];
       const markerColor = normalizeMarkerColor(avatar.color);
       const offline = isCollarOffline(device, presenceNow);

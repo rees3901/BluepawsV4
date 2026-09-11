@@ -13,7 +13,7 @@ import { formatMapCoordinates, googleMapsUrl } from "@/lib/mapLocation";
 import type { SearchPartySnapshot } from "@/lib/searchParty";
 import type { DeviceAction, DeviceAvatar, MapCommand, TelemetryDevice } from "@/types/telemetry";
 
-const TrackingMap = dynamic(() => import("@/components/TrackingMap"), {
+const TrackingMap = dynamic(() => import("@/components/MapContainer"), {
   ssr: false,
   loading: () => <div className="map-loading">Loading search map…</div>,
 });
