@@ -169,7 +169,7 @@ button:disabled { opacity: .5; cursor: not-allowed; }
   margin-top: 14px;
 }
 table { width: 100%; border-collapse: collapse; min-width: 980px; }
-.device-table { min-width: 1180px; }
+.device-table { min-width: 1420px; }
 th, td { border-bottom: 1px solid rgba(112, 169, 208, 0.18); padding: 9px; text-align: left; }
 th { color: #cceeff; background: #143b59; font-size: 12px; }
 td { color: var(--text); }
@@ -208,6 +208,16 @@ textarea { min-height: 120px; resize: vertical; }
 }
 label { display: grid; gap: 6px; color: var(--muted); font-size: 13px; font-weight: 700; }
 label.check { display: flex; align-items: center; gap: 8px; grid-column: 1 / -1; }
+.cadence-summary {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(6, 21, 34, 0.45);
+  color: var(--muted);
+  font-size: 13px;
+}
 .optional-tlv-panel {
   grid-column: 1 / -1;
   border: 1px solid var(--border);
