@@ -162,7 +162,7 @@ export function SearchPartyViewer({ token, initialSnapshot, previewMode = false,
       <TrackingMap
         devices={devices}
         avatars={avatars}
-        presenceNow={Math.floor(now / 60_000) * 60_000}
+        presenceNow={Math.floor(now / 10_000) * 10_000}
         sidebarOpen={panelOpen}
         followedId={followedId}
         trailIds={trailIds}
