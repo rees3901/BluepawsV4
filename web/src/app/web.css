@@ -392,6 +392,8 @@ body.light .leaflet-map-btn:focus-visible .fit-markers-icon {
   pointer-events: auto;
 }
 .maplibre-tool-stack { top: 82px; left: 10px; }
+body.panel-open .maplibre-tool-stack,
+body.panel-open .maplibre-zoom-stack { left: calc(var(--panel-width) + 10px); }
 .maplibre-tool-stack .leaflet-map-btn {
   display: grid;
   place-items: center;
@@ -411,6 +413,10 @@ body.light .leaflet-map-btn:focus-visible .fit-markers-icon {
 .maplibre-zoom-stack button:hover,
 .maplibre-zoom-stack button:focus-visible { background: var(--accent); color: #fff; }
 .measure-popup .maplibregl-popup-content { padding: 6px 9px; border-radius: 6px; font-weight: 800; }
+@media (max-width: 768px) {
+  body.panel-open .maplibre-tool-stack,
+  body.panel-open .maplibre-zoom-stack { left: 10px; }
+}
 .maplibre-marker { width: 36px; height: 48px; cursor: pointer; }
 .maplibre-device-popup { display: grid; gap: 7px; color: #16202a; }
 .maplibre-device-popup > span { color: #52606d; font-size: 0.75rem; }
