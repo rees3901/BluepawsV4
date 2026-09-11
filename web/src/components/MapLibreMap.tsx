@@ -10,7 +10,7 @@ import { mapLibreStyle } from "@/lib/mapLibreStyle";
 import { EMPTY_MAP_CENTER, EMPTY_MAP_ZOOM } from "@/lib/mapViewport";
 import { normalizeMarkerColor } from "@/lib/markerColor";
 import { VISIBLE_TRAIL_POINT_LIMIT } from "@/lib/trailPoints";
-import { locatedDevices, type MapRendererProps } from "@/components/mapRenderer";
+import { locatedDevices, type ConfiguredMapRendererProps } from "@/components/mapRenderer";
 import type { DeviceAction, DeviceAvatar, TelemetryDevice } from "@/types/telemetry";
 
 const JUMP_TO_ZOOM = 17;
@@ -18,8 +18,8 @@ const TRAILS_SOURCE = "bluepaws-trails";
 const TRAILS_LAYER = "bluepaws-trails";
 let protocolRegistered = false;
 
-export default function MapLibreMap(props: MapRendererProps) {
-  const { devices, avatars, presenceNow, sidebarOpen, followedId, trailIds, trailHistory, command, onNotice } = props;
+export default function MapLibreMap(props: ConfiguredMapRendererProps) {
+  const { devices, avatars, presenceNow, sidebarOpen, followedId, trailIds, trailHistory, vectorSource, command, onNotice } = props;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibre | null>(null);
   const markersRef = useRef(new Map<number, maplibregl.Marker>());
@@ -36,7 +36,7 @@ export default function MapLibreMap(props: MapRendererProps) {
     }
     const map = new maplibregl.Map({
       container: containerRef.current,
-      style: mapLibreStyle(process.env.NEXT_PUBLIC_BLUEPAWS_PMTILES_URL),
+      style: mapLibreStyle(vectorSource === "pmtiles" ? process.env.NEXT_PUBLIC_BLUEPAWS_PMTILES_URL : undefined),
       center: [EMPTY_MAP_CENTER[1], EMPTY_MAP_CENTER[0]],
       zoom: EMPTY_MAP_ZOOM,
       attributionControl: {},
@@ -51,7 +51,7 @@ export default function MapLibreMap(props: MapRendererProps) {
       map.remove();
       mapRef.current = null;
     };
-  }, [onNotice]);
+  }, [onNotice, vectorSource]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => mapRef.current?.resize(), 340);
@@ -129,7 +129,7 @@ function markerElement(avatar: DeviceAvatar, color: string, status: TelemetryDev
   return pin;
 }
 
-function openPopup(map: MapLibre, marker: maplibregl.Marker, deviceId: number, propsRef: MutableRefObject<MapRendererProps>) {
+function openPopup(map: MapLibre, marker: maplibregl.Marker, deviceId: number, propsRef: MutableRefObject<ConfiguredMapRendererProps>) {
   const props = propsRef.current;
   const device = props.devices.find(item => item.id === deviceId);
   if (!device) return;
@@ -146,7 +146,7 @@ function openPopup(map: MapLibre, marker: maplibregl.Marker, deviceId: number, p
   new maplibregl.Popup({ offset: 38, maxWidth: "380px" }).setDOMContent(content).setLngLat(marker.getLngLat()).addTo(map);
 }
 
-function syncTrails(map: MapLibre, devices: TelemetryDevice[], avatars: Record<number, DeviceAvatar>, trailIds: Set<number>, history: MapRendererProps["trailHistory"]) {
+function syncTrails(map: MapLibre, devices: TelemetryDevice[], avatars: Record<number, DeviceAvatar>, trailIds: Set<number>, history: ConfiguredMapRendererProps["trailHistory"]) {
   const features = devices.filter(device => trailIds.has(device.id)).map(device => ({
     type: "Feature" as const,
     properties: { color: normalizeMarkerColor(avatars[device.id]?.color) },
