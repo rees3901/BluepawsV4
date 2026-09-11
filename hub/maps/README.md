@@ -58,12 +58,10 @@ with QGIS LTR. It remains a useful reference pack, but its Outdoor cartography
 is not the intended BluePaws visual style.
 
 The preferred road-map source is now a bounded Protomaps PMTiles extract made
-from current OpenStreetMap data. The hardware raster pack uses the BluePaws
-`bluepaws-carto` style. The browser vector layer uses the visibly distinct
-`bluepaws-vector` palette: cool land, strong cyan water and a blue/cyan road
-hierarchy with dark, haloed labels. This makes the active renderer apparent
-even before consulting its on-map layer badge. The original Protomaps `light`
-render was technically correct but too pale on the hub LCD.
+from current OpenStreetMap data. The hardware pack uses the BluePaws
+`bluepaws-carto` style: warm land, strong water/woodland/building fills, an
+OSM-Carto-like coloured road hierarchy and dark, haloed labels. The original
+Protomaps `light` render was technically correct but too pale on the hub LCD.
 The local web dashboard reads that PMTiles source directly through the P4's
 HTTP Range endpoint. The PC also renders the same source to the
 hardware-friendly JPEG XYZ layout used by LVGL; LVGL does not provide a WebGL

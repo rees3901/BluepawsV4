@@ -1,6 +1,5 @@
 """Regression checks for the public/off-grid filesystem boundary."""
 from pathlib import Path
-import json
 import re
 import unittest
 
@@ -107,9 +106,7 @@ class PublicAssetTests(unittest.TestCase):
         server = (ROOT / 'hub/esp-idf-p4/main/home_hub_web.cpp').read_text(encoding='utf-8')
         html = (ROOT / 'hub/platformio/data/index.html').read_text(encoding='utf-8')
         js = (ROOT / 'hub/platformio/data/app.js').read_text(encoding='utf-8')
-        css = (ROOT / 'hub/platformio/data/style.css').read_text(encoding='utf-8')
         bootstrap = (ROOT / 'hub/platformio/data/map-bootstrap.mjs').read_text(encoding='utf-8')
-        style = json.loads((ROOT / 'hub/platformio/data/map-style.json').read_text(encoding='utf-8'))
         for asset in [
             'maplibre-gl.mjs', 'maplibre-gl-shared.mjs', 'maplibre-gl-worker.mjs',
             'maplibre-gl.css', 'leaflet-maplibre-gl.js', 'pmtiles.js', 'map-style.json',
@@ -123,13 +120,6 @@ class PublicAssetTests(unittest.TestCase):
         self.assertIn('OFFLINE_VECTOR_DISPLAY_MAX_ZOOM = 22', js)
         self.assertIn('maxZoom: OFFLINE_VECTOR_DISPLAY_MAX_ZOOM', js)
         self.assertIn('maxzoom: nativeMaxZoom', js)
-        self.assertIn("'VECTOR • PMTILES'", js)
-        self.assertIn("'RASTER • JPEG'", js)
-        self.assertIn('active-map-layer-badge', css)
-        self.assertEqual(style['name'], 'BluePaws OSM bluepaws-vector')
-        layers_by_id = {layer['id']: layer for layer in style['layers']}
-        self.assertEqual(layers_by_id['water']['paint']['fill-color'], '#45ACD0')
-        self.assertEqual(layers_by_id['roads_highway']['paint']['line-color'], '#27B9D7')
         self.assertIn('"format", "pmtiles"', server)
         self.assertIn('"/maps/uk.pmtiles"', server)
 

@@ -19,9 +19,7 @@ const tileUrl = argument(
   "http://127.0.0.1:8077/gloucestershire-20260829/{z}/{x}/{y}.mvt",
 );
 const flavor = argument("flavor", "light");
-const baseFlavor = ["bluepaws-carto", "bluepaws-road", "bluepaws-vector"].includes(flavor)
-  ? "light"
-  : flavor;
+const baseFlavor = flavor === "bluepaws-carto" || flavor === "bluepaws-road" ? "light" : flavor;
 
 const majorRoadColor = [
   "match",
@@ -238,114 +236,6 @@ function bluePawsRoadLayer(layer) {
   return result;
 }
 
-function bluePawsVectorLayer(layer) {
-  const result = bluePawsCartoLayer(layer);
-  const paint = result.paint ?? {};
-  const exactPaint = {
-    background: { "background-color": "#8FC7DB" },
-    earth: { "fill-color": "#E8F0F3" },
-    landcover: {
-      "fill-color": [
-        "match", ["get", "kind"],
-        "grassland", "#B9D9B8",
-        "barren", "#DFD5B8",
-        "urban_area", "#D8E1E5",
-        "farmland", "#CDDCB5",
-        "glacier", "#F8FCFD",
-        "scrub", "#ACCAA8",
-        "#A5C9AD",
-      ],
-      "fill-opacity": paint["fill-opacity"],
-    },
-    landuse_park: {
-      "fill-opacity": paint["fill-opacity"],
-      "fill-color": [
-        "case",
-        ["in", ["get", "kind"], ["literal", ["forest", "wood"]]], "#76AE8D",
-        ["in", ["get", "kind"], ["literal", ["park", "nature_reserve", "protected_area", "national_park"]]], "#91C6A0",
-        ["in", ["get", "kind"], ["literal", ["grass", "grassland", "golf_course"]]], "#ADD5AA",
-        ["==", ["get", "kind"], "sand"], "#E6D59E",
-        "#9BC69C",
-      ],
-    },
-    landuse_urban_green: { "fill-color": "#91C6A0", "fill-opacity": 0.88 },
-    landuse_hospital: { "fill-color": "#E3C9D5" },
-    landuse_industrial: { "fill-color": "#C6D2DE" },
-    landuse_school: { "fill-color": "#DDD6B2" },
-    landuse_beach: { "fill-color": "#E6D59E" },
-    landuse_zoo: { "fill-color": "#9BC69C" },
-    landuse_aerodrome: { "fill-color": "#CAD6DE" },
-    landuse_pedestrian: { "fill-color": "#DDE8EC" },
-    landuse_pier: { "fill-color": "#E8F0F3" },
-    water: { "fill-color": "#45ACD0" },
-    water_stream: { "line-color": "#147FA8", "line-width": paint["line-width"] },
-    water_river: { "line-color": "#147FA8", "line-width": paint["line-width"] },
-    buildings: {
-      "fill-color": "#AFC5D2",
-      "fill-opacity": 0.94,
-      "fill-outline-color": "#718F9F",
-    },
-  };
-  if (exactPaint[result.id]) result.paint = exactPaint[result.id];
-
-  const vectorRoadColor = [
-    "match", ["get", "kind_detail"],
-    "trunk", "#55C7DB",
-    "primary", "#77D7E5",
-    "secondary", "#B0E8EE",
-    "tertiary", "#E2F5F7",
-    "#F6FBFC",
-  ];
-  const vectorRoadCasing = [
-    "match", ["get", "kind_detail"],
-    "trunk", "#176D8B",
-    "primary", "#2A7F9C",
-    "secondary", "#5B94A8",
-    "tertiary", "#789CAA",
-    "#789CAA",
-  ];
-  if (result.id.includes("_highway_casing")) {
-    result.paint["line-color"] = "#075F80";
-  } else if (result.id.includes("_major_casing")) {
-    result.paint["line-color"] = vectorRoadCasing;
-  } else if (result.id.includes("_minor_casing") || result.id.includes("_link_casing")) {
-    result.paint["line-color"] = "#789CAA";
-  } else if (result.id.includes("_other_casing")) {
-    result.paint["line-color"] = "#66899A";
-  }
-  if (result.id.match(/^roads_(tunnels_|bridges_)?highway$/)) {
-    result.paint["line-color"] = "#27B9D7";
-  } else if (result.id.match(/^roads_(tunnels_|bridges_)?major$/)) {
-    result.paint["line-color"] = vectorRoadColor;
-  } else if (result.id.match(/^roads_(tunnels_|bridges_)?minor$/)) {
-    result.paint["line-color"] = "#F6FBFC";
-  } else if (result.id.match(/^roads_(tunnels_|bridges_)?link$/)) {
-    result.paint["line-color"] = [
-      "case",
-      ["==", ["get", "kind"], "highway"], "#27B9D7",
-      ["==", ["get", "kind"], "major_road"], vectorRoadColor,
-      "#F6FBFC",
-    ];
-  } else if (result.id === "roads_minor_service") {
-    result.paint["line-color"] = "#E6F0F3";
-  } else if (result.id.match(/^roads_(tunnels_|bridges_)?other$/)) {
-    result.paint["line-color"] = [
-      "case", ["==", ["get", "kind"], "path"], "#3D8BA5", "#C2D4DC",
-    ];
-  }
-  if (result.type === "symbol") {
-    result.paint = {
-      ...result.paint,
-      "text-color": "#123247",
-      "text-halo-color": "#F2FAFC",
-      "text-halo-width": 1.8,
-    };
-  }
-  if (result.id === "roads_rail") result.paint["line-color"] = "#385D70";
-  if (result.id.startsWith("boundaries")) result.paint["line-color"] = "#24789B";
-  return result;
-}
-
 let qgisLayers = layers(sourceName, namedFlavor(baseFlavor), { lang: "en" })
   .filter((layer) => layer.type !== "symbol" || layer.layout?.["text-field"])
   .map((layer) => {
@@ -391,8 +281,6 @@ if (flavor === "bluepaws-carto") {
   });
 } else if (flavor === "bluepaws-road") {
   qgisLayers = qgisLayers.map(bluePawsRoadLayer);
-} else if (flavor === "bluepaws-vector") {
-  qgisLayers = qgisLayers.map(bluePawsVectorLayer);
 }
 const style = {
   version: 8,
