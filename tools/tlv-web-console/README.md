@@ -84,6 +84,12 @@ The file is gitignored because it contains plaintext bearer tokens and HMAC keys
 
 The browser UI can import another JSON bundle, generate new test devices/gateways, save the active bundle back to disk, and generate provisioning SQL for Supabase.
 
+## Per-device reporting cadence
+
+Each simulated device has its own average reporting cadence and a plus/minus variance, both entered in seconds. For example, an average of `65` with a variance of `30` schedules each interval randomly between 35 and 95 seconds. The first report is also staggered, so starting a fleet run does not make every enabled device report together.
+
+Set these values in the selected-device editor or edit the corresponding columns in the fleet table. **Reports per device** controls how many reports each enabled device produces; the runner always sends the next device that is due and maintains sequence, timestamp and telemetry advancement independently for every device.
+
 ## Security note
 
 The local Node server performs HMAC generation and sends HTTPS requests. This keeps secrets out of the production web app and avoids adding any customer-facing diagnostic routes.

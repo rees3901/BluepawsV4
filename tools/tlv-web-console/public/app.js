@@ -1,3 +1,5 @@
+import { cadenceDelaySeconds, formatCadenceSeconds, initialCadenceDelaySeconds } from "./cadence.js";
+
 const state = {
   meta: null,
   credentials: { devices: [], gateways: [] },
@@ -65,7 +67,7 @@ function bindEvents() {
   $("provision-sql").addEventListener("click", () => $("sql-dialog").showModal());
   $("generate-sql").addEventListener("click", generateSql);
   $("copy-sql").addEventListener("click", () => navigator.clipboard.writeText($("sql-output").value));
-  for (const id of ["send-count", "send-interval", "movement-metres"]) {
+  for (const id of ["send-count", "movement-metres"]) {
     $(id).addEventListener("input", updateRecipeDescription);
   }
 }
@@ -121,6 +123,8 @@ function renderDevices() {
       <td><input data-field="latitude" type="number" step="0.0000001" value="${settings.latitude}"></td>
       <td><input data-field="longitude" type="number" step="0.0000001" value="${settings.longitude}"></td>
       <td><input data-field="driftMetres" type="number" min="0" max="300" value="${settings.driftMetres ?? 300}"></td>
+      <td><input data-field="reportCadenceSeconds" aria-label="Device ${device.device_id} average reporting cadence in seconds" type="number" min="0.1" max="86400" step="0.1" value="${settings.reportCadenceSeconds ?? 60}"></td>
+      <td><input data-field="reportVarianceSeconds" aria-label="Device ${device.device_id} reporting variance in seconds" type="number" min="0" max="86400" step="0.1" value="${settings.reportVarianceSeconds ?? 0}"></td>
       <td><input data-field="sequence" type="number" min="0" max="65535" value="${settings.sequence}"></td>
       <td><button data-action="select">Edit</button> <button data-action="delete" class="danger">Delete</button></td>
     `;
@@ -194,6 +198,9 @@ function renderDeviceDetail() {
     <label>Latitude <input data-detail="latitude" type="number" step="0.0000001" value="${settings.latitude}"></label>
     <label>Longitude <input data-detail="longitude" type="number" step="0.0000001" value="${settings.longitude}"></label>
     <label>Drift metres <input data-detail="driftMetres" type="number" min="0" max="300" value="${settings.driftMetres ?? 300}"></label>
+    <label>Average reporting cadence <input data-detail="reportCadenceSeconds" type="number" min="0.1" max="86400" step="0.1" value="${settings.reportCadenceSeconds ?? 60}"><small>Seconds; for example, 65 = 1m 5s</small></label>
+    <label>Reporting variance (±) <input data-detail="reportVarianceSeconds" type="number" min="0" max="86400" step="0.1" value="${settings.reportVarianceSeconds ?? 0}"><small>Each interval is randomized from average minus variance to average plus variance</small></label>
+    <p class="cadence-summary">Reports approximately every <strong>${formatCadenceSeconds(settings.reportCadenceSeconds ?? 60)}</strong>, varied by <strong>±${formatCadenceSeconds(settings.reportVarianceSeconds ?? 0)}</strong>.</p>
     <label>Message sequence <input data-detail="sequence" type="number" min="0" max="65535" value="${settings.sequence}"></label>
     <label>Timestamp Unix <input data-detail="timestamp" type="number" value="${settings.timestamp}"></label>
     <label>Battery mV <input data-detail="batteryMv" type="number" min="0" max="65535" value="${settings.batteryMv}"></label>
@@ -229,7 +236,6 @@ function renderDeviceDetail() {
     </details>
   `;
   detail.querySelectorAll("[data-detail],[data-tlv]").forEach((input) => {
-    input.addEventListener("input", updateDetailFromEvent);
     input.addEventListener("change", updateDetailFromEvent);
   });
   $("configured-device-id").addEventListener("input", (event) => {
@@ -485,20 +491,33 @@ async function runScenario() {
   state.stopRequested = false;
   const recipeKey = $("recipe").value;
   const count = Number($("send-count").value);
-  const interval = Number($("send-interval").value);
   const timeout = Number($("send-timeout").value);
   const fallbackMovementMetres = Number($("movement-metres").value);
   const enabledIds = [...state.deviceSettings.values()].filter((settings) => settings.enabled).map((settings) => settings.deviceId);
+  const schedule = enabledIds.map((deviceId) => ({
+    deviceId,
+    reportIndex: 0,
+    dueAt: Date.now() + initialCadenceDelaySeconds(state.deviceSettings.get(deviceId)) * 1000,
+  }));
   let requestNumber = 0;
   try {
-    for (let cycle = 0; cycle < count && !state.stopRequested; cycle += 1) {
-      for (const deviceId of enabledIds) {
+    while (schedule.some((item) => item.reportIndex < count) && !state.stopRequested) {
+      const item = schedule.filter((candidate) => candidate.reportIndex < count).sort((left, right) => left.dueAt - right.dueAt)[0];
+      const waitMilliseconds = Math.max(0, item.dueAt - Date.now());
+      if (waitMilliseconds > 0) {
+        $("run-status").textContent = `Waiting ${formatCadenceSeconds(waitMilliseconds / 1000)} for device ${item.deviceId}`;
+        await waitUntil(item.dueAt);
+      }
+      if (state.stopRequested) break;
+      {
+        const deviceId = item.deviceId;
+        const cycle = item.reportIndex;
         const current = state.deviceSettings.get(deviceId);
         let packetSettings = { ...current, knownTlvs: { ...current.knownTlvs } };
         packetSettings = await applyRecipe(packetSettings, recipeKey, cycle);
         if ($("advance-live").checked && recipeKey !== "duplicate_retry_storm") {
           packetSettings.sequence = (Number(packetSettings.sequence) + 1) & 0xffff;
-          packetSettings.timestamp = Math.floor(Date.now() / 1000) + Math.round(cycle * interval);
+          packetSettings.timestamp = Math.floor(Date.now() / 1000);
           const driftMetres = Number(packetSettings.driftMetres ?? fallbackMovementMetres);
           if (driftMetres > 0) {
             packetSettings.latitude = Number(packetSettings.latitude) + (Math.random() - 0.5) * (driftMetres / 111_320);
@@ -521,9 +540,9 @@ async function runScenario() {
         state.deviceSettings.set(deviceId, packetSettings);
         appendLog(requestNumber, deviceId, packetSettings, result, requestPreview);
         renderDevices();
-        if (state.stopRequested) break;
+        item.reportIndex += 1;
+        if (item.reportIndex < count) item.dueAt = Date.now() + cadenceDelaySeconds(packetSettings) * 1000;
       }
-      if (cycle < count - 1 && !state.stopRequested) await sleep(interval * 1000);
     }
     $("run-status").textContent = state.stopRequested ? "Stopped." : `Completed ${requestNumber} request(s).`;
   } catch (error) {
@@ -531,6 +550,12 @@ async function runScenario() {
   } finally {
     state.running = false;
     schedulePreview();
+  }
+}
+
+async function waitUntil(timestamp) {
+  while (!state.stopRequested && Date.now() < timestamp) {
+    await sleep(Math.min(250, timestamp - Date.now()));
   }
 }
 
@@ -683,7 +708,6 @@ async function generateSql() {
 function applyRecipeDefaults() {
   const recipe = state.meta.recipes[$("recipe").value];
   $("send-count").value = recipe.count;
-  $("send-interval").value = recipe.interval;
   $("movement-metres").value = recipe.movementMetres ?? 0;
   if (recipe.transport) {
     state.wrapper.transport = recipe.transport;
@@ -714,6 +738,8 @@ function cloneDeviceSettings(settings, deviceId) {
     deviceId,
     enabled: true,
     driftMetres: settings.driftMetres ?? 300,
+    reportCadenceSeconds: settings.reportCadenceSeconds ?? 60,
+    reportVarianceSeconds: settings.reportVarianceSeconds ?? 0,
     knownTlvs: { ...(settings.knownTlvs || {}) },
     customTlvs: [...(settings.customTlvs || [])],
   };
