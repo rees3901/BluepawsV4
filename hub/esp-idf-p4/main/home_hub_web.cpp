@@ -9,11 +9,15 @@
 #include "esp_log.h"
 #include "esp_spiffs.h"
 #include "esp_timer.h"
+#include "ff.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
+#include <cerrno>
+#include <cstdlib>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
@@ -25,6 +29,8 @@ namespace {
 constexpr char kTag[] = "home_hub_web";
 constexpr char kWebRoot[] = "/web";
 constexpr char kHubId[] = "0010";
+constexpr char kPmtilesFatFsPath[] = "0:/bluepaws/maps/vector/united-kingdom.pmtiles";
+constexpr std::size_t kMaximumPmtilesRange = 1024U * 1024U;
 
 struct MapLayer {
     const char *id;
@@ -270,6 +276,41 @@ bool directory_exists(const char *path)
     return stat(path, &details) == 0 && S_ISDIR(details.st_mode);
 }
 
+uint64_t read_little_endian_u64(const uint8_t *bytes)
+{
+    uint64_t value = 0;
+    for (int index = 7; index >= 0; --index) value = (value << 8U) | bytes[index];
+    return value;
+}
+
+bool valid_pmtiles_archive(FIL *file)
+{
+    if (file == nullptr || f_size(file) < 127U || f_lseek(file, 0) != FR_OK) return false;
+    std::array<uint8_t, 127> header{};
+    UINT bytes_read = 0;
+    if (f_read(file, header.data(), header.size(), &bytes_read) != FR_OK ||
+        bytes_read != header.size() || std::memcmp(header.data(), "PMTiles", 7) != 0 ||
+        header[7] != 3) {
+        return false;
+    }
+    const uint64_t size = static_cast<uint64_t>(f_size(file));
+    for (std::size_t offset = 8; offset <= 56; offset += 16) {
+        const uint64_t section_start = read_little_endian_u64(header.data() + offset);
+        const uint64_t section_length = read_little_endian_u64(header.data() + offset + 8);
+        if (section_start > size || section_length > size - section_start) return false;
+    }
+    return true;
+}
+
+bool pmtiles_archive_available()
+{
+    FIL file{};
+    if (f_open(&file, kPmtilesFatFsPath, FA_READ) != FR_OK) return false;
+    const bool valid = valid_pmtiles_archive(&file);
+    f_close(&file);
+    return valid;
+}
+
 esp_err_t map_layers_handler(httpd_req_t *request)
 {
     cJSON *response = cJSON_CreateObject();
@@ -278,6 +319,17 @@ esp_err_t map_layers_handler(httpd_req_t *request)
     if (layers == nullptr) {
         cJSON_Delete(response);
         return ESP_ERR_NO_MEM;
+    }
+    if (pmtiles_archive_available()) {
+        cJSON *item = cJSON_CreateObject();
+        cJSON_AddStringToObject(item, "id", "uk-vector");
+        cJSON_AddStringToObject(item, "name", "Vector (UK)");
+        cJSON_AddStringToObject(item, "format", "pmtiles");
+        cJSON_AddStringToObject(item, "url", "/maps/uk.pmtiles");
+        cJSON_AddStringToObject(item, "style", "/map-style.json");
+        cJSON_AddNumberToObject(item, "minZoom", 0);
+        cJSON_AddNumberToObject(item, "maxZoom", 15);
+        cJSON_AddItemToArray(layers, item);
     }
     for (const MapLayer &layer : kMapLayers) {
         if (!directory_exists(layer.root)) continue;
@@ -380,11 +432,13 @@ const char *content_type(const char *path)
     if (std::strcmp(extension, ".html") == 0) return "text/html";
     if (std::strcmp(extension, ".css") == 0) return "text/css";
     if (std::strcmp(extension, ".js") == 0) return "application/javascript";
+    if (std::strcmp(extension, ".mjs") == 0) return "application/javascript";
     if (std::strcmp(extension, ".json") == 0) return "application/json";
     if (std::strcmp(extension, ".png") == 0) return "image/png";
     if (std::strcmp(extension, ".svg") == 0) return "image/svg+xml";
     if (std::strcmp(extension, ".ico") == 0) return "image/x-icon";
     if (std::strcmp(extension, ".avif") == 0) return "image/avif";
+    if (std::strcmp(extension, ".pbf") == 0) return "application/x-protobuf";
     return "application/octet-stream";
 }
 
@@ -395,7 +449,10 @@ bool public_path(const char *uri)
         "/leaflet.js", "/leaflet.css", "/basemap.json", "/feedback.js",
         "/hub-presence.js", "/hub-presence.css", "/favicon.svg", "/brand-favicon.ico",
         "/brand-mascot.avif", "/location-fit-markers.png", "/map-location.png",
-        "/map-layers.png",
+        "/map-layers.png", "/map-bootstrap.mjs", "/maplibre-gl.mjs",
+        "/maplibre-gl-shared.mjs", "/maplibre-gl-worker.mjs", "/maplibre-gl.css",
+        "/leaflet-maplibre-gl.js", "/pmtiles.js", "/map-style.json",
+        "/noto-sans-regular-0-255.pbf", "/noto-sans-regular-256-511.pbf",
         "/images/marker-icon.png", "/images/marker-icon-2x.png", "/images/marker-shadow.png",
     };
     for (const char *candidate : allowed) {
@@ -475,6 +532,99 @@ esp_err_t serve_map_tile(httpd_req_t *request)
     return result;
 }
 
+esp_err_t serve_pmtiles_range(httpd_req_t *request)
+{
+    // ESP-IDF's POSIX off_t is signed 32-bit on the P4. The UK archive is
+    // about 2.9 GB, so use FatFs directly: FSIZE_t remains unsigned 32-bit on
+    // FAT32 and can address the complete archive without offset overflow.
+    FIL file{};
+    if (f_open(&file, kPmtilesFatFsPath, FA_READ) != FR_OK ||
+        !valid_pmtiles_archive(&file)) {
+        f_close(&file);
+        return httpd_resp_send_err(request, HTTPD_404_NOT_FOUND,
+                                   "UK vector archive unavailable");
+    }
+    const uint64_t file_size = static_cast<uint64_t>(f_size(&file));
+
+    char range[96]{};
+    if (httpd_req_get_hdr_value_str(request, "Range", range, sizeof(range)) != ESP_OK ||
+        std::strncmp(range, "bytes=", 6) != 0) {
+        char total[48]{};
+        std::snprintf(total, sizeof(total), "bytes */%llu",
+                      static_cast<unsigned long long>(file_size));
+        httpd_resp_set_status(request, "416 Range Not Satisfiable");
+        httpd_resp_set_hdr(request, "Content-Range", total);
+        f_close(&file);
+        return httpd_resp_send(request, nullptr, 0);
+    }
+
+    char *end_pointer = nullptr;
+    errno = 0;
+    const uint64_t start = std::strtoull(range + 6, &end_pointer, 10);
+    if (errno != 0 || end_pointer == range + 6 || *end_pointer != '-' || start >= file_size) {
+        f_close(&file);
+        httpd_resp_set_status(request, "416 Range Not Satisfiable");
+        return httpd_resp_sendstr(request, "Invalid PMTiles byte range");
+    }
+    uint64_t end = file_size - 1;
+    if (*(end_pointer + 1) != '\0') {
+        char *range_end = nullptr;
+        errno = 0;
+        end = std::strtoull(end_pointer + 1, &range_end, 10);
+        if (errno != 0 || range_end == end_pointer + 1 || *range_end != '\0') {
+            f_close(&file);
+            httpd_resp_set_status(request, "416 Range Not Satisfiable");
+            return httpd_resp_sendstr(request, "Invalid PMTiles byte range");
+        }
+    }
+    end = std::min(end, file_size - 1);
+    if (end < start || end - start + 1 > kMaximumPmtilesRange) {
+        f_close(&file);
+        httpd_resp_set_status(request, "416 Range Not Satisfiable");
+        return httpd_resp_sendstr(request, "PMTiles byte range is too large");
+    }
+
+    const std::size_t length = static_cast<std::size_t>(end - start + 1);
+    void *buffer = heap_caps_malloc(length, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (buffer == nullptr) buffer = heap_caps_malloc(length, MALLOC_CAP_8BIT);
+    UINT bytes_read = 0;
+    if (buffer == nullptr || f_lseek(&file, static_cast<FSIZE_t>(start)) != FR_OK ||
+        f_read(&file, buffer, static_cast<UINT>(length), &bytes_read) != FR_OK ||
+        bytes_read != length) {
+        if (buffer != nullptr) heap_caps_free(buffer);
+        f_close(&file);
+        return httpd_resp_send_err(request, HTTPD_500_INTERNAL_SERVER_ERROR,
+                                   "Could not read vector archive");
+    }
+    f_close(&file);
+
+    char content_range[80]{};
+    std::snprintf(content_range, sizeof(content_range), "bytes %llu-%llu/%llu",
+                  static_cast<unsigned long long>(start),
+                  static_cast<unsigned long long>(end),
+                  static_cast<unsigned long long>(file_size));
+    httpd_resp_set_status(request, "206 Partial Content");
+    httpd_resp_set_type(request, "application/octet-stream");
+    httpd_resp_set_hdr(request, "Accept-Ranges", "bytes");
+    httpd_resp_set_hdr(request, "Content-Range", content_range);
+    httpd_resp_set_hdr(request, "Cache-Control", "public, max-age=86400");
+    httpd_resp_set_hdr(request, "ETag", "\"bluepaws-uk-20260910-z15\"");
+    const esp_err_t result = httpd_resp_send(request, static_cast<const char *>(buffer), length);
+    heap_caps_free(buffer);
+    return result;
+}
+
+esp_err_t serve_map_font(httpd_req_t *request)
+{
+    if (std::strstr(request->uri, "/0-255.pbf") != nullptr) {
+        return serve_file(request, "/noto-sans-regular-0-255.pbf");
+    }
+    if (std::strstr(request->uri, "/256-511.pbf") != nullptr) {
+        return serve_file(request, "/noto-sans-regular-256-511.pbf");
+    }
+    return httpd_resp_send_err(request, HTTPD_404_NOT_FOUND, "Offline glyph range unavailable");
+}
+
 esp_err_t root_handler(httpd_req_t *request)
 {
     return serve_file(request, "/index.html");
@@ -552,10 +702,10 @@ bool start_server_now()
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.stack_size = 8192;
-    // Modern browsers open several asset connections in parallel. Leave room
-    // for two local dashboard tabs while LRU purging protects the AP server.
-    config.max_open_sockets = 12;
-    config.backlog_conn = 8;
+    // Hosted Wi-Fi, captive DNS and mDNS share lwIP's descriptor pool. Keep
+    // HTTP below that ceiling and rotate idle browser connections with LRU.
+    config.max_open_sockets = 4;
+    config.backlog_conn = 4;
     config.max_uri_handlers = 32;
     config.lru_purge_enable = true;
     config.uri_match_fn = httpd_uri_match_wildcard;
@@ -573,6 +723,8 @@ bool start_server_now()
     ok &= register_uri("/api/status", HTTP_GET, status_handler);
     ok &= register_uri("/api/hub-presence", HTTP_GET, hub_presence_handler);
     ok &= register_uri("/api/map-layers", HTTP_GET, map_layers_handler);
+    ok &= register_uri("/maps/uk.pmtiles", HTTP_GET, serve_pmtiles_range);
+    ok &= register_uri("/fonts/*", HTTP_GET, serve_map_font);
     ok &= register_uri("/api/commands", HTTP_GET, empty_array_handler);
     ok &= register_uri("/api/ble", HTTP_GET, empty_array_handler);
     ok &= register_uri("/api/history*", HTTP_GET, history_handler);
