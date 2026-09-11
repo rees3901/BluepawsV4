@@ -476,6 +476,18 @@ body.light .device-card.offline {
     gap: 14px;
 }
 
+.card-indicators-primary {
+    width: 100%;
+    flex-wrap: nowrap;
+}
+
+.card-indicators-primary > .collar-awake {
+    flex: 0 0 auto;
+    min-width: 1.25em;
+    margin-left: auto;
+    font-size: 1.15em;
+}
+
 .card-indicator-group {
     display: inline-flex;
     align-items: center;
