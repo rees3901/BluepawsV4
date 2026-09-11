@@ -4,7 +4,8 @@ import L from "leaflet";
 import { useEffect, useRef } from "react";
 import { emojiImageUrl } from "@/lib/emoji";
 import { COLLAR_RECEIVE_WINDOW_SECONDS, collarCardFreshness, collarFreshnessClass, type CollarCardFreshness } from "@/lib/devicePresence";
-import { formatMapCoordinates, googleMapsUrl } from "@/lib/mapLocation";
+import { formatMapCoordinates } from "@/lib/mapLocation";
+import { contextMenuHtml, copyTextToClipboard, temporaryPinPopupHtml } from "@/lib/mapLocationPopup";
 import { MAP_LAYER_DEFINITIONS, type MapLayerName } from "@/lib/mapLayers";
 import { mapPopupHtml } from "@/lib/mapPopup";
 import { EMPTY_MAP_CENTER, EMPTY_MAP_ZOOM } from "@/lib/mapViewport";
@@ -37,6 +38,7 @@ export default function LeafletMap(props: ConfiguredMapRendererProps) {
   const allTrailsVisibleRef = useRef(allTrailsVisible);
   const trailsAvailableRef = useRef(trailsAvailable);
   const noticeRef = useRef(onNotice);
+  const viewportChangeRef = useRef(props.onViewportChange);
   const allTrailsButtonRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
@@ -48,6 +50,7 @@ export default function LeafletMap(props: ConfiguredMapRendererProps) {
     allTrailsVisibleRef.current = allTrailsVisible;
     trailsAvailableRef.current = trailsAvailable;
     noticeRef.current = onNotice;
+    viewportChangeRef.current = props.onViewportChange;
     const trailButton = allTrailsButtonRef.current;
     if (trailButton) {
       const label = allTrailsVisible ? "Hide all breadcrumb trails" : "Show all breadcrumb trails";
@@ -57,7 +60,7 @@ export default function LeafletMap(props: ConfiguredMapRendererProps) {
       trailButton.setAttribute("aria-label", label);
       trailButton.setAttribute("aria-pressed", String(allTrailsVisible));
     }
-  }, [allTrailsVisible, avatars, devices, onAction, onAllTrailsToggle, onNotice, trailIds, trailsAvailable]);
+  }, [allTrailsVisible, avatars, devices, onAction, onAllTrailsToggle, onNotice, props.onViewportChange, trailIds, trailsAvailable]);
 
   useEffect(() => {
     const markers = markersRef.current;
@@ -66,6 +69,12 @@ export default function LeafletMap(props: ConfiguredMapRendererProps) {
     const trailPoints = trailPointsRef.current;
     const map = L.map("map", { center: [...EMPTY_MAP_CENTER], zoom: EMPTY_MAP_ZOOM, zoomControl: false, tapHold: true });
     mapRef.current = map;
+    const reportViewport = () => {
+      const center = map.getCenter();
+      viewportChangeRef.current?.({ latitude: center.lat, longitude: center.lng, zoom: map.getZoom() });
+    };
+    map.on("moveend zoomend", reportViewport);
+    reportViewport();
 
     const createTileLayer = (name: MapLayerName) => {
       const definition = MAP_LAYER_DEFINITIONS[name];
@@ -471,29 +480,6 @@ export default function LeafletMap(props: ConfiguredMapRendererProps) {
   return <div id="map" aria-label="Live animal tracking map" />;
 }
 
-function contextMenuHtml(point: L.LatLng) {
-  const locationData = locationDataAttributes(point);
-  return `<div class="map-context-menu"><div class="map-context-heading">Map location</div>${coordinateActionRow(point)}<div class="map-context-actions"><button type="button" data-location-action="drop-pin" ${locationData}>📍 Drop temporary pin</button><button type="button" data-location-action="measure" ${locationData}>↔ Measure from here</button></div><p class="map-context-hint">Coordinates were copied when this menu opened.</p></div>`;
-}
-
-function temporaryPinPopupHtml(point: L.LatLng, pinId: number) {
-  const locationData = locationDataAttributes(point);
-  return `<div class="map-context-menu temporary-pin-card"><div class="map-context-heading">Temporary meeting point</div>${coordinateActionRow(point)}<div class="map-context-actions"><button type="button" data-location-action="measure" ${locationData}>↔ Measure from here</button><button type="button" class="danger" data-location-action="remove-pin" data-pin-id="${pinId}">× Remove pin</button></div><p class="map-context-hint">This pin stays only for this browser session.</p></div>`;
-}
-
-function coordinateActionRow(point: L.LatLng) {
-  const mapsUrl = googleMapsUrl(point.lat, point.lng);
-  return `<div class="map-context-coordinate-row"><a class="map-context-coordinates" href="${mapsUrl}" target="_blank" rel="noopener noreferrer" title="Open this location in Google Maps">${formatMapCoordinates(point.lat, point.lng, 6)}</a><a class="map-context-icon-action" href="${mapsUrl}" target="_blank" rel="noopener noreferrer" title="Open in Google Maps" aria-label="Open this location in Google Maps in a new tab">${openInNewTabIcon()}</a></div>`;
-}
-
-function openInNewTabIcon() {
-  return '<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3h7v7"/><path d="M10 14 21 3"/><path d="M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5"/></svg>';
-}
-
-function locationDataAttributes(point: L.LatLng) {
-  return `data-latitude="${point.lat.toFixed(6)}" data-longitude="${point.lng.toFixed(6)}"`;
-}
-
 function temporaryPinIcon() {
   return L.divIcon({
     className: "temporary-map-pin-icon",
@@ -588,26 +574,4 @@ function toDms(value: number, positive: string, negative: string) {
 
 function formatDistance(metres: number) {
   return metres >= 1000 ? `${(metres / 1000).toFixed(2)} km` : `${Math.round(metres)} m`;
-}
-
-
-async function copyTextToClipboard(value: string) {
-  // Keep the synchronous path inside the user's click gesture. Some browsers
-  // reject the async Clipboard API while still allowing the legacy copy action.
-  const textarea = document.createElement("textarea");
-  textarea.value = value;
-  textarea.style.position = "fixed";
-  textarea.style.opacity = "0";
-  document.body.append(textarea);
-  textarea.select();
-  const copiedSynchronously = document.execCommand("copy");
-  textarea.remove();
-  if (copiedSynchronously) return true;
-
-  try {
-    await navigator.clipboard.writeText(value);
-    return true;
-  } catch {
-    return false;
-  }
 }
