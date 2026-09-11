@@ -25,4 +25,3 @@ export function locatedDevices(devices: TelemetryDevice[]) {
     && Number.isFinite(device.lat)
     && Number.isFinite(device.lon));
 }
-

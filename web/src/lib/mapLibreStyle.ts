@@ -18,4 +18,3 @@ export function mapLibreStyle(pmtilesUrl?: string): string | StyleSpecification 
     layers: layers("protomaps", namedFlavor("light"), { lang: "en" }),
   } as StyleSpecification;
 }
-
