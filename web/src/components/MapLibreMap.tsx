@@ -9,9 +9,10 @@ import { isCollarOffline } from "@/lib/devicePresence";
 import { mapLibreStyle } from "@/lib/mapLibreStyle";
 import { EMPTY_MAP_CENTER, EMPTY_MAP_ZOOM } from "@/lib/mapViewport";
 import { normalizeMarkerColor } from "@/lib/markerColor";
+import { mapPopupHtml } from "@/lib/mapPopup";
 import { VISIBLE_TRAIL_POINT_LIMIT } from "@/lib/trailPoints";
 import { locatedDevices, type ConfiguredMapRendererProps } from "@/components/mapRenderer";
-import type { DeviceAction, DeviceAvatar, TelemetryDevice } from "@/types/telemetry";
+import type { DeviceAvatar, TelemetryDevice } from "@/types/telemetry";
 
 const JUMP_TO_ZOOM = 17;
 const TRAILS_SOURCE = "bluepaws-trails";
@@ -269,18 +270,24 @@ function updateMarkerElement(element: HTMLElement, name: string, avatar: DeviceA
 function openPopup(map: MapLibre, marker: maplibregl.Marker, deviceId: number, propsRef: MutableRefObject<ConfiguredMapRendererProps>) {
   const props = propsRef.current;
   const device = props.devices.find(item => item.id === deviceId);
-  if (!device) return;
-  const content = document.createElement("div");
-  content.className = "maplibre-device-popup";
-  const title = document.createElement("strong"); title.textContent = device.name; content.appendChild(title);
-  const detail = document.createElement("span"); detail.textContent = `${device.status} · ${device.lat.toFixed(6)}, ${device.lon.toFixed(6)}`; content.appendChild(detail);
-  const actions = document.createElement("div"); actions.className = "maplibre-popup-actions";
-  const available: DeviceAction[] = props.readOnly || device.entity === "hub" ? ["jump", "follow", "trail"] : ["jump", "follow", "trail", "find", "command"];
-  for (const action of available) {
-    const button = document.createElement("button"); button.type = "button"; button.textContent = action === "jump" ? "Jump To" : action; button.addEventListener("click", () => props.onAction(device, action)); actions.appendChild(button);
-  }
-  content.appendChild(actions);
-  new maplibregl.Popup({ offset: 38, maxWidth: "380px" }).setDOMContent(content).setLngLat(marker.getLngLat()).addTo(map);
+  const avatar = props.avatars[deviceId];
+  if (!device || !avatar) return;
+
+  const template = document.createElement("template");
+  template.innerHTML = mapPopupHtml(device, avatar, props.presenceNow, props.readOnly, props.followedId === deviceId, props.trailIds.has(deviceId));
+  const content = template.content.firstElementChild as HTMLElement | null;
+  if (!content) return;
+  content.addEventListener("click", event => {
+    const action = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-map-action]");
+    if (!action) return;
+    const currentProps = propsRef.current;
+    const currentDevice = currentProps.devices.find(item => item.id === deviceId);
+    if (currentDevice) currentProps.onAction(currentDevice, action.dataset.mapAction as Parameters<ConfiguredMapRendererProps["onAction"]>[1]);
+  });
+  new maplibregl.Popup({ offset: 38, maxWidth: "380px", className: "device-marker-popup maplibre-device-marker-popup" })
+    .setDOMContent(content)
+    .setLngLat(marker.getLngLat())
+    .addTo(map);
 }
 
 function syncTrails(map: MapLibre, devices: TelemetryDevice[], avatars: Record<number, DeviceAvatar>, trailIds: Set<number>, history: ConfiguredMapRendererProps["trailHistory"]) {
