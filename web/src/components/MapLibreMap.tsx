@@ -107,13 +107,20 @@ export default function MapLibreMap(props: ConfiguredMapRendererProps) {
         if (!avatar) continue;
         let marker = markersRef.current.get(device.id);
         if (!marker) {
-          const element = markerElement(avatar, normalizeMarkerColor(avatar.color), device.status, isCollarOffline(device, presenceNow));
+          const element = markerElement(device.name, avatar, normalizeMarkerColor(avatar.color), device.status, isCollarOffline(device, presenceNow));
           marker = new maplibregl.Marker({ element, anchor: "bottom" }).setLngLat([device.lon, device.lat]).addTo(map);
           markersRef.current.set(device.id, marker);
-          element.addEventListener("click", () => openPopup(map, marker!, device.id, propsRef));
+          const openMarker = () => openPopup(map, marker!, device.id, propsRef);
+          element.addEventListener("click", event => { event.stopPropagation(); openMarker(); });
+          element.addEventListener("keydown", event => {
+            if (event.key !== "Enter" && event.key !== " ") return;
+            event.preventDefault();
+            event.stopPropagation();
+            openMarker();
+          });
         } else {
           marker.setLngLat([device.lon, device.lat]);
-          updateMarkerElement(marker.getElement(), avatar, normalizeMarkerColor(avatar.color), device.status, isCollarOffline(device, presenceNow));
+          updateMarkerElement(marker.getElement(), device.name, avatar, normalizeMarkerColor(avatar.color), device.status, isCollarOffline(device, presenceNow));
         }
       }
       syncTrails(map, visible, avatars, trailIds, trailHistory);
@@ -226,18 +233,22 @@ function formatDistance(metres: number) {
   return `${(metres / 1_000).toFixed(metres < 10_000 ? 2 : 1)} km`;
 }
 
-function markerElement(avatar: DeviceAvatar, color: string, status: TelemetryDevice["status"], offline: boolean) {
+function markerElement(name: string, avatar: DeviceAvatar, color: string, status: TelemetryDevice["status"], offline: boolean) {
   const pin = document.createElement("div");
   pin.className = "marker-pin bp-marker maplibre-marker";
-  updateMarkerElement(pin, avatar, color, status, offline);
+  pin.tabIndex = 0;
+  pin.setAttribute("role", "button");
+  updateMarkerElement(pin, name, avatar, color, status, offline);
   return pin;
 }
 
-function updateMarkerElement(element: HTMLElement, avatar: DeviceAvatar, color: string, status: TelemetryDevice["status"], offline: boolean) {
+function updateMarkerElement(element: HTMLElement, name: string, avatar: DeviceAvatar, color: string, status: TelemetryDevice["status"], offline: boolean) {
   element.classList.remove("status-home", "status-out", "status-lost", "status-error");
   element.classList.add(`status-${status.toLowerCase()}`);
   element.classList.toggle("marker-offline", offline);
   element.style.setProperty("--marker-color", color);
+  element.setAttribute("aria-label", `Open ${name} map marker`);
+  element.title = name;
 
   const face = document.createElement("div");
   face.className = "card-avatar marker-pin-face";
