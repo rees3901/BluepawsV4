@@ -443,6 +443,8 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
     requestTrailHistory(deviceIds);
   }, [allTrailsVisible, mapDevices, requestTrailHistory]);
 
+  const handleMapUserNavigation = useCallback(() => setFollowedId(null), []);
+
   const handlePanelBlankClick = useCallback((event: MouseEvent<HTMLElement>) => {
     const target = event.target as HTMLElement;
     if (target.closest("button, a, input, select, textarea, [role='button'], .device-card, .telemetry-empty-state, [data-panel-static]")) return;
@@ -730,7 +732,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
 
       <TrackingMap devices={mapDevices} avatars={mapAvatars} presenceNow={Math.floor(now / 60_000) * 60_000} sidebarOpen={sidebarOpen} followedId={followedId} trailIds={trailIds} trailHistory={trailHistory}
         allTrailsVisible={allTrailsVisible} trailsAvailable={mapDevices.length > 0} command={mapCommand} onAction={handleAction}
-        onAllTrailsToggle={handleAllTrailsToggle} onNotice={setMapNotice} />
+        onAllTrailsToggle={handleAllTrailsToggle} onUserNavigation={handleMapUserNavigation} onNotice={setMapNotice} />
 
       {settingsOpen && (
         <SettingsModal
