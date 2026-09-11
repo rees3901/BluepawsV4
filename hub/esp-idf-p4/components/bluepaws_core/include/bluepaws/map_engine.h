@@ -69,6 +69,7 @@ public:
     void resize(uint16_t width, uint16_t height);
     void setCenter(GeoPoint center);
     void setZoom(uint8_t zoom);
+    void centerAndZoom(ScreenPoint point, uint8_t zoom);
     void panBy(double drag_x, double drag_y);
 
     uint16_t width() const { return width_; }

@@ -52,6 +52,24 @@ void viewportPansAndLaysOutTiles() {
     }
 }
 
+void viewportCentersAndZoomsAtScreenPoint() {
+    bluepaws::map::Viewport viewport(800, 480, {51.5074, -0.1278}, 15);
+    const bluepaws::map::ScreenPoint tap{620.0, 130.0};
+    const auto expected_center = viewport.toGeo(tap);
+
+    viewport.centerAndZoom(tap, 16);
+
+    assert(viewport.zoom() == 16);
+    assert(near(viewport.center().latitude, expected_center.latitude, 1.0e-9));
+    assert(near(viewport.center().longitude, expected_center.longitude, 1.0e-9));
+    const auto centered = viewport.toScreen(expected_center);
+    assert(near(centered.x, 400.0, 1.0e-6));
+    assert(near(centered.y, 240.0, 1.0e-6));
+
+    viewport.centerAndZoom({400.0, 240.0}, 255);
+    assert(viewport.zoom() == bluepaws::map::kMaximumZoom);
+}
+
 void fitAllKeepsPointsInsidePadding() {
     const bluepaws::map::GeoPoint cats[] = {
         {51.505, -0.15}, {51.515, -0.10}, {51.49, -0.08}, {51.53, -0.18},
@@ -207,6 +225,7 @@ int main() {
                            bluepaws::hub::CommunicationsMode::OffGrid), "Off-Grid") == 0);
     projectionRoundTrips();
     viewportPansAndLaysOutTiles();
+    viewportCentersAndZoomsAtScreenPoint();
     fitAllKeepsPointsInsidePadding();
     storeRetainsLastValidPosition();
     simulatorUsesTheSharedStatePath();

@@ -62,6 +62,9 @@ constexpr size_t kTilePixelBytes = bluepaws::map::kTileSize * bluepaws::map::kTi
 constexpr uint32_t kBrightnessTimeoutMs = 1000;
 constexpr uint32_t kBrightnessFadeMs = 3000;
 constexpr uint32_t kGesturePollMs = 30;
+constexpr uint32_t kMapDoubleTapMs = 350;
+constexpr int32_t kMapTapMovementPx = 18;
+constexpr int32_t kMapDoubleTapDistancePx = 32;
 constexpr char kTag[] = "bluepaws_home_hub";
 constexpr uint32_t kMarkerColours[] = {
     0x1E88E5, 0xE53935, 0x43A047, 0xFB8C00,
@@ -227,6 +230,12 @@ struct UiState {
     size_t prepared_tile_count = 0;
     size_t loaded_tile_count = 0;
     uint32_t map_refresh_ms = 0;
+    uint32_t last_map_tap_ms = 0;
+    lv_point_t last_map_tap{};
+    lv_point_t map_press_start{};
+    bool map_press_active = false;
+    bool map_press_moved = false;
+    bool map_press_multitouch = false;
     AppPage active_page = AppPage::Launcher;
     MapLayer active_map_layer = MapLayer::Street;
     bool dark_mode = true;
@@ -1139,6 +1148,26 @@ lv_obj_t *make_label(lv_obj_t *parent, const char *text, lv_color_t colour);
 void open_quick_settings(UiState &ui);
 void close_quick_settings(UiState &ui, bool animate);
 
+int32_t point_distance_squared(const lv_point_t &a, const lv_point_t &b)
+{
+    const int32_t dx = a.x - b.x;
+    const int32_t dy = a.y - b.y;
+    return dx * dx + dy * dy;
+}
+
+void map_pressed(lv_event_t *event)
+{
+    auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
+    lv_indev_t *indev = lv_indev_active();
+    if (ui == nullptr || indev == nullptr) {
+        return;
+    }
+    lv_indev_get_point(indev, &ui->map_press_start);
+    ui->map_press_active = true;
+    ui->map_press_moved = false;
+    ui->map_press_multitouch = guition_jc4880p443c_touch_count() > 1;
+}
+
 void gesture_timer(lv_timer_t *timer)
 {
     auto *ui = static_cast<UiState *>(lv_timer_get_user_data(timer));
@@ -1159,7 +1188,17 @@ void map_pressing(lv_event_t *event)
         change_zoom(*ui, pinch_steps);
     }
     if (guition_jc4880p443c_touch_count() > 1) {
+        ui->map_press_multitouch = true;
+        ui->last_map_tap_ms = 0;
         return;
+    }
+    lv_point_t point{};
+    lv_indev_get_point(indev, &point);
+    if (ui->map_press_active &&
+        point_distance_squared(point, ui->map_press_start) >
+            kMapTapMovementPx * kMapTapMovementPx) {
+        ui->map_press_moved = true;
+        ui->last_map_tap_ms = 0;
     }
     lv_point_t vector{};
     lv_indev_get_vect(indev, &vector);
@@ -1167,6 +1206,55 @@ void map_pressing(lv_event_t *event)
         return;
     }
     ui->viewport.panBy(vector.x, vector.y);
+    ui->tiles_dirty = true;
+    update_ui(*ui);
+}
+
+void map_released(lv_event_t *event)
+{
+    auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
+    lv_indev_t *indev = lv_indev_active();
+    if (ui == nullptr || indev == nullptr || !ui->map_press_active) {
+        return;
+    }
+
+    lv_point_t point{};
+    lv_indev_get_point(indev, &point);
+    const bool moved = ui->map_press_moved ||
+        point_distance_squared(point, ui->map_press_start) >
+            kMapTapMovementPx * kMapTapMovementPx;
+    const bool valid_tap = !moved && !ui->map_press_multitouch;
+    ui->map_press_active = false;
+    ui->map_press_moved = false;
+    ui->map_press_multitouch = false;
+    if (!valid_tap) {
+        ui->last_map_tap_ms = 0;
+        return;
+    }
+
+    const uint32_t now = lv_tick_get();
+    const bool double_tap = ui->last_map_tap_ms != 0 &&
+        now - ui->last_map_tap_ms <= kMapDoubleTapMs &&
+        point_distance_squared(point, ui->last_map_tap) <=
+            kMapDoubleTapDistancePx * kMapDoubleTapDistancePx;
+    if (!double_tap) {
+        ui->last_map_tap = point;
+        ui->last_map_tap_ms = now;
+        return;
+    }
+    ui->last_map_tap_ms = 0;
+
+    lv_area_t map_area{};
+    lv_obj_get_coords(ui->map_view, &map_area);
+    const bluepaws::map::ScreenPoint local_point{
+        static_cast<double>(point.x - map_area.x1),
+        static_cast<double>(point.y - map_area.y1),
+    };
+    const MapLayerInfo &layer = map_layer_info(ui->active_map_layer);
+    const uint8_t next_zoom = static_cast<uint8_t>(std::min(
+        static_cast<int>(layer.maximum_zoom),
+        static_cast<int>(ui->viewport.zoom()) + 1));
+    ui->viewport.centerAndZoom(local_point, next_zoom);
     ui->tiles_dirty = true;
     update_ui(*ui);
 }
@@ -2638,7 +2726,9 @@ void create_map_page(UiState &ui)
     lv_obj_set_style_radius(ui.map_view, 0, 0);
     lv_obj_set_style_pad_all(ui.map_view, 0, 0);
     lv_obj_remove_flag(ui.map_view, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(ui.map_view, map_pressed, LV_EVENT_PRESSED, &ui);
     lv_obj_add_event_cb(ui.map_view, map_pressing, LV_EVENT_PRESSING, &ui);
+    lv_obj_add_event_cb(ui.map_view, map_released, LV_EVENT_RELEASED, &ui);
 
     for (lv_obj_t *&image : ui.tile_images) {
         image = lv_image_create(ui.map_view);
