@@ -231,14 +231,30 @@ body.panel-open .hamburger-btn {
 }
 
 .device-card.collar-sleeping {
-    opacity: 0.86;
-    filter: grayscale(0.08) saturate(0.72) brightness(0.94);
-    background: color-mix(in srgb, var(--bg-card) 94%, #090f16);
+    opacity: 0.96;
+    filter: grayscale(0.02) saturate(0.94) brightness(0.99);
+    background: color-mix(in srgb, var(--bg-card) 98%, #090f16);
+}
+
+.device-card.freshness-subdued {
+    opacity: 0.9;
+    filter: grayscale(0.1) saturate(0.8) brightness(0.96);
+    background: color-mix(in srgb, var(--bg-card) 96%, #090f16);
+}
+
+.device-card.freshness-faded {
+    opacity: 0.82;
+    filter: grayscale(0.22) saturate(0.62) brightness(0.92);
 }
 
 .device-card.stale {
+    opacity: 0.72;
+    filter: grayscale(0.42) saturate(0.42) brightness(0.88);
+}
+
+.device-card.freshness-greyed {
     opacity: 0.56;
-    filter: grayscale(0.45) saturate(0.32) brightness(0.86);
+    filter: grayscale(0.95) saturate(0.08) brightness(0.82);
 }
 
 .device-card.offline {
@@ -249,12 +265,25 @@ body.panel-open .hamburger-btn {
 }
 
 body.light .device-card.collar-sleeping {
-    filter: grayscale(0.08) saturate(0.72) brightness(0.97);
-    background: color-mix(in srgb, var(--bg-card) 95%, #7b8490);
+    filter: grayscale(0.02) saturate(0.94) brightness(1);
+    background: color-mix(in srgb, var(--bg-card) 98%, #7b8490);
+}
+
+body.light .device-card.freshness-subdued {
+    filter: grayscale(0.1) saturate(0.8) brightness(0.99);
+    background: color-mix(in srgb, var(--bg-card) 97%, #7b8490);
+}
+
+body.light .device-card.freshness-faded {
+    filter: grayscale(0.22) saturate(0.62) brightness(0.96);
 }
 
 body.light .device-card.stale {
-    filter: grayscale(0.45) saturate(0.32) brightness(0.92);
+    filter: grayscale(0.42) saturate(0.42) brightness(0.93);
+}
+
+body.light .device-card.freshness-greyed {
+    filter: grayscale(0.95) saturate(0.08) brightness(0.9);
 }
 
 body.light .device-card.offline {
@@ -262,7 +291,9 @@ body.light .device-card.offline {
 }
 
 .device-card.offline .card-avatar,
-.marker-offline .marker-pin-face {
+.device-card.freshness-greyed .card-avatar,
+.marker-pin.freshness-greyed .marker-pin-face,
+.marker-pin.offline .marker-pin-face {
     filter: grayscale(1) saturate(0);
     opacity: 0.52;
 }
@@ -289,9 +320,38 @@ body.light .device-card.offline {
     line-height: 1.35;
 }
 
-.marker-offline {
-    filter: grayscale(1) saturate(0);
+.marker-pin {
+    transition: opacity 0.25s ease, filter 0.25s ease;
+}
+
+.marker-pin.collar-sleeping {
+    opacity: 0.97;
+    filter: grayscale(0.02) saturate(0.94) brightness(0.99);
+}
+
+.marker-pin.freshness-subdued {
+    opacity: 0.92;
+    filter: grayscale(0.1) saturate(0.8) brightness(0.96);
+}
+
+.marker-pin.freshness-faded {
+    opacity: 0.84;
+    filter: grayscale(0.22) saturate(0.62) brightness(0.92);
+}
+
+.marker-pin.stale {
+    opacity: 0.75;
+    filter: grayscale(0.42) saturate(0.42) brightness(0.88);
+}
+
+.marker-pin.freshness-greyed {
     opacity: 0.62;
+    filter: grayscale(0.95) saturate(0.08) brightness(0.82);
+}
+
+.marker-pin.offline {
+    filter: grayscale(1) saturate(0);
+    opacity: 0.52;
 }
 
 /* ── Compact summary row (always visible) ── */

@@ -3,7 +3,7 @@
 import L from "leaflet";
 import { useEffect, useRef } from "react";
 import { emojiImageUrl } from "@/lib/emoji";
-import { isCollarOffline } from "@/lib/devicePresence";
+import { COLLAR_RECEIVE_WINDOW_SECONDS, collarCardFreshness, collarFreshnessClass, type CollarCardFreshness } from "@/lib/devicePresence";
 import { formatMapCoordinates, googleMapsUrl } from "@/lib/mapLocation";
 import { MAP_LAYER_DEFINITIONS, type MapLayerName } from "@/lib/mapLayers";
 import { mapPopupHtml } from "@/lib/mapPopup";
@@ -363,12 +363,13 @@ export default function LeafletMap(props: ConfiguredMapRendererProps) {
     visibleDevices.forEach((device) => {
       const avatar = avatars[device.id];
       const markerColor = normalizeMarkerColor(avatar.color);
-      const offline = isCollarOffline(device, presenceNow);
+      const ageSeconds = Math.max(0, Math.floor((presenceNow - device.lastUpdate) / 1000));
+      const freshness = device.entity === "hub" ? null : collarCardFreshness(ageSeconds, ageSeconds < COLLAR_RECEIVE_WINDOW_SECONDS);
       const latLng: TrailLatLng = [device.lat, device.lon];
       let marker = markersRef.current.get(device.id);
       const icon = L.divIcon({
         className: "bp-marker-icon",
-        html: markerElement(avatar, markerColor, device.status, offline),
+        html: markerElement(avatar, markerColor, device.status, freshness),
         iconSize: [36, 48],
         iconAnchor: [18, 47],
         popupAnchor: [0, -43],
@@ -503,9 +504,10 @@ function temporaryPinIcon() {
   });
 }
 
-function markerElement(avatar: DeviceAvatar, markerColor: string, status: TelemetryDevice["status"], offline: boolean) {
+function markerElement(avatar: DeviceAvatar, markerColor: string, status: TelemetryDevice["status"], freshness: CollarCardFreshness | null) {
   const pin = document.createElement("div");
-  pin.className = `marker-pin bp-marker status-${status.toLowerCase()}${offline ? " marker-offline" : ""}`;
+  const freshnessClass = collarFreshnessClass(freshness);
+  pin.className = `marker-pin bp-marker status-${status.toLowerCase()}${freshnessClass ? ` ${freshnessClass}` : ""}`;
   pin.style.setProperty("--marker-color", markerColor);
 
   const face = document.createElement("div");
