@@ -90,6 +90,11 @@ void Viewport::setZoom(uint8_t zoom) {
     zoom_ = clampZoom(zoom);
 }
 
+void Viewport::centerAndZoom(ScreenPoint point, uint8_t zoom) {
+    center_ = toGeo(point);
+    zoom_ = clampZoom(zoom);
+}
+
 void Viewport::panBy(double drag_x, double drag_y) {
     WorldPoint world_center = project(center_, zoom_);
     world_center.x -= drag_x;

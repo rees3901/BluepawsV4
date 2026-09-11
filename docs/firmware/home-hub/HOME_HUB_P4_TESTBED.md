@@ -91,7 +91,8 @@ portable library. It contains:
 - `main`: a responsive 800 x 480 landscape / 480 x 800 portrait LVGL test
   screen displaying eight simulated cats through the same `CatStore` intended
   for LoRa and restored telemetry.
-- Touch map navigation with continuous drag panning, **Home**, **Fit**, **+/-**
+- Touch map navigation with continuous drag panning, double-tap recenter and
+  one-level zoom, **Home**, **Fit**, **+/-**
   zoom, two-finger pinch zoom and an in-app orientation control. All actions
   consume the portable viewport/state layer rather than maintaining a second
   GUI-only model.
