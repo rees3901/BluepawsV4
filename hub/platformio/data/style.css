@@ -1213,7 +1213,7 @@ body.light .leaflet-control-scale-line {
     content: "";
     position: absolute;
     inset: 8px;
-    background: var(--accent);
+    background: var(--text-primary);
     -webkit-mask: url("/map-layers.png?v=2") center / contain no-repeat;
     mask: url("/map-layers.png?v=2") center / contain no-repeat;
 }
