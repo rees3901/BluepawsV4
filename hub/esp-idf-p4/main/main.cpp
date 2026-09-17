@@ -141,8 +141,11 @@ struct UiState {
     bluepaws::CatSimulator simulator{kTestOrigin};
     bluepaws::map::Viewport viewport{
         kLandscapeLayout.map_width, kLandscapeLayout.map_height, kTestOrigin, 15};
+    bluepaws::map::Viewport overview_viewport{340, 246, kTestOrigin, 15};
     lv_display_t *display = nullptr;
     lv_obj_t *map_view = nullptr;
+    lv_obj_t *overview_map_view = nullptr;
+    lv_obj_t *overview_hub_marker = nullptr;
     std::array<lv_obj_t *, bluepaws::map::kMaximumVisibleTiles> tile_images{};
     std::array<TileCacheEntry, bluepaws::map::kMaximumVisibleTiles> tile_cache{};
     std::array<lv_obj_t *, bluepaws::kMaximumCats> markers{};
@@ -483,14 +486,19 @@ void refresh_map_tiles(UiState &ui)
         return;
     }
 
-    const bluepaws::map::TileGrid visible_grid = ui.viewport.visibleTiles(0);
-    const bluepaws::map::TileGrid grid = ui.viewport.visibleTiles(1);
+    const bool overview_map = ui.active_page == AppPage::Overview &&
+        ui.overview_map_view != nullptr;
+    const bluepaws::map::Viewport &render_viewport = overview_map
+        ? ui.overview_viewport : ui.viewport;
+    const MapLayer render_layer = overview_map ? MapLayer::Street : ui.active_map_layer;
+    const bluepaws::map::TileGrid visible_grid = render_viewport.visibleTiles(0);
+    const bluepaws::map::TileGrid grid = render_viewport.visibleTiles(1);
     ui.visible_tile_count = visible_grid.count;
 
     bool sources_changed = !ui.tile_images_bound;
     for (size_t i = 0; i < grid.count && !sources_changed; ++i) {
         const TileCacheEntry &entry = ui.tile_cache[i];
-        sources_changed = !entry.valid || entry.layer != ui.active_map_layer ||
+        sources_changed = !entry.valid || entry.layer != render_layer ||
                           !(entry.id == grid.tiles[i].id);
     }
 
@@ -553,7 +561,7 @@ void refresh_map_tiles(UiState &ui)
         }
 
         const bluepaws::map::TilePlacement &placement = grid.tiles[i];
-        const MapLayerInfo &layer = map_layer_info(ui.active_map_layer);
+        const MapLayerInfo &layer = map_layer_info(render_layer);
         char filesystem_path[160]{};
         std::snprintf(filesystem_path,
                       sizeof(filesystem_path),
@@ -563,7 +571,7 @@ void refresh_map_tiles(UiState &ui)
                       static_cast<unsigned long>(placement.id.x),
                       static_cast<unsigned long>(placement.id.y));
         TileCacheEntry &entry = ui.tile_cache[i];
-        if (!entry.valid || entry.layer != ui.active_map_layer || !(entry.id == placement.id)) {
+        if (!entry.valid || entry.layer != render_layer || !(entry.id == placement.id)) {
             if (entry.descriptor.data != nullptr) {
                 lv_image_cache_drop(&entry.descriptor);
             }
@@ -572,7 +580,7 @@ void refresh_map_tiles(UiState &ui)
                 lv_obj_add_flag(image, LV_OBJ_FLAG_HIDDEN);
                 continue;
             }
-            entry.layer = ui.active_map_layer;
+            entry.layer = render_layer;
             entry.id = placement.id;
             entry.valid = true;
             ++ui.loaded_tile_count;
@@ -721,23 +729,54 @@ void update_ui(UiState &ui)
         }
     }
 
-    if (ui.active_page == AppPage::Map && ui.map_view != nullptr) {
+    if (ui.active_page == AppPage::Overview && ui.overview_map_view != nullptr) {
+        std::array<bluepaws::map::GeoPoint, bluepaws::kMaximumCats + 1> points{};
+        size_t point_count = 0;
+        points[point_count++] = kTestOrigin;
+        for (size_t i = 0; i < ui.cats.size(); ++i) {
+            const bluepaws::CatRecord *cat = ui.cats.at(i);
+            if (cat != nullptr && cat->has_position) {
+                points[point_count++] = {
+                    static_cast<double>(cat->last_valid_latitude_e7) / 1.0e7,
+                    static_cast<double>(cat->last_valid_longitude_e7) / 1.0e7,
+                };
+            }
+        }
+        const MapLayerInfo &overview_layer = map_layer_info(MapLayer::Street);
+        const auto fit = bluepaws::map::fitPoints(
+            points.data(),
+            point_count,
+            ui.overview_viewport.width(),
+            ui.overview_viewport.height(),
+            30,
+            overview_layer.minimum_zoom,
+            overview_layer.maximum_zoom);
+        if (fit.valid) {
+            const uint8_t relaxed_zoom = fit.zoom > overview_layer.minimum_zoom
+                ? static_cast<uint8_t>(fit.zoom - 1U) : fit.zoom;
+            // Keep the hub at the centre of the radar. The extra zoom-out
+            // level provides the space that a bounds-centred fit would
+            // otherwise gain by shifting the hub away from the crosshair.
+            const bluepaws::map::GeoPoint target_center = kTestOrigin;
+            const bluepaws::map::GeoPoint previous_center = ui.overview_viewport.center();
+            if (ui.overview_viewport.zoom() != relaxed_zoom ||
+                std::abs(previous_center.latitude - target_center.latitude) > 1.0e-8 ||
+                std::abs(previous_center.longitude - target_center.longitude) > 1.0e-8) {
+                ui.overview_viewport = bluepaws::map::Viewport(
+                    ui.overview_viewport.width(),
+                    ui.overview_viewport.height(),
+                    target_center,
+                    relaxed_zoom);
+                ui.tiles_dirty = true;
+            }
+        }
+        refresh_map_tiles(ui);
+    } else if (ui.active_page == AppPage::Map && ui.map_view != nullptr) {
         refresh_map_tiles(ui);
     }
 
     char list_text[640]{};
     size_t used = 0;
-    double overview_scale_metres = 250.0;
-    for (size_t i = 0; i < ui.cats.size(); ++i) {
-        const bluepaws::CatRecord *cat = ui.cats.at(i);
-        if (cat == nullptr || !cat->has_position) continue;
-        const auto relative = bluepaws::hub::relativePosition(
-            kTestOrigin,
-            {static_cast<double>(cat->last_valid_latitude_e7) / 1.0e7,
-             static_cast<double>(cat->last_valid_longitude_e7) / 1.0e7});
-        if (relative.valid) overview_scale_metres = std::max(
-            overview_scale_metres, relative.distance_metres * 1.15);
-    }
     for (size_t i = 0; i < ui.cats.size(); ++i) {
         const bluepaws::CatRecord *cat = ui.cats.at(i);
         if (cat == nullptr) {
@@ -861,20 +900,17 @@ void update_ui(UiState &ui)
         }
 
         if (ui.overview_markers[i] != nullptr) {
-            if (!relative.valid) {
+            if (!cat->has_position) {
                 lv_obj_add_flag(ui.overview_markers[i], LV_OBJ_FLAG_HIDDEN);
             } else {
                 lv_obj_remove_flag(ui.overview_markers[i], LV_OBJ_FLAG_HIDDEN);
-                lv_obj_t *radar = lv_obj_get_parent(ui.overview_markers[i]);
-                const double radius = std::max(20.0,
-                    std::min(lv_obj_get_width(radar), lv_obj_get_height(radar)) / 2.0 - 36.0);
-                const double plotted_radius = std::min(
-                    radius, relative.distance_metres / overview_scale_metres * radius);
-                const double bearing = relative.bearing_degrees * 3.14159265358979323846 / 180.0;
-                const int32_t x = static_cast<int32_t>(
-                    lv_obj_get_width(radar) / 2.0 + std::sin(bearing) * plotted_radius - 17.0);
-                const int32_t y = static_cast<int32_t>(
-                    lv_obj_get_height(radar) / 2.0 - std::cos(bearing) * plotted_radius - 17.0);
+                const bluepaws::map::ScreenPoint overview_point =
+                    ui.overview_viewport.toScreen({
+                        static_cast<double>(cat->last_valid_latitude_e7) / 1.0e7,
+                        static_cast<double>(cat->last_valid_longitude_e7) / 1.0e7,
+                    });
+                const int32_t x = static_cast<int32_t>(overview_point.x) - 17;
+                const int32_t y = static_cast<int32_t>(overview_point.y) - 17;
                 lv_obj_set_pos(ui.overview_markers[i], x, y);
             }
         }
@@ -895,6 +931,14 @@ void update_ui(UiState &ui)
                 lv_obj_set_pos(marker, x - kMarkerSize / 2, y - kMarkerSize / 2);
             }
         }
+    }
+
+    if (ui.overview_hub_marker != nullptr) {
+        const bluepaws::map::ScreenPoint hub_point =
+            ui.overview_viewport.toScreen(kTestOrigin);
+        lv_obj_set_pos(ui.overview_hub_marker,
+                       static_cast<int32_t>(hub_point.x) - 27,
+                       static_cast<int32_t>(hub_point.y) - 27);
     }
 
     if (ui.overview_cards[0] != nullptr) {
@@ -3383,12 +3427,40 @@ void create_overview_page(UiState &ui)
     const int32_t radar_height = ui.portrait ? 206 : 246;
     lv_obj_t *radar = lv_obj_create(left_panel);
     lv_obj_set_size(radar, radar_width, radar_height);
-    lv_obj_set_style_bg_opa(radar, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(radar, 0, 0);
-    lv_obj_set_style_radius(radar, 0, 0);
+    lv_obj_set_style_bg_color(radar, lv_color_hex(0xDDE8EE), 0);
+    lv_obj_set_style_bg_opa(radar, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(radar, lv_color_hex(0x1C6C83), 0);
+    lv_obj_set_style_border_width(radar, 1, 0);
+    lv_obj_set_style_radius(radar, 10, 0);
     lv_obj_set_style_pad_all(radar, 0, 0);
     lv_obj_remove_flag(radar, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_remove_flag(radar, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_remove_flag(radar, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
+    ui.overview_map_view = radar;
+    ui.overview_viewport.resize(static_cast<uint16_t>(radar_width),
+                                static_cast<uint16_t>(radar_height));
+    ui.tiles_dirty = true;
+    ui.tile_images_bound = false;
+
+    // The quick map and full map never exist at the same time, so they can
+    // share the decoded JPEG tile cache without spending another ~4.5 MiB of
+    // PSRAM. Creating the images first keeps every radar element above them.
+    for (lv_obj_t *&image : ui.tile_images) {
+        image = lv_image_create(radar);
+        lv_obj_add_flag(image, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(image, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_remove_flag(image, LV_OBJ_FLAG_CLICKABLE);
+    }
+    lv_obj_t *map_tint = lv_obj_create(radar);
+    lv_obj_set_size(map_tint, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_color(map_tint, lv_color_hex(0x06141D), 0);
+    lv_obj_set_style_bg_opa(map_tint, LV_OPA_30, 0);
+    lv_obj_set_style_border_width(map_tint, 0, 0);
+    lv_obj_set_style_radius(map_tint, 0, 0);
+    lv_obj_set_style_pad_all(map_tint, 0, 0);
+    lv_obj_remove_flag(map_tint, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(map_tint, LV_OBJ_FLAG_CLICKABLE);
+
     const int32_t ring_sizes[] = {
         ui.portrait ? 198 : 232,
         ui.portrait ? 138 : 162,
@@ -3434,6 +3506,7 @@ void create_overview_page(UiState &ui)
     lv_obj_t *hub_label = make_label(hub, LV_SYMBOL_HOME, lv_color_hex(0xFFFFFF));
     lv_obj_set_style_text_font(hub_label, &lv_font_montserrat_22, 0);
     lv_obj_center(hub_label);
+    ui.overview_hub_marker = hub;
 
     for (size_t i = 0; i < ui.overview_markers.size(); ++i) {
         lv_obj_t *marker = lv_obj_create(radar);
@@ -4316,6 +4389,8 @@ void create_ui(UiState &ui)
     ui.drawer_command_buttons.fill(nullptr);
     ui.drawer_card_expanded.fill(false);
     ui.map_view = nullptr;
+    ui.overview_map_view = nullptr;
+    ui.overview_hub_marker = nullptr;
     ui.cat_list = nullptr;
     ui.diagnostics_text = nullptr;
     ui.camera_preview_image = nullptr;
