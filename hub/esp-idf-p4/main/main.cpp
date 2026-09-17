@@ -174,6 +174,7 @@ struct UiState {
     lv_obj_t *overview_mode_confirmation_title = nullptr;
     lv_obj_t *overview_mode_confirmation_body = nullptr;
     lv_obj_t *overview_clock_label = nullptr;
+    lv_obj_t *overview_header_wifi_image = nullptr;
     lv_obj_t *overview_header_signal_image = nullptr;
     lv_obj_t *overview_header_battery_image = nullptr;
     lv_obj_t *overview_header_battery_label = nullptr;
@@ -631,6 +632,21 @@ lv_color_t signal_colour(int16_t rssi)
         : (rssi > -95 ? lv_color_hex(0xF2B134) : lv_color_hex(0xEF5A67));
 }
 
+const lv_image_dsc_t *wifi_signal_icon(int16_t rssi)
+{
+    return rssi >= -55 ? &bluepaws::ui::icon_signal_full
+        : (rssi >= -67 ? &bluepaws::ui::icon_signal_high
+        : (rssi >= -75 ? &bluepaws::ui::icon_signal_medium
+        : (rssi >= -85 ? &bluepaws::ui::icon_signal_low
+                       : &bluepaws::ui::icon_signal_mobile)));
+}
+
+lv_color_t wifi_signal_colour(int16_t rssi)
+{
+    return rssi >= -67 ? lv_color_hex(0x2BC48A)
+        : (rssi >= -80 ? lv_color_hex(0xF2B134) : lv_color_hex(0xEF5A67));
+}
+
 struct OverviewModeTheme {
     uint32_t header;
     uint32_t control;
@@ -1081,22 +1097,38 @@ void update_ui(UiState &ui)
                                   static_cast<unsigned long>(age_seconds));
         }
 
+        const bool wifi_connected = cloud_status.wifi_station_connected;
+        const lv_color_t wifi_colour = wifi_connected
+            ? wifi_signal_colour(cloud_status.wifi_rssi_dbm)
+            : lv_color_hex(0x6E91A5);
+        if (ui.overview_header_wifi_image != nullptr) {
+            lv_obj_set_style_image_recolor(ui.overview_header_wifi_image,
+                                           wifi_colour,
+                                           0);
+            lv_obj_set_style_image_recolor_opa(ui.overview_header_wifi_image,
+                                               LV_OPA_COVER,
+                                               0);
+        }
+        if (ui.overview_header_signal_image != nullptr) {
+            lv_image_set_src(ui.overview_header_signal_image,
+                             wifi_connected
+                                 ? wifi_signal_icon(cloud_status.wifi_rssi_dbm)
+                                 : &bluepaws::ui::icon_signal_mobile);
+            lv_obj_set_style_image_recolor(ui.overview_header_signal_image,
+                                           wifi_colour,
+                                           0);
+            lv_obj_set_style_image_recolor_opa(ui.overview_header_signal_image,
+                                               LV_OPA_COVER,
+                                               0);
+        }
+
         if (ui.cats.size() > 0) {
             const bluepaws::CatRecord *latest = ui.cats.at(newest_first[0]);
-            lv_image_set_src(ui.overview_header_signal_image, signal_icon(latest->latest.rssi));
-            lv_obj_set_style_image_recolor(ui.overview_header_signal_image,
-                                           signal_colour(latest->latest.rssi), 0);
-            lv_obj_set_style_image_recolor_opa(ui.overview_header_signal_image, LV_OPA_COVER, 0);
             lv_image_set_src(ui.overview_header_battery_image,
                              battery_icon(latest->latest.battery_percent));
             lv_label_set_text_fmt(ui.overview_header_battery_label, "%u%%",
                                   static_cast<unsigned>(latest->latest.battery_percent));
         } else {
-            lv_image_set_src(ui.overview_header_signal_image,
-                             &bluepaws::ui::icon_signal_mobile);
-            lv_obj_set_style_image_recolor(ui.overview_header_signal_image,
-                                           lv_color_hex(0x6E91A5), 0);
-            lv_obj_set_style_image_recolor_opa(ui.overview_header_signal_image, LV_OPA_COVER, 0);
             lv_label_set_text(ui.overview_header_battery_label, "--%");
         }
     }
@@ -3363,8 +3395,15 @@ void create_overview_page(UiState &ui)
     ui.overview_mode_dropdown = mode_dropdown;
     apply_overview_mode_theme(ui, ui.settings.communications_mode);
 
+    ui.overview_header_wifi_image = make_drawer_image(header, bluepaws::ui::icon_radio_wifi);
+    lv_obj_set_pos(ui.overview_header_wifi_image, ui.portrait ? 240 : 510, 18);
+    lv_image_set_scale(ui.overview_header_wifi_image, ui.portrait ? 288 : 320);
+    lv_obj_set_style_image_recolor(ui.overview_header_wifi_image,
+                                   lv_color_hex(0x6E91A5),
+                                   0);
+    lv_obj_set_style_image_recolor_opa(ui.overview_header_wifi_image, LV_OPA_COVER, 0);
     ui.overview_header_signal_image = make_drawer_image(header, bluepaws::ui::icon_signal_full);
-    lv_obj_set_pos(ui.overview_header_signal_image, ui.portrait ? 252 : 538, 17);
+    lv_obj_set_pos(ui.overview_header_signal_image, ui.portrait ? 266 : 540, 17);
     lv_image_set_scale(ui.overview_header_signal_image, ui.portrait ? 320 : 384);
     ui.overview_header_battery_image = make_drawer_image(header, bluepaws::ui::icon_battery_full);
     lv_obj_set_pos(ui.overview_header_battery_image, ui.portrait ? 297 : 578, 17);
@@ -4387,6 +4426,7 @@ void create_ui(UiState &ui)
     ui.overview_mode_confirmation_title = nullptr;
     ui.overview_mode_confirmation_body = nullptr;
     ui.overview_clock_label = nullptr;
+    ui.overview_header_wifi_image = nullptr;
     ui.overview_header_signal_image = nullptr;
     ui.overview_header_battery_image = nullptr;
     ui.overview_header_battery_label = nullptr;
