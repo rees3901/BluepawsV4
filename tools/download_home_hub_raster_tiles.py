@@ -30,8 +30,11 @@ class DownloadPass:
 
 
 SATELLITE_PASSES = (
-    DownloadPass("Great Britain overview", (-8.82, 49.79, 1.92, 60.95), 5, 11),
-    DownloadPass("Gloucestershire detail", (-2.72, 51.55, -1.62, 52.15), 12, 14),
+    # Keep nationwide imagery deliberately coarse.  The physical hub only
+    # needs enough UK context to pan back towards the local high-detail area.
+    DownloadPass("Great Britain overview", (-8.82, 49.79, 1.92, 60.95), 5, 9),
+    # Spend the file count and storage budget around the deployment area.
+    DownloadPass("Gloucestershire detail", (-2.72, 51.55, -1.62, 52.15), 10, 14),
 )
 
 FULL_GB_PASSES = (
@@ -150,10 +153,15 @@ def write_manifest(args: argparse.Namespace, count: int, total_bytes: int) -> No
         "western-england": (-4.20, 50.70, -0.50, 53.00),
         "great-britain": (-8.82, 49.79, 1.92, 60.95),
     }[args.profile]
+    detailed_min_zoom = {
+        "gloucestershire": 10,
+        "western-england": 12,
+        "great-britain": 5,
+    }[args.profile]
     manifest = {
         "schema_version": 1,
         "name": args.name,
-        "version": "2026-08",
+        "version": "2026-09",
         "projection": "EPSG:3857",
         "tile_scheme": "xyz",
         "tile_size": 256,
@@ -167,8 +175,21 @@ def write_manifest(args: argparse.Namespace, count: int, total_bytes: int) -> No
             "south": detailed_bounds[1],
             "east": detailed_bounds[2],
             "north": detailed_bounds[3],
-            "min_zoom": 12,
+            "min_zoom": detailed_min_zoom,
         },
+        "coverage_passes": [
+            {
+                "name": render.name,
+                "bounds": list(render.bounds),
+                "min_zoom": render.minimum_zoom,
+                "max_zoom": render.maximum_zoom,
+            }
+            for render in {
+                "gloucestershire": SATELLITE_PASSES,
+                "western-england": WESTERN_ENGLAND_PASSES,
+                "great-britain": FULL_GB_PASSES,
+            }[args.profile]
+        ],
         "coverage_profile": args.profile,
         "tile_count": count,
         "payload_bytes": total_bytes,

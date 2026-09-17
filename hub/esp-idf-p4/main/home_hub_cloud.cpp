@@ -5,6 +5,7 @@
 #endif
 #include "home_hub_config.h"
 #include "home_hub_mdns.h"
+#include "bluepaws/hub_mode_policy.h"
 
 #include "cJSON.h"
 #include "esp_crt_bundle.h"
@@ -97,10 +98,59 @@ void set_state(ConnectionState state) {
     portEXIT_CRITICAL(&g_status_lock);
 }
 
-void set_effective_mode(hub::CommunicationsMode mode, bool automatic_off_grid = false) {
+void set_mode_status(hub::CommunicationsMode requested,
+                     hub::CommunicationsMode effective,
+                     ModeReason reason,
+                     bool automatic_off_grid = false) {
     portENTER_CRITICAL(&g_status_lock);
-    g_status.effective_mode = mode;
+    g_status.requested_mode = requested;
+    g_status.effective_mode = effective;
+    g_status.mode_reason = reason;
     g_status.automatic_off_grid = automatic_off_grid;
+    portEXIT_CRITICAL(&g_status_lock);
+}
+
+hub::CommunicationsMode network_mode(unsigned network_index) {
+    return hub::effectiveModeForNetwork(network_index);
+}
+
+ModeReason network_reason(unsigned network_index) {
+    return network_index == 1 ? ModeReason::SecondaryWifi : ModeReason::PrimaryWifi;
+}
+
+void set_network_mode(const hub::Settings &settings, unsigned network_index) {
+    set_mode_status(settings.communications_mode, network_mode(network_index),
+                    network_reason(network_index));
+}
+
+void set_off_grid_mode(const hub::Settings &settings, bool automatic) {
+    set_mode_status(settings.communications_mode, hub::CommunicationsMode::OffGrid,
+                    automatic ? ModeReason::WifiUnavailable
+                              : ModeReason::ManualSelection,
+                    automatic);
+}
+
+void clear_station_link() {
+    portENTER_CRITICAL(&g_status_lock);
+    g_status.wifi_station_connected = false;
+    g_status.wifi_rssi_dbm = -127;
+    g_status.wifi_ssid[0] = '\0';
+    portEXIT_CRITICAL(&g_status_lock);
+}
+
+void refresh_station_link() {
+    wifi_ap_record_t access_point{};
+    if (esp_wifi_sta_get_ap_info(&access_point) != ESP_OK) {
+        clear_station_link();
+        return;
+    }
+    portENTER_CRITICAL(&g_status_lock);
+    g_status.wifi_station_connected = true;
+    g_status.wifi_rssi_dbm = access_point.rssi;
+    std::strncpy(g_status.wifi_ssid,
+                 reinterpret_cast<const char *>(access_point.ssid),
+                 sizeof(g_status.wifi_ssid) - 1);
+    g_status.wifi_ssid[sizeof(g_status.wifi_ssid) - 1] = '\0';
     portEXIT_CRITICAL(&g_status_lock);
 }
 
@@ -372,11 +422,13 @@ void wifi_event(void *, esp_event_base_t base, int32_t id, void *) {
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         xEventGroupClearBits(g_wifi, kConnectedBit);
         xEventGroupSetBits(g_wifi, kDisconnectedBit);
+        clear_station_link();
         set_state(ConnectionState::Connecting);
         if (g_station_allowed.load()) esp_wifi_connect();
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         xEventGroupClearBits(g_wifi, kDisconnectedBit);
         xEventGroupSetBits(g_wifi, kConnectedBit);
+        refresh_station_link();
         set_state(ConnectionState::Online);
     }
 }
@@ -399,6 +451,7 @@ bool configure_wifi(const hub::Settings &settings, unsigned network_index, bool 
     if (!station_enabled && !access_point_enabled) return false;
 
     g_station_allowed.store(false);
+    clear_station_link();
     if (restart && g_wifi_initialized) {
         esp_wifi_disconnect();
         esp_wifi_stop();
@@ -459,13 +512,23 @@ bool network_available(const hub::Settings &settings, unsigned index) {
 }
 
 unsigned preferred_network(const hub::Settings &settings) {
-    return settings.communications_mode == hub::CommunicationsMode::Portable ? 1U : 0U;
+    return hub::preferredNetwork(settings.communications_mode);
+}
+
+bool network_allowed(const hub::Settings &settings, unsigned index) {
+    // Portable is an explicit request for the saved secondary/hotspot SSID.
+    // It must never silently attach to the home network and present as Home.
+    return hub::modeAllowsNetwork(settings.communications_mode, index);
+}
+
+bool usable_network(const hub::Settings &settings, unsigned index) {
+    return network_allowed(settings, index) && network_available(settings, index);
 }
 
 unsigned first_available_network(const hub::Settings &settings, unsigned preferred) {
-    if (network_available(settings, preferred)) return preferred;
+    if (usable_network(settings, preferred)) return preferred;
     const unsigned alternate = preferred == 0 ? 1U : 0U;
-    return network_available(settings, alternate) ? alternate : preferred;
+    return usable_network(settings, alternate) ? alternate : preferred;
 }
 
 bool start_wifi(const hub::Settings &settings) {
@@ -494,11 +557,9 @@ bool start_wifi(const hub::Settings &settings) {
     const unsigned preferred = preferred_network(settings);
     const unsigned network_index = first_available_network(settings, preferred);
     const bool automatic_off_grid = !explicit_off_grid &&
-        !network_available(settings, 0) && !network_available(settings, 1);
-    set_effective_mode(explicit_off_grid || automatic_off_grid
-                           ? hub::CommunicationsMode::OffGrid
-                           : settings.communications_mode,
-                       automatic_off_grid);
+        !usable_network(settings, 0) && !usable_network(settings, 1);
+    if (explicit_off_grid || automatic_off_grid) set_off_grid_mode(settings, automatic_off_grid);
+    else set_network_mode(settings, network_index);
     return configure_wifi(settings, network_index, false,
                           explicit_off_grid || automatic_off_grid, !explicit_off_grid);
 }
@@ -517,23 +578,24 @@ void sync_task(void *) {
     unsigned network_index = first_available_network(settings, preferred);
     bool explicit_off_grid = settings.communications_mode == hub::CommunicationsMode::OffGrid;
     bool off_grid_active = explicit_off_grid ||
-        (!network_available(settings, 0) && !network_available(settings, 1));
-    bool tried_alternate = network_index != preferred;
+        (!usable_network(settings, 0) && !usable_network(settings, 1));
+    bool tried_alternate = network_index != preferred ||
+        !usable_network(settings, preferred == 0 ? 1U : 0U);
     if (off_grid_active) set_state(ConnectionState::Degraded);
     while (true) {
         xEventGroupClearBits(g_wifi, kDisconnectedBit);
-        const bool any_network_configured = network_available(settings, 0) ||
-                                            network_available(settings, 1);
+        const bool any_network_configured = usable_network(settings, 0) ||
+                                            usable_network(settings, 1);
         if (explicit_off_grid || (off_grid_active && !any_network_configured)) {
             set_state(ConnectionState::Degraded);
-            set_effective_mode(hub::CommunicationsMode::OffGrid, !explicit_off_grid);
+            set_off_grid_mode(settings, !explicit_off_grid);
             // AP-only states have no station timeout. A user selection or newly
             // saved credential wakes this task immediately through reconfigure.
             xEventGroupWaitBits(g_wifi, kReconfigureBit, pdFALSE, pdFALSE, portMAX_DELAY);
             continue;
         }
-        const bool both_configured = network_available(settings, 0) &&
-                                     network_available(settings, 1);
+        const bool both_configured = usable_network(settings, 0) &&
+                                     usable_network(settings, 1);
         const uint32_t recovery_wait_ms = off_grid_active
             ? HOME_HUB_WIFI_RECOVERY_MS
             : (both_configured ? HOME_HUB_WIFI_RECOVERY_MS / 2U
@@ -551,31 +613,39 @@ void sync_task(void *) {
             network_index = first_available_network(settings, preferred);
             explicit_off_grid = settings.communications_mode == hub::CommunicationsMode::OffGrid;
             off_grid_active = explicit_off_grid ||
-                (!network_available(settings, 0) && !network_available(settings, 1));
-            tried_alternate = network_index != preferred;
-            set_effective_mode(off_grid_active ? hub::CommunicationsMode::OffGrid
-                                               : settings.communications_mode,
-                               off_grid_active && !explicit_off_grid);
+                (!usable_network(settings, 0) && !usable_network(settings, 1));
+            tried_alternate = network_index != preferred ||
+                !usable_network(settings, preferred == 0 ? 1U : 0U);
+            if (off_grid_active) {
+                set_state(ConnectionState::Degraded);
+                set_off_grid_mode(settings, !explicit_off_grid);
+            } else {
+                set_state(ConnectionState::Connecting);
+                set_network_mode(settings, network_index);
+            }
             configure_wifi(settings, network_index, true, off_grid_active, !explicit_off_grid);
             cloud_delay_ms = HOME_HUB_SYNC_INTERVAL_MS;
             continue;
         }
+        if ((connected & kConnectedBit) != 0) {
+            refresh_station_link();
+        }
         if ((connected & kConnectedBit) == 0) {
-            const bool primary_available = network_available(settings, 0);
-            const bool secondary_available = network_available(settings, 1);
+            const bool primary_available = usable_network(settings, 0);
+            const bool secondary_available = usable_network(settings, 1);
             if (!primary_available && !secondary_available) {
                 off_grid_active = true;
                 set_state(ConnectionState::Degraded);
-                set_effective_mode(hub::CommunicationsMode::OffGrid, true);
+                set_off_grid_mode(settings, true);
                 continue;
             }
 
             const unsigned alternate = network_index == 0 ? 1U : 0U;
-            if (!off_grid_active && !tried_alternate && network_available(settings, alternate)) {
+            if (!off_grid_active && !tried_alternate && usable_network(settings, alternate)) {
                 network_index = alternate;
                 tried_alternate = true;
                 set_state(ConnectionState::Connecting);
-                set_effective_mode(settings.communications_mode);
+                set_network_mode(settings, network_index);
                 ESP_LOGI(kTag, "Preferred Wi-Fi timed out; trying %s uplink",
                          network_index == 1 ? "secondary" : "primary");
                 configure_wifi(settings, network_index, true, false);
@@ -585,9 +655,9 @@ void sync_task(void *) {
             if (!off_grid_active) {
                 off_grid_active = true;
                 set_state(ConnectionState::Degraded);
-                set_effective_mode(hub::CommunicationsMode::OffGrid, true);
+                set_off_grid_mode(settings, true);
                 ESP_LOGW(kTag, "Known Wi-Fi recovery timed out; automatic off-grid AP enabled");
-            } else if (network_available(settings, alternate)) {
+            } else if (usable_network(settings, alternate)) {
                 network_index = alternate;
             }
             configure_wifi(settings, network_index, true, true);
@@ -598,12 +668,12 @@ void sync_task(void *) {
             if (esp_wifi_set_mode(WIFI_MODE_STA) == ESP_OK) {
                 off_grid_active = false;
                 tried_alternate = network_index != preferred;
-                set_effective_mode(settings.communications_mode);
+                set_network_mode(settings, network_index);
                 ESP_LOGI(kTag, "Trusted Wi-Fi restored; automatic off-grid AP stopped");
             }
             cloud_delay_ms = HOME_HUB_SYNC_INTERVAL_MS;
         } else if (!g_cloud_authorized || fetch_snapshot()) {
-            set_effective_mode(settings.communications_mode);
+            set_network_mode(settings, network_index);
             cloud_delay_ms = HOME_HUB_SYNC_INTERVAL_MS;
         } else {
             cloud_delay_ms = std::min(cloud_delay_ms * 2U,
@@ -642,6 +712,16 @@ bool applyNetworkSettings(const hub::Settings &input) {
     portEXIT_CRITICAL(&g_settings_lock);
     if (g_wifi != nullptr) xEventGroupSetBits(g_wifi, kReconfigureBit);
     return true;
+}
+
+const char *modeReasonName(ModeReason reason) {
+    switch (reason) {
+    case ModeReason::PrimaryWifi: return "primary_wifi";
+    case ModeReason::SecondaryWifi: return "secondary_wifi";
+    case ModeReason::WifiUnavailable: return "wifi_unavailable";
+    case ModeReason::ManualSelection: return "manual_selection";
+    }
+    return "unknown";
 }
 
 std::size_t drain(CatStore &store) {

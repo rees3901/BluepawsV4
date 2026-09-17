@@ -172,6 +172,7 @@ std::size_t make_mdns_reply(const uint8_t *query, std::size_t received,
 void mdns_task(void *)
 {
     int socket_handle = -1;
+    uint32_t joined_interface_address = 0;
     // esp_wifi_start() returns before the hosted radio has necessarily raised
     // WIFI_EVENT_AP_START/STA_GOT_IP. Joining an IPv4 multicast group during
     // that short window fails, so keep this low-priority task alive and retry.
@@ -190,6 +191,9 @@ void mdns_task(void *)
         }
         int reuse = 1;
         setsockopt(socket_handle, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+        timeval receive_timeout{1, 0};
+        setsockopt(socket_handle, SOL_SOCKET, SO_RCVTIMEO,
+                   &receive_timeout, sizeof(receive_timeout));
         sockaddr_in address{};
         address.sin_family = AF_INET;
         address.sin_port = htons(kMdnsPort);
@@ -199,11 +203,15 @@ void mdns_task(void *)
         group.imr_interface.s_addr = interface_address;
         if (bind(socket_handle, reinterpret_cast<sockaddr *>(&address), sizeof(address)) != 0 ||
             setsockopt(socket_handle, IPPROTO_IP, IP_ADD_MEMBERSHIP,
-                       &group, sizeof(group)) != 0) {
+                       &group, sizeof(group)) != 0 ||
+            setsockopt(socket_handle, IPPROTO_IP, IP_MULTICAST_IF,
+                       &interface_address, sizeof(interface_address)) != 0) {
             ESP_LOGW(kTag, "Waiting to join mDNS group: errno=%d", errno);
             close(socket_handle);
             socket_handle = -1;
             vTaskDelay(pdMS_TO_TICKS(1000));
+        } else {
+            joined_interface_address = interface_address;
         }
     }
     uint8_t ttl = 255;
@@ -217,6 +225,50 @@ void mdns_task(void *)
     destination.sin_port = htons(kMdnsPort);
     destination.sin_addr.s_addr = inet_addr(kMdnsGroup);
     while (true) {
+        uint32_t active_address = 0;
+        if (!active_wifi_address(active_address) ||
+            active_address != joined_interface_address) {
+            ESP_LOGI(kTag, "Active interface changed; rejoining mDNS group");
+            close(socket_handle);
+            socket_handle = -1;
+            joined_interface_address = 0;
+            while (socket_handle < 0) {
+                if (!active_wifi_address(active_address)) {
+                    vTaskDelay(pdMS_TO_TICKS(500));
+                    continue;
+                }
+                socket_handle = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
+                if (socket_handle < 0) {
+                    vTaskDelay(pdMS_TO_TICKS(1000));
+                    continue;
+                }
+                int reuse = 1;
+                setsockopt(socket_handle, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+                timeval receive_timeout{1, 0};
+                setsockopt(socket_handle, SOL_SOCKET, SO_RCVTIMEO,
+                           &receive_timeout, sizeof(receive_timeout));
+                sockaddr_in address{};
+                address.sin_family = AF_INET;
+                address.sin_port = htons(kMdnsPort);
+                address.sin_addr.s_addr = htonl(INADDR_ANY);
+                ip_mreq group{};
+                group.imr_multiaddr.s_addr = inet_addr(kMdnsGroup);
+                group.imr_interface.s_addr = active_address;
+                if (bind(socket_handle, reinterpret_cast<sockaddr *>(&address), sizeof(address)) != 0 ||
+                    setsockopt(socket_handle, IPPROTO_IP, IP_ADD_MEMBERSHIP,
+                               &group, sizeof(group)) != 0 ||
+                    setsockopt(socket_handle, IPPROTO_IP, IP_MULTICAST_IF,
+                               &active_address, sizeof(active_address)) != 0) {
+                    close(socket_handle);
+                    socket_handle = -1;
+                    vTaskDelay(pdMS_TO_TICKS(1000));
+                    continue;
+                }
+                setsockopt(socket_handle, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof(ttl));
+                joined_interface_address = active_address;
+                ESP_LOGI(kTag, "mDNS hostname rebound: http://%s/", kLocalHostname);
+            }
+        }
         const int received = recvfrom(socket_handle, query, sizeof(query), 0, nullptr, nullptr);
         if (received <= 0) continue;
         const std::size_t reply_length = make_mdns_reply(

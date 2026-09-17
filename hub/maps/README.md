@@ -20,13 +20,11 @@ firmware's hard-coded road path:
 ```text
 /bluepaws/maps/map_manifest.json             active OSM road manifest
 /bluepaws/maps/tiles/{z}/{x}/{y}.jpg         active OSM road layer
-/bluepaws/maps/layers/aerial/...             EA Gloucester aerial layer
 /bluepaws/maps/layers/osm-road-v2/...         high-contrast OSM road layer
 /bluepaws/maps/layers/ordnance-survey/...     OS Open Zoomstack Road layer
 /bluepaws/maps/layers/osm-road-100km/...      GB overview + Gloucester-region OSM
 /bluepaws/maps/layers/ordnance-survey-100km/  GB overview + Gloucester-region OS
-/bluepaws/maps/layers/satellite/...          legacy EOX Sentinel-2 overview layer
-/bluepaws/maps/layers/satellite-v2/...       coherent EA high-resolution aerial layer
+/bluepaws/maps/layers/satellite/...          tiered UK/Gloucestershire imagery layer
 /bluepaws/maps/legacy/os-zoomstack-fixture/  preserved first hardware proof
 ```
 
@@ -281,8 +279,10 @@ duplicating cat markers or interaction overlays.
 
 The broad satellite pack uses EOX's `s2cloudless_3857` service, which is the
 2016/2017 Sentinel-2 cloudless mosaic released under CC BY 4.0 with rendered
-tile download explicitly allowed. It contains Great Britain at z5-11 and
-Gloucestershire at z12-14. Later EOX annual mosaics have different
+tile download explicitly allowed. The active storage-balanced profile contains
+Great Britain at z5-9 and Gloucestershire at z10-14. Browser and LVGL views may
+over-zoom those source tiles for closer framing, but no false detail is created.
+Later EOX annual mosaics have different
 non-commercial/licensing terms, so do not silently substitute a newer layer.
 
 The old composite builder below is retained for reproducing the rejected test
@@ -318,7 +318,7 @@ python tools\download_home_hub_raster_tiles.py `
   --source-url 'https://eox.at/2017/08/sentinel-2-global-cloudless-mosaic/'
 ```
 
-The default profile keeps z12-14 limited to Gloucestershire. The recommended
+The default profile keeps z10-14 limited to Gloucestershire. The recommended
 `western-england` profile keeps Great Britain at z5-11 and extends z12-14 over
 a broad region around Gloucester (47,663 requested XYZ positions). The
 optional `great-britain` profile extends genuine imagery through z14 across the

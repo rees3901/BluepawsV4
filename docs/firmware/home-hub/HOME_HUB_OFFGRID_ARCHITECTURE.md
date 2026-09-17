@@ -367,7 +367,7 @@ Future uploads must likewise preserve a fresh copy of private files/history.
 ## Direct browser access (September 2026)
 
 This supersedes the captive-portal behavior described in the historical notes
-above. Both hubs now advertise `BluePaws_192.168.4.1`. Users join the hotspot,
+above. Both hubs now advertise `BluePaws.local_IP:192.168.4.1`. Users join the hotspot,
 keep the connection when warned that it has no internet, and open
 `http://192.168.4.1/` in their normal browser. Wildcard DNS, captive HTTP redirects
 and the P4 DHCP portal announcement have been removed. mDNS remains available

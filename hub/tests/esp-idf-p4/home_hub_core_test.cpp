@@ -1,6 +1,7 @@
 #include "bluepaws/cat_simulator.h"
 #include "bluepaws/cat_store.h"
 #include "bluepaws/hub_settings.h"
+#include "bluepaws/hub_mode_policy.h"
 #include "bluepaws/map_engine.h"
 #include "bluepaws/qr_payload.h"
 
@@ -159,7 +160,7 @@ void storeRejectsOlderTruth() {
 
 void settingsRemainSafeAndOrdered() {
     auto settings = bluepaws::hub::defaultSettings();
-    assert(std::strcmp(settings.access_point_ssid, "BluePaws_192.168.4.1") == 0);
+    assert(std::strcmp(settings.access_point_ssid, "BluePaws.local_IP:192.168.4.1") == 0);
     assert(settings.communications_mode == bluepaws::hub::CommunicationsMode::Home);
     assert(settings.overview_timeout_seconds == 120);
     std::strcpy(settings.access_point_ssid, "Old hotspot name");
@@ -170,7 +171,7 @@ void settingsRemainSafeAndOrdered() {
     settings.dim_brightness_percent = 0;
     settings.communications_mode = static_cast<bluepaws::hub::CommunicationsMode>(99);
     bluepaws::hub::sanitize(settings);
-    assert(std::strcmp(settings.access_point_ssid, "BluePaws_192.168.4.1") == 0);
+    assert(std::strcmp(settings.access_point_ssid, "BluePaws.local_IP:192.168.4.1") == 0);
     assert(settings.overview_timeout_seconds == 15);
     assert(settings.dim_timeout_seconds >= settings.overview_timeout_seconds);
     assert(settings.screen_off_timeout_seconds >= settings.dim_timeout_seconds);
@@ -181,6 +182,23 @@ void settingsRemainSafeAndOrdered() {
     assert(!bluepaws::hub::validSsid(""));
     assert(bluepaws::hub::validPassword("password"));
     assert(!bluepaws::hub::validPassword("short"));
+}
+
+void communicationsModesUseOneDeterministicPolicy() {
+    using bluepaws::hub::CommunicationsMode;
+    assert(bluepaws::hub::preferredNetwork(CommunicationsMode::Home) == 0);
+    assert(bluepaws::hub::modeAllowsNetwork(CommunicationsMode::Home, 0));
+    assert(bluepaws::hub::modeAllowsNetwork(CommunicationsMode::Home, 1));
+    assert(bluepaws::hub::effectiveModeForNetwork(0) == CommunicationsMode::Home);
+    assert(bluepaws::hub::effectiveModeForNetwork(1) == CommunicationsMode::Portable);
+
+    assert(bluepaws::hub::preferredNetwork(CommunicationsMode::Portable) == 1);
+    assert(!bluepaws::hub::modeAllowsNetwork(CommunicationsMode::Portable, 0));
+    assert(bluepaws::hub::modeAllowsNetwork(CommunicationsMode::Portable, 1));
+
+    assert(!bluepaws::hub::modeAllowsNetwork(CommunicationsMode::OffGrid, 0));
+    assert(!bluepaws::hub::modeAllowsNetwork(CommunicationsMode::OffGrid, 1));
+    assert(!bluepaws::hub::modeAllowsNetwork(CommunicationsMode::Home, 2));
 }
 
 void relativePositionProvidesDistanceAndClockDirection() {
@@ -233,6 +251,7 @@ int main() {
     simulatorUsesTheSharedStatePath();
     storeRejectsOlderTruth();
     settingsRemainSafeAndOrdered();
+    communicationsModesUseOneDeterministicPolicy();
     relativePositionProvidesDistanceAndClockDirection();
     qrPayloadsAreStrictAndEscaped();
     std::puts("Home Hub portable core: all tests passed");

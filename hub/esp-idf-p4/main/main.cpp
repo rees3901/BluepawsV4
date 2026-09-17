@@ -97,7 +97,6 @@ enum class MapLayer : uint8_t {
     Street,
     OrdnanceSurvey,
     Satellite,
-    Aerial,
 };
 
 struct MapLayerInfo {
@@ -108,11 +107,10 @@ struct MapLayerInfo {
     uint8_t maximum_zoom;
 };
 
-constexpr std::array<MapLayerInfo, 4> kMapLayers{{
+constexpr std::array<MapLayerInfo, 3> kMapLayers{{
     {"OpenStreetMap", "GB overview; 100 km Gloucester detail", "/sdcard/bluepaws/maps/layers/osm-road-100km/tiles", 5, 17},
     {"Ordnance Survey", "Official OS mapping; GB overview and regional detail", "/sdcard/bluepaws/maps/layers/ordnance-survey-100km/tiles", 5, 17},
-    {"Satellite", "EA 20 cm Gloucester aerial imagery", "/sdcard/bluepaws/maps/layers/satellite-v2/tiles", 14, 17},
-    {"Aerial", "Single-source Gloucester aerial imagery", "/sdcard/bluepaws/maps/layers/aerial-consistent/tiles", 12, 17},
+    {"Satellite", "UK overview with Gloucestershire detail", "/sdcard/bluepaws/maps/layers/satellite/tiles", 5, 14},
 }};
 
 struct UiLayout {
@@ -124,6 +122,7 @@ struct UiLayout {
 
 constexpr UiLayout kLandscapeLayout{784, 406, 784, 406};
 constexpr UiLayout kPortraitLayout{464, 726, 464, 726};
+constexpr size_t kOverviewRecentCardCount = 3;
 
 struct TileCacheEntry {
     bluepaws::map::TileId id{};
@@ -139,8 +138,11 @@ struct UiState {
     bluepaws::CatSimulator simulator{kTestOrigin};
     bluepaws::map::Viewport viewport{
         kLandscapeLayout.map_width, kLandscapeLayout.map_height, kTestOrigin, 15};
+    bluepaws::map::Viewport overview_viewport{340, 246, kTestOrigin, 15};
     lv_display_t *display = nullptr;
     lv_obj_t *map_view = nullptr;
+    lv_obj_t *overview_map_view = nullptr;
+    lv_obj_t *overview_hub_marker = nullptr;
     std::array<lv_obj_t *, bluepaws::map::kMaximumVisibleTiles> tile_images{};
     std::array<TileCacheEntry, bluepaws::map::kMaximumVisibleTiles> tile_cache{};
     std::array<lv_obj_t *, bluepaws::kMaximumCats> markers{};
@@ -160,6 +162,8 @@ struct UiState {
     std::array<lv_obj_t *, bluepaws::kMaximumCats> overview_distance_labels{};
     std::array<lv_obj_t *, bluepaws::kMaximumCats> overview_age_labels{};
     lv_obj_t *overview_summary_label = nullptr;
+    lv_obj_t *overview_safety_panel = nullptr;
+    lv_obj_t *overview_safety_label = nullptr;
     lv_obj_t *overview_header = nullptr;
     lv_obj_t *overview_mode_title = nullptr;
     lv_obj_t *overview_mode_dropdown = nullptr;
@@ -167,6 +171,7 @@ struct UiState {
     lv_obj_t *overview_mode_confirmation_title = nullptr;
     lv_obj_t *overview_mode_confirmation_body = nullptr;
     lv_obj_t *overview_clock_label = nullptr;
+    lv_obj_t *overview_header_wifi_image = nullptr;
     lv_obj_t *overview_header_signal_image = nullptr;
     lv_obj_t *overview_header_battery_image = nullptr;
     lv_obj_t *overview_header_battery_label = nullptr;
@@ -328,7 +333,7 @@ void log_map_storage_probe(const UiState &ui)
     }
 
     constexpr char satellite_probe[] =
-        "/sdcard/bluepaws/maps/layers/satellite-v2/tiles/14/8090/5421.jpg";
+        "/sdcard/bluepaws/maps/layers/satellite/tiles/14/8090/5421.jpg";
     struct stat tile_stat {};
     if (stat(satellite_probe, &tile_stat) != 0) {
         ESP_LOGE(kTag, "Satellite centre tile missing: %s errno=%d", satellite_probe, errno);
@@ -479,14 +484,19 @@ void refresh_map_tiles(UiState &ui)
         return;
     }
 
-    const bluepaws::map::TileGrid visible_grid = ui.viewport.visibleTiles(0);
-    const bluepaws::map::TileGrid grid = ui.viewport.visibleTiles(1);
+    const bool overview_map = ui.active_page == AppPage::Overview &&
+        ui.overview_map_view != nullptr;
+    const bluepaws::map::Viewport &render_viewport = overview_map
+        ? ui.overview_viewport : ui.viewport;
+    const MapLayer render_layer = overview_map ? MapLayer::Street : ui.active_map_layer;
+    const bluepaws::map::TileGrid visible_grid = render_viewport.visibleTiles(0);
+    const bluepaws::map::TileGrid grid = render_viewport.visibleTiles(1);
     ui.visible_tile_count = visible_grid.count;
 
     bool sources_changed = !ui.tile_images_bound;
     for (size_t i = 0; i < grid.count && !sources_changed; ++i) {
         const TileCacheEntry &entry = ui.tile_cache[i];
-        sources_changed = !entry.valid || entry.layer != ui.active_map_layer ||
+        sources_changed = !entry.valid || entry.layer != render_layer ||
                           !(entry.id == grid.tiles[i].id);
     }
 
@@ -549,7 +559,7 @@ void refresh_map_tiles(UiState &ui)
         }
 
         const bluepaws::map::TilePlacement &placement = grid.tiles[i];
-        const MapLayerInfo &layer = map_layer_info(ui.active_map_layer);
+        const MapLayerInfo &layer = map_layer_info(render_layer);
         char filesystem_path[160]{};
         std::snprintf(filesystem_path,
                       sizeof(filesystem_path),
@@ -559,7 +569,7 @@ void refresh_map_tiles(UiState &ui)
                       static_cast<unsigned long>(placement.id.x),
                       static_cast<unsigned long>(placement.id.y));
         TileCacheEntry &entry = ui.tile_cache[i];
-        if (!entry.valid || entry.layer != ui.active_map_layer || !(entry.id == placement.id)) {
+        if (!entry.valid || entry.layer != render_layer || !(entry.id == placement.id)) {
             if (entry.descriptor.data != nullptr) {
                 lv_image_cache_drop(&entry.descriptor);
             }
@@ -568,7 +578,7 @@ void refresh_map_tiles(UiState &ui)
                 lv_obj_add_flag(image, LV_OBJ_FLAG_HIDDEN);
                 continue;
             }
-            entry.layer = ui.active_map_layer;
+            entry.layer = render_layer;
             entry.id = placement.id;
             entry.valid = true;
             ++ui.loaded_tile_count;
@@ -617,6 +627,21 @@ lv_color_t signal_colour(int16_t rssi)
 {
     return rssi > -80 ? lv_color_hex(0x2BC48A)
         : (rssi > -95 ? lv_color_hex(0xF2B134) : lv_color_hex(0xEF5A67));
+}
+
+const lv_image_dsc_t *wifi_signal_icon(int16_t rssi)
+{
+    return rssi >= -55 ? &bluepaws::ui::icon_signal_full
+        : (rssi >= -67 ? &bluepaws::ui::icon_signal_high
+        : (rssi >= -75 ? &bluepaws::ui::icon_signal_medium
+        : (rssi >= -85 ? &bluepaws::ui::icon_signal_low
+                       : &bluepaws::ui::icon_signal_mobile)));
+}
+
+lv_color_t wifi_signal_colour(int16_t rssi)
+{
+    return rssi >= -67 ? lv_color_hex(0x2BC48A)
+        : (rssi >= -80 ? lv_color_hex(0xF2B134) : lv_color_hex(0xEF5A67));
 }
 
 struct OverviewModeTheme {
@@ -701,6 +726,14 @@ void update_ui(UiState &ui)
     }
     const bluepaws::cloud::Status cloud_status = bluepaws::cloud::status();
     bluepaws::web::updateSnapshot(ui.cats, cloud_status);
+    if (ui.overview_mode_dropdown != nullptr &&
+        ui.overview_mode_confirmation != nullptr &&
+        lv_obj_has_flag(ui.overview_mode_confirmation, LV_OBJ_FLAG_HIDDEN)) {
+        // The selector is also the runtime indicator.  Automatic Home ->
+        // Portable -> Off-Grid transitions must therefore be visible here.
+        lv_dropdown_set_selected(ui.overview_mode_dropdown,
+                                 static_cast<uint32_t>(cloud_status.effective_mode));
+    }
     const char *sync_name = !ui.cloud_enabled ? "simulator"
         : (cloud_status.state == bluepaws::cloud::ConnectionState::Online ? "online"
         : (cloud_status.state == bluepaws::cloud::ConnectionState::Connecting ? "connecting"
@@ -717,23 +750,54 @@ void update_ui(UiState &ui)
         }
     }
 
-    if (ui.active_page == AppPage::Map && ui.map_view != nullptr) {
+    if (ui.active_page == AppPage::Overview && ui.overview_map_view != nullptr) {
+        std::array<bluepaws::map::GeoPoint, bluepaws::kMaximumCats + 1> points{};
+        size_t point_count = 0;
+        points[point_count++] = kTestOrigin;
+        for (size_t i = 0; i < ui.cats.size(); ++i) {
+            const bluepaws::CatRecord *cat = ui.cats.at(i);
+            if (cat != nullptr && cat->has_position) {
+                points[point_count++] = {
+                    static_cast<double>(cat->last_valid_latitude_e7) / 1.0e7,
+                    static_cast<double>(cat->last_valid_longitude_e7) / 1.0e7,
+                };
+            }
+        }
+        const MapLayerInfo &overview_layer = map_layer_info(MapLayer::Street);
+        const auto fit = bluepaws::map::fitPoints(
+            points.data(),
+            point_count,
+            ui.overview_viewport.width(),
+            ui.overview_viewport.height(),
+            30,
+            overview_layer.minimum_zoom,
+            overview_layer.maximum_zoom);
+        if (fit.valid) {
+            const uint8_t relaxed_zoom = fit.zoom > overview_layer.minimum_zoom
+                ? static_cast<uint8_t>(fit.zoom - 1U) : fit.zoom;
+            // Keep the hub at the centre of the radar. The extra zoom-out
+            // level provides the space that a bounds-centred fit would
+            // otherwise gain by shifting the hub away from the crosshair.
+            const bluepaws::map::GeoPoint target_center = kTestOrigin;
+            const bluepaws::map::GeoPoint previous_center = ui.overview_viewport.center();
+            if (ui.overview_viewport.zoom() != relaxed_zoom ||
+                std::abs(previous_center.latitude - target_center.latitude) > 1.0e-8 ||
+                std::abs(previous_center.longitude - target_center.longitude) > 1.0e-8) {
+                ui.overview_viewport = bluepaws::map::Viewport(
+                    ui.overview_viewport.width(),
+                    ui.overview_viewport.height(),
+                    target_center,
+                    relaxed_zoom);
+                ui.tiles_dirty = true;
+            }
+        }
+        refresh_map_tiles(ui);
+    } else if (ui.active_page == AppPage::Map && ui.map_view != nullptr) {
         refresh_map_tiles(ui);
     }
 
     char list_text[640]{};
     size_t used = 0;
-    double overview_scale_metres = 250.0;
-    for (size_t i = 0; i < ui.cats.size(); ++i) {
-        const bluepaws::CatRecord *cat = ui.cats.at(i);
-        if (cat == nullptr || !cat->has_position) continue;
-        const auto relative = bluepaws::hub::relativePosition(
-            kTestOrigin,
-            {static_cast<double>(cat->last_valid_latitude_e7) / 1.0e7,
-             static_cast<double>(cat->last_valid_longitude_e7) / 1.0e7});
-        if (relative.valid) overview_scale_metres = std::max(
-            overview_scale_metres, relative.distance_metres * 1.15);
-    }
     for (size_t i = 0; i < ui.cats.size(); ++i) {
         const bluepaws::CatRecord *cat = ui.cats.at(i);
         if (cat == nullptr) {
@@ -857,20 +921,17 @@ void update_ui(UiState &ui)
         }
 
         if (ui.overview_markers[i] != nullptr) {
-            if (!relative.valid) {
+            if (!cat->has_position) {
                 lv_obj_add_flag(ui.overview_markers[i], LV_OBJ_FLAG_HIDDEN);
             } else {
                 lv_obj_remove_flag(ui.overview_markers[i], LV_OBJ_FLAG_HIDDEN);
-                lv_obj_t *radar = lv_obj_get_parent(ui.overview_markers[i]);
-                const double radius = std::max(20.0,
-                    std::min(lv_obj_get_width(radar), lv_obj_get_height(radar)) / 2.0 - 36.0);
-                const double plotted_radius = std::min(
-                    radius, relative.distance_metres / overview_scale_metres * radius);
-                const double bearing = relative.bearing_degrees * 3.14159265358979323846 / 180.0;
-                const int32_t x = static_cast<int32_t>(
-                    lv_obj_get_width(radar) / 2.0 + std::sin(bearing) * plotted_radius - 17.0);
-                const int32_t y = static_cast<int32_t>(
-                    lv_obj_get_height(radar) / 2.0 - std::cos(bearing) * plotted_radius - 17.0);
+                const bluepaws::map::ScreenPoint overview_point =
+                    ui.overview_viewport.toScreen({
+                        static_cast<double>(cat->last_valid_latitude_e7) / 1.0e7,
+                        static_cast<double>(cat->last_valid_longitude_e7) / 1.0e7,
+                    });
+                const int32_t x = static_cast<int32_t>(overview_point.x) - 17;
+                const int32_t y = static_cast<int32_t>(overview_point.y) - 17;
                 lv_obj_set_pos(ui.overview_markers[i], x, y);
             }
         }
@@ -893,6 +954,14 @@ void update_ui(UiState &ui)
         }
     }
 
+    if (ui.overview_hub_marker != nullptr) {
+        const bluepaws::map::ScreenPoint hub_point =
+            ui.overview_viewport.toScreen(kTestOrigin);
+        lv_obj_set_pos(ui.overview_hub_marker,
+                       static_cast<int32_t>(hub_point.x) - 27,
+                       static_cast<int32_t>(hub_point.y) - 27);
+    }
+
     if (ui.overview_cards[0] != nullptr) {
         size_t recently_seen = 0;
         for (size_t i = 0; i < ui.cats.size(); ++i) {
@@ -902,16 +971,63 @@ void update_ui(UiState &ui)
                 ++recently_seen;
             }
         }
+        size_t attention_count = 0;
+        for (size_t i = 0; i < ui.cats.size(); ++i) {
+            const bluepaws::CatRecord *cat = ui.cats.at(i);
+            if (cat == nullptr) continue;
+            const bool stale = now_ms < cat->latest.received_at_ms ||
+                now_ms - cat->latest.received_at_ms > 60U * 60U * 1000U;
+            const bool fault = cat->latest.status_code == 3 ||
+                (cat->latest.flags & 0x80U) != 0;
+            if (stale || fault) ++attention_count;
+        }
+        const bool all_accounted_for = ui.cats.size() > 0 &&
+            recently_seen == ui.cats.size() && attention_count == 0;
         if (ui.overview_summary_label != nullptr) {
             if (recently_seen == 0) {
-                lv_label_set_text(ui.overview_summary_label, "No devices seen in the last hour");
+                lv_label_set_text(ui.overview_summary_label, "No collars seen  |  Check hub");
             } else {
                 lv_label_set_text_fmt(ui.overview_summary_label,
-                                      recently_seen == 1
-                                          ? "%u device seen in the last hour"
-                                          : "%u devices seen in the last hour",
+                                      all_accounted_for
+                                          ? "%u collars seen  |  All safe"
+                                          : "%u collars seen  |  Check alerts",
                                       static_cast<unsigned>(recently_seen));
             }
+            lv_obj_set_style_text_color(ui.overview_summary_label,
+                                        all_accounted_for
+                                            ? lv_color_hex(0x62E89A)
+                                            : lv_color_hex(0xF4B740),
+                                        0);
+        }
+        if (ui.overview_safety_label != nullptr) {
+            if (all_accounted_for) {
+                lv_label_set_text(ui.overview_safety_label,
+                                  LV_SYMBOL_OK "  All pets accounted for");
+            } else if (ui.cats.size() == 0) {
+                lv_label_set_text(ui.overview_safety_label, "Waiting for collar reports");
+            } else {
+                lv_label_set_text_fmt(ui.overview_safety_label,
+                                      LV_SYMBOL_WARNING "  %u of %u pets reporting",
+                                      static_cast<unsigned>(recently_seen),
+                                      static_cast<unsigned>(ui.cats.size()));
+            }
+            lv_obj_set_style_text_color(ui.overview_safety_label,
+                                        all_accounted_for
+                                            ? lv_color_hex(0x62E89A)
+                                            : lv_color_hex(0xF4B740),
+                                        0);
+        }
+        if (ui.overview_safety_panel != nullptr) {
+            lv_obj_set_style_bg_color(ui.overview_safety_panel,
+                                      all_accounted_for
+                                          ? lv_color_hex(0x0B3327)
+                                          : lv_color_hex(0x382B12),
+                                      0);
+            lv_obj_set_style_border_color(ui.overview_safety_panel,
+                                          all_accounted_for
+                                              ? lv_color_hex(0x42D985)
+                                              : lv_color_hex(0xF4B740),
+                                          0);
         }
 
         std::array<size_t, bluepaws::kMaximumCats> newest_first{};
@@ -929,7 +1045,7 @@ void update_ui(UiState &ui)
                       return a->latest.revision > b->latest.revision;
                   });
 
-        for (size_t slot = 0; slot < ui.overview_cards.size(); ++slot) {
+        for (size_t slot = 0; slot < kOverviewRecentCardCount; ++slot) {
             if (slot >= ui.cats.size()) {
                 lv_obj_add_flag(ui.overview_cards[slot], LV_OBJ_FLAG_HIDDEN);
                 continue;
@@ -986,22 +1102,38 @@ void update_ui(UiState &ui)
                                   static_cast<unsigned long>(age_seconds));
         }
 
+        const bool wifi_connected = cloud_status.wifi_station_connected;
+        const lv_color_t wifi_colour = wifi_connected
+            ? wifi_signal_colour(cloud_status.wifi_rssi_dbm)
+            : lv_color_hex(0x6E91A5);
+        if (ui.overview_header_wifi_image != nullptr) {
+            lv_obj_set_style_image_recolor(ui.overview_header_wifi_image,
+                                           wifi_colour,
+                                           0);
+            lv_obj_set_style_image_recolor_opa(ui.overview_header_wifi_image,
+                                               LV_OPA_COVER,
+                                               0);
+        }
+        if (ui.overview_header_signal_image != nullptr) {
+            lv_image_set_src(ui.overview_header_signal_image,
+                             wifi_connected
+                                 ? wifi_signal_icon(cloud_status.wifi_rssi_dbm)
+                                 : &bluepaws::ui::icon_signal_mobile);
+            lv_obj_set_style_image_recolor(ui.overview_header_signal_image,
+                                           wifi_colour,
+                                           0);
+            lv_obj_set_style_image_recolor_opa(ui.overview_header_signal_image,
+                                               LV_OPA_COVER,
+                                               0);
+        }
+
         if (ui.cats.size() > 0) {
             const bluepaws::CatRecord *latest = ui.cats.at(newest_first[0]);
-            lv_image_set_src(ui.overview_header_signal_image, signal_icon(latest->latest.rssi));
-            lv_obj_set_style_image_recolor(ui.overview_header_signal_image,
-                                           signal_colour(latest->latest.rssi), 0);
-            lv_obj_set_style_image_recolor_opa(ui.overview_header_signal_image, LV_OPA_COVER, 0);
             lv_image_set_src(ui.overview_header_battery_image,
                              battery_icon(latest->latest.battery_percent));
             lv_label_set_text_fmt(ui.overview_header_battery_label, "%u%%",
                                   static_cast<unsigned>(latest->latest.battery_percent));
         } else {
-            lv_image_set_src(ui.overview_header_signal_image,
-                             &bluepaws::ui::icon_signal_mobile);
-            lv_obj_set_style_image_recolor(ui.overview_header_signal_image,
-                                           lv_color_hex(0x6E91A5), 0);
-            lv_obj_set_style_image_recolor_opa(ui.overview_header_signal_image, LV_OPA_COVER, 0);
             lv_label_set_text(ui.overview_header_battery_label, "--%");
         }
     }
@@ -1107,11 +1239,7 @@ void update_ui(UiState &ui)
                               static_cast<unsigned>(ui.cats.size()));
         break;
     case AppPage::Overview:
-        apply_overview_mode_theme(
-            ui,
-            cloud_status.automatic_off_grid
-                ? bluepaws::hub::CommunicationsMode::OffGrid
-                : ui.settings.communications_mode);
+        apply_overview_mode_theme(ui, cloud_status.effective_mode);
         if (ui.overview_clock_label != nullptr) {
             const std::time_t wall_time = std::time(nullptr);
             std::tm local_time{};
@@ -1126,11 +1254,13 @@ void update_ui(UiState &ui)
                 lv_label_set_text(ui.overview_clock_label, "--:-- --");
             }
         }
+        const bool automatic_transition =
+            cloud_status.requested_mode != cloud_status.effective_mode;
         lv_label_set_text_fmt(ui.status,
                               "%u cats | %s | %s%s mode | tap background to open",
                               static_cast<unsigned>(ui.cats.size()),
                               sync_name,
-                              cloud_status.automatic_off_grid ? "auto " : "",
+                              automatic_transition ? "auto " : "",
                               bluepaws::hub::communicationsModeName(cloud_status.effective_mode));
         break;
     }
@@ -1919,11 +2049,6 @@ void ordnance_survey_layer_clicked(lv_event_t *event)
     select_map_layer(*static_cast<UiState *>(lv_event_get_user_data(event)), MapLayer::OrdnanceSurvey);
 }
 
-void aerial_layer_clicked(lv_event_t *event)
-{
-    select_map_layer(*static_cast<UiState *>(lv_event_get_user_data(event)), MapLayer::Aerial);
-}
-
 lv_obj_t *make_layer_option(lv_obj_t *parent,
                             MapLayer layer,
                             lv_event_cb_t callback,
@@ -1961,10 +2086,7 @@ lv_obj_t *make_layer_option(lv_obj_t *parent,
     lv_obj_set_style_text_font(title, &lv_font_montserrat_18, 0);
     lv_obj_t *description = make_label(
         button,
-        available ? info.description
-                  : (layer == MapLayer::Aerial
-                         ? "Mixed pack rejected; one imagery source required"
-                         : "Not installed on SD card"),
+        available ? info.description : "Not installed on SD card",
         ui.dark_mode ? lv_color_hex(0xC2D4DE) : lv_color_hex(0x41657A));
     lv_obj_set_pos(description, 0, 31);
     lv_obj_set_width(description, LV_PCT(100));
@@ -2905,14 +3027,6 @@ void create_map_page(UiState &ui)
     make_layer_option(
         ui.layer_drawer, MapLayer::OrdnanceSurvey, ordnance_survey_layer_clicked, ui);
     make_layer_option(ui.layer_drawer, MapLayer::Satellite, satellite_layer_clicked, ui);
-    make_layer_option(ui.layer_drawer, MapLayer::Aerial, aerial_layer_clicked, ui);
-    lv_obj_t *layer_note = make_label(
-        ui.layer_drawer,
-        "Mixed-source aerial imagery is disabled. Install a consistent aerial pack to enable it.",
-        ui.dark_mode ? lv_color_hex(0x9DB3C0) : lv_color_hex(0x41657A));
-    lv_obj_set_width(layer_note, LV_PCT(100));
-    lv_label_set_long_mode(layer_note, LV_LABEL_LONG_WRAP);
-    lv_obj_set_style_text_font(layer_note, &lv_font_montserrat_14, 0);
     if (!ui.layer_drawer_open) {
         lv_obj_add_flag(ui.layer_drawer, LV_OBJ_FLAG_HIDDEN);
     }
@@ -2977,13 +3091,13 @@ void overview_wake_clicked(lv_event_t *event)
 
 bool set_communications_mode(UiState &ui, bluepaws::hub::CommunicationsMode mode)
 {
-    if (ui.settings.communications_mode == mode) return true;
     const bluepaws::hub::CommunicationsMode previous = ui.settings.communications_mode;
     ESP_LOGI(kTag, "Hub mode requested: %s -> %s",
              bluepaws::hub::communicationsModeName(previous),
              bluepaws::hub::communicationsModeName(mode));
+    const bool preference_changed = previous != mode;
     ui.settings.communications_mode = mode;
-    if (!bluepaws::settings_store::save(ui.settings)) {
+    if (preference_changed && !bluepaws::settings_store::save(ui.settings)) {
         ui.settings.communications_mode = previous;
         if (ui.overview_mode_dropdown != nullptr) {
             lv_dropdown_set_selected(ui.overview_mode_dropdown,
@@ -2994,6 +3108,8 @@ bool set_communications_mode(UiState &ui, bluepaws::hub::CommunicationsMode mode
         if (ui.status != nullptr) lv_label_set_text(ui.status, "Could not save hub mode");
         return false;
     }
+    // Applying even an unchanged preference is deliberate: selecting Home
+    // while Home's automatic fallback is active requests an immediate retry.
     bluepaws::cloud::applyNetworkSettings(ui.settings);
     apply_overview_mode_theme(ui, mode);
     lv_display_trigger_activity(ui.display);
@@ -3006,9 +3122,9 @@ const char *mode_confirmation_body(bluepaws::hub::CommunicationsMode mode)
 {
     switch (mode) {
     case bluepaws::hub::CommunicationsMode::Home:
-        return "Stops the local hotspot, prefers your primary home Wi-Fi, and resumes normal cloud relay when online.";
+        return "Prefers your primary home Wi-Fi, then tries the saved portable Wi-Fi and finally starts Off-Grid if neither is available.";
     case bluepaws::hub::CommunicationsMode::Portable:
-        return "Prefers your secondary phone hotspot, keeps cloud relay available, and identifies this hub as portable.";
+        return "Uses your saved portable Wi-Fi only. If it is unavailable, the hub starts Off-Grid rather than joining the home network.";
     case bluepaws::hub::CommunicationsMode::OffGrid:
         return "Stops internet Wi-Fi attempts and starts the hub hotspot, local dashboard, and offline operation.";
     }
@@ -3021,9 +3137,10 @@ void close_mode_confirmation(UiState &ui)
         lv_obj_add_flag(ui.overview_mode_confirmation, LV_OBJ_FLAG_HIDDEN);
     }
     if (ui.overview_mode_dropdown != nullptr) {
+        const auto effective = bluepaws::cloud::status().effective_mode;
         lv_dropdown_set_selected(
             ui.overview_mode_dropdown,
-            static_cast<uint32_t>(ui.settings.communications_mode));
+            static_cast<uint32_t>(effective));
     }
 }
 
@@ -3052,10 +3169,11 @@ void mode_dropdown_changed(lv_event_t *event)
     const uint32_t selected = lv_dropdown_get_selected(dropdown);
     if (selected > static_cast<uint32_t>(bluepaws::hub::CommunicationsMode::OffGrid)) return;
     const auto requested = static_cast<bluepaws::hub::CommunicationsMode>(selected);
-    if (requested == ui->settings.communications_mode) return;
+    const auto effective = bluepaws::cloud::status().effective_mode;
+    if (requested == ui->settings.communications_mode && requested == effective) return;
     ui->pending_communications_mode = requested;
     lv_dropdown_set_selected(
-        dropdown, static_cast<uint32_t>(ui->settings.communications_mode));
+        dropdown, static_cast<uint32_t>(effective));
     if (ui->overview_mode_confirmation_title != nullptr) {
         lv_label_set_text_fmt(ui->overview_mode_confirmation_title,
                               "Switch to %s mode?",
@@ -3146,23 +3264,23 @@ void create_overview_cat_card(lv_obj_t *parent, size_t slot, UiState &ui)
 {
     lv_obj_t *card = lv_obj_create(parent);
     lv_obj_set_width(card, LV_PCT(100));
-    lv_obj_set_height(card, 140);
+    lv_obj_set_height(card, 112);
     lv_obj_set_style_bg_color(card, lv_color_hex(0x172733), 0);
     lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_color(card, lv_color_hex(0x405B6D), 0);
+    lv_obj_set_style_border_color(card, lv_color_hex(0x1D9EE5), 0);
     lv_obj_set_style_border_width(card, 1, 0);
     lv_obj_set_style_radius(card, 10, 0);
-    lv_obj_set_style_pad_all(card, 9, 0);
-    lv_obj_set_style_pad_gap(card, 6, 0);
+    lv_obj_set_style_pad_all(card, 7, 0);
+    lv_obj_set_style_pad_gap(card, 3, 0);
     lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
     lv_obj_remove_flag(card, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_remove_flag(card, LV_OBJ_FLAG_CLICKABLE);
 
     const lv_color_t primary_text = lv_color_hex(0xF3F8FB);
     const lv_color_t secondary_text = lv_color_hex(0xAFC3CE);
-    lv_obj_t *header = make_drawer_row(card, 44, 4);
+    lv_obj_t *header = make_drawer_row(card, 38, 5);
     lv_obj_t *avatar = lv_obj_create(header);
-    lv_obj_set_size(avatar, 42, 42);
+    lv_obj_set_size(avatar, 38, 38);
     lv_obj_set_style_bg_color(avatar, lv_color_hex(kMarkerColours[slot]), 0);
     lv_obj_set_style_border_color(avatar, lv_color_hex(0xD3E5ED), 0);
     lv_obj_set_style_border_width(avatar, 2, 0);
@@ -3182,22 +3300,21 @@ void create_overview_cat_card(lv_obj_t *parent, size_t slot, UiState &ui)
     lv_obj_set_style_text_font(name, &lv_font_montserrat_14, 0);
     lv_obj_t *status = make_drawer_image(header, bluepaws::ui::icon_status_out);
     lv_obj_t *profile = make_drawer_image(header, bluepaws::ui::icon_profile_powersave);
-    lv_image_set_scale(status, 307);
-    lv_image_set_scale(profile, 307);
-
-    lv_obj_t *fault_row = make_drawer_row(card, 20, 4);
-    lv_obj_t *fault = make_drawer_image(fault_row, bluepaws::ui::icon_status_error);
+    lv_image_set_scale(status, 268);
+    lv_image_set_scale(profile, 268);
+    lv_obj_t *fault = make_drawer_image(header, bluepaws::ui::icon_status_error);
+    lv_image_set_scale(fault, 268);
     lv_obj_add_flag(fault, LV_OBJ_FLAG_HIDDEN);
 
     lv_obj_t *telemetry = make_drawer_row(card, 22, 4);
     lv_obj_t *battery = make_drawer_image(telemetry, bluepaws::ui::icon_battery_full);
-    lv_image_set_scale(battery, 320);
+    lv_image_set_scale(battery, 288);
     lv_obj_t *battery_text = make_label(telemetry, "--%", secondary_text);
-    lv_obj_set_width(battery_text, 46);
+    lv_obj_set_width(battery_text, 42);
     lv_obj_set_style_text_font(battery_text, &lv_font_montserrat_14, 0);
     make_drawer_image(telemetry, bluepaws::ui::icon_radio_antenna);
     lv_obj_t *signal = make_drawer_image(telemetry, bluepaws::ui::icon_signal_full);
-    lv_image_set_scale(signal, 320);
+    lv_image_set_scale(signal, 288);
     lv_obj_t *telemetry_spacer = lv_obj_create(telemetry);
     lv_obj_set_size(telemetry_spacer, 1, 1);
     lv_obj_set_flex_grow(telemetry_spacer, 1);
@@ -3207,14 +3324,14 @@ void create_overview_cat_card(lv_obj_t *parent, size_t slot, UiState &ui)
     lv_obj_remove_flag(telemetry_spacer, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_t *radio = make_drawer_image(telemetry, bluepaws::ui::icon_radio_rf);
 
-    lv_obj_t *meta = make_drawer_row(card, 18, 5);
+    lv_obj_t *meta = make_drawer_row(card, 20, 5);
     make_drawer_image(meta, bluepaws::ui::icon_status_home_small);
     lv_obj_t *distance = make_label(meta, "--m", secondary_text);
-    lv_obj_set_width(distance, 70);
+    lv_obj_set_width(distance, 62);
     lv_obj_set_style_text_font(distance, &lv_font_montserrat_14, 0);
     make_drawer_image(meta, bluepaws::ui::icon_status_stopwatch);
     lv_obj_t *age = make_label(meta, "--s", secondary_text);
-    lv_obj_set_width(age, 70);
+    lv_obj_set_width(age, 62);
     lv_obj_set_style_text_font(age, &lv_font_montserrat_14, 0);
 
     ui.overview_cards[slot] = card;
@@ -3248,11 +3365,6 @@ void create_overview_page(UiState &ui)
     lv_obj_t *title = lv_obj_get_child(header, 0);
     lv_obj_set_pos(title, ui.portrait ? 8 : 12, 5);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_18, 0);
-    ui.overview_summary_label = make_label(
-        header, "No devices seen in the last hour", lv_color_hex(0x80A9BE));
-    lv_obj_set_pos(ui.overview_summary_label, ui.portrait ? 8 : 12, 32);
-    lv_obj_set_style_text_font(ui.overview_summary_label, &lv_font_montserrat_14, 0);
-    if (ui.portrait) lv_obj_add_flag(ui.overview_summary_label, LV_OBJ_FLAG_HIDDEN);
 
     lv_obj_t *mode_title = make_label(header, "Hub mode", lv_color_hex(0x80C9F2));
     lv_obj_set_pos(mode_title, ui.portrait ? 100 : 305, 3);
@@ -3261,7 +3373,8 @@ void create_overview_page(UiState &ui)
     ui.overview_mode_title = mode_title;
     lv_obj_t *mode_dropdown = lv_dropdown_create(header);
     lv_dropdown_set_options(mode_dropdown, "Home Hub\nPortable\nOff-Grid");
-    lv_dropdown_set_selected(mode_dropdown, static_cast<uint32_t>(ui.settings.communications_mode));
+    lv_dropdown_set_selected(mode_dropdown,
+                             static_cast<uint32_t>(bluepaws::cloud::status().effective_mode));
     lv_obj_set_pos(mode_dropdown, ui.portrait ? 100 : 305, ui.portrait ? 10 : 21);
     lv_obj_set_size(mode_dropdown, ui.portrait ? 136 : 190, ui.portrait ? 38 : 34);
     lv_obj_set_style_bg_color(mode_dropdown, lv_color_hex(0x173342), 0);
@@ -3272,10 +3385,17 @@ void create_overview_page(UiState &ui)
     lv_obj_set_style_text_font(mode_dropdown, &lv_font_montserrat_14, 0);
     lv_obj_add_event_cb(mode_dropdown, mode_dropdown_changed, LV_EVENT_VALUE_CHANGED, &ui);
     ui.overview_mode_dropdown = mode_dropdown;
-    apply_overview_mode_theme(ui, ui.settings.communications_mode);
+    apply_overview_mode_theme(ui, bluepaws::cloud::status().effective_mode);
 
+    ui.overview_header_wifi_image = make_drawer_image(header, bluepaws::ui::icon_radio_wifi);
+    lv_obj_set_pos(ui.overview_header_wifi_image, ui.portrait ? 240 : 510, 18);
+    lv_image_set_scale(ui.overview_header_wifi_image, ui.portrait ? 288 : 320);
+    lv_obj_set_style_image_recolor(ui.overview_header_wifi_image,
+                                   lv_color_hex(0x6E91A5),
+                                   0);
+    lv_obj_set_style_image_recolor_opa(ui.overview_header_wifi_image, LV_OPA_COVER, 0);
     ui.overview_header_signal_image = make_drawer_image(header, bluepaws::ui::icon_signal_full);
-    lv_obj_set_pos(ui.overview_header_signal_image, ui.portrait ? 252 : 538, 17);
+    lv_obj_set_pos(ui.overview_header_signal_image, ui.portrait ? 266 : 540, 17);
     lv_image_set_scale(ui.overview_header_signal_image, ui.portrait ? 320 : 384);
     ui.overview_header_battery_image = make_drawer_image(header, bluepaws::ui::icon_battery_full);
     lv_obj_set_pos(ui.overview_header_battery_image, ui.portrait ? 297 : 578, 17);
@@ -3296,21 +3416,87 @@ void create_overview_page(UiState &ui)
                           LV_FLEX_ALIGN_SPACE_EVENLY,
                           LV_FLEX_ALIGN_CENTER,
                           LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_all(content, 4, 0);
+    lv_obj_set_style_pad_gap(content, 6, 0);
     lv_obj_set_style_bg_color(content, lv_color_hex(0x050A0F), 0);
     lv_obj_add_event_cb(lv_screen_active(), overview_wake_clicked, LV_EVENT_PRESSED, &ui);
     lv_obj_add_event_cb(content, overview_wake_clicked, LV_EVENT_PRESSED, &ui);
 
-    const int32_t radar_width = ui.portrait ? 440 : 320;
-    const int32_t radar_height = ui.portrait ? 340 : 390;
-    lv_obj_t *radar = lv_obj_create(content);
+    lv_obj_t *left_panel = lv_obj_create(content);
+    lv_obj_set_size(left_panel, ui.portrait ? 440 : 350, ui.portrait ? 332 : 390);
+    lv_obj_set_style_bg_opa(left_panel, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(left_panel, 0, 0);
+    lv_obj_set_style_pad_all(left_panel, 2, 0);
+    lv_obj_set_style_pad_gap(left_panel, 3, 0);
+    lv_obj_set_flex_flow(left_panel, LV_FLEX_FLOW_COLUMN);
+    lv_obj_remove_flag(left_panel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(left_panel, LV_OBJ_FLAG_CLICKABLE);
+
+    lv_obj_t *safety = lv_obj_create(left_panel);
+    lv_obj_set_size(safety, LV_PCT(100), ui.portrait ? 42 : 48);
+    lv_obj_set_style_bg_color(safety, lv_color_hex(0x0B3327), 0);
+    lv_obj_set_style_bg_opa(safety, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(safety, lv_color_hex(0x42D985), 0);
+    lv_obj_set_style_border_width(safety, 2, 0);
+    lv_obj_set_style_radius(safety, 10, 0);
+    lv_obj_set_style_pad_all(safety, 0, 0);
+    lv_obj_remove_flag(safety, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(safety, LV_OBJ_FLAG_CLICKABLE);
+    ui.overview_safety_panel = safety;
+    ui.overview_safety_label = make_label(
+        safety, LV_SYMBOL_OK "  All pets accounted for", lv_color_hex(0x62E89A));
+    lv_obj_set_style_text_font(ui.overview_safety_label,
+                               ui.portrait ? &lv_font_montserrat_14
+                                           : &lv_font_montserrat_18,
+                               0);
+    lv_obj_center(ui.overview_safety_label);
+
+    lv_obj_t *proximity_title = make_label(left_panel, "Proximity", lv_color_hex(0x80A9BE));
+    lv_obj_set_style_text_font(proximity_title, &lv_font_montserrat_14, 0);
+
+    const int32_t radar_width = ui.portrait ? 420 : 340;
+    const int32_t radar_height = ui.portrait ? 206 : 246;
+    lv_obj_t *radar = lv_obj_create(left_panel);
     lv_obj_set_size(radar, radar_width, radar_height);
-    lv_obj_set_style_bg_opa(radar, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(radar, 0, 0);
-    lv_obj_set_style_radius(radar, 0, 0);
+    lv_obj_set_style_bg_color(radar, lv_color_hex(0xDDE8EE), 0);
+    lv_obj_set_style_bg_opa(radar, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(radar, lv_color_hex(0x1C6C83), 0);
+    lv_obj_set_style_border_width(radar, 1, 0);
+    lv_obj_set_style_radius(radar, 10, 0);
     lv_obj_set_style_pad_all(radar, 0, 0);
     lv_obj_remove_flag(radar, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_remove_flag(radar, LV_OBJ_FLAG_CLICKABLE);
-    const int32_t ring_sizes[] = {300, 210, 120};
+    lv_obj_remove_flag(radar, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
+    ui.overview_map_view = radar;
+    ui.overview_viewport.resize(static_cast<uint16_t>(radar_width),
+                                static_cast<uint16_t>(radar_height));
+    ui.tiles_dirty = true;
+    ui.tile_images_bound = false;
+
+    // The quick map and full map never exist at the same time, so they can
+    // share the decoded JPEG tile cache without spending another ~4.5 MiB of
+    // PSRAM. Creating the images first keeps every radar element above them.
+    for (lv_obj_t *&image : ui.tile_images) {
+        image = lv_image_create(radar);
+        lv_obj_add_flag(image, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(image, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_remove_flag(image, LV_OBJ_FLAG_CLICKABLE);
+    }
+    lv_obj_t *map_tint = lv_obj_create(radar);
+    lv_obj_set_size(map_tint, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_color(map_tint, lv_color_hex(0x06141D), 0);
+    lv_obj_set_style_bg_opa(map_tint, LV_OPA_30, 0);
+    lv_obj_set_style_border_width(map_tint, 0, 0);
+    lv_obj_set_style_radius(map_tint, 0, 0);
+    lv_obj_set_style_pad_all(map_tint, 0, 0);
+    lv_obj_remove_flag(map_tint, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(map_tint, LV_OBJ_FLAG_CLICKABLE);
+
+    const int32_t ring_sizes[] = {
+        ui.portrait ? 198 : 232,
+        ui.portrait ? 138 : 162,
+        ui.portrait ? 78 : 92,
+    };
     for (int32_t size : ring_sizes) {
         lv_obj_t *ring = lv_obj_create(radar);
         lv_obj_set_size(ring, size, size);
@@ -3325,12 +3511,12 @@ void create_overview_page(UiState &ui)
         lv_obj_remove_flag(ring, LV_OBJ_FLAG_CLICKABLE);
     }
     lv_obj_t *cross_h = lv_obj_create(radar);
-    lv_obj_set_size(cross_h, 300, 1);
+    lv_obj_set_size(cross_h, ui.portrait ? 198 : 232, 1);
     lv_obj_center(cross_h);
     lv_obj_set_style_bg_color(cross_h, lv_color_hex(0x1C6C83), 0);
     lv_obj_set_style_border_width(cross_h, 0, 0);
     lv_obj_t *cross_v = lv_obj_create(radar);
-    lv_obj_set_size(cross_v, 1, 300);
+    lv_obj_set_size(cross_v, 1, ui.portrait ? 198 : 232);
     lv_obj_center(cross_v);
     lv_obj_set_style_bg_color(cross_v, lv_color_hex(0x1C6C83), 0);
     lv_obj_set_style_border_width(cross_v, 0, 0);
@@ -3351,6 +3537,7 @@ void create_overview_page(UiState &ui)
     lv_obj_t *hub_label = make_label(hub, LV_SYMBOL_HOME, lv_color_hex(0xFFFFFF));
     lv_obj_set_style_text_font(hub_label, &lv_font_montserrat_22, 0);
     lv_obj_center(hub_label);
+    ui.overview_hub_marker = hub;
 
     for (size_t i = 0; i < ui.overview_markers.size(); ++i) {
         lv_obj_t *marker = lv_obj_create(radar);
@@ -3370,21 +3557,53 @@ void create_overview_page(UiState &ui)
         ui.overview_markers[i] = marker;
     }
 
+    lv_obj_t *overview_footer = lv_obj_create(left_panel);
+    lv_obj_set_size(overview_footer, LV_PCT(100), ui.portrait ? 48 : 58);
+    lv_obj_set_style_bg_color(overview_footer, lv_color_hex(0x0D202C), 0);
+    lv_obj_set_style_bg_opa(overview_footer, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(overview_footer, lv_color_hex(0x2A5D72), 0);
+    lv_obj_set_style_border_width(overview_footer, 1, 0);
+    lv_obj_set_style_radius(overview_footer, 9, 0);
+    lv_obj_set_style_pad_all(overview_footer, ui.portrait ? 3 : 5, 0);
+    lv_obj_set_style_pad_gap(overview_footer, 0, 0);
+    lv_obj_set_flex_flow(overview_footer, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(overview_footer,
+                          LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_remove_flag(overview_footer, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(overview_footer, LV_OBJ_FLAG_CLICKABLE);
+
+    ui.overview_summary_label = make_label(
+        overview_footer, "No collars seen  |  Check hub", lv_color_hex(0xF4B740));
+    lv_obj_set_width(ui.overview_summary_label, LV_PCT(100));
+    lv_obj_set_style_text_align(ui.overview_summary_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(ui.overview_summary_label,
+                               ui.portrait ? &lv_font_montserrat_14
+                                           : &lv_font_montserrat_18,
+                               0);
+
+    lv_obj_t *wake_hint = make_label(
+        overview_footer, "Tap to open dashboard", lv_color_hex(0xB5CBD6));
+    lv_obj_set_width(wake_hint, LV_PCT(100));
+    lv_obj_set_style_text_align(wake_hint, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(wake_hint,
+                               ui.portrait ? &lv_font_montserrat_14
+                                           : &lv_font_montserrat_18,
+                               0);
+
     lv_obj_t *summary = lv_obj_create(content);
-    lv_obj_set_size(summary, ui.portrait ? 440 : 456, ui.portrait ? 378 : 390);
-    lv_obj_set_style_bg_color(summary, lv_color_hex(0x0C1820), 0);
-    lv_obj_set_style_border_color(summary, lv_color_hex(0x17465D), 0);
-    lv_obj_set_style_border_width(summary, 1, 0);
-    lv_obj_set_style_radius(summary, 14, 0);
-    lv_obj_set_style_pad_all(summary, 10, 0);
+    lv_obj_set_size(summary, ui.portrait ? 440 : 418, ui.portrait ? 374 : 390);
+    lv_obj_set_style_bg_opa(summary, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(summary, 0, 0);
+    lv_obj_set_style_radius(summary, 0, 0);
+    lv_obj_set_style_pad_all(summary, 6, 0);
     lv_obj_set_style_pad_gap(summary, 5, 0);
     lv_obj_set_flex_flow(summary, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_scroll_dir(summary, LV_DIR_VER);
-    lv_obj_set_scrollbar_mode(summary, LV_SCROLLBAR_MODE_AUTO);
+    lv_obj_remove_flag(summary, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(summary, LV_OBJ_FLAG_CLICKABLE);
 
-    lv_obj_t *summary_title = make_label(summary, "Last known positions", lv_color_hex(0x80C9F2));
-    lv_obj_set_style_text_font(summary_title, &lv_font_montserrat_18, 0);
-    for (size_t i = 0; i < ui.overview_cards.size(); ++i) {
+    for (size_t i = 0; i < kOverviewRecentCardCount; ++i) {
         create_overview_cat_card(summary, i, ui);
     }
     create_mode_confirmation(ui);
@@ -3679,7 +3898,7 @@ void create_settings_page(UiState &ui)
     lv_obj_set_width(automatic_note, LV_PCT(100));
     lv_label_set_long_mode(automatic_note, LV_LABEL_LONG_WRAP);
     lv_obj_t *address_note = make_label(content,
-        "Connect to BluePaws_192.168.4.1, then open http://192.168.4.1 in your browser.",
+        "Join BluePaws.local_IP:192.168.4.1, then open http://BluePaws.local or http://192.168.4.1.",
         ui.dark_mode ? lv_color_hex(0xC7D9E5) : lv_color_hex(0x38576D));
     lv_obj_set_width(address_note, LV_PCT(100));
     lv_label_set_long_mode(address_note, LV_LABEL_LONG_WRAP);
@@ -4185,6 +4404,8 @@ void create_ui(UiState &ui)
     ui.overview_distance_labels.fill(nullptr);
     ui.overview_age_labels.fill(nullptr);
     ui.overview_summary_label = nullptr;
+    ui.overview_safety_panel = nullptr;
+    ui.overview_safety_label = nullptr;
     ui.overview_header = nullptr;
     ui.overview_mode_title = nullptr;
     ui.overview_mode_dropdown = nullptr;
@@ -4192,6 +4413,7 @@ void create_ui(UiState &ui)
     ui.overview_mode_confirmation_title = nullptr;
     ui.overview_mode_confirmation_body = nullptr;
     ui.overview_clock_label = nullptr;
+    ui.overview_header_wifi_image = nullptr;
     ui.overview_header_signal_image = nullptr;
     ui.overview_header_battery_image = nullptr;
     ui.overview_header_battery_label = nullptr;
@@ -4217,6 +4439,8 @@ void create_ui(UiState &ui)
     ui.drawer_command_buttons.fill(nullptr);
     ui.drawer_card_expanded.fill(false);
     ui.map_view = nullptr;
+    ui.overview_map_view = nullptr;
+    ui.overview_hub_marker = nullptr;
     ui.cat_list = nullptr;
     ui.diagnostics_text = nullptr;
     ui.camera_preview_image = nullptr;
