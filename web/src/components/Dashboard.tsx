@@ -352,8 +352,9 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
   useEffect(() => {
     document.body.classList.toggle("panel-open", sidebarOpen);
     document.body.classList.toggle("light", !darkMode);
+    if (!preferencesReady) return;
     try { localStorage.setItem("bp_theme", darkMode ? "dark" : "light"); } catch { /* non-critical preference */ }
-  }, [darkMode, searchPartyMode, sidebarOpen]);
+  }, [darkMode, preferencesReady, searchPartyMode, sidebarOpen]);
 
   useEffect(() => {
     if (!toast) return;

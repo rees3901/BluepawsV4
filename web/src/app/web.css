@@ -2657,3 +2657,437 @@ body.light .collar-awake.sleeping {
   font-size: 0.76rem;
   text-align: center;
 }
+
+/* ── BluePaws facelift ───────────────────────────────────────────────
+   Web-only presentation layer. The dashboard structure, handlers,
+   telemetry, map behaviour and persisted preferences remain unchanged. */
+:root {
+  --bp-tracking-blue: #1d9bf0;
+  --bp-tracking-blue-dark: #147ac1;
+  --bp-collar-orange: #f59e0b;
+  --bp-collar-orange-dark: #b85c00;
+  --bp-signal-navy: #243c50;
+  --bp-warm-paper: #eee9df;
+  --bp-charcoal-ink: #273039;
+  --bp-soft-white: #f4f7fa;
+  --bp-font-sans: "Nunito Sans", "Avenir Next", "Segoe UI", sans-serif;
+  --bp-font-mono: "Fira Code", "SFMono-Regular", Consolas, monospace;
+
+  --bg-primary: #243c50;
+  --bg-card: #2c4a61;
+  --bg-panel: #20364a;
+  --bg-hover: #315a73;
+  --text-primary: #f4f7fa;
+  --text-secondary: #d7e3ec;
+  --text-dim: #b8c8d4;
+  --accent: #1d9bf0;
+  --accent-hover: #147ac1;
+  --success: #16a34a;
+  --warning: #f59e0b;
+  --danger: #dc2626;
+  --border: #496a82;
+  --radius: 12px;
+  --shadow: 0 8px 24px rgb(9 24 36 / 18%);
+  color-scheme: dark;
+}
+
+body.light {
+  --bg-primary: #eee9df;
+  --bg-card: #fbf8f1;
+  --bg-panel: #f5f0e7;
+  --bg-hover: #e8e0d4;
+  --text-primary: #273039;
+  --text-secondary: #66706f;
+  --text-dim: #767e7b;
+  --accent: #147ac1;
+  --accent-hover: #0f639e;
+  --success: #16a34a;
+  --warning: #b85c00;
+  --danger: #dc2626;
+  --border: #d4cabb;
+  --shadow: 0 8px 24px rgb(86 71 48 / 11%);
+  color-scheme: light;
+}
+
+html,
+body,
+button,
+input,
+select,
+textarea {
+  font-family: var(--bp-font-sans);
+}
+
+body {
+  background:
+    radial-gradient(circle at 14% 8%, rgb(29 155 240 / 9%), transparent 31%),
+    var(--bg-primary);
+}
+
+body.light {
+  background:
+    radial-gradient(circle at 14% 8%, rgb(29 155 240 / 6%), transparent 30%),
+    var(--bg-primary);
+}
+
+#panel {
+  background: color-mix(in srgb, var(--bg-panel) 96%, transparent);
+  border-right-color: color-mix(in srgb, var(--border) 88%, transparent);
+  box-shadow: 14px 0 42px rgb(7 20 30 / 10%);
+  transition: transform 391.4ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+#map,
+.map-loading {
+  transition: margin-left 391.4ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.hamburger-btn,
+.maplibre-tool-stack,
+.maplibre-zoom-stack {
+  transition:
+    left 391.4ms cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    color 180ms ease,
+    transform 180ms ease;
+}
+
+#panelHeader {
+  gap: 10px;
+  padding: 12px 14px 14px;
+  background: color-mix(in srgb, var(--bg-panel) 92%, var(--bg-card));
+}
+
+.panel-status-row {
+  min-height: 42px;
+}
+
+.panel-brand {
+  min-height: 112px;
+  gap: 7px;
+}
+
+.panel-brand-mark {
+  width: 62px;
+  height: 52px;
+}
+
+.panel-brand-mascot {
+  width: 112px;
+  height: 112px;
+  margin-left: auto;
+}
+
+.panel-brand .panel-title {
+  color: var(--text-primary);
+  font-size: 1.12rem;
+  font-weight: 800;
+  letter-spacing: -0.015em;
+}
+
+#statusBanner {
+  min-height: 30px;
+  padding: 5px 9px;
+  border-color: color-mix(in srgb, var(--border) 82%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-card) 76%, transparent);
+  font-weight: 700;
+}
+
+.ctrl-btn,
+.hamburger-btn,
+.leaflet-map-btn,
+.maplibre-tool-stack .leaflet-map-btn,
+.maplibre-zoom-stack,
+.bp-layer-preview-toggle {
+  border-color: color-mix(in srgb, var(--border) 88%, transparent);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--bg-card) 96%, transparent);
+  box-shadow: 0 5px 18px rgb(8 23 34 / 13%);
+}
+
+.ctrl-btn {
+  width: 38px;
+  height: 38px;
+}
+
+.ctrl-btn:hover,
+.ctrl-btn:focus-visible,
+.hamburger-btn:hover,
+.hamburger-btn:focus-visible,
+.leaflet-map-btn:hover,
+.leaflet-map-btn:focus-visible,
+.maplibre-tool-stack .leaflet-map-btn:hover,
+.maplibre-tool-stack .leaflet-map-btn:focus-visible {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg-card));
+  color: var(--accent);
+  transform: translateY(-1px);
+}
+
+#deviceCards {
+  gap: 12px;
+  padding: 12px;
+}
+
+.device-card {
+  border-color: color-mix(in srgb, var(--border) 84%, transparent);
+  border-radius: 14px;
+  background: var(--bg-card);
+  box-shadow: 0 5px 18px rgb(8 23 34 / 8%);
+  transition:
+    border-color 180ms ease,
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    opacity 180ms ease,
+    filter 180ms ease,
+    background 180ms ease;
+}
+
+.device-card:hover {
+  border-color: color-mix(in srgb, var(--accent) 72%, var(--border));
+  box-shadow: 0 9px 24px rgb(8 23 34 / 13%);
+  transform: translateY(-1px);
+}
+
+.device-card.expanded {
+  border-color: var(--accent);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--accent) 14%, transparent),
+    0 10px 28px rgb(8 23 34 / 13%);
+}
+
+.card-summary {
+  gap: 11px;
+  padding: 13px 14px;
+}
+
+.card-name {
+  font-size: 1rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.card-status,
+.card-profile,
+.transport-badge {
+  border-radius: 999px;
+  font-weight: 800;
+}
+
+.card-indicators {
+  row-gap: 5px;
+}
+
+.card-detail {
+  padding: 0 14px 14px;
+}
+
+.card-grid {
+  gap: 6px 14px;
+  padding: 11px 0;
+}
+
+.card-grid .value,
+.card-coords,
+.map-context-coordinates,
+.console-output,
+.status-info {
+  font-family: var(--bp-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.card-actions {
+  gap: 7px;
+  padding: 10px 12px 12px;
+  background: color-mix(in srgb, var(--bg-panel) 48%, transparent);
+}
+
+.btn-action {
+  min-height: 36px;
+  border-color: color-mix(in srgb, var(--border) 88%, transparent);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--bg-card) 78%, transparent);
+  font-weight: 700;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    color 160ms ease,
+    transform 160ms ease;
+}
+
+.btn-action:hover,
+.btn-action:focus-visible {
+  transform: translateY(-1px);
+}
+
+.btn-action.active {
+  box-shadow: inset 0 -2px 0 rgb(0 0 0 / 18%);
+}
+
+.btn-action:disabled,
+.ctrl-btn:disabled,
+.btn-primary:disabled,
+.btn-secondary:disabled {
+  filter: saturate(0.45);
+  opacity: 0.46;
+}
+
+.modal {
+  background: rgb(12 28 40 / 62%);
+  backdrop-filter: blur(7px);
+}
+
+.modal-content,
+.login-card,
+.account-card,
+.onboarding-card,
+.tutorial-callout,
+.tutorial-welcome-card {
+  border-color: color-mix(in srgb, var(--border) 88%, transparent);
+  border-radius: 16px;
+  background: var(--bg-card);
+  box-shadow: 0 22px 64px rgb(8 23 34 / 28%);
+}
+
+.modal-content h2,
+.login-card h1,
+.account-card h1,
+.onboarding-card h1 {
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.form-group input,
+.form-group select,
+.marker-name-field input,
+.family-switcher select,
+.family-name-form input,
+.invite-form input,
+.search-party-form input,
+.profile-form input {
+  min-height: 42px;
+  border-color: color-mix(in srgb, var(--border) 90%, transparent);
+  border-radius: 9px;
+  background: var(--bg-primary);
+}
+
+.btn-primary,
+.btn-secondary,
+.google-login-button,
+.login-submit,
+.avatar-upload-button,
+.tutorial-replay-btn {
+  min-height: 40px;
+  border-radius: 9px;
+  font-weight: 750;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    color 160ms ease,
+    transform 160ms ease;
+}
+
+.btn-primary,
+.login-submit {
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #f4f7fa;
+  box-shadow: 0 5px 14px color-mix(in srgb, var(--accent) 24%, transparent);
+}
+
+body:not(.light) .btn-primary,
+body:not(.light) .login-submit,
+body:not(.light) .hub-mode-tab.active,
+body:not(.light) .map-style-tabs button.active {
+  color: #0d2538;
+}
+
+.btn-primary:hover,
+.btn-primary:focus-visible,
+.login-submit:hover,
+.login-submit:focus-visible {
+  border-color: var(--accent-hover);
+  background: var(--accent-hover);
+  transform: translateY(-1px);
+}
+
+.btn-secondary:hover,
+.btn-secondary:focus-visible {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-card));
+  color: var(--accent);
+}
+
+.bp-layer-preview-toggle,
+.map-style-picker,
+.leaflet-control-layers,
+.maplibregl-popup-content {
+  border-radius: 12px !important;
+  box-shadow: 0 10px 28px rgb(8 23 34 / 18%) !important;
+}
+
+.map-style-picker {
+  border-color: color-mix(in srgb, var(--border) 88%, transparent);
+  background: color-mix(in srgb, var(--bg-card) 96%, transparent);
+}
+
+.command-feedback.pending {
+  border: 1px solid color-mix(in srgb, var(--bp-collar-orange) 42%, var(--border));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--bp-collar-orange) 12%, var(--bg-card));
+  color: color-mix(in srgb, var(--bp-collar-orange) 82%, var(--text-primary));
+}
+
+.device-card.offline {
+  filter: saturate(0.58);
+}
+
+:where(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent) 68%, white);
+  outline-offset: 2px;
+}
+
+@media (max-width: 768px) {
+  #panelHeader {
+    padding: 10px 12px 12px;
+  }
+
+  .panel-brand {
+    min-height: 94px;
+  }
+
+  .panel-brand-mark {
+    width: 54px;
+    height: 46px;
+  }
+
+  .panel-brand-mascot {
+    width: 94px;
+    height: 94px;
+  }
+
+  .card-summary {
+    padding: 12px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #panel,
+  #map,
+  .map-loading,
+  .hamburger-btn,
+  .maplibre-tool-stack,
+  .maplibre-zoom-stack,
+  .device-card,
+  .btn-action,
+  .btn-primary,
+  .btn-secondary {
+    transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
+  }
+}
