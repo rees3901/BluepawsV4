@@ -26,6 +26,9 @@ struct Status {
     hub::CommunicationsMode effective_mode = hub::CommunicationsMode::Home;
     bool automatic_off_grid = false;
     bool time_synchronized = false;
+    bool wifi_station_connected = false;
+    int16_t wifi_rssi_dbm = -127;
+    char wifi_ssid[33]{};
 };
 
 // Starts ESP-Hosted Wi-Fi and the HTTPS snapshot task. Returns false when the

@@ -104,6 +104,30 @@ void set_effective_mode(hub::CommunicationsMode mode, bool automatic_off_grid = 
     portEXIT_CRITICAL(&g_status_lock);
 }
 
+void clear_station_link() {
+    portENTER_CRITICAL(&g_status_lock);
+    g_status.wifi_station_connected = false;
+    g_status.wifi_rssi_dbm = -127;
+    g_status.wifi_ssid[0] = '\0';
+    portEXIT_CRITICAL(&g_status_lock);
+}
+
+void refresh_station_link() {
+    wifi_ap_record_t access_point{};
+    if (esp_wifi_sta_get_ap_info(&access_point) != ESP_OK) {
+        clear_station_link();
+        return;
+    }
+    portENTER_CRITICAL(&g_status_lock);
+    g_status.wifi_station_connected = true;
+    g_status.wifi_rssi_dbm = access_point.rssi;
+    std::strncpy(g_status.wifi_ssid,
+                 reinterpret_cast<const char *>(access_point.ssid),
+                 sizeof(g_status.wifi_ssid) - 1);
+    g_status.wifi_ssid[sizeof(g_status.wifi_ssid) - 1] = '\0';
+    portEXIT_CRITICAL(&g_status_lock);
+}
+
 void note_result(bool success, uint32_t http_status) {
     portENTER_CRITICAL(&g_status_lock);
     g_status.last_http_status = http_status;
@@ -372,11 +396,13 @@ void wifi_event(void *, esp_event_base_t base, int32_t id, void *) {
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         xEventGroupClearBits(g_wifi, kConnectedBit);
         xEventGroupSetBits(g_wifi, kDisconnectedBit);
+        clear_station_link();
         set_state(ConnectionState::Connecting);
         if (g_station_allowed.load()) esp_wifi_connect();
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         xEventGroupClearBits(g_wifi, kDisconnectedBit);
         xEventGroupSetBits(g_wifi, kConnectedBit);
+        refresh_station_link();
         set_state(ConnectionState::Online);
     }
 }
@@ -399,6 +425,7 @@ bool configure_wifi(const hub::Settings &settings, unsigned network_index, bool 
     if (!station_enabled && !access_point_enabled) return false;
 
     g_station_allowed.store(false);
+    clear_station_link();
     if (restart && g_wifi_initialized) {
         esp_wifi_disconnect();
         esp_wifi_stop();
@@ -559,6 +586,9 @@ void sync_task(void *) {
             configure_wifi(settings, network_index, true, off_grid_active, !explicit_off_grid);
             cloud_delay_ms = HOME_HUB_SYNC_INTERVAL_MS;
             continue;
+        }
+        if ((connected & kConnectedBit) != 0) {
+            refresh_station_link();
         }
         if ((connected & kConnectedBit) == 0) {
             const bool primary_available = network_available(settings, 0);
