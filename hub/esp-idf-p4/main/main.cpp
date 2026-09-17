@@ -97,7 +97,6 @@ enum class MapLayer : uint8_t {
     Street,
     OrdnanceSurvey,
     Satellite,
-    Aerial,
 };
 
 struct MapLayerInfo {
@@ -108,11 +107,10 @@ struct MapLayerInfo {
     uint8_t maximum_zoom;
 };
 
-constexpr std::array<MapLayerInfo, 4> kMapLayers{{
+constexpr std::array<MapLayerInfo, 3> kMapLayers{{
     {"OpenStreetMap", "GB overview; 100 km Gloucester detail", "/sdcard/bluepaws/maps/layers/osm-road-100km/tiles", 5, 17},
     {"Ordnance Survey", "Official OS mapping; GB overview and regional detail", "/sdcard/bluepaws/maps/layers/ordnance-survey-100km/tiles", 5, 17},
-    {"Satellite", "EA 20 cm Gloucester aerial imagery", "/sdcard/bluepaws/maps/layers/satellite-v2/tiles", 14, 17},
-    {"Aerial", "Single-source Gloucester aerial imagery", "/sdcard/bluepaws/maps/layers/aerial-consistent/tiles", 12, 17},
+    {"Satellite", "UK overview with Gloucestershire detail", "/sdcard/bluepaws/maps/layers/satellite/tiles", 5, 14},
 }};
 
 struct UiLayout {
@@ -335,7 +333,7 @@ void log_map_storage_probe(const UiState &ui)
     }
 
     constexpr char satellite_probe[] =
-        "/sdcard/bluepaws/maps/layers/satellite-v2/tiles/14/8090/5421.jpg";
+        "/sdcard/bluepaws/maps/layers/satellite/tiles/14/8090/5421.jpg";
     struct stat tile_stat {};
     if (stat(satellite_probe, &tile_stat) != 0) {
         ESP_LOGE(kTag, "Satellite centre tile missing: %s errno=%d", satellite_probe, errno);
@@ -2045,11 +2043,6 @@ void ordnance_survey_layer_clicked(lv_event_t *event)
     select_map_layer(*static_cast<UiState *>(lv_event_get_user_data(event)), MapLayer::OrdnanceSurvey);
 }
 
-void aerial_layer_clicked(lv_event_t *event)
-{
-    select_map_layer(*static_cast<UiState *>(lv_event_get_user_data(event)), MapLayer::Aerial);
-}
-
 lv_obj_t *make_layer_option(lv_obj_t *parent,
                             MapLayer layer,
                             lv_event_cb_t callback,
@@ -2087,10 +2080,7 @@ lv_obj_t *make_layer_option(lv_obj_t *parent,
     lv_obj_set_style_text_font(title, &lv_font_montserrat_18, 0);
     lv_obj_t *description = make_label(
         button,
-        available ? info.description
-                  : (layer == MapLayer::Aerial
-                         ? "Mixed pack rejected; one imagery source required"
-                         : "Not installed on SD card"),
+        available ? info.description : "Not installed on SD card",
         ui.dark_mode ? lv_color_hex(0xC2D4DE) : lv_color_hex(0x41657A));
     lv_obj_set_pos(description, 0, 31);
     lv_obj_set_width(description, LV_PCT(100));
@@ -3031,14 +3021,6 @@ void create_map_page(UiState &ui)
     make_layer_option(
         ui.layer_drawer, MapLayer::OrdnanceSurvey, ordnance_survey_layer_clicked, ui);
     make_layer_option(ui.layer_drawer, MapLayer::Satellite, satellite_layer_clicked, ui);
-    make_layer_option(ui.layer_drawer, MapLayer::Aerial, aerial_layer_clicked, ui);
-    lv_obj_t *layer_note = make_label(
-        ui.layer_drawer,
-        "Mixed-source aerial imagery is disabled. Install a consistent aerial pack to enable it.",
-        ui.dark_mode ? lv_color_hex(0x9DB3C0) : lv_color_hex(0x41657A));
-    lv_obj_set_width(layer_note, LV_PCT(100));
-    lv_label_set_long_mode(layer_note, LV_LABEL_LONG_WRAP);
-    lv_obj_set_style_text_font(layer_note, &lv_font_montserrat_14, 0);
     if (!ui.layer_drawer_open) {
         lv_obj_add_flag(ui.layer_drawer, LV_OBJ_FLAG_HIDDEN);
     }

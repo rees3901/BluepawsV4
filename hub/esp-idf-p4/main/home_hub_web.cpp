@@ -43,8 +43,7 @@ struct MapLayer {
 constexpr MapLayer kMapLayers[] = {
     {"osm", "OpenStreetMap", "/sdcard/bluepaws/maps/layers/osm-road-100km/tiles", 5, 17},
     {"os", "Ordnance Survey", "/sdcard/bluepaws/maps/layers/ordnance-survey-100km/tiles", 5, 17},
-    {"satellite", "Satellite", "/sdcard/bluepaws/maps/layers/satellite-v2/tiles", 14, 17},
-    {"aerial", "Aerial", "/sdcard/bluepaws/maps/layers/aerial-consistent/tiles", 12, 17},
+    {"satellite", "Satellite", "/sdcard/bluepaws/maps/layers/satellite/tiles", 5, 14},
 };
 
 struct WebSnapshot {
