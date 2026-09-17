@@ -51,6 +51,7 @@ constexpr char kTag[] = "home_hub_cloud";
 constexpr EventBits_t kConnectedBit = BIT0;
 constexpr EventBits_t kReconfigureBit = BIT1;
 constexpr EventBits_t kDisconnectedBit = BIT2;
+constexpr EventBits_t kWifiScanBit = BIT3;
 constexpr std::size_t kResponseBytes = 64U * 1024U;
 constexpr char kStateDirectory[] = "/sdcard/bluepaws/data/state-v1";
 constexpr char kAvatarDirectory[] = "/sdcard/bluepaws/data/avatars-v1";
@@ -76,7 +77,12 @@ EventGroupHandle_t g_wifi = nullptr;
 Status g_status{};
 portMUX_TYPE g_status_lock = portMUX_INITIALIZER_UNLOCKED;
 portMUX_TYPE g_settings_lock = portMUX_INITIALIZER_UNLOCKED;
+portMUX_TYPE g_wifi_scan_lock = portMUX_INITIALIZER_UNLOCKED;
 hub::Settings g_network_settings{};
+// The application is already close to the ESP32-P4 internal DRAM limit before
+// app_main starts. Keep scan results in PSRAM so adding the picker cannot stop
+// FreeRTOS from allocating the main task.
+WifiScanSnapshot *g_wifi_scan = nullptr;
 bool g_wifi_initialized = false;
 bool g_cloud_authorized = false;
 std::atomic_bool g_station_allowed{false};
@@ -152,6 +158,79 @@ void refresh_station_link() {
                  sizeof(g_status.wifi_ssid) - 1);
     g_status.wifi_ssid[sizeof(g_status.wifi_ssid) - 1] = '\0';
     portEXIT_CRITICAL(&g_status_lock);
+}
+
+void perform_wifi_scan() {
+    if (g_wifi_scan == nullptr) return;
+    wifi_mode_t original_mode = WIFI_MODE_NULL;
+    if (esp_wifi_get_mode(&original_mode) != ESP_OK) {
+        portENTER_CRITICAL(&g_wifi_scan_lock);
+        g_wifi_scan->state = WifiScanState::Failed;
+        portEXIT_CRITICAL(&g_wifi_scan_lock);
+        return;
+    }
+
+    const bool add_station_interface = original_mode == WIFI_MODE_AP;
+    if (add_station_interface && esp_wifi_set_mode(WIFI_MODE_APSTA) != ESP_OK) {
+        portENTER_CRITICAL(&g_wifi_scan_lock);
+        g_wifi_scan->state = WifiScanState::Failed;
+        portEXIT_CRITICAL(&g_wifi_scan_lock);
+        return;
+    }
+
+    wifi_scan_config_t scan_config{};
+    scan_config.show_hidden = false;
+    const esp_err_t scan_error = esp_wifi_scan_start(&scan_config, true);
+    std::array<wifi_ap_record_t, 24> access_points{};
+    uint16_t found = static_cast<uint16_t>(access_points.size());
+    esp_err_t results_error = scan_error;
+    if (scan_error == ESP_OK) {
+        results_error = esp_wifi_scan_get_ap_records(&found, access_points.data());
+    }
+
+    WifiScanSnapshot completed{};
+    completed.state = results_error == ESP_OK ? WifiScanState::Ready
+                                               : WifiScanState::Failed;
+    portENTER_CRITICAL(&g_wifi_scan_lock);
+    completed.generation = g_wifi_scan->generation;
+    portEXIT_CRITICAL(&g_wifi_scan_lock);
+    if (results_error == ESP_OK) {
+        for (uint16_t i = 0; i < found && completed.count < completed.results.size(); ++i) {
+            const char *ssid = reinterpret_cast<const char *>(access_points[i].ssid);
+            if (ssid[0] == '\0') continue;
+            bool duplicate = false;
+            for (std::size_t existing = 0; existing < completed.count; ++existing) {
+                if (std::strcmp(completed.results[existing].ssid, ssid) == 0) {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (duplicate) continue;
+            WifiScanResult &result = completed.results[completed.count++];
+            std::strncpy(result.ssid, ssid, sizeof(result.ssid) - 1);
+            result.rssi_dbm = access_points[i].rssi;
+            result.secured = access_points[i].authmode != WIFI_AUTH_OPEN;
+        }
+    }
+
+    if (add_station_interface) {
+        // Returning APSTA to AP leaves the local Off-Grid hotspot running and
+        // ensures a settings scan cannot silently enable station operation.
+        esp_wifi_set_mode(original_mode);
+    }
+    portENTER_CRITICAL(&g_wifi_scan_lock);
+    *g_wifi_scan = completed;
+    portEXIT_CRITICAL(&g_wifi_scan_lock);
+    ESP_LOGI(kTag, "Wi-Fi scan %s with %u unique networks",
+             completed.state == WifiScanState::Ready ? "completed" : "failed",
+             static_cast<unsigned>(completed.count));
+}
+
+bool handle_wifi_scan(EventBits_t events) {
+    if ((events & kWifiScanBit) == 0) return false;
+    xEventGroupClearBits(g_wifi, kWifiScanBit);
+    perform_wifi_scan();
+    return true;
 }
 
 void note_result(bool success, uint32_t http_status) {
@@ -456,9 +535,14 @@ bool configure_wifi(const hub::Settings &settings, unsigned network_index, bool 
         esp_wifi_disconnect();
         esp_wifi_stop();
     }
-    const wifi_mode_t mode = station_enabled && access_point_enabled
+    // The GUI-TION ESP32-C6 firmware acknowledges AP-only mode and raises
+    // WIFI_EVENT_AP_START, but does not actually transmit a beacon.  Keep the
+    // hosted radio in APSTA whenever the local hotspot is active.  In explicit
+    // Off-Grid mode station_enabled remains false and g_station_allowed stays
+    // false, so the station interface is idle and makes no uplink attempts.
+    const wifi_mode_t mode = access_point_enabled
         ? WIFI_MODE_APSTA
-        : (station_enabled ? WIFI_MODE_STA : WIFI_MODE_AP);
+        : WIFI_MODE_STA;
     if (esp_wifi_set_mode(mode) != ESP_OK) return false;
 
     if (station_enabled) {
@@ -591,7 +675,10 @@ void sync_task(void *) {
             set_off_grid_mode(settings, !explicit_off_grid);
             // AP-only states have no station timeout. A user selection or newly
             // saved credential wakes this task immediately through reconfigure.
-            xEventGroupWaitBits(g_wifi, kReconfigureBit, pdFALSE, pdFALSE, portMAX_DELAY);
+            const EventBits_t events = xEventGroupWaitBits(
+                g_wifi, kReconfigureBit | kWifiScanBit,
+                pdFALSE, pdFALSE, portMAX_DELAY);
+            if (handle_wifi_scan(events)) continue;
             continue;
         }
         const bool both_configured = usable_network(settings, 0) &&
@@ -602,10 +689,11 @@ void sync_task(void *) {
                                : HOME_HUB_WIFI_RECOVERY_MS);
         const EventBits_t connected = xEventGroupWaitBits(
             g_wifi,
-            kConnectedBit | kReconfigureBit,
+            kConnectedBit | kReconfigureBit | kWifiScanBit,
             pdFALSE,
             pdFALSE,
             pdMS_TO_TICKS(recovery_wait_ms));
+        if (handle_wifi_scan(connected)) continue;
         if ((connected & kReconfigureBit) != 0) {
             xEventGroupClearBits(g_wifi, kReconfigureBit | kConnectedBit);
             settings = network_settings();
@@ -680,8 +768,10 @@ void sync_task(void *) {
                                       static_cast<uint32_t>(HOME_HUB_SYNC_MAX_BACKOFF_MS));
         }
         // A manual mode selection or link loss interrupts cloud backoff immediately.
-        xEventGroupWaitBits(g_wifi, kReconfigureBit | kDisconnectedBit,
-                            pdFALSE, pdFALSE, pdMS_TO_TICKS(cloud_delay_ms));
+        const EventBits_t events = xEventGroupWaitBits(
+            g_wifi, kReconfigureBit | kDisconnectedBit | kWifiScanBit,
+            pdFALSE, pdFALSE, pdMS_TO_TICKS(cloud_delay_ms));
+        handle_wifi_scan(events);
     }
 }
 
@@ -698,7 +788,12 @@ bool start(const hub::Settings &settings) {
     portEXIT_CRITICAL(&g_settings_lock);
     g_updates = xQueueCreate(kMaximumCats * 2, sizeof(CloudUpdate));
     g_wifi = xEventGroupCreate();
-    if (g_updates == nullptr || g_wifi == nullptr) return false;
+    if (g_wifi_scan == nullptr) {
+        g_wifi_scan = static_cast<WifiScanSnapshot *>(
+            heap_caps_calloc(1, sizeof(WifiScanSnapshot),
+                             MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    }
+    if (g_updates == nullptr || g_wifi == nullptr || g_wifi_scan == nullptr) return false;
     if (g_cloud_authorized) restore_cached_snapshot();
     const bool started = xTaskCreate(sync_task, "hub_cloud", 12288, nullptr, 5, nullptr) == pdPASS;
     return started && g_cloud_authorized;
@@ -712,6 +807,29 @@ bool applyNetworkSettings(const hub::Settings &input) {
     portEXIT_CRITICAL(&g_settings_lock);
     if (g_wifi != nullptr) xEventGroupSetBits(g_wifi, kReconfigureBit);
     return true;
+}
+
+bool requestWifiScan() {
+    if (g_wifi == nullptr || g_wifi_scan == nullptr || !g_wifi_initialized) return false;
+    portENTER_CRITICAL(&g_wifi_scan_lock);
+    if (g_wifi_scan->state == WifiScanState::Scanning) {
+        portEXIT_CRITICAL(&g_wifi_scan_lock);
+        return true;
+    }
+    g_wifi_scan->state = WifiScanState::Scanning;
+    g_wifi_scan->count = 0;
+    ++g_wifi_scan->generation;
+    portEXIT_CRITICAL(&g_wifi_scan_lock);
+    xEventGroupSetBits(g_wifi, kWifiScanBit);
+    return true;
+}
+
+WifiScanSnapshot wifiScanSnapshot() {
+    if (g_wifi_scan == nullptr) return {};
+    portENTER_CRITICAL(&g_wifi_scan_lock);
+    const WifiScanSnapshot snapshot = *g_wifi_scan;
+    portEXIT_CRITICAL(&g_wifi_scan_lock);
+    return snapshot;
 }
 
 const char *modeReasonName(ModeReason reason) {
