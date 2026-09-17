@@ -3898,7 +3898,7 @@ void create_settings_page(UiState &ui)
     lv_obj_set_width(automatic_note, LV_PCT(100));
     lv_label_set_long_mode(automatic_note, LV_LABEL_LONG_WRAP);
     lv_obj_t *address_note = make_label(content,
-        "Connect to BluePaws_192.168.4.1, then open http://192.168.4.1 in your browser.",
+        "Join BluePaws.local_IP:192.168.4.1, then open http://BluePaws.local or http://192.168.4.1.",
         ui.dark_mode ? lv_color_hex(0xC7D9E5) : lv_color_hex(0x38576D));
     lv_obj_set_width(address_note, LV_PCT(100));
     lv_label_set_long_mode(address_note, LV_LABEL_LONG_WRAP);
