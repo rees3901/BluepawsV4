@@ -4545,20 +4545,45 @@ void create_settings_page(UiState &ui)
                               ui.dark_mode ? lv_color_hex(0x101B25)
                                            : lv_color_hex(0xCCC8BF),
                               LV_PART_MAIN);
-    constexpr lv_style_selector_t kCheckedTab = static_cast<lv_style_selector_t>(
-        static_cast<uint32_t>(LV_PART_ITEMS) | static_cast<uint32_t>(LV_STATE_CHECKED));
-    lv_obj_set_style_bg_color(tab_bar, lv_color_hex(0x1479A8), kCheckedTab);
-    lv_obj_set_style_text_color(tab_bar,
-                                ui.dark_mode ? lv_color_hex(0xC7D9E5)
-                                             : lv_color_hex(0x284A60),
-                                LV_PART_ITEMS);
-    lv_obj_set_style_text_color(tab_bar, lv_color_hex(0xFFFFFF), kCheckedTab);
-    lv_obj_set_style_text_font(tab_bar, &lv_font_montserrat_14, LV_PART_ITEMS);
     lv_obj_set_style_border_width(tab_bar, 0, LV_PART_MAIN);
 
     lv_obj_t *wifi_tab = lv_tabview_add_tab(tabview, "Wi-Fi");
     lv_obj_t *off_grid_tab = lv_tabview_add_tab(tabview, "Off-grid");
     lv_obj_t *display_tab = lv_tabview_add_tab(tabview, "Display & power");
+
+    // LVGL 9 renders tab headers as button children rather than LV_PART_ITEMS.
+    // Style the buttons and their labels directly so inactive tabs remain
+    // legible on the dark settings background.
+    const uint32_t tab_count = lv_obj_get_child_count(tab_bar);
+    for (uint32_t i = 0; i < tab_count; ++i) {
+        lv_obj_t *tab_button = lv_obj_get_child(tab_bar, static_cast<int32_t>(i));
+        lv_obj_set_style_bg_color(tab_button,
+                                  ui.dark_mode ? lv_color_hex(0x162532)
+                                               : lv_color_hex(0xE2DED5),
+                                  0);
+        lv_obj_set_style_bg_color(tab_button, lv_color_hex(0x1479A8),
+                                  LV_STATE_CHECKED);
+        lv_obj_set_style_bg_color(tab_button, lv_color_hex(0x1D6F94),
+                                  LV_STATE_PRESSED);
+        lv_obj_set_style_border_width(tab_button, 0, 0);
+        lv_obj_set_style_border_width(tab_button, 4, LV_STATE_CHECKED);
+        lv_obj_set_style_border_side(tab_button, LV_BORDER_SIDE_BOTTOM,
+                                     LV_STATE_CHECKED);
+        lv_obj_set_style_border_color(tab_button, lv_color_hex(0x00D5FF),
+                                      LV_STATE_CHECKED);
+        lv_obj_set_style_radius(tab_button, 0, 0);
+        lv_obj_set_style_shadow_width(tab_button, 0, 0);
+
+        lv_obj_t *tab_label = lv_obj_get_child(tab_button, 0);
+        if (tab_label != nullptr) {
+            lv_obj_set_style_text_color(tab_label,
+                                        ui.dark_mode ? lv_color_hex(0xDCECF5)
+                                                     : lv_color_hex(0x17384D),
+                                        0);
+            lv_obj_set_style_text_font(tab_label, &lv_font_montserrat_14, 0);
+        }
+    }
+
     style_settings_tab(wifi_tab, ui);
     style_settings_tab(off_grid_tab, ui);
     style_settings_tab(display_tab, ui);
