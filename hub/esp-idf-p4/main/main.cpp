@@ -143,6 +143,7 @@ struct UiLayout {
 constexpr UiLayout kLandscapeLayout{784, 406, 784, 406};
 constexpr UiLayout kPortraitLayout{464, 726, 464, 726};
 constexpr size_t kOverviewRecentCardCount = 3;
+constexpr uint32_t kOverviewRecentlySeenMs = 60U * 60U * 1000U;
 
 struct TileCacheEntry {
     bluepaws::map::TileId id{};
@@ -184,6 +185,7 @@ struct UiState {
     lv_obj_t *overview_summary_label = nullptr;
     lv_obj_t *overview_safety_panel = nullptr;
     lv_obj_t *overview_safety_label = nullptr;
+    lv_obj_t *overview_header_summary_label = nullptr;
     lv_obj_t *overview_header = nullptr;
     lv_obj_t *overview_mode_title = nullptr;
     lv_obj_t *overview_mode_dropdown = nullptr;
@@ -1000,11 +1002,15 @@ void update_ui(UiState &ui)
     }
 
     if (ui.overview_cards[0] != nullptr) {
+        // CatStore is populated from the provisioned household snapshot and
+        // subsequently updated by RF/cloud reports. Its size is therefore the
+        // affiliated roster, not merely the number of currently active radios.
+        const size_t affiliated_count = ui.cats.size();
         size_t recently_seen = 0;
         for (size_t i = 0; i < ui.cats.size(); ++i) {
             const bluepaws::CatRecord *cat = ui.cats.at(i);
             if (cat != nullptr && now_ms >= cat->latest.received_at_ms &&
-                now_ms - cat->latest.received_at_ms <= 60U * 60U * 1000U) {
+                now_ms - cat->latest.received_at_ms <= kOverviewRecentlySeenMs) {
                 ++recently_seen;
             }
         }
@@ -1013,22 +1019,37 @@ void update_ui(UiState &ui)
             const bluepaws::CatRecord *cat = ui.cats.at(i);
             if (cat == nullptr) continue;
             const bool stale = now_ms < cat->latest.received_at_ms ||
-                now_ms - cat->latest.received_at_ms > 60U * 60U * 1000U;
+                now_ms - cat->latest.received_at_ms > kOverviewRecentlySeenMs;
             const bool fault = cat->latest.status_code == 3 ||
                 (cat->latest.flags & 0x80U) != 0;
             if (stale || fault) ++attention_count;
         }
-        const bool all_accounted_for = ui.cats.size() > 0 &&
-            recently_seen == ui.cats.size() && attention_count == 0;
+        const bool all_accounted_for = affiliated_count > 0 &&
+            recently_seen == affiliated_count && attention_count == 0;
+        if (ui.overview_header_summary_label != nullptr) {
+            if (affiliated_count == 0) {
+                lv_label_set_text(ui.overview_header_summary_label, "No affiliated collars");
+            } else {
+                lv_label_set_text_fmt(ui.overview_header_summary_label,
+                                      "%u affiliated  |  %u recent",
+                                      static_cast<unsigned>(affiliated_count),
+                                      static_cast<unsigned>(recently_seen));
+            }
+        }
         if (ui.overview_summary_label != nullptr) {
-            if (recently_seen == 0) {
-                lv_label_set_text(ui.overview_summary_label, "No collars seen  |  Check hub");
+            if (affiliated_count == 0) {
+                lv_label_set_text(ui.overview_summary_label, "No affiliated collars");
+            } else if (recently_seen == 0) {
+                lv_label_set_text_fmt(ui.overview_summary_label,
+                                      "0/%u collars recent  |  Check hub",
+                                      static_cast<unsigned>(affiliated_count));
             } else {
                 lv_label_set_text_fmt(ui.overview_summary_label,
                                       all_accounted_for
-                                          ? "%u collars seen  |  All safe"
-                                          : "%u collars seen  |  Check alerts",
-                                      static_cast<unsigned>(recently_seen));
+                                          ? "%u/%u collars recent  |  All safe"
+                                          : "%u/%u collars recent  |  Check status",
+                                      static_cast<unsigned>(recently_seen),
+                                      static_cast<unsigned>(affiliated_count));
             }
             lv_obj_set_style_text_color(ui.overview_summary_label,
                                         all_accounted_for
@@ -1040,13 +1061,13 @@ void update_ui(UiState &ui)
             if (all_accounted_for) {
                 lv_label_set_text(ui.overview_safety_label,
                                   LV_SYMBOL_OK "  All pets accounted for");
-            } else if (ui.cats.size() == 0) {
+            } else if (affiliated_count == 0) {
                 lv_label_set_text(ui.overview_safety_label, "Waiting for collar reports");
             } else {
                 lv_label_set_text_fmt(ui.overview_safety_label,
                                       LV_SYMBOL_WARNING "  %u of %u pets reporting",
                                       static_cast<unsigned>(recently_seen),
-                                      static_cast<unsigned>(ui.cats.size()));
+                                      static_cast<unsigned>(affiliated_count));
             }
             lv_obj_set_style_text_color(ui.overview_safety_label,
                                         all_accounted_for
@@ -3324,7 +3345,7 @@ void create_overview_cat_card(lv_obj_t *parent, size_t slot, UiState &ui)
     lv_obj_set_style_border_color(card, lv_color_hex(0x1D9EE5), 0);
     lv_obj_set_style_border_width(card, 1, 0);
     lv_obj_set_style_radius(card, 10, 0);
-    lv_obj_set_style_pad_all(card, 7, 0);
+    lv_obj_set_style_pad_all(card, 6, 0);
     lv_obj_set_style_pad_gap(card, 3, 0);
     lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
     lv_obj_remove_flag(card, LV_OBJ_FLAG_SCROLLABLE);
@@ -3332,9 +3353,9 @@ void create_overview_cat_card(lv_obj_t *parent, size_t slot, UiState &ui)
 
     const lv_color_t primary_text = lv_color_hex(0xF3F8FB);
     const lv_color_t secondary_text = lv_color_hex(0xAFC3CE);
-    lv_obj_t *header = make_drawer_row(card, 38, 5);
+    lv_obj_t *header = make_drawer_row(card, 36, 4);
     lv_obj_t *avatar = lv_obj_create(header);
-    lv_obj_set_size(avatar, 38, 38);
+    lv_obj_set_size(avatar, 36, 36);
     lv_obj_set_style_bg_color(avatar, lv_color_hex(kMarkerColours[slot]), 0);
     lv_obj_set_style_border_color(avatar, lv_color_hex(0xD3E5ED), 0);
     lv_obj_set_style_border_width(avatar, 2, 0);
@@ -3354,17 +3375,17 @@ void create_overview_cat_card(lv_obj_t *parent, size_t slot, UiState &ui)
     lv_obj_set_style_text_font(name, &lv_font_montserrat_14, 0);
     lv_obj_t *status = make_drawer_image(header, bluepaws::ui::icon_status_out);
     lv_obj_t *profile = make_drawer_image(header, bluepaws::ui::icon_profile_powersave);
-    lv_image_set_scale(status, 268);
-    lv_image_set_scale(profile, 268);
+    lv_image_set_scale(status, 244);
+    lv_image_set_scale(profile, 244);
     lv_obj_t *fault = make_drawer_image(header, bluepaws::ui::icon_status_error);
-    lv_image_set_scale(fault, 268);
+    lv_image_set_scale(fault, 244);
     lv_obj_add_flag(fault, LV_OBJ_FLAG_HIDDEN);
 
-    lv_obj_t *telemetry = make_drawer_row(card, 22, 4);
+    lv_obj_t *telemetry = make_drawer_row(card, 22, 3);
     lv_obj_t *battery = make_drawer_image(telemetry, bluepaws::ui::icon_battery_full);
     lv_image_set_scale(battery, 288);
     lv_obj_t *battery_text = make_label(telemetry, "--%", secondary_text);
-    lv_obj_set_width(battery_text, 42);
+    lv_obj_set_width(battery_text, 38);
     lv_obj_set_style_text_font(battery_text, &lv_font_montserrat_14, 0);
     make_drawer_image(telemetry, bluepaws::ui::icon_radio_antenna);
     lv_obj_t *signal = make_drawer_image(telemetry, bluepaws::ui::icon_signal_full);
@@ -3378,14 +3399,14 @@ void create_overview_cat_card(lv_obj_t *parent, size_t slot, UiState &ui)
     lv_obj_remove_flag(telemetry_spacer, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_t *radio = make_drawer_image(telemetry, bluepaws::ui::icon_radio_rf);
 
-    lv_obj_t *meta = make_drawer_row(card, 20, 5);
+    lv_obj_t *meta = make_drawer_row(card, 20, 4);
     make_drawer_image(meta, bluepaws::ui::icon_status_home_small);
     lv_obj_t *distance = make_label(meta, "--m", secondary_text);
-    lv_obj_set_width(distance, 62);
+    lv_obj_set_width(distance, 54);
     lv_obj_set_style_text_font(distance, &lv_font_montserrat_14, 0);
     make_drawer_image(meta, bluepaws::ui::icon_status_stopwatch);
     lv_obj_t *age = make_label(meta, "--s", secondary_text);
-    lv_obj_set_width(age, 62);
+    lv_obj_set_width(age, 54);
     lv_obj_set_style_text_font(age, &lv_font_montserrat_14, 0);
 
     ui.overview_cards[slot] = card;
@@ -3420,8 +3441,17 @@ void create_overview_page(UiState &ui)
     lv_obj_set_pos(title, ui.portrait ? 8 : 12, 5);
     lv_obj_set_style_text_font(title, &lv_font_montserrat_18, 0);
 
+    ui.overview_header_summary_label = make_label(
+        header, "No affiliated collars", lv_color_hex(0xB8D4E2));
+    lv_obj_set_pos(ui.overview_header_summary_label, 12, 31);
+    lv_obj_set_width(ui.overview_header_summary_label, 216);
+    lv_label_set_long_mode(ui.overview_header_summary_label, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_font(ui.overview_header_summary_label,
+                               &lv_font_montserrat_14, 0);
+    if (ui.portrait) lv_obj_add_flag(ui.overview_header_summary_label, LV_OBJ_FLAG_HIDDEN);
+
     lv_obj_t *mode_title = make_label(header, "Hub mode", lv_color_hex(0x80C9F2));
-    lv_obj_set_pos(mode_title, ui.portrait ? 100 : 305, 3);
+    lv_obj_set_pos(mode_title, ui.portrait ? 100 : 236, 3);
     lv_obj_set_style_text_font(mode_title, &lv_font_montserrat_14, 0);
     if (ui.portrait) lv_obj_add_flag(mode_title, LV_OBJ_FLAG_HIDDEN);
     ui.overview_mode_title = mode_title;
@@ -3429,8 +3459,8 @@ void create_overview_page(UiState &ui)
     lv_dropdown_set_options(mode_dropdown, "Home Hub\nPortable\nOff-Grid");
     lv_dropdown_set_selected(mode_dropdown,
                              static_cast<uint32_t>(bluepaws::cloud::status().effective_mode));
-    lv_obj_set_pos(mode_dropdown, ui.portrait ? 100 : 305, ui.portrait ? 10 : 21);
-    lv_obj_set_size(mode_dropdown, ui.portrait ? 136 : 190, ui.portrait ? 38 : 34);
+    lv_obj_set_pos(mode_dropdown, ui.portrait ? 100 : 236, ui.portrait ? 10 : 21);
+    lv_obj_set_size(mode_dropdown, ui.portrait ? 136 : 178, ui.portrait ? 38 : 34);
     lv_obj_set_style_bg_color(mode_dropdown, lv_color_hex(0x173342), 0);
     lv_obj_set_style_border_color(mode_dropdown, lv_color_hex(0x80C9F2), 0);
     lv_obj_set_style_border_width(mode_dropdown, 1, 0);
@@ -3442,40 +3472,40 @@ void create_overview_page(UiState &ui)
     apply_overview_mode_theme(ui, bluepaws::cloud::status().effective_mode);
 
     ui.overview_header_wifi_image = make_drawer_image(header, bluepaws::ui::icon_radio_wifi);
-    lv_obj_set_pos(ui.overview_header_wifi_image, ui.portrait ? 240 : 510, 18);
-    lv_image_set_scale(ui.overview_header_wifi_image, ui.portrait ? 288 : 320);
+    lv_obj_set_pos(ui.overview_header_wifi_image, ui.portrait ? 240 : 430, 18);
+    lv_image_set_scale(ui.overview_header_wifi_image, ui.portrait ? 288 : 288);
     lv_obj_set_style_image_recolor(ui.overview_header_wifi_image,
                                    lv_color_hex(0x6E91A5),
                                    0);
     lv_obj_set_style_image_recolor_opa(ui.overview_header_wifi_image, LV_OPA_COVER, 0);
     ui.overview_header_signal_image = make_drawer_image(header, bluepaws::ui::icon_signal_full);
-    lv_obj_set_pos(ui.overview_header_signal_image, ui.portrait ? 266 : 540, 17);
-    lv_image_set_scale(ui.overview_header_signal_image, ui.portrait ? 320 : 384);
+    lv_obj_set_pos(ui.overview_header_signal_image, ui.portrait ? 266 : 458, 17);
+    lv_image_set_scale(ui.overview_header_signal_image, ui.portrait ? 320 : 320);
     ui.overview_header_bluetooth_label = make_label(
         header, LV_SYMBOL_BLUETOOTH,
         ui.settings.bluetooth_enabled ? lv_color_hex(0x38BDF8) : lv_color_hex(0x6E91A5));
-    lv_obj_set_pos(ui.overview_header_bluetooth_label, ui.portrait ? 294 : 575, 17);
+    lv_obj_set_pos(ui.overview_header_bluetooth_label, ui.portrait ? 294 : 493, 17);
     lv_obj_set_style_text_font(ui.overview_header_bluetooth_label,
                                &lv_font_montserrat_18,
                                0);
     ui.overview_header_bluetooth_disabled_label = make_label(
         header, LV_SYMBOL_CLOSE, lv_color_hex(0xEF4444));
     lv_obj_set_pos(ui.overview_header_bluetooth_disabled_label,
-                   ui.portrait ? 298 : 579, 20);
+                   ui.portrait ? 298 : 497, 20);
     lv_obj_set_style_text_font(ui.overview_header_bluetooth_disabled_label,
                                &lv_font_montserrat_14, 0);
     if (ui.settings.bluetooth_enabled) {
         lv_obj_add_flag(ui.overview_header_bluetooth_disabled_label, LV_OBJ_FLAG_HIDDEN);
     }
     ui.overview_header_battery_image = make_drawer_image(header, bluepaws::ui::icon_battery_full);
-    lv_obj_set_pos(ui.overview_header_battery_image, ui.portrait ? 315 : 598, 17);
-    lv_image_set_scale(ui.overview_header_battery_image, ui.portrait ? 320 : 384);
+    lv_obj_set_pos(ui.overview_header_battery_image, ui.portrait ? 315 : 519, 17);
+    lv_image_set_scale(ui.overview_header_battery_image, ui.portrait ? 320 : 320);
     ui.overview_header_battery_label = make_label(header, "--%", lv_color_hex(0xAFC3CE));
-    lv_obj_set_pos(ui.overview_header_battery_label, ui.portrait ? 344 : 630, 18);
+    lv_obj_set_pos(ui.overview_header_battery_label, ui.portrait ? 344 : 548, 18);
     lv_obj_set_style_text_font(ui.overview_header_battery_label, &lv_font_montserrat_18, 0);
     ui.overview_clock_label = make_label(header, "--:-- --", lv_color_hex(0xFFFFFF));
-    lv_obj_set_pos(ui.overview_clock_label, ui.portrait ? 378 : 660, 17);
-    lv_obj_set_width(ui.overview_clock_label, ui.portrait ? 94 : 128);
+    lv_obj_set_pos(ui.overview_clock_label, ui.portrait ? 378 : 644, 17);
+    lv_obj_set_width(ui.overview_clock_label, ui.portrait ? 94 : 132);
     lv_obj_set_style_text_align(ui.overview_clock_label, LV_TEXT_ALIGN_RIGHT, 0);
     lv_obj_set_style_text_font(ui.overview_clock_label,
                                ui.portrait ? &lv_font_montserrat_18 : &lv_font_montserrat_22,
@@ -3493,7 +3523,7 @@ void create_overview_page(UiState &ui)
     lv_obj_add_event_cb(content, overview_wake_clicked, LV_EVENT_PRESSED, &ui);
 
     lv_obj_t *left_panel = lv_obj_create(content);
-    lv_obj_set_size(left_panel, ui.portrait ? 440 : 350, ui.portrait ? 332 : 390);
+    lv_obj_set_size(left_panel, ui.portrait ? 440 : 418, ui.portrait ? 332 : 390);
     lv_obj_set_style_bg_opa(left_panel, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(left_panel, 0, 0);
     lv_obj_set_style_pad_all(left_panel, 2, 0);
@@ -3524,7 +3554,7 @@ void create_overview_page(UiState &ui)
     lv_obj_t *proximity_title = make_label(left_panel, "Proximity", lv_color_hex(0x80A9BE));
     lv_obj_set_style_text_font(proximity_title, &lv_font_montserrat_14, 0);
 
-    const int32_t radar_width = ui.portrait ? 420 : 340;
+    const int32_t radar_width = ui.portrait ? 420 : 408;
     const int32_t radar_height = ui.portrait ? 206 : 246;
     lv_obj_t *radar = lv_obj_create(left_panel);
     lv_obj_set_size(radar, radar_width, radar_height);
@@ -3663,11 +3693,11 @@ void create_overview_page(UiState &ui)
                                0);
 
     lv_obj_t *summary = lv_obj_create(content);
-    lv_obj_set_size(summary, ui.portrait ? 440 : 418, ui.portrait ? 374 : 390);
+    lv_obj_set_size(summary, ui.portrait ? 440 : 350, ui.portrait ? 374 : 390);
     lv_obj_set_style_bg_opa(summary, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(summary, 0, 0);
     lv_obj_set_style_radius(summary, 0, 0);
-    lv_obj_set_style_pad_all(summary, 6, 0);
+    lv_obj_set_style_pad_all(summary, ui.portrait ? 6 : 4, 0);
     lv_obj_set_style_pad_gap(summary, 5, 0);
     lv_obj_set_flex_flow(summary, LV_FLEX_FLOW_COLUMN);
     lv_obj_remove_flag(summary, LV_OBJ_FLAG_SCROLLABLE);
@@ -4476,6 +4506,7 @@ void create_ui(UiState &ui)
     ui.overview_summary_label = nullptr;
     ui.overview_safety_panel = nullptr;
     ui.overview_safety_label = nullptr;
+    ui.overview_header_summary_label = nullptr;
     ui.overview_header = nullptr;
     ui.overview_mode_title = nullptr;
     ui.overview_mode_dropdown = nullptr;
