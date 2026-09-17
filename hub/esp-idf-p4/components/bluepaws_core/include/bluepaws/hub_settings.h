@@ -27,6 +27,7 @@ struct Settings {
     char access_point_ssid[kWifiSsidBytes]{"BluePaws.local_IP:192.168.4.1"};
     char access_point_password[kWifiPasswordBytes]{};
     CommunicationsMode communications_mode = CommunicationsMode::Home;
+    bool bluetooth_enabled = true;
     uint16_t overview_timeout_seconds = 120;
     uint16_t dim_timeout_seconds = 180;
     uint16_t screen_off_timeout_seconds = 300;

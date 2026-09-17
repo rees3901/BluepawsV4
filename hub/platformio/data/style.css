@@ -1347,8 +1347,7 @@ body.light .collar-awake.sleeping { opacity: .52; filter: grayscale(1) saturate(
 .btn-bluetooth.active { border-color: var(--success); background: rgb(29 155 240 / 28%); color: #fff; }
 body.light .btn-bluetooth:not(.active) { border-color: #9aa1a7; background: #ddd9d1; color: #46515b; }
 body.light .btn-bluetooth.active { border-color: #64a978; background: #d8eaf6; color: #175f8f; }
-.bluetooth-action-icon { position: relative; display: inline-grid; width: 20px; height: 20px; place-items: center; font-size: 18px; }
-.bluetooth-action-state { position: absolute; top: -7px; right: -10px; font-size: 11px; line-height: 1; }
+.bluetooth-action-icon { display: block; flex: 0 0 auto; width: 18px; height: 18px; }
 
 .leaflet-cursor-coords {
     display: flex;

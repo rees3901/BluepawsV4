@@ -65,10 +65,12 @@ no internet. There is no captive portal, wildcard DNS interception or DHCP
 portal announcement. `http://bluepaws.local/` remains an optional mDNS address.
 Existing saved hotspot names are replaced with the address-based name on load.
 The first compatibility milestone serves live P4 collar snapshots and hub/network
-status. It deliberately
-reports collar commands, history export, configuration writes and Bluetooth as
-unavailable until the SX1262/GNSS daughterboard and the crash-safe P4 journal are
-connected. Server-sent events also fall back to the dashboard's established
+status. It deliberately reports collar commands, history export and
+daughterboard configuration writes as unavailable until the SX1262/GNSS
+daughterboard and the crash-safe P4 journal are connected. The Bluetooth Home
+beacon preference is stored in NVS and controlled from the local dashboard. The
+P4 NimBLE host drives the ESP32-C6 controller over ESP-Hosted SDIO VHCI and
+advertises `BLUEPAWS_HOME` only in Home mode. Server-sent events also fall back to the dashboard's established
 10-second device polling path. No Wi-Fi passwords, gateway credentials or journal
 records are included in the SPIFFS image or exposed as static files.
 The browser map discovers the installed map packs through `/api/map-layers` and
