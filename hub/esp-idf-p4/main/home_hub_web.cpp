@@ -271,6 +271,7 @@ esp_err_t hub_presence_handler(httpd_req_t *request)
         cJSON_AddNullToObject(json, "wifi_rssi_dbm");
     }
     cJSON_AddBoolToObject(json, "ble_advertising", state.bluetooth.advertising);
+    cJSON_AddBoolToObject(json, "ble_scanning", state.bluetooth.scanning);
     cJSON_AddBoolToObject(json, "ble_enabled", state.settings.bluetooth_enabled);
     cJSON_AddBoolToObject(json, "ble_settled", state.bluetooth.settled);
     cJSON_AddNumberToObject(json, "uptime_s", esp_timer_get_time() / 1000000);
