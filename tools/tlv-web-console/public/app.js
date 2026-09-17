@@ -60,6 +60,10 @@ function bindEvents() {
   });
   $("clear-log").addEventListener("click", () => {
     state.responseRows = [];
+    if (!state.running) {
+      $("run-feedback").dataset.runState = "idle";
+      $("run-status").textContent = "Idle.";
+    }
     $("request-detail").textContent = "{}";
     $("response-detail").textContent = "{}";
     renderResponseLog();
