@@ -3525,17 +3525,40 @@ void create_overview_page(UiState &ui)
         ui.overview_markers[i] = marker;
     }
 
+    lv_obj_t *overview_footer = lv_obj_create(left_panel);
+    lv_obj_set_size(overview_footer, LV_PCT(100), ui.portrait ? 48 : 58);
+    lv_obj_set_style_bg_color(overview_footer, lv_color_hex(0x0D202C), 0);
+    lv_obj_set_style_bg_opa(overview_footer, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(overview_footer, lv_color_hex(0x2A5D72), 0);
+    lv_obj_set_style_border_width(overview_footer, 1, 0);
+    lv_obj_set_style_radius(overview_footer, 9, 0);
+    lv_obj_set_style_pad_all(overview_footer, ui.portrait ? 3 : 5, 0);
+    lv_obj_set_style_pad_gap(overview_footer, 0, 0);
+    lv_obj_set_flex_flow(overview_footer, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(overview_footer,
+                          LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_remove_flag(overview_footer, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(overview_footer, LV_OBJ_FLAG_CLICKABLE);
+
     ui.overview_summary_label = make_label(
-        left_panel, "No collars seen  |  Check hub", lv_color_hex(0xF4B740));
+        overview_footer, "No collars seen  |  Check hub", lv_color_hex(0xF4B740));
     lv_obj_set_width(ui.overview_summary_label, LV_PCT(100));
     lv_obj_set_style_text_align(ui.overview_summary_label, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_font(ui.overview_summary_label, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(ui.overview_summary_label,
+                               ui.portrait ? &lv_font_montserrat_14
+                                           : &lv_font_montserrat_18,
+                               0);
 
     lv_obj_t *wake_hint = make_label(
-        left_panel, "Tap to open dashboard", lv_color_hex(0x6E91A5));
+        overview_footer, "Tap to open dashboard", lv_color_hex(0xB5CBD6));
     lv_obj_set_width(wake_hint, LV_PCT(100));
     lv_obj_set_style_text_align(wake_hint, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_font(wake_hint, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_font(wake_hint,
+                               ui.portrait ? &lv_font_montserrat_14
+                                           : &lv_font_montserrat_18,
+                               0);
 
     lv_obj_t *summary = lv_obj_create(content);
     lv_obj_set_size(summary, ui.portrait ? 440 : 418, ui.portrait ? 374 : 390);
