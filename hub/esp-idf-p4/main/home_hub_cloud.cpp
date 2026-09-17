@@ -535,9 +535,14 @@ bool configure_wifi(const hub::Settings &settings, unsigned network_index, bool 
         esp_wifi_disconnect();
         esp_wifi_stop();
     }
-    const wifi_mode_t mode = station_enabled && access_point_enabled
+    // The GUI-TION ESP32-C6 firmware acknowledges AP-only mode and raises
+    // WIFI_EVENT_AP_START, but does not actually transmit a beacon.  Keep the
+    // hosted radio in APSTA whenever the local hotspot is active.  In explicit
+    // Off-Grid mode station_enabled remains false and g_station_allowed stays
+    // false, so the station interface is idle and makes no uplink attempts.
+    const wifi_mode_t mode = access_point_enabled
         ? WIFI_MODE_APSTA
-        : (station_enabled ? WIFI_MODE_STA : WIFI_MODE_AP);
+        : WIFI_MODE_STA;
     if (esp_wifi_set_mode(mode) != ESP_OK) return false;
 
     if (station_enabled) {
