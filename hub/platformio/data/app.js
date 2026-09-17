@@ -467,7 +467,6 @@
             skeleton: new SkeletonGrid({ attribution: 'Bluepaws offline map', maxZoom: 19 })
         };
         var usingSdMaps = false;
-        var activeMapMaxZoom = 17;
         var fallbackCoastline = null;
         mapSources.skeleton.addTo(map);
         fetch('/basemap.json').then(function (response) { return response.json(); }).then(function (data) {
@@ -519,7 +518,6 @@
                         var initialName = vectorLayer ? (vectorSource.name || 'Vector (UK)') : names[0];
                         var initialLayer = baseLayers[initialName];
                         var initialOptions = initialLayer.options || {};
-                        if (Number.isFinite(initialOptions.maxZoom)) activeMapMaxZoom = initialOptions.maxZoom;
                         if (Number.isFinite(initialOptions.minZoom)) map.setMinZoom(initialOptions.minZoom);
                         if (Number.isFinite(initialOptions.maxZoom)) map.setMaxZoom(initialOptions.maxZoom);
                         if (Number.isFinite(initialOptions.minZoom) && map.getZoom() < initialOptions.minZoom) {
@@ -531,7 +529,6 @@
                         L.control.layers(baseLayers, null, {position: 'topright'}).addTo(map);
                         map.on('baselayerchange', function (event) {
                             var options = event.layer && event.layer.options ? event.layer.options : {};
-                            if (Number.isFinite(options.maxZoom)) activeMapMaxZoom = options.maxZoom;
                             if (Number.isFinite(options.minZoom)) map.setMinZoom(options.minZoom);
                             if (Number.isFinite(options.maxZoom)) map.setMaxZoom(options.maxZoom);
                             if (Number.isFinite(options.minZoom) && map.getZoom() < options.minZoom) {
@@ -2120,7 +2117,7 @@
     // ═══════════════════════════════════════════════
     // Fit All Markers
     // Zooms the map to show all tracked devices at once.
-    // Adds 20% padding so markers aren't right at the edge.
+    // Match the online Leaflet map: leave room for icons and cap close-up zoom.
     // ═══════════════════════════════════════════════
     function fitAllMarkers() {
         var bounds = [];
@@ -2130,7 +2127,10 @@
             }
         }
         if (bounds.length > 0) {
-            map.fitBounds(L.latLngBounds(bounds).pad(0.2), { maxZoom: activeMapMaxZoom });
+            map.fitBounds(L.latLngBounds(bounds), {
+                padding: [50, 50],
+                maxZoom: Math.min(16, map.getMaxZoom())
+            });
         }
     }
 
