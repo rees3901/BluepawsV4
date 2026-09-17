@@ -17,13 +17,25 @@ enum class ConnectionState : uint8_t {
     Degraded,
 };
 
+// Explains why the runtime mode differs from (or matches) the user's saved
+// policy.  The requested mode is persistent; the effective mode follows the
+// radio path that is actually active.
+enum class ModeReason : uint8_t {
+    ManualSelection,
+    PrimaryWifi,
+    SecondaryWifi,
+    WifiUnavailable,
+};
+
 struct Status {
     ConnectionState state = ConnectionState::Disabled;
     uint32_t successful_snapshots = 0;
     uint32_t failed_snapshots = 0;
     uint32_t last_http_status = 0;
     uint32_t last_sync_uptime_ms = 0;
+    hub::CommunicationsMode requested_mode = hub::CommunicationsMode::Home;
     hub::CommunicationsMode effective_mode = hub::CommunicationsMode::Home;
+    ModeReason mode_reason = ModeReason::ManualSelection;
     bool automatic_off_grid = false;
     bool time_synchronized = false;
     bool wifi_station_connected = false;
@@ -43,6 +55,7 @@ bool applyNetworkSettings(const hub::Settings &settings);
 // its networking task, avoiding cross-thread LVGL and CatStore access.
 std::size_t drain(CatStore &store);
 Status status();
+const char *modeReasonName(ModeReason reason);
 
 }  // namespace bluepaws::cloud
 
