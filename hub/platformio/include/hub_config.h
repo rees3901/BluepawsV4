@@ -53,7 +53,7 @@
 #endif
 
 #ifndef WIFI_AP_SSID
-#define WIFI_AP_SSID "BluePaws_192.168.4.1"
+#define WIFI_AP_SSID "BluePaws.local_IP:192.168.4.1"
 #endif
 
 #ifndef WIFI_AP_CHANNEL

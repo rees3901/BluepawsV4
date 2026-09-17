@@ -160,7 +160,7 @@ void storeRejectsOlderTruth() {
 
 void settingsRemainSafeAndOrdered() {
     auto settings = bluepaws::hub::defaultSettings();
-    assert(std::strcmp(settings.access_point_ssid, "BluePaws_192.168.4.1") == 0);
+    assert(std::strcmp(settings.access_point_ssid, "BluePaws.local_IP:192.168.4.1") == 0);
     assert(settings.communications_mode == bluepaws::hub::CommunicationsMode::Home);
     assert(settings.overview_timeout_seconds == 120);
     std::strcpy(settings.access_point_ssid, "Old hotspot name");
@@ -171,7 +171,7 @@ void settingsRemainSafeAndOrdered() {
     settings.dim_brightness_percent = 0;
     settings.communications_mode = static_cast<bluepaws::hub::CommunicationsMode>(99);
     bluepaws::hub::sanitize(settings);
-    assert(std::strcmp(settings.access_point_ssid, "BluePaws_192.168.4.1") == 0);
+    assert(std::strcmp(settings.access_point_ssid, "BluePaws.local_IP:192.168.4.1") == 0);
     assert(settings.overview_timeout_seconds == 15);
     assert(settings.dim_timeout_seconds >= settings.overview_timeout_seconds);
     assert(settings.screen_off_timeout_seconds >= settings.dim_timeout_seconds);
