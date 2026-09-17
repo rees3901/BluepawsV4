@@ -104,6 +104,13 @@ bool begin_passive_scan()
     ble_gap_disc_params parameters{};
     parameters.passive = 1;
     parameters.filter_duplicates = 1;
+    // NimBLE's zero/default values select a 30 ms window every 30 ms: a
+    // continuous 100% BLE scan.  The C6 shares one 2.4 GHz radio with the
+    // Off-Grid SoftAP, so that can starve Wi-Fi beacons and associations.
+    // A 10% listening duty cycle still detects collar advertisements quickly
+    // while leaving deterministic airtime for the local hotspot.
+    parameters.itvl = BLE_GAP_SCAN_ITVL_MS(300);
+    parameters.window = BLE_GAP_SCAN_WIN_MS(30);
     const int result = ble_gap_disc(g_own_address_type, BLE_HS_FOREVER,
                                     &parameters, gap_event, nullptr);
     if (result != 0) {

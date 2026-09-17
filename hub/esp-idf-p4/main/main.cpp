@@ -5288,7 +5288,7 @@ extern "C" void app_main(void)
     ui.simulator.reset(kTestOrigin, uptime_ms());
     ui.cloud_enabled = bluepaws::cloud::start(ui.settings);
     if (!bluepaws::bluetooth::start(ui.settings.bluetooth_enabled,
-                                    bluepaws::cloud::status().effective_mode)) {
+                                    ui.settings.communications_mode)) {
         ESP_LOGE(kTag, "Bluetooth control failed to start");
     }
     if (!bluepaws::web::start()) {
