@@ -113,6 +113,14 @@ enum class SettingsField : uint8_t {
     DimBrightness,
 };
 
+enum class WifiVerificationState : uint8_t {
+    Idle,
+    Waiting,
+    Connected,
+    Failed,
+    Deferred,
+};
+
 enum class MapLayer : uint8_t {
     Street,
     OrdnanceSurvey,
@@ -249,6 +257,9 @@ struct UiState {
     lv_obj_t *settings_wifi_dropdown = nullptr;
     lv_obj_t *settings_wifi_scan_status = nullptr;
     lv_obj_t *settings_wifi_use_button = nullptr;
+    lv_obj_t *settings_wifi_connection_status = nullptr;
+    lv_obj_t *settings_wifi_connection_detail = nullptr;
+    lv_obj_t *settings_wifi_connection_action = nullptr;
     lv_timer_t *gesture_timer = nullptr;
     lv_timer_t *camera_timer = nullptr;
     lv_timer_t *camera_success_timer = nullptr;
@@ -291,6 +302,8 @@ struct UiState {
     bluepaws::cloud::WifiScanState settings_wifi_scan_state =
         bluepaws::cloud::WifiScanState::Idle;
     bool settings_wifi_pending_password = false;
+    WifiVerificationState settings_wifi_verification = WifiVerificationState::Idle;
+    uint32_t settings_wifi_verification_started_ms = 0;
     bluepaws::hub::WifiNetwork settings_wifi_previous{};
     bluepaws::hub::Settings settings = bluepaws::hub::defaultSettings();
     bluepaws::hub::CommunicationsMode pending_communications_mode =
@@ -306,6 +319,9 @@ void rebuild_current_page(void *user_data);
 void navigate_to(UiState &ui, AppPage page);
 bool set_communications_mode(UiState &ui, bluepaws::hub::CommunicationsMode mode);
 void refresh_wifi_picker(UiState &ui);
+void open_settings_editor(UiState &ui, SettingsField field);
+void refresh_wifi_connection_verification(UiState &ui,
+    const bluepaws::cloud::Status &status);
 
 const UiLayout &current_layout(const UiState &ui)
 {
@@ -773,6 +789,7 @@ void update_ui(UiState &ui)
         }
     }
     const bluepaws::cloud::Status cloud_status = bluepaws::cloud::status();
+    refresh_wifi_connection_verification(ui, cloud_status);
     bluepaws::bluetooth::apply(ui.settings.bluetooth_enabled, cloud_status.effective_mode);
     bluepaws::web::updateSnapshot(ui.cats, cloud_status, ui.settings,
                                   bluepaws::bluetooth::status());
@@ -3781,7 +3798,11 @@ void close_settings_editor(UiState &ui)
     ui.settings_wifi_dropdown = nullptr;
     ui.settings_wifi_scan_status = nullptr;
     ui.settings_wifi_use_button = nullptr;
+    ui.settings_wifi_connection_status = nullptr;
+    ui.settings_wifi_connection_detail = nullptr;
+    ui.settings_wifi_connection_action = nullptr;
     ui.settings_wifi_result_count = 0;
+    ui.settings_wifi_verification = WifiVerificationState::Idle;
 }
 
 bool apply_settings_editor_value(UiState &ui, const char *value, const char **error)
@@ -3855,6 +3876,178 @@ bool apply_settings_editor_value(UiState &ui, const char *value, const char **er
     return true;
 }
 
+void settings_password_visibility_clicked(lv_event_t *event)
+{
+    auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
+    auto *button = static_cast<lv_obj_t *>(lv_event_get_current_target(event));
+    if (ui == nullptr || button == nullptr || ui->settings_input == nullptr) return;
+    const bool currently_hidden = lv_textarea_get_password_mode(ui->settings_input);
+    lv_textarea_set_password_mode(ui->settings_input, !currently_hidden);
+    lv_obj_t *label = lv_obj_get_child(button, 0);
+    if (label != nullptr) {
+        lv_label_set_text(label, currently_hidden ? LV_SYMBOL_EYE_CLOSE : LV_SYMBOL_EYE_OPEN);
+    }
+}
+
+const char *wifi_verification_ssid(const UiState &ui)
+{
+    return ui.editing_field == SettingsField::PrimaryPassword
+        ? ui.settings.primary.ssid : ui.settings.secondary.ssid;
+}
+
+void wifi_verification_close_clicked(lv_event_t *event)
+{
+    auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
+    if (ui == nullptr) return;
+    close_settings_editor(*ui);
+    lv_async_call(rebuild_current_page, ui);
+}
+
+void wifi_verification_action_clicked(lv_event_t *event)
+{
+    auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
+    if (ui == nullptr) return;
+    const WifiVerificationState state = ui->settings_wifi_verification;
+    const SettingsField field = ui->editing_field;
+    close_settings_editor(*ui);
+    if (state == WifiVerificationState::Failed) {
+        open_settings_editor(*ui, field);
+    } else {
+        lv_async_call(rebuild_current_page, ui);
+    }
+}
+
+void open_wifi_connection_verification(UiState &ui)
+{
+    const char *ssid = wifi_verification_ssid(ui);
+    close_settings_editor(ui);
+
+    lv_obj_t *modal = lv_obj_create(lv_screen_active());
+    lv_obj_set_size(modal, LV_PCT(100), LV_PCT(100));
+    lv_obj_align(modal, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_add_flag(modal, LV_OBJ_FLAG_FLOATING);
+    lv_obj_set_style_bg_color(modal, lv_color_hex(0x081018), 0);
+    lv_obj_set_style_bg_opa(modal, 246, 0);
+    lv_obj_set_style_border_width(modal, 0, 0);
+    lv_obj_set_style_radius(modal, 0, 0);
+    lv_obj_set_style_pad_all(modal, 18, 0);
+    lv_obj_remove_flag(modal, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *icon = make_label(modal, LV_SYMBOL_WIFI, lv_color_hex(0x38BDF8));
+    lv_obj_set_style_text_font(icon, &lv_font_montserrat_22, 0);
+    lv_obj_align(icon, LV_ALIGN_TOP_MID, 0, 34);
+    lv_obj_t *status = make_label(modal, "Connecting to Wi-Fi", lv_color_hex(0xF3F8FB));
+    lv_obj_set_style_text_font(status, &lv_font_montserrat_22, 0);
+    lv_obj_align(status, LV_ALIGN_TOP_MID, 0, 86);
+    lv_obj_t *detail = make_label(modal, "", lv_color_hex(0xAFC3CE));
+    lv_obj_set_style_text_font(detail, &lv_font_montserrat_14, 0);
+    lv_obj_set_width(detail, LV_PCT(86));
+    lv_label_set_long_mode(detail, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_align(detail, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(detail, LV_ALIGN_TOP_MID, 0, 132);
+    lv_label_set_text_fmt(detail,
+        "Checking %s. Success is confirmed only after the hub joins this SSID and receives an IP address.",
+        ssid[0] == '\0' ? "the selected network" : ssid);
+
+    lv_obj_t *action = lv_button_create(modal);
+    lv_obj_set_size(action, 230, 50);
+    lv_obj_align(action, LV_ALIGN_BOTTOM_MID, -126, -22);
+    lv_obj_set_style_bg_color(action, lv_color_hex(0x1479A8), 0);
+    lv_obj_set_style_radius(action, 9, 0);
+    lv_obj_add_state(action, LV_STATE_DISABLED);
+    lv_obj_add_event_cb(action, wifi_verification_action_clicked, LV_EVENT_CLICKED, &ui);
+    lv_obj_t *action_label = make_label(action, "Checking...", lv_color_hex(0xFFFFFF));
+    lv_obj_set_style_text_font(action_label, &lv_font_montserrat_18, 0);
+    lv_obj_center(action_label);
+
+    lv_obj_t *close = lv_button_create(modal);
+    lv_obj_set_size(close, 190, 50);
+    lv_obj_align(close, LV_ALIGN_BOTTOM_MID, 110, -22);
+    lv_obj_set_style_bg_color(close, lv_color_hex(0x315263), 0);
+    lv_obj_set_style_radius(close, 9, 0);
+    lv_obj_add_event_cb(close, wifi_verification_close_clicked, LV_EVENT_CLICKED, &ui);
+    lv_obj_t *close_label = make_label(close, "Close", lv_color_hex(0xFFFFFF));
+    lv_obj_set_style_text_font(close_label, &lv_font_montserrat_18, 0);
+    lv_obj_center(close_label);
+
+    ui.settings_modal = modal;
+    ui.settings_wifi_connection_status = status;
+    ui.settings_wifi_connection_detail = detail;
+    ui.settings_wifi_connection_action = action;
+    ui.settings_wifi_verification = WifiVerificationState::Waiting;
+    ui.settings_wifi_verification_started_ms = uptime_ms();
+    lv_obj_move_foreground(modal);
+}
+
+void refresh_wifi_connection_verification(UiState &ui,
+    const bluepaws::cloud::Status &status)
+{
+    if (ui.settings_wifi_verification != WifiVerificationState::Waiting ||
+        ui.settings_wifi_connection_status == nullptr ||
+        ui.settings_wifi_connection_detail == nullptr ||
+        ui.settings_wifi_connection_action == nullptr) return;
+
+    const char *target = wifi_verification_ssid(ui);
+    lv_obj_t *action_label = lv_obj_get_child(ui.settings_wifi_connection_action, 0);
+    if (status.wifi_station_connected && target[0] != '\0' &&
+        std::strcmp(status.wifi_ssid, target) == 0) {
+        ui.settings_wifi_verification = WifiVerificationState::Connected;
+        lv_label_set_text(ui.settings_wifi_connection_status,
+                          LV_SYMBOL_OK "  Wi-Fi connected");
+        lv_label_set_text_fmt(ui.settings_wifi_connection_detail,
+                              "Connected securely to %s and received a network address.", target);
+        lv_obj_set_style_text_color(ui.settings_wifi_connection_status,
+                                    lv_color_hex(0x57E389), 0);
+        lv_obj_set_style_border_color(ui.settings_modal, lv_color_hex(0x57E389), 0);
+        lv_obj_set_style_border_width(ui.settings_modal, 3, 0);
+        lv_obj_set_style_bg_color(ui.settings_wifi_connection_action,
+                                  lv_color_hex(0x168653), 0);
+        lv_obj_remove_state(ui.settings_wifi_connection_action, LV_STATE_DISABLED);
+        if (action_label != nullptr) lv_label_set_text(action_label, "Done");
+        return;
+    }
+
+    const bool primary = ui.editing_field == SettingsField::PrimaryPassword;
+    const bluepaws::hub::CommunicationsMode required_mode = primary
+        ? bluepaws::hub::CommunicationsMode::Home
+        : bluepaws::hub::CommunicationsMode::Portable;
+    if (ui.settings.communications_mode != required_mode) {
+        ui.settings_wifi_verification = WifiVerificationState::Deferred;
+        lv_label_set_text(ui.settings_wifi_connection_status,
+                          LV_SYMBOL_SAVE "  Network saved");
+        lv_label_set_text_fmt(ui.settings_wifi_connection_detail,
+            "%s is saved for %s mode. The hub will validate it when that mode is activated.",
+            target, primary ? "Home Hub" : "Portable");
+        lv_obj_set_style_text_color(ui.settings_wifi_connection_status,
+                                    lv_color_hex(0xF3C969), 0);
+        lv_obj_remove_state(ui.settings_wifi_connection_action, LV_STATE_DISABLED);
+        if (action_label != nullptr) lv_label_set_text(action_label, "Done");
+        return;
+    }
+
+    constexpr uint32_t kWifiVerificationTimeoutMs = 35000;
+    if (uptime_ms() - ui.settings_wifi_verification_started_ms >=
+        kWifiVerificationTimeoutMs) {
+        ui.settings_wifi_verification = WifiVerificationState::Failed;
+        lv_label_set_text(ui.settings_wifi_connection_status,
+                          LV_SYMBOL_WARNING "  Could not connect");
+        if (status.wifi_station_connected && status.wifi_ssid[0] != '\0') {
+            lv_label_set_text_fmt(ui.settings_wifi_connection_detail,
+                "The hub connected to %s instead of %s. Check the selected network and password.",
+                status.wifi_ssid, target);
+        } else {
+            lv_label_set_text_fmt(ui.settings_wifi_connection_detail,
+                "The hub could not join %s. Check the password and signal, then try again.", target);
+        }
+        lv_obj_set_style_text_color(ui.settings_wifi_connection_status,
+                                    lv_color_hex(0xFF9B73), 0);
+        lv_obj_set_style_bg_color(ui.settings_wifi_connection_action,
+                                  lv_color_hex(0xA34A34), 0);
+        lv_obj_remove_state(ui.settings_wifi_connection_action, LV_STATE_DISABLED);
+        if (action_label != nullptr) lv_label_set_text(action_label, "Edit password");
+    }
+}
+
 void settings_keyboard_event(lv_event_t *event)
 {
     auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
@@ -3883,12 +4076,19 @@ void settings_keyboard_event(lv_event_t *event)
             lv_label_set_text(ui->settings_error, "Could not save to device storage.");
         return;
     }
+    const bool verify_wifi_connection =
+        ui->editing_field == SettingsField::PrimaryPassword ||
+        ui->editing_field == SettingsField::SecondaryPassword;
     if (ui->editing_field <= SettingsField::AccessPointPassword) {
         bluepaws::cloud::applyNetworkSettings(ui->settings);
     }
     ui->settings_wifi_pending_password = false;
-    close_settings_editor(*ui);
-    lv_async_call(rebuild_current_page, ui);
+    if (verify_wifi_connection) {
+        open_wifi_connection_verification(*ui);
+    } else {
+        close_settings_editor(*ui);
+        lv_async_call(rebuild_current_page, ui);
+    }
 }
 
 void open_settings_editor(UiState &ui, SettingsField field)
@@ -3914,16 +4114,34 @@ void open_settings_editor(UiState &ui, SettingsField field)
     lv_obj_set_style_text_font(hint, &lv_font_montserrat_14, 0);
     lv_obj_set_pos(hint, 8, 30);
 
+    const bool password_field = settings_field_password(ui.editing_field);
     lv_obj_t *input = lv_textarea_create(modal);
-    lv_obj_set_size(input, LV_PCT(96), 54);
-    lv_obj_align(input, LV_ALIGN_TOP_MID, 0, 62);
+    lv_obj_set_size(input, password_field ? LV_PCT(82) : LV_PCT(96), 54);
+    lv_obj_align(input, password_field ? LV_ALIGN_TOP_LEFT : LV_ALIGN_TOP_MID,
+                 password_field ? 8 : 0, 62);
     lv_textarea_set_one_line(input, true);
     lv_textarea_set_max_length(input, settings_field_numeric(ui.editing_field) ? 5 :
         (ui.editing_field == SettingsField::PrimarySsid ||
          ui.editing_field == SettingsField::SecondarySsid ? 32 : 63));
     char buffer[16]{};
     lv_textarea_set_text(input, settings_field_value(ui, ui.editing_field, buffer, sizeof(buffer)));
-    lv_textarea_set_password_mode(input, settings_field_password(ui.editing_field));
+    lv_textarea_set_password_mode(input, password_field);
+
+    if (password_field) {
+        lv_obj_t *visibility = lv_button_create(modal);
+        lv_obj_set_size(visibility, 54, 54);
+        lv_obj_align(visibility, LV_ALIGN_TOP_RIGHT, -8, 62);
+        lv_obj_set_style_bg_color(visibility, lv_color_hex(0x26485C), 0);
+        lv_obj_set_style_border_color(visibility, lv_color_hex(0x73B9DD), 0);
+        lv_obj_set_style_border_width(visibility, 1, 0);
+        lv_obj_set_style_radius(visibility, 9, 0);
+        lv_obj_add_event_cb(visibility, settings_password_visibility_clicked,
+                            LV_EVENT_CLICKED, &ui);
+        lv_obj_t *visibility_label = make_label(
+            visibility, LV_SYMBOL_EYE_OPEN, lv_color_hex(0xFFFFFF));
+        lv_obj_set_style_text_font(visibility_label, &lv_font_montserrat_18, 0);
+        lv_obj_center(visibility_label);
+    }
 
     lv_obj_t *error_label = make_label(modal, "", lv_color_hex(0xFF8A80));
     lv_obj_set_style_text_font(error_label, &lv_font_montserrat_14, 0);
@@ -4855,6 +5073,10 @@ void create_ui(UiState &ui)
     ui.settings_wifi_dropdown = nullptr;
     ui.settings_wifi_scan_status = nullptr;
     ui.settings_wifi_use_button = nullptr;
+    ui.settings_wifi_connection_status = nullptr;
+    ui.settings_wifi_connection_detail = nullptr;
+    ui.settings_wifi_connection_action = nullptr;
+    ui.settings_wifi_verification = WifiVerificationState::Idle;
     ui.quick_settings_open = false;
     ui.status = nullptr;
 
