@@ -8,6 +8,7 @@ struct Status {
     bool initialized = false;
     bool enabled = false;
     bool advertising = false;
+    bool scanning = false;
     bool settled = false;
 };
 
@@ -16,7 +17,8 @@ struct Status {
 bool start(bool enabled, hub::CommunicationsMode mode);
 
 // Updates the persisted user preference and current mode presented to the
-// worker. Bluetooth advertises only while both are Home/On.
+// worker. Bluetooth advertises only while both are Home/On. Portable and
+// Off-Grid are hard overrides that stop advertising and use passive scanning.
 void apply(bool enabled, hub::CommunicationsMode mode);
 
 Status status();

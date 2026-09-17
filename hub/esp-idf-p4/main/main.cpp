@@ -193,6 +193,8 @@ struct UiState {
     lv_obj_t *overview_clock_label = nullptr;
     lv_obj_t *overview_header_wifi_image = nullptr;
     lv_obj_t *overview_header_signal_image = nullptr;
+    lv_obj_t *overview_header_bluetooth_label = nullptr;
+    lv_obj_t *overview_header_bluetooth_disabled_label = nullptr;
     lv_obj_t *overview_header_battery_image = nullptr;
     lv_obj_t *overview_header_battery_label = nullptr;
     std::array<lv_obj_t *, bluepaws::kMaximumCats> drawer_cards{};
@@ -1160,6 +1162,23 @@ void update_ui(UiState &ui)
             lv_obj_set_style_image_recolor_opa(ui.overview_header_signal_image,
                                                LV_OPA_COVER,
                                                0);
+        }
+
+        if (ui.overview_header_bluetooth_label != nullptr) {
+            lv_obj_set_style_text_color(ui.overview_header_bluetooth_label,
+                                        ui.settings.bluetooth_enabled
+                                            ? lv_color_hex(0x38BDF8)
+                                            : lv_color_hex(0x6E91A5),
+                                        0);
+        }
+        if (ui.overview_header_bluetooth_disabled_label != nullptr) {
+            if (ui.settings.bluetooth_enabled) {
+                lv_obj_add_flag(ui.overview_header_bluetooth_disabled_label,
+                                LV_OBJ_FLAG_HIDDEN);
+            } else {
+                lv_obj_remove_flag(ui.overview_header_bluetooth_disabled_label,
+                                   LV_OBJ_FLAG_HIDDEN);
+            }
         }
 
         if (ui.cats.size() > 0) {
@@ -3432,15 +3451,31 @@ void create_overview_page(UiState &ui)
     ui.overview_header_signal_image = make_drawer_image(header, bluepaws::ui::icon_signal_full);
     lv_obj_set_pos(ui.overview_header_signal_image, ui.portrait ? 266 : 540, 17);
     lv_image_set_scale(ui.overview_header_signal_image, ui.portrait ? 320 : 384);
+    ui.overview_header_bluetooth_label = make_label(
+        header, LV_SYMBOL_BLUETOOTH,
+        ui.settings.bluetooth_enabled ? lv_color_hex(0x38BDF8) : lv_color_hex(0x6E91A5));
+    lv_obj_set_pos(ui.overview_header_bluetooth_label, ui.portrait ? 294 : 575, 17);
+    lv_obj_set_style_text_font(ui.overview_header_bluetooth_label,
+                               &lv_font_montserrat_18,
+                               0);
+    ui.overview_header_bluetooth_disabled_label = make_label(
+        header, LV_SYMBOL_CLOSE, lv_color_hex(0xEF4444));
+    lv_obj_set_pos(ui.overview_header_bluetooth_disabled_label,
+                   ui.portrait ? 298 : 579, 20);
+    lv_obj_set_style_text_font(ui.overview_header_bluetooth_disabled_label,
+                               &lv_font_montserrat_14, 0);
+    if (ui.settings.bluetooth_enabled) {
+        lv_obj_add_flag(ui.overview_header_bluetooth_disabled_label, LV_OBJ_FLAG_HIDDEN);
+    }
     ui.overview_header_battery_image = make_drawer_image(header, bluepaws::ui::icon_battery_full);
-    lv_obj_set_pos(ui.overview_header_battery_image, ui.portrait ? 297 : 578, 17);
+    lv_obj_set_pos(ui.overview_header_battery_image, ui.portrait ? 315 : 598, 17);
     lv_image_set_scale(ui.overview_header_battery_image, ui.portrait ? 320 : 384);
     ui.overview_header_battery_label = make_label(header, "--%", lv_color_hex(0xAFC3CE));
-    lv_obj_set_pos(ui.overview_header_battery_label, ui.portrait ? 326 : 610, 18);
+    lv_obj_set_pos(ui.overview_header_battery_label, ui.portrait ? 344 : 630, 18);
     lv_obj_set_style_text_font(ui.overview_header_battery_label, &lv_font_montserrat_18, 0);
     ui.overview_clock_label = make_label(header, "--:-- --", lv_color_hex(0xFFFFFF));
-    lv_obj_set_pos(ui.overview_clock_label, ui.portrait ? 363 : 642, 17);
-    lv_obj_set_width(ui.overview_clock_label, ui.portrait ? 109 : 146);
+    lv_obj_set_pos(ui.overview_clock_label, ui.portrait ? 378 : 660, 17);
+    lv_obj_set_width(ui.overview_clock_label, ui.portrait ? 94 : 128);
     lv_obj_set_style_text_align(ui.overview_clock_label, LV_TEXT_ALIGN_RIGHT, 0);
     lv_obj_set_style_text_font(ui.overview_clock_label,
                                ui.portrait ? &lv_font_montserrat_18 : &lv_font_montserrat_22,
@@ -4450,6 +4485,8 @@ void create_ui(UiState &ui)
     ui.overview_clock_label = nullptr;
     ui.overview_header_wifi_image = nullptr;
     ui.overview_header_signal_image = nullptr;
+    ui.overview_header_bluetooth_label = nullptr;
+    ui.overview_header_bluetooth_disabled_label = nullptr;
     ui.overview_header_battery_image = nullptr;
     ui.overview_header_battery_label = nullptr;
     ui.drawer_cards.fill(nullptr);

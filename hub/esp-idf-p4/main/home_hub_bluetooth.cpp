@@ -27,14 +27,23 @@ std::atomic_bool g_worker_started{false};
 std::atomic_bool g_initialized{false};
 std::atomic_bool g_synced{false};
 std::atomic_bool g_advertising{false};
+std::atomic_bool g_scanning{false};
 std::atomic_bool g_desired_enabled{false};
 std::atomic_int g_desired_mode{static_cast<int>(hub::CommunicationsMode::Home)};
 uint8_t g_own_address_type = 0;
 
 bool should_advertise()
 {
+    // Home advertising is a fail-closed policy: Portable and Off-Grid always
+    // override the saved preference so collars cannot be told they are home.
     return g_desired_enabled.load() &&
            g_desired_mode.load() == static_cast<int>(hub::CommunicationsMode::Home);
+}
+
+bool should_scan()
+{
+    return g_desired_enabled.load() &&
+           g_desired_mode.load() != static_cast<int>(hub::CommunicationsMode::Home);
 }
 
 int gap_event(ble_gap_event *event, void *)
@@ -42,6 +51,8 @@ int gap_event(ble_gap_event *event, void *)
     if (event == nullptr) return 0;
     if (event->type == BLE_GAP_EVENT_ADV_COMPLETE) {
         g_advertising = false;
+    } else if (event->type == BLE_GAP_EVENT_DISC_COMPLETE) {
+        g_scanning = false;
     }
     return 0;
 }
@@ -88,10 +99,39 @@ void stop_advertising()
     ESP_LOGI(kTag, "Home beacon stopped");
 }
 
+bool begin_passive_scan()
+{
+    ble_gap_disc_params parameters{};
+    parameters.passive = 1;
+    parameters.filter_duplicates = 1;
+    const int result = ble_gap_disc(g_own_address_type, BLE_HS_FOREVER,
+                                    &parameters, gap_event, nullptr);
+    if (result != 0) {
+        ESP_LOGE(kTag, "Could not start passive collar scan: %d", result);
+        return false;
+    }
+    g_scanning = true;
+    ESP_LOGI(kTag, "Passive BLE listening active; Home advertising disabled");
+    return true;
+}
+
+void stop_passive_scan()
+{
+    if (!g_scanning.load()) return;
+    const int result = ble_gap_disc_cancel();
+    if (result != 0) {
+        ESP_LOGW(kTag, "Could not stop passive collar scan: %d", result);
+        return;
+    }
+    g_scanning = false;
+    ESP_LOGI(kTag, "Passive BLE listening stopped");
+}
+
 void on_reset(int reason)
 {
     g_synced = false;
     g_advertising = false;
+    g_scanning = false;
     ESP_LOGW(kTag, "NimBLE reset: %d", reason);
 }
 
@@ -167,8 +207,19 @@ void control_task(void *)
     while (!initialize_stack()) vTaskDelay(pdMS_TO_TICKS(1000));
     while (true) {
         if (g_synced.load()) {
-            if (should_advertise() && !g_advertising.load()) begin_advertising();
-            else if (!should_advertise() && g_advertising.load()) stop_advertising();
+            const bool advertise = should_advertise();
+            const bool scan = should_scan();
+
+            // Stop the disallowed role first. In particular, Off-Grid and
+            // Portable never permit even a brief overlap with the Home beacon.
+            if (!advertise && g_advertising.load()) stop_advertising();
+            if (!scan && g_scanning.load()) stop_passive_scan();
+
+            if (advertise && !g_advertising.load() && !g_scanning.load()) {
+                begin_advertising();
+            } else if (scan && !g_scanning.load() && !g_advertising.load()) {
+                begin_passive_scan();
+            }
         }
         vTaskDelay(pdMS_TO_TICKS(250));
     }
@@ -198,12 +249,16 @@ void apply(bool enabled, hub::CommunicationsMode mode)
 Status status()
 {
     const bool desired_advertising = should_advertise();
+    const bool desired_scanning = should_scan();
     const bool ready = g_initialized.load() && g_synced.load();
     return {
         .initialized = ready,
         .enabled = g_desired_enabled.load(),
         .advertising = g_advertising.load(),
-        .settled = ready && g_advertising.load() == desired_advertising,
+        .scanning = g_scanning.load(),
+        .settled = ready &&
+                   g_advertising.load() == desired_advertising &&
+                   g_scanning.load() == desired_scanning,
     };
 }
 
