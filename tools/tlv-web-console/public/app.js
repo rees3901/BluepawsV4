@@ -489,6 +489,7 @@ async function runScenario() {
   if (state.running) return;
   state.running = true;
   state.stopRequested = false;
+  $("run-feedback").dataset.runState = "running";
   const recipeKey = $("recipe").value;
   const count = Number($("send-count").value);
   const timeout = Number($("send-timeout").value);
@@ -545,8 +546,10 @@ async function runScenario() {
       }
     }
     $("run-status").textContent = state.stopRequested ? "Stopped." : `Completed ${requestNumber} request(s).`;
+    $("run-feedback").dataset.runState = state.stopRequested ? "stopped" : "completed";
   } catch (error) {
     $("run-status").textContent = `Run failed: ${error.message}`;
+    $("run-feedback").dataset.runState = "failed";
   } finally {
     state.running = false;
     schedulePreview();
