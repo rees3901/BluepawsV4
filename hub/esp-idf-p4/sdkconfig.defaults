@@ -17,9 +17,10 @@ CONFIG_CACHE_L2_CACHE_256KB=y
 CONFIG_CACHE_L2_CACHE_LINE_128B=y
 # ESP-Hosted consumes enough early internal RAM that the previous 12 KiB main
 # stack cannot be allocated before the scheduler starts. The UI/network workers
-# have their own stacks; app_main itself uses a measured 6 KiB allowance.
+# have their own stacks; app_main only performs orchestration and keeps its
+# large UI state in static storage, so a 4 KiB startup stack is sufficient.
 # ESP-IDF adds its own startup allowance on top of this configured size.
-CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=4096
 CONFIG_FREERTOS_HZ=1000
 CONFIG_FREERTOS_IDLE_TASK_STACKSIZE=768
 CONFIG_IDF_EXPERIMENTAL_FEATURES=y
@@ -54,6 +55,15 @@ CONFIG_ESP_HOSTED_PRIV_SDIO_PIN_D2_4BIT_BUS_SLOT_1=16
 CONFIG_ESP_HOSTED_PRIV_SDIO_PIN_D3_4BIT_BUS_SLOT_1=17
 CONFIG_ESP_HOSTED_SDIO_GPIO_RESET_SLAVE=54
 CONFIG_ESP_HOSTED_SDIO_RESET_ACTIVE_HIGH=y
+# The P4 hosts NimBLE; HCI is transported to the ESP32-C6 BLE controller over
+# the same ESP-Hosted SDIO link as Wi-Fi.
+CONFIG_BT_ENABLED=y
+CONFIG_BT_CONTROLLER_DISABLED=y
+CONFIG_BT_BLUEDROID_ENABLED=n
+CONFIG_BT_NIMBLE_ENABLED=y
+CONFIG_BT_NIMBLE_TRANSPORT_UART=n
+CONFIG_ESP_HOSTED_ENABLE_BT_NIMBLE=y
+CONFIG_ESP_HOSTED_NIMBLE_HCI_VHCI=y
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
 
 # LVGL 9 settings used by the first landscape testbed UI.

@@ -1,6 +1,7 @@
 #include "home_hub_web.h"
 
 #include "bluepaws/hub_settings.h"
+#include "home_hub_bluetooth.h"
 #include "home_hub_defaults.h"
 
 #include "cJSON.h"
@@ -50,6 +51,8 @@ struct WebSnapshot {
     std::array<CatRecord, kMaximumCats> cats{};
     std::size_t count = 0;
     cloud::Status cloud{};
+    hub::Settings settings{};
+    bluetooth::Status bluetooth{};
 };
 
 SemaphoreHandle_t g_lock = nullptr;
@@ -57,6 +60,7 @@ httpd_handle_t g_server = nullptr;
 WebSnapshot g_snapshot{};
 std::atomic_bool g_starting{false};
 std::atomic_int g_requested_mode{-1};
+std::atomic_int g_requested_bluetooth{-1};
 
 const char *mode_name(hub::CommunicationsMode mode)
 {
@@ -266,14 +270,14 @@ esp_err_t hub_presence_handler(httpd_req_t *request)
     } else {
         cJSON_AddNullToObject(json, "wifi_rssi_dbm");
     }
-    cJSON_AddBoolToObject(json, "ble_advertising", false);
-    cJSON_AddBoolToObject(json, "ble_enabled", false);
-    cJSON_AddBoolToObject(json, "ble_settled", true);
+    cJSON_AddBoolToObject(json, "ble_advertising", state.bluetooth.advertising);
+    cJSON_AddBoolToObject(json, "ble_enabled", state.settings.bluetooth_enabled);
+    cJSON_AddBoolToObject(json, "ble_settled", state.bluetooth.settled);
     cJSON_AddNumberToObject(json, "uptime_s", esp_timer_get_time() / 1000000);
     cJSON_AddStringToObject(json, "home_emoji", "Home");
     cJSON_AddStringToObject(json, "portable_emoji", "Hub");
     cJSON_AddStringToObject(json, "marker_colour", "#38bdf8");
-    cJSON_AddNumberToObject(json, "control_poll_s", 0);
+    cJSON_AddNumberToObject(json, "control_poll_s", 1);
     const esp_err_t result = send_json(request, json);
     cJSON_Delete(json);
     return result;
@@ -421,6 +425,50 @@ esp_err_t hub_mode_handler(httpd_req_t *request)
     cJSON_AddBoolToObject(json, "pending", true);
     const esp_err_t result = send_json(request, json, "202 Accepted");
     cJSON_Delete(json);
+    return result;
+}
+
+esp_err_t hub_preferences_handler(httpd_req_t *request)
+{
+    if (request->content_len == 0 || request->content_len >= 128) {
+        return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST,
+                                   "Invalid hub preference request");
+    }
+    char body[128]{};
+    std::size_t received = 0;
+    while (received < request->content_len) {
+        const int count = httpd_req_recv(request, body + received,
+                                         request->content_len - received);
+        if (count <= 0) return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST,
+                                                   "Could not read request");
+        received += static_cast<std::size_t>(count);
+    }
+    body[received] = '\0';
+    cJSON *json = cJSON_Parse(body);
+    if (json == nullptr) {
+        return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+    }
+    const cJSON *bluetooth = cJSON_GetObjectItemCaseSensitive(json, "ble_enabled");
+    if (!cJSON_IsBool(bluetooth)) {
+        cJSON_Delete(json);
+        return httpd_resp_send_err(request, HTTPD_400_BAD_REQUEST,
+                                   "ble_enabled must be a boolean");
+    }
+    const int requested = cJSON_IsTrue(bluetooth) ? 1 : 0;
+    cJSON_Delete(json);
+
+    int expected = -1;
+    if (!g_requested_bluetooth.compare_exchange_strong(expected, requested)) {
+        cJSON *response = cJSON_CreateObject();
+        cJSON_AddStringToObject(response, "error", "bluetooth_change_pending");
+        const esp_err_t result = send_json(request, response, "409 Conflict");
+        cJSON_Delete(response);
+        return result;
+    }
+    cJSON *response = cJSON_CreateObject();
+    cJSON_AddBoolToObject(response, "pending", true);
+    const esp_err_t result = send_json(request, response, "202 Accepted");
+    cJSON_Delete(response);
     return result;
 }
 
@@ -735,7 +783,7 @@ bool start_server_now()
     ok &= register_uri("/api/device-status", HTTP_POST, unavailable_handler);
     ok &= register_uri("/api/hub-mode", HTTP_POST, hub_mode_handler);
     ok &= register_uri("/api/config", HTTP_POST, unavailable_handler);
-    ok &= register_uri("/api/hub-preferences", HTTP_POST, unavailable_handler);
+    ok &= register_uri("/api/hub-preferences", HTTP_POST, hub_preferences_handler);
     ok &= register_uri("/api/device-meta", HTTP_POST, unavailable_handler);
     ok &= register_uri("/api/security*", HTTP_GET, unavailable_handler);
     ok &= register_uri("/api/security*", HTTP_POST, unavailable_handler);
@@ -778,7 +826,17 @@ bool takeRequestedMode(hub::CommunicationsMode &mode)
     return true;
 }
 
-void updateSnapshot(const CatStore &cats, const cloud::Status &cloud_status)
+bool takeRequestedBluetooth(bool &enabled)
+{
+    const int requested = g_requested_bluetooth.exchange(-1);
+    if (requested != 0 && requested != 1) return false;
+    enabled = requested == 1;
+    return true;
+}
+
+void updateSnapshot(const CatStore &cats, const cloud::Status &cloud_status,
+                    const hub::Settings &settings,
+                    const bluetooth::Status &bluetooth_status)
 {
     if (g_lock == nullptr || xSemaphoreTake(g_lock, pdMS_TO_TICKS(20)) != pdTRUE) return;
     g_snapshot = {};
@@ -788,6 +846,8 @@ void updateSnapshot(const CatStore &cats, const cloud::Status &cloud_status)
         if (cat != nullptr) g_snapshot.cats[i] = *cat;
     }
     g_snapshot.cloud = cloud_status;
+    g_snapshot.settings = settings;
+    g_snapshot.bluetooth = bluetooth_status;
     xSemaphoreGive(g_lock);
 }
 

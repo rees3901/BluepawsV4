@@ -1379,7 +1379,7 @@
             '</button>';
         if (dev.data.entity === 'hub') return html +
             '<button class="btn-action btn-bluetooth' + (dev.data.hub.ble_enabled ? ' active' : '') + '" ' + ((HubPresencePanel.feedback() && HubPresencePanel.feedback().state === 'pending') || Date.now()-dev.lastUpdate>=15000 ? 'disabled ' : '') + 'data-action="bluetooth" data-id="' + dev.id + '" aria-pressed="' + !!dev.data.hub.ble_enabled +
-            '" title="Home beacon operates only on primary Home Wi-Fi"><span class="bluetooth-action-icon" aria-hidden="true">ᛒ<span class="bluetooth-action-state">' + (dev.data.hub.ble_enabled ? '✅' : '❌') + '</span></span> Bluetooth ' + (dev.data.hub.ble_enabled ? 'On' : 'Off') + '</button>' +
+            '" title="Turn the hub Bluetooth Home beacon on or off; advertising is active in Home mode"><svg class="bluetooth-action-icon" aria-hidden="true" viewBox="0 0 24 24"><path fill="currentColor" d="M17.71 7.71l-6-6A.997.997 0 0 0 10 2.42v7.17L5.41 5 4 6.41 9.59 12 4 17.59 5.41 19 10 14.41v7.17a.997.997 0 0 0 1.71.71l6-6L13.41 12l4.3-4.29zM12 4.83l2.88 2.88L12 10.59V4.83zm2.88 11.46L12 19.17v-5.76l2.88 2.88z"/></svg> Bluetooth ' + (dev.data.hub.ble_enabled ? 'On' : 'Off') + '</button>' +
             '<button class="btn-action btn-cmd" ' + ((HubPresencePanel.feedback() && HubPresencePanel.feedback().state === 'pending') || Date.now()-dev.lastUpdate>=15000 ? 'disabled ' : '') +
             'data-action="hub-profile" data-id="' + dev.id + '" title="Hub reporting profile">⌘ Cmd</button>';
         return html + '<button class="btn-action btn-find" data-action="find" data-id="' + dev.id + '" title="Find Alert — trigger buzzer + LED">' +

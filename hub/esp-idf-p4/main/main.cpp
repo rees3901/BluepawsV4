@@ -12,6 +12,7 @@
 #include "home_hub_settings_store.h"
 #include "home_hub_web.h"
 #include "home_hub_camera.h"
+#include "home_hub_bluetooth.h"
 
 #include "driver/jpeg_decode.h"
 #include "esp_heap_caps.h"
@@ -50,6 +51,25 @@ extern "C" void __wrap_vApplicationGetTimerTaskMemory(
     *tcb_buffer = &timer_tcb;
     *stack_buffer = reinterpret_cast<StackType_t *>(timer_stack);
     *stack_size = CONFIG_FREERTOS_TIMER_TASK_STACK_DEPTH;
+}
+
+// NimBLE adds early static allocations before the scheduler creates both idle
+// tasks. Supplying their buffers here avoids depending on the small remaining
+// contiguous internal heap during startup.
+extern "C" void __wrap_vApplicationGetIdleTaskMemory(
+    StaticTask_t **tcb_buffer,
+    StackType_t **stack_buffer,
+    uint32_t *stack_size)
+{
+    static StaticTask_t idle_tcbs[configNUMBER_OF_CORES];
+    alignas(StackType_t) static uint8_t
+        idle_stacks[configNUMBER_OF_CORES][configMINIMAL_STACK_SIZE];
+    static uint32_t next_idle_task = 0;
+    const uint32_t index = next_idle_task < configNUMBER_OF_CORES
+        ? next_idle_task++ : configNUMBER_OF_CORES - 1U;
+    *tcb_buffer = &idle_tcbs[index];
+    *stack_buffer = reinterpret_cast<StackType_t *>(idle_stacks[index]);
+    *stack_size = configMINIMAL_STACK_SIZE;
 }
 
 namespace {
@@ -724,8 +744,23 @@ void update_ui(UiState &ui)
                                      static_cast<uint32_t>(ui.settings.communications_mode));
         }
     }
+    bool web_requested_bluetooth = false;
+    if (bluepaws::web::takeRequestedBluetooth(web_requested_bluetooth)) {
+        const bool previous = ui.settings.bluetooth_enabled;
+        ui.settings.bluetooth_enabled = web_requested_bluetooth;
+        if (!bluepaws::settings_store::save(ui.settings)) {
+            ui.settings.bluetooth_enabled = previous;
+            ESP_LOGE(kTag, "Bluetooth preference save failed; restored %s",
+                     previous ? "On" : "Off");
+        } else {
+            ESP_LOGI(kTag, "Bluetooth preference saved: %s",
+                     web_requested_bluetooth ? "On" : "Off");
+        }
+    }
     const bluepaws::cloud::Status cloud_status = bluepaws::cloud::status();
-    bluepaws::web::updateSnapshot(ui.cats, cloud_status);
+    bluepaws::bluetooth::apply(ui.settings.bluetooth_enabled, cloud_status.effective_mode);
+    bluepaws::web::updateSnapshot(ui.cats, cloud_status, ui.settings,
+                                  bluepaws::bluetooth::status());
     if (ui.overview_mode_dropdown != nullptr &&
         ui.overview_mode_confirmation != nullptr &&
         lv_obj_has_flag(ui.overview_mode_confirmation, LV_OBJ_FLAG_HIDDEN)) {
@@ -4542,10 +4577,15 @@ extern "C" void app_main(void)
     }
     ui.simulator.reset(kTestOrigin, uptime_ms());
     ui.cloud_enabled = bluepaws::cloud::start(ui.settings);
+    if (!bluepaws::bluetooth::start(ui.settings.bluetooth_enabled,
+                                    bluepaws::cloud::status().effective_mode)) {
+        ESP_LOGE(kTag, "Bluetooth control failed to start");
+    }
     if (!bluepaws::web::start()) {
         ESP_LOGE(kTag, "Local Off-Grid dashboard failed to start");
     }
-    bluepaws::web::updateSnapshot(ui.cats, bluepaws::cloud::status());
+    bluepaws::web::updateSnapshot(ui.cats, bluepaws::cloud::status(), ui.settings,
+                                  bluepaws::bluetooth::status());
     if (!lvgl_port_lock(0)) {
         ESP_LOGE(kTag, "Could not acquire LVGL lock");
         return;
