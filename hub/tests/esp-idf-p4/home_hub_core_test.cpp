@@ -1,6 +1,7 @@
 #include "bluepaws/cat_simulator.h"
 #include "bluepaws/cat_store.h"
 #include "bluepaws/hub_settings.h"
+#include "bluepaws/hub_mode_policy.h"
 #include "bluepaws/map_engine.h"
 #include "bluepaws/qr_payload.h"
 
@@ -183,6 +184,23 @@ void settingsRemainSafeAndOrdered() {
     assert(!bluepaws::hub::validPassword("short"));
 }
 
+void communicationsModesUseOneDeterministicPolicy() {
+    using bluepaws::hub::CommunicationsMode;
+    assert(bluepaws::hub::preferredNetwork(CommunicationsMode::Home) == 0);
+    assert(bluepaws::hub::modeAllowsNetwork(CommunicationsMode::Home, 0));
+    assert(bluepaws::hub::modeAllowsNetwork(CommunicationsMode::Home, 1));
+    assert(bluepaws::hub::effectiveModeForNetwork(0) == CommunicationsMode::Home);
+    assert(bluepaws::hub::effectiveModeForNetwork(1) == CommunicationsMode::Portable);
+
+    assert(bluepaws::hub::preferredNetwork(CommunicationsMode::Portable) == 1);
+    assert(!bluepaws::hub::modeAllowsNetwork(CommunicationsMode::Portable, 0));
+    assert(bluepaws::hub::modeAllowsNetwork(CommunicationsMode::Portable, 1));
+
+    assert(!bluepaws::hub::modeAllowsNetwork(CommunicationsMode::OffGrid, 0));
+    assert(!bluepaws::hub::modeAllowsNetwork(CommunicationsMode::OffGrid, 1));
+    assert(!bluepaws::hub::modeAllowsNetwork(CommunicationsMode::Home, 2));
+}
+
 void relativePositionProvidesDistanceAndClockDirection() {
     const bluepaws::map::GeoPoint hub{51.8642, -2.2382};
     const auto north_east = bluepaws::hub::relativePosition(hub, {51.8652, -2.2372});
@@ -233,6 +251,7 @@ int main() {
     simulatorUsesTheSharedStatePath();
     storeRejectsOlderTruth();
     settingsRemainSafeAndOrdered();
+    communicationsModesUseOneDeterministicPolicy();
     relativePositionProvidesDistanceAndClockDirection();
     qrPayloadsAreStrictAndEscaped();
     std::puts("Home Hub portable core: all tests passed");

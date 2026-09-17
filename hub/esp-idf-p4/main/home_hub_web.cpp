@@ -43,8 +43,7 @@ struct MapLayer {
 constexpr MapLayer kMapLayers[] = {
     {"osm", "OpenStreetMap", "/sdcard/bluepaws/maps/layers/osm-road-100km/tiles", 5, 17},
     {"os", "Ordnance Survey", "/sdcard/bluepaws/maps/layers/ordnance-survey-100km/tiles", 5, 17},
-    {"satellite", "Satellite", "/sdcard/bluepaws/maps/layers/satellite-v2/tiles", 14, 17},
-    {"aerial", "Aerial", "/sdcard/bluepaws/maps/layers/aerial-consistent/tiles", 12, 17},
+    {"satellite", "Satellite", "/sdcard/bluepaws/maps/layers/satellite/tiles", 5, 14},
 };
 
 struct WebSnapshot {
@@ -200,8 +199,16 @@ esp_err_t status_handler(httpd_req_t *request)
     cJSON_AddNumberToObject(json, "freeHeap", esp_get_free_heap_size());
     cJSON_AddStringToObject(json, "mode", mode_name(state.cloud.effective_mode));
     cJSON_AddStringToObject(json, "hubMode", mode_name(state.cloud.effective_mode));
-    cJSON_AddBoolToObject(json, "wifi_connected",
-                          state.cloud.state == cloud::ConnectionState::Online);
+    cJSON_AddStringToObject(json, "requestedMode", mode_name(state.cloud.requested_mode));
+    cJSON_AddStringToObject(json, "modeReason", cloud::modeReasonName(state.cloud.mode_reason));
+    cJSON_AddBoolToObject(json, "automaticFallback", state.cloud.automatic_off_grid);
+    cJSON_AddBoolToObject(json, "wifi_connected", state.cloud.wifi_station_connected);
+    cJSON_AddStringToObject(json, "wifi_ssid", state.cloud.wifi_ssid);
+    if (state.cloud.wifi_station_connected) {
+        cJSON_AddNumberToObject(json, "wifi_rssi_dbm", state.cloud.wifi_rssi_dbm);
+    } else {
+        cJSON_AddNullToObject(json, "wifi_rssi_dbm");
+    }
     cJSON_AddBoolToObject(json, "internet_reachable",
                           state.cloud.state == cloud::ConnectionState::Online);
     cJSON_AddBoolToObject(json, "cloud_reachable",
@@ -218,8 +225,7 @@ esp_err_t status_handler(httpd_req_t *request)
     cJSON_AddNumberToObject(json, "txCount", 0);
     cJSON_AddNumberToObject(json, "crcFails", 0);
     cJSON_AddNumberToObject(json, "logEntries", 0);
-    cJSON_AddBoolToObject(json, "staConnected",
-                          state.cloud.state == cloud::ConnectionState::Online);
+    cJSON_AddBoolToObject(json, "staConnected", state.cloud.wifi_station_connected);
     cJSON_AddStringToObject(json, "staIP", "");
     cJSON_AddNumberToObject(json, "recovery_remaining_ms", 0);
     cJSON_AddNumberToObject(json, "ap_clients", 0);
@@ -230,8 +236,7 @@ esp_err_t status_handler(httpd_req_t *request)
     cJSON_AddBoolToObject(json, "known_wifi_available", false);
     cJSON_AddBoolToObject(json, "provisioning_mode", false);
     cJSON_AddStringToObject(json, "network_phase",
-                            state.cloud.state == cloud::ConnectionState::Online
-                                ? "connected" : "off_grid");
+                            cloud::modeReasonName(state.cloud.mode_reason));
     const esp_err_t result = send_json(request, json);
     cJSON_Delete(json);
     return result;
@@ -256,7 +261,11 @@ esp_err_t hub_presence_handler(httpd_req_t *request)
     cJSON_AddNumberToObject(json, "longitude", defaults::kStarterLocation.longitude);
     cJSON_AddStringToObject(json, "position_source", "starter");
     cJSON_AddNullToObject(json, "fix_age_s");
-    cJSON_AddNullToObject(json, "wifi_rssi_dbm");
+    if (state.cloud.wifi_station_connected) {
+        cJSON_AddNumberToObject(json, "wifi_rssi_dbm", state.cloud.wifi_rssi_dbm);
+    } else {
+        cJSON_AddNullToObject(json, "wifi_rssi_dbm");
+    }
     cJSON_AddBoolToObject(json, "ble_advertising", false);
     cJSON_AddBoolToObject(json, "ble_enabled", false);
     cJSON_AddBoolToObject(json, "ble_settled", true);
