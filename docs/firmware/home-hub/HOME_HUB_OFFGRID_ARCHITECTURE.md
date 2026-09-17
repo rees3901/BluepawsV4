@@ -363,3 +363,15 @@ collar and approximate clock state; it consumed no SSE slots. The in-app
 browser blocked the post-upload reload by URL policy, so the actual on-device
 visual/OS captive-window handoff still needs checking on the user's phone.
 Future uploads must likewise preserve a fresh copy of private files/history.
+
+## Direct browser access (September 2026)
+
+This supersedes the captive-portal behavior described in the historical notes
+above. Both hubs now advertise `BluePaws_192.168.4.1`. Users join the hotspot,
+keep the connection when warned that it has no internet, and open
+`http://192.168.4.1/` in their normal browser. Wildcard DNS, captive HTTP redirects
+and the P4 DHCP portal announcement have been removed. mDNS remains available
+as the optional `bluepaws.local` hostname. `/welcome` is now an optional help and
+shortcut page opened manually from dashboard settings, never an automatic login.
+The P4 normalizes saved hotspot names to the address-based name on load and
+shows connection instructions in place of the editable SSID setting.

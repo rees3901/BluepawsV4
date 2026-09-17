@@ -86,7 +86,6 @@ enum class SettingsField : uint8_t {
     PrimaryPassword,
     SecondarySsid,
     SecondaryPassword,
-    AccessPointSsid,
     AccessPointPassword,
     OverviewTimeout,
     DimTimeout,
@@ -3398,7 +3397,6 @@ const char *settings_field_title(SettingsField field)
     case SettingsField::PrimaryPassword: return "Primary Wi-Fi password";
     case SettingsField::SecondarySsid: return "Secondary Wi-Fi name";
     case SettingsField::SecondaryPassword: return "Secondary Wi-Fi password";
-    case SettingsField::AccessPointSsid: return "Off-grid local network name";
     case SettingsField::AccessPointPassword: return "Off-grid local network password";
     case SettingsField::OverviewTimeout: return "Overview timeout (seconds)";
     case SettingsField::DimTimeout: return "Dim timeout (seconds)";
@@ -3430,7 +3428,6 @@ const char *settings_field_value(UiState &ui, SettingsField field, char *buffer,
     case SettingsField::PrimaryPassword: return ui.settings.primary.password;
     case SettingsField::SecondarySsid: return ui.settings.secondary.ssid;
     case SettingsField::SecondaryPassword: return ui.settings.secondary.password;
-    case SettingsField::AccessPointSsid: return ui.settings.access_point_ssid;
     case SettingsField::AccessPointPassword: return ui.settings.access_point_password;
     case SettingsField::OverviewTimeout:
         std::snprintf(buffer, size, "%u", ui.settings.overview_timeout_seconds); break;
@@ -3471,11 +3468,6 @@ bool apply_settings_editor_value(UiState &ui, const char *value, const char **er
             *error = "Use between 1 and 32 characters."; return false;
         }
         copy_text(ui.settings.secondary.ssid, sizeof(ui.settings.secondary.ssid), value); break;
-    case SettingsField::AccessPointSsid:
-        if (!bluepaws::hub::validSsid(value)) {
-            *error = "The off-grid local network needs a name."; return false;
-        }
-        copy_text(ui.settings.access_point_ssid, sizeof(ui.settings.access_point_ssid), value); break;
     case SettingsField::PrimaryPassword:
     case SettingsField::SecondaryPassword:
     case SettingsField::AccessPointPassword:
@@ -3584,8 +3576,7 @@ void setting_card_clicked(lv_event_t *event)
     lv_textarea_set_one_line(input, true);
     lv_textarea_set_max_length(input, settings_field_numeric(ui->editing_field) ? 5 :
         (ui->editing_field == SettingsField::PrimarySsid ||
-         ui->editing_field == SettingsField::SecondarySsid ||
-         ui->editing_field == SettingsField::AccessPointSsid ? 32 : 63));
+         ui->editing_field == SettingsField::SecondarySsid ? 32 : 63));
     char buffer[16]{};
     lv_textarea_set_text(input, settings_field_value(*ui, ui->editing_field, buffer, sizeof(buffer)));
     lv_textarea_set_password_mode(input, settings_field_password(ui->editing_field));
@@ -3687,8 +3678,11 @@ void create_settings_page(UiState &ui)
         ui.dark_mode ? lv_color_hex(0xC7D9E5) : lv_color_hex(0x38576D));
     lv_obj_set_width(automatic_note, LV_PCT(100));
     lv_label_set_long_mode(automatic_note, LV_LABEL_LONG_WRAP);
-    create_setting_card(content, "LOCAL NETWORK NAME", ui.settings.access_point_ssid,
-                        SettingsField::AccessPointSsid, lv_color_hex(0x7A5A9E), ui);
+    lv_obj_t *address_note = make_label(content,
+        "Connect to BluePaws_192.168.4.1, then open http://192.168.4.1 in your browser.",
+        ui.dark_mode ? lv_color_hex(0xC7D9E5) : lv_color_hex(0x38576D));
+    lv_obj_set_width(address_note, LV_PCT(100));
+    lv_label_set_long_mode(address_note, LV_LABEL_LONG_WRAP);
     create_setting_card(content, "LOCAL NETWORK PASSWORD",
                         ui.settings.access_point_password[0] == '\0' ? "Open / not set" : "Configured - tap to change",
                         SettingsField::AccessPointPassword, lv_color_hex(0x7A5A9E), ui);

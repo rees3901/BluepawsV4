@@ -644,14 +644,6 @@ esp_err_t events_handler(httpd_req_t *request)
     return httpd_resp_send(request, nullptr, 0);
 }
 
-esp_err_t captive_handler(httpd_req_t *request)
-{
-    httpd_resp_set_status(request, "302 Found");
-    httpd_resp_set_hdr(request, "Location", "http://bluepaws.local/welcome");
-    httpd_resp_set_hdr(request, "Cache-Control", "no-store");
-    return httpd_resp_send(request, nullptr, 0);
-}
-
 esp_err_t wildcard_handler(httpd_req_t *request)
 {
     // HTTPD leaves the query string in request->uri. Strip it before matching
@@ -702,7 +694,7 @@ bool start_server_now()
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.stack_size = 8192;
-    // Hosted Wi-Fi, captive DNS and mDNS share lwIP's descriptor pool. Keep
+    // Hosted Wi-Fi and mDNS share lwIP's descriptor pool. Keep
     // HTTP below that ceiling and rotate idle browser connections with LRU.
     config.max_open_sockets = 4;
     config.backlog_conn = 4;
@@ -738,14 +730,6 @@ bool start_server_now()
     ok &= register_uri("/api/device-meta", HTTP_POST, unavailable_handler);
     ok &= register_uri("/api/security*", HTTP_GET, unavailable_handler);
     ok &= register_uri("/api/security*", HTTP_POST, unavailable_handler);
-    ok &= register_uri("/generate_204", HTTP_GET, captive_handler);
-    ok &= register_uri("/gen_204", HTTP_GET, captive_handler);
-    ok &= register_uri("/hotspot-detect.html", HTTP_GET, captive_handler);
-    ok &= register_uri("/library/test/success.html", HTTP_GET, captive_handler);
-    ok &= register_uri("/ncsi.txt", HTTP_GET, captive_handler);
-    ok &= register_uri("/connecttest.txt", HTTP_GET, captive_handler);
-    ok &= register_uri("/redirect", HTTP_GET, captive_handler);
-    ok &= register_uri("/fwlink", HTTP_GET, captive_handler);
     ok &= register_uri("/*", HTTP_GET, wildcard_handler);
     ESP_LOGI(kTag, "P4 local dashboard listening on port 80 (%s)", ok ? "ready" : "partial");
     return ok;
