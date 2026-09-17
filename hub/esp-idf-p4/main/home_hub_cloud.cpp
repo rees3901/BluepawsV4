@@ -79,7 +79,10 @@ portMUX_TYPE g_status_lock = portMUX_INITIALIZER_UNLOCKED;
 portMUX_TYPE g_settings_lock = portMUX_INITIALIZER_UNLOCKED;
 portMUX_TYPE g_wifi_scan_lock = portMUX_INITIALIZER_UNLOCKED;
 hub::Settings g_network_settings{};
-WifiScanSnapshot g_wifi_scan{};
+// The application is already close to the ESP32-P4 internal DRAM limit before
+// app_main starts. Keep scan results in PSRAM so adding the picker cannot stop
+// FreeRTOS from allocating the main task.
+WifiScanSnapshot *g_wifi_scan = nullptr;
 bool g_wifi_initialized = false;
 bool g_cloud_authorized = false;
 std::atomic_bool g_station_allowed{false};
@@ -158,10 +161,11 @@ void refresh_station_link() {
 }
 
 void perform_wifi_scan() {
+    if (g_wifi_scan == nullptr) return;
     wifi_mode_t original_mode = WIFI_MODE_NULL;
     if (esp_wifi_get_mode(&original_mode) != ESP_OK) {
         portENTER_CRITICAL(&g_wifi_scan_lock);
-        g_wifi_scan.state = WifiScanState::Failed;
+        g_wifi_scan->state = WifiScanState::Failed;
         portEXIT_CRITICAL(&g_wifi_scan_lock);
         return;
     }
@@ -169,7 +173,7 @@ void perform_wifi_scan() {
     const bool add_station_interface = original_mode == WIFI_MODE_AP;
     if (add_station_interface && esp_wifi_set_mode(WIFI_MODE_APSTA) != ESP_OK) {
         portENTER_CRITICAL(&g_wifi_scan_lock);
-        g_wifi_scan.state = WifiScanState::Failed;
+        g_wifi_scan->state = WifiScanState::Failed;
         portEXIT_CRITICAL(&g_wifi_scan_lock);
         return;
     }
@@ -188,7 +192,7 @@ void perform_wifi_scan() {
     completed.state = results_error == ESP_OK ? WifiScanState::Ready
                                                : WifiScanState::Failed;
     portENTER_CRITICAL(&g_wifi_scan_lock);
-    completed.generation = g_wifi_scan.generation;
+    completed.generation = g_wifi_scan->generation;
     portEXIT_CRITICAL(&g_wifi_scan_lock);
     if (results_error == ESP_OK) {
         for (uint16_t i = 0; i < found && completed.count < completed.results.size(); ++i) {
@@ -215,7 +219,7 @@ void perform_wifi_scan() {
         esp_wifi_set_mode(original_mode);
     }
     portENTER_CRITICAL(&g_wifi_scan_lock);
-    g_wifi_scan = completed;
+    *g_wifi_scan = completed;
     portEXIT_CRITICAL(&g_wifi_scan_lock);
     ESP_LOGI(kTag, "Wi-Fi scan %s with %u unique networks",
              completed.state == WifiScanState::Ready ? "completed" : "failed",
@@ -779,7 +783,12 @@ bool start(const hub::Settings &settings) {
     portEXIT_CRITICAL(&g_settings_lock);
     g_updates = xQueueCreate(kMaximumCats * 2, sizeof(CloudUpdate));
     g_wifi = xEventGroupCreate();
-    if (g_updates == nullptr || g_wifi == nullptr) return false;
+    if (g_wifi_scan == nullptr) {
+        g_wifi_scan = static_cast<WifiScanSnapshot *>(
+            heap_caps_calloc(1, sizeof(WifiScanSnapshot),
+                             MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    }
+    if (g_updates == nullptr || g_wifi == nullptr || g_wifi_scan == nullptr) return false;
     if (g_cloud_authorized) restore_cached_snapshot();
     const bool started = xTaskCreate(sync_task, "hub_cloud", 12288, nullptr, 5, nullptr) == pdPASS;
     return started && g_cloud_authorized;
@@ -796,23 +805,24 @@ bool applyNetworkSettings(const hub::Settings &input) {
 }
 
 bool requestWifiScan() {
-    if (g_wifi == nullptr || !g_wifi_initialized) return false;
+    if (g_wifi == nullptr || g_wifi_scan == nullptr || !g_wifi_initialized) return false;
     portENTER_CRITICAL(&g_wifi_scan_lock);
-    if (g_wifi_scan.state == WifiScanState::Scanning) {
+    if (g_wifi_scan->state == WifiScanState::Scanning) {
         portEXIT_CRITICAL(&g_wifi_scan_lock);
         return true;
     }
-    g_wifi_scan.state = WifiScanState::Scanning;
-    g_wifi_scan.count = 0;
-    ++g_wifi_scan.generation;
+    g_wifi_scan->state = WifiScanState::Scanning;
+    g_wifi_scan->count = 0;
+    ++g_wifi_scan->generation;
     portEXIT_CRITICAL(&g_wifi_scan_lock);
     xEventGroupSetBits(g_wifi, kWifiScanBit);
     return true;
 }
 
 WifiScanSnapshot wifiScanSnapshot() {
+    if (g_wifi_scan == nullptr) return {};
     portENTER_CRITICAL(&g_wifi_scan_lock);
-    const WifiScanSnapshot snapshot = g_wifi_scan;
+    const WifiScanSnapshot snapshot = *g_wifi_scan;
     portEXIT_CRITICAL(&g_wifi_scan_lock);
     return snapshot;
 }

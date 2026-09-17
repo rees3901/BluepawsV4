@@ -286,8 +286,6 @@ struct UiState {
     int followed_cat = -1;
     bool cloud_enabled = false;
     SettingsField editing_field = SettingsField::PrimarySsid;
-    std::array<bluepaws::cloud::WifiScanResult,
-               bluepaws::cloud::kMaximumWifiScanResults> settings_wifi_results{};
     std::size_t settings_wifi_result_count = 0;
     uint32_t settings_wifi_scan_generation = 0;
     bluepaws::cloud::WifiScanState settings_wifi_scan_state =
@@ -3989,7 +3987,6 @@ void refresh_wifi_picker(UiState &ui)
     if (scan.state != bluepaws::cloud::WifiScanState::Ready) return;
 
     ui.settings_wifi_result_count = scan.count;
-    ui.settings_wifi_results = scan.results;
     if (scan.count == 0) {
         lv_label_set_text(ui.settings_wifi_scan_status,
                           "No networks found. Move closer or enter the name manually.");
@@ -4060,8 +4057,10 @@ void wifi_picker_use_clicked(lv_event_t *event)
     if (ui == nullptr || ui->settings_wifi_dropdown == nullptr ||
         ui->settings_wifi_result_count == 0) return;
     const uint32_t selected = lv_dropdown_get_selected(ui->settings_wifi_dropdown);
-    if (selected >= ui->settings_wifi_result_count) return;
-    const bluepaws::cloud::WifiScanResult result = ui->settings_wifi_results[selected];
+    const bluepaws::cloud::WifiScanSnapshot scan = bluepaws::cloud::wifiScanSnapshot();
+    if (scan.state != bluepaws::cloud::WifiScanState::Ready ||
+        selected >= scan.count || selected >= ui->settings_wifi_result_count) return;
+    const bluepaws::cloud::WifiScanResult result = scan.results[selected];
     bluepaws::hub::WifiNetwork &network =
         ui->editing_field == SettingsField::PrimarySsid
             ? ui->settings.primary : ui->settings.secondary;
