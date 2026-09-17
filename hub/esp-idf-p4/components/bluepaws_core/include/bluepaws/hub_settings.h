@@ -24,7 +24,7 @@ struct WifiNetwork {
 struct Settings {
     WifiNetwork primary{};
     WifiNetwork secondary{};
-    char access_point_ssid[kWifiSsidBytes]{"BluePaws-Hub"};
+    char access_point_ssid[kWifiSsidBytes]{"BluePaws_192.168.4.1"};
     char access_point_password[kWifiPasswordBytes]{};
     CommunicationsMode communications_mode = CommunicationsMode::Home;
     uint16_t overview_timeout_seconds = 120;

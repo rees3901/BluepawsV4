@@ -7,21 +7,23 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class PublicAssetTests(unittest.TestCase):
-    def test_captive_routes_redirect_to_absolute_ap_ip_only_for_ap_clients(self):
-        source = (ROOT / 'hub/platformio/src/main.cpp').read_text(encoding='utf-8')
-        portal = source.split('static bool isCaptivePortalClient() {', 1)[1].split(
-            'static void handleFavicon()', 1)[0]
-        self.assertIn('httpServer.client().localIP() == WiFi.softAPIP()', portal)
-        self.assertIn('if (!isCaptivePortalClient())', portal)
-        self.assertIn('"http://" + WiFi.softAPIP().toString() + "/welcome"', portal)
-        self.assertIn('sendHeader("Location", target, true)', portal)
-        self.assertIn('send(302,', portal)
-        for path in ['/redirect', '/fwlink', '/connecttest.txt', '/ncsi.txt', '/generate_204', '/hotspot-detect.html']:
-            self.assertIn(f'httpServer.on("{path}", HTTP_GET, handleCaptiveProbe)', source)
-        catchall = source.split('static void handleNotFound() {', 1)[1].split('// Register all HTTP routes', 1)[0]
-        self.assertIn('hasForeignPortalHost()', catchall)
-        self.assertIn('!path.startsWith("/api/")', catchall)
+    def test_both_hubs_have_no_captive_portal_discovery_or_redirects(self):
+        arduino = (ROOT / 'hub/platformio/src/main.cpp').read_text(encoding='utf-8')
+        p4 = ROOT / 'hub/esp-idf-p4/main'
+        cloud = (p4 / 'home_hub_cloud.cpp').read_text(encoding='utf-8')
+        web = (p4 / 'home_hub_web.cpp').read_text(encoding='utf-8')
+        mdns = (p4 / 'home_hub_mdns.cpp').read_text(encoding='utf-8')
+        for source in [arduino, cloud, web, mdns]:
+            for removed in ['captiveDns', 'handleCaptiveProbe', 'captive_handler',
+                            'CAPTIVEPORTAL_URI', 'hasForeignPortalHost', 'kDnsPort = 53;']:
+                self.assertNotIn(removed, source)
+        for path in ['/redirect', '/fwlink', '/connecttest.txt', '/ncsi.txt',
+                     '/generate_204', '/gen_204', '/hotspot-detect.html', '/library/test/success.html']:
+            self.assertNotIn(f'httpServer.on("{path}"', arduino)
+            self.assertNotIn(f'register_uri("{path}"', web)
+        catchall = arduino.split('static void handleNotFound() {', 1)[1].split('// Register all HTTP routes', 1)[0]
         self.assertIn('httpServer.send(404,', catchall)
+        self.assertNotIn('Location', catchall)
 
     def test_local_favicon_matches_cloud_brand_asset(self):
         self.assertEqual((ROOT / 'hub/platformio/data/favicon.svg').read_text(),
@@ -138,14 +140,12 @@ class PublicAssetTests(unittest.TestCase):
         self.assertIn('valid_pmtiles_archive(&file)', handler)
         self.assertIn('section_length > size - section_start', server)
 
-    def test_mdns_hostname_is_not_redirected_as_foreign(self):
+    def test_local_hostname_remains_available_without_wildcard_dns(self):
         source = (ROOT / 'hub/platformio/src/main.cpp').read_text(encoding='utf-8')
-        host = source.split('static bool hasForeignPortalHost() {', 1)[1].split(
-            'static void handleCaptiveProbe()', 1)[0]
-        self.assertIn('host.toLowerCase()', host)
-        self.assertIn('host.endsWith(":80")', host)
-        self.assertIn('host.endsWith(".")', host)
-        self.assertIn('host != String(MDNS_HOSTNAME) + ".local"', host)
+        self.assertIn('MDNS.begin(MDNS_HOSTNAME)', source)
+        mdns = (ROOT / 'hub/esp-idf-p4/main/home_hub_mdns.cpp').read_text(encoding='utf-8')
+        self.assertIn('strcasecmp(name, kLocalHostname) == 0', mdns)
+        self.assertIn('kMdnsPort = 5353', mdns)
 
     def test_welcome_page_is_separate_and_offline_ready(self):
         source = (ROOT / 'hub/platformio/src/main.cpp').read_text(encoding='utf-8')
@@ -154,7 +154,9 @@ class PublicAssetTests(unittest.TestCase):
         self.assertIn('httpServer.on("/",             HTTP_GET,  handleRoot)', source)
         self.assertIn('href="http://192.168.4.1/"', html)
         self.assertIn('href="http://bluepaws.local/"', html)
-        self.assertIn('Use this network as is', html)
+        self.assertIn('Stay connected', html)
+        self.assertIn('BluePaws_192.168.4.1', html)
+        self.assertNotIn('sign-in window', html)
         self.assertIn('Open tracking dashboard', html)
         self.assertIn('<noscript>', html)
         self.assertNotRegex(html, r'(?:src|href)="https://')
@@ -165,7 +167,7 @@ class PublicAssetTests(unittest.TestCase):
         source = (ROOT / 'hub/platformio/src/main.cpp').read_text(encoding='utf-8')
         handler = source.split('static void handleApiWelcome() {', 1)[1].split(
             'static void handleFavicon()', 1)[0]
-        self.assertIn('if (!isCaptivePortalClient())', handler)
+        self.assertIn('if (!isAccessPointClient())', handler)
         self.assertIn('sendHeader("Cache-Control", "no-store")', handler)
         self.assertIn('xSemaphoreTake(deviceMutex, pdMS_TO_TICKS(50))', handler)
         self.assertIn('httpServer.send(503', handler)
@@ -215,7 +217,7 @@ class PublicAssetTests(unittest.TestCase):
         self.assertIn('WiFi.softAPgetStationNum() > 0', network)
         self.assertIn('!busy && now - lastScan >= 60000', network)
         self.assertIn('pending.confirmed', network)
-        self.assertIn('captiveDns.processNextRequest()', network)
+        self.assertNotIn('captiveDns', network)
         self.assertNotIn('syncHubClock(', network)
         self.assertIn('false, MAX_SSE_CLIENTS', source)
         self.assertNotIn('WiFi.setSleep(false)', source)

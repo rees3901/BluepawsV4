@@ -42,7 +42,8 @@ layer.
 
 The launcher **Settings** page is backed by ESP-IDF NVS and provides touch
 editing with an on-screen keyboard for primary and secondary Wi-Fi networks,
-plus the fallback off-grid access-point name and password. The launcher also
+plus the fallback off-grid access-point password. The network name is fixed at
+`BluePaws_192.168.4.1` so it always tells users where to open the dashboard. The launcher also
 opens the Overview directly. Its compact Hub mode selector persists Home,
 Portable or Off-Grid. Home prefers primary Wi-Fi and Portable prefers the
 secondary phone hotspot; both use one 30-second recovery budget to try every
@@ -58,12 +59,11 @@ or written to the serial log.
 
 The P4 now also packages the proven static off-grid dashboard from `hub/data`
 into its 7 MB `storage` SPIFFS partition. When the hub's access point is active,
-clients can open `http://192.168.4.1`; common Android, Apple and Windows captive
-portal probes are redirected to the local welcome page. The dashboard is
-advertised as `http://bluepaws.local/` using a lightweight mDNS responder. The
-P4 also advertises `/welcome` with DHCP captive-portal option 114
-and answers wildcard IPv4 DNS locally. This lets Windows NCSI reach its HTTP probe
-without waiting for public DNS to time out on the intentionally offline network.
+clients join `BluePaws_192.168.4.1` and open `http://192.168.4.1/` in Chrome,
+Safari or their normal browser. Choose to stay connected if the phone reports
+no internet. There is no captive portal, wildcard DNS interception or DHCP
+portal announcement. `http://bluepaws.local/` remains an optional mDNS address.
+Existing saved hotspot names are replaced with the address-based name on load.
 The first compatibility milestone serves live P4 collar snapshots and hub/network
 status. It deliberately
 reports collar commands, history export, configuration writes and Bluetooth as

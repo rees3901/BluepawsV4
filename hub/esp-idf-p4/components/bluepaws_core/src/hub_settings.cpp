@@ -62,10 +62,9 @@ void sanitize(Settings &settings) {
     settings.access_point_ssid[kWifiSsidBytes - 1] = '\0';
     settings.access_point_password[kWifiPasswordBytes - 1] = '\0';
 
-    if (!validSsid(settings.access_point_ssid)) {
-        std::strncpy(settings.access_point_ssid, "BluePaws-Hub",
-                     sizeof(settings.access_point_ssid) - 1);
-    }
+    // Replace persisted legacy names too: the SSID is the offline entry address.
+    std::strncpy(settings.access_point_ssid, "BluePaws_192.168.4.1",
+                 sizeof(settings.access_point_ssid) - 1);
     if (!validAccessPointPassword(settings.access_point_password)) {
         settings.access_point_password[0] = '\0';
     }

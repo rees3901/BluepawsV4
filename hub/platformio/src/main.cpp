@@ -13,7 +13,7 @@
   │  FreeRTOS Tasks (pinned to cores):                          │
   │    loraTask  (core 1, prio 3) — RX/TX LoRa packets         │
   │    webTask   (core 1, prio 2) — HTTP server + SSE push      │
-  │    network   (core 0, prio 2) — Wi-Fi policy + captive DNS  │
+  │    network   (core 0, prio 2) — Wi-Fi connection policy    │
   │    bleTask   (core 0, prio 1) — BLE home beacon advertising │
   │    cloudTask (core 0, prio 1) — REST POST relay to cloud    │
   │  Main loop() yields to scheduler (does nothing).            │
@@ -25,7 +25,6 @@
 #include <Preferences.h>
 #include <RadioLib.h>        // SX1262 LoRa radio driver
 #include <WiFi.h>            // WiFi AP+STA dual mode
-#include <DNSServer.h>       // Captive portal wildcard DNS in Off-Grid mode
 #include <WebServer.h>       // Lightweight HTTP server (port 80)
 #include <LittleFS.h>        // On-chip flash filesystem (stores web files + logs)
 #include <ESPmDNS.h>         // mDNS so you can browse to http://bluepaws.local
@@ -113,8 +112,6 @@ static SemaphoreHandle_t loraMutex = NULL;        // Protects SPI bus access
 
 // ── Web Server ──
 static WebServer httpServer(HTTP_PORT);
-static DNSServer captiveDns;
-static constexpr uint8_t CAPTIVE_DNS_PORT = 53;
 static OfflineAccess offlineAccess;
 
 // ── SSE (Server-Sent Events) ──
@@ -225,7 +222,6 @@ static std::atomic<bool> networkStackReady{false};
 static std::atomic<WifiFailover::Phase> wifiPhase{WifiFailover::Phase::Idle};
 static std::atomic<uint32_t> wifiRecoveryRemainingMs{0};
 static std::atomic<uint32_t> apStartFailures{0};
-static bool captiveDnsRunning = false; // network task only
 static bool hubTimeSynced = false;
 static uint32_t lastNtpSyncMs = 0;
 
@@ -467,7 +463,7 @@ void setup() {
     xTaskCreatePinnedToCore(webTask,   "web",   STACK_WEB,   NULL, PRIO_WEB,   &webTaskHandle,   1);  // Below LoRa on core 1
     if (xTaskCreatePinnedToCore(networkTask, "network", STACK_NETWORK, NULL,
                                PRIO_NETWORK, &networkTaskHandle, 0) != pdPASS) {
-        Serial.println("[FATAL] Cannot start Wi-Fi/captive DNS task");
+        Serial.println("[FATAL] Cannot start Wi-Fi network task");
         delay(1000);
         ESP.restart();
     }
@@ -566,16 +562,10 @@ static void applyWifiRoleForCurrentProfile() {
             Serial.println("[WIFI] AP start failed; retry in 5 seconds");
         }
     } else if (!shouldEnableAp && hubApEnabled) {
-        captiveDns.stop();
-        captiveDnsRunning = false;
         WiFi.softAPdisconnect(true);
         hubApEnabled = false;
         WiFi.mode(WIFI_STA);
         Serial.println("[WIFI] AP disabled for normal Home/Portable STA mode");
-    }
-    if (hubApEnabled && !captiveDnsRunning) {
-        captiveDnsRunning = captiveDns.start(CAPTIVE_DNS_PORT, "*", WiFi.softAPIP());
-        if (!captiveDnsRunning) Serial.println("[WIFI] Captive DNS start failed; will retry");
     }
 }
 
@@ -714,7 +704,7 @@ static bool requestHubMode(hub_comm_profile_t profile, bool confirmed) {
     return true;
 }
 
-// All application Wi-Fi mutations and captive DNS belong to this task.
+// All application Wi-Fi mutations belong to this task.
 // Keep HTTP handlers, NTP waits, TLS, filesystem writes and BLE scans elsewhere.
 static void networkTask(void *param) {
     (void)param;
@@ -793,7 +783,7 @@ static void networkTask(void *param) {
         if (!staConnected) homeBeaconAllowed = false;
 
         // AP+STA shares one radio. Never associate or scan while local clients
-        // are connected: channel hops disrupt captive portal, HTTP and SSE.
+        // are connected: channel hops disrupt local HTTP and SSE.
         // Idle-only discovery provides a hint, NEVER an automatic mode change.
         if (policy.phase() == WifiFailover::Phase::OffGrid && hubApEnabled) {
             const bool busy = WiFi.softAPgetStationNum() > 0;
@@ -817,11 +807,10 @@ static void networkTask(void *param) {
                 scanActive = WiFi.scanNetworks(true, false, false, 120) == WIFI_SCAN_RUNNING;
             }
         }
-        if (hubApEnabled && captiveDnsRunning) captiveDns.processNextRequest();
         if (now - lastMaintenance >= 5000) {
             lastMaintenance = now;
-            // Retry only failed AP/DNS starts. Healthy interfaces are left alone.
-            if (hubProfileNeedsLocalAp() && (!hubApEnabled || !captiveDnsRunning)) applyWifiRoleForCurrentProfile();
+            // Retry only failed AP starts. Healthy interfaces are left alone.
+            if (hubProfileNeedsLocalAp() && !hubApEnabled) applyWifiRoleForCurrentProfile();
             if (!mdnsStarted && (hubApEnabled || staConnected)) {
                 mdnsStarted = MDNS.begin(MDNS_HOSTNAME);
                 if (mdnsStarted) MDNS.addService("http", "tcp", HTTP_PORT);
@@ -1555,36 +1544,13 @@ static void sseBroadcast(const char *event, const char *data) {
 // SSE endpoint pushes real-time telemetry to the browser.
 // ═══════════════════════════════════════════════
 
-// Only AP-side HTTP requests belong to the captive portal. Never redirect
-// ordinary LAN API traffic or reflect an arbitrary Host header into Location.
-static bool isCaptivePortalClient() {
+// Keep the optional local help/status page scoped to hotspot clients.
+static bool isAccessPointClient() {
     return hubApEnabled && httpServer.client().localIP() == WiFi.softAPIP();
 }
 
-static bool hasForeignPortalHost() {
-    String host = httpServer.hostHeader();
-    host.toLowerCase();
-    if (host.endsWith(":80")) host.remove(host.length() - 3);
-    if (host.endsWith(".")) host.remove(host.length() - 1);
-    return host.length() && host != WiFi.softAPIP().toString()
-        && host != String(MDNS_HOSTNAME) + ".local";
-}
-
-static void handleCaptiveProbe() {
-    if (!isCaptivePortalClient()) {
-        httpServer.send(404, "text/plain", "Not found");
-        return;
-    }
-    String target = "http://" + WiFi.softAPIP().toString() + "/welcome";
-    httpServer.sendHeader("Cache-Control", "no-store");
-    httpServer.sendHeader("Location", target, true);
-    httpServer.send(302, "text/html", "<a href=\"" + target + "\">Welcome to Bluepaws Home Hub</a>");
-}
-
-// A small entry page for OS sign-in windows; the full dashboard stays at /.
-// Do not fake Internet validation or attempt to force another application open.
+// Optional browser help page. The dashboard is served directly at /.
 static void handleWelcome() {
-    if (hasForeignPortalHost()) { handleCaptiveProbe(); return; }
     httpServer.sendHeader("Cache-Control", "no-store");
     File file = LittleFS.open("/welcome.html", "r");
     if (!file) {
@@ -1600,7 +1566,7 @@ static void handleWelcome() {
 // Small read-only snapshot: no location, credentials, names, commands or SSE.
 static void handleApiWelcome() {
     httpServer.sendHeader("Cache-Control", "no-store");
-    if (!isCaptivePortalClient()) {
+    if (!isAccessPointClient()) {
         httpServer.send(404, "application/json", "{\"error\":\"not_found\"}");
         return;
     }
@@ -1640,10 +1606,6 @@ static void handleFavicon() {
 
 // Serve the main HTML page from flash
 static void handleRoot() {
-    if (isCaptivePortalClient() && hasForeignPortalHost()) {
-        handleCaptiveProbe();
-        return;
-    }
     httpServer.sendHeader("Cache-Control", "no-store");
     File f = LittleFS.open("/index.html", "r");
     if (f) {
@@ -2285,14 +2247,6 @@ static void handleNotFound() {
         f.close();
         return;
     }
-    // Unknown navigation on a captured external hostname (including Windows'
-    // portal URL variants) must land on the IP, not stay on a probe origin.
-    // Canonical-IP missing assets/private files and API errors remain real 404s.
-    if (isCaptivePortalClient() && hasForeignPortalHost() && !path.startsWith("/api/")
-        && (httpServer.method() == HTTP_GET || httpServer.method() == HTTP_HEAD)) {
-        handleCaptiveProbe();
-        return;
-    }
     httpServer.send(404, "text/plain", "Not found");
 }
 
@@ -2334,14 +2288,6 @@ static void initWebServer() {
     httpServer.on("/api/security", HTTP_GET, handleApiSecurityStatus);
     httpServer.on("/api/security/pin", HTTP_POST, handleApiSecurityPin);
     httpServer.on("/api/security/unlock", HTTP_POST, handleApiSecurityUnlock);
-    httpServer.on("/generate_204", HTTP_GET, handleCaptiveProbe);
-    httpServer.on("/gen_204", HTTP_GET, handleCaptiveProbe);
-    httpServer.on("/hotspot-detect.html", HTTP_GET, handleCaptiveProbe);
-    httpServer.on("/library/test/success.html", HTTP_GET, handleCaptiveProbe);
-    httpServer.on("/ncsi.txt", HTTP_GET, handleCaptiveProbe);
-    httpServer.on("/connecttest.txt", HTTP_GET, handleCaptiveProbe);
-    httpServer.on("/redirect", HTTP_GET, handleCaptiveProbe); // Windows NCSI browser launch
-    httpServer.on("/fwlink", HTTP_GET, handleCaptiveProbe);   // older Windows portal launch
     httpServer.onNotFound(handleNotFound);                        // Serve other files from flash
     httpServer.begin();
     Serial.printf("[WEB] HTTP server on port %d\n", HTTP_PORT);

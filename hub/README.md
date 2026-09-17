@@ -11,3 +11,12 @@ material:
 
 The PlatformIO environment retains the name `hub` for command-line and CI
 compatibility.
+
+## Offline browser access
+
+Join `BluePaws_192.168.4.1`, stay connected if your phone reports no internet,
+and open `http://192.168.4.1/` in Chrome, Safari or your usual browser.
+Both hub firmware variants serve the dashboard directly without a captive
+portal, wildcard DNS or portal redirects. `http://bluepaws.local/` remains an
+optional local hostname. Updating existing hardware requires flashing the
+firmware and bundled web filesystem.
