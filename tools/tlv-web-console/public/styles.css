@@ -50,8 +50,7 @@ h2 { font-size: 18px; }
   box-shadow: 0 18px 45px rgba(0, 0, 0, 0.22);
 }
 .credentials { margin: 18px 0; }
-#run-feedback[data-run-state="running"],
-#run-feedback[data-run-state="completed"] {
+#run-feedback[data-run-state="running"] {
   border-color: var(--good);
   box-shadow: 0 0 0 1px var(--good), 0 18px 45px rgba(0, 0, 0, 0.22);
 }
@@ -60,12 +59,12 @@ h2 { font-size: 18px; }
 }
 @keyframes run-feedback-pulse {
   0%, 100% {
-    border-color: #21815e;
-    box-shadow: 0 0 0 1px #21815e, 0 18px 45px rgba(0, 0, 0, 0.22);
+    border-color: var(--border);
+    box-shadow: 0 0 0 1px rgba(21, 213, 138, 0), 0 0 24px rgba(21, 213, 138, 0), 0 18px 45px rgba(0, 0, 0, 0.22);
   }
   50% {
     border-color: var(--good);
-    box-shadow: 0 0 0 1px var(--good), 0 0 18px rgba(21, 213, 138, 0.22), 0 18px 45px rgba(0, 0, 0, 0.22);
+    box-shadow: 0 0 0 1px var(--good), 0 0 24px rgba(21, 213, 138, 0.45), 0 18px 45px rgba(0, 0, 0, 0.22);
   }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -78,6 +77,11 @@ h2 { font-size: 18px; }
   border-radius: 999px;
   color: var(--muted);
 }
+.run-action { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+#run-outcome { font-weight: 700; white-space: nowrap; }
+#run-outcome[data-outcome="completed"] { color: var(--good); border-color: var(--good); }
+#run-outcome[data-outcome="stopped"] { color: var(--warn); border-color: var(--warn); }
+#run-outcome[data-outcome="failed"] { color: var(--bad); border-color: var(--bad); }
 
 button, .file-button {
   border: 1px solid var(--border);

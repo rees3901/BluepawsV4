@@ -55,13 +55,14 @@ function bindEvents() {
   $("recipe").addEventListener("change", applyRecipeDefaults);
   $("run-send").addEventListener("click", runScenario);
   $("stop-send").addEventListener("click", () => {
+    if (!state.running) return;
     state.stopRequested = true;
     $("run-status").textContent = "Stopping after current request…";
   });
   $("clear-log").addEventListener("click", () => {
     state.responseRows = [];
     if (!state.running) {
-      $("run-feedback").dataset.runState = "idle";
+      setRunFeedback("idle");
       $("run-status").textContent = "Idle.";
     }
     $("request-detail").textContent = "{}";
@@ -489,11 +490,20 @@ function setHtml(id, value) {
   if (element) element.innerHTML = value;
 }
 
+function setRunFeedback(outcome) {
+  $("run-feedback").dataset.runState = outcome;
+  const pill = $("run-outcome");
+  const labels = { completed: "✅ Complete", stopped: "⚠️ Stopped", failed: "❌ Failed" };
+  pill.dataset.outcome = outcome;
+  pill.textContent = labels[outcome] || "";
+  pill.hidden = !labels[outcome];
+}
+
 async function runScenario() {
   if (state.running) return;
   state.running = true;
   state.stopRequested = false;
-  $("run-feedback").dataset.runState = "running";
+  setRunFeedback("running");
   const recipeKey = $("recipe").value;
   const count = Number($("send-count").value);
   const timeout = Number($("send-timeout").value);
@@ -505,6 +515,7 @@ async function runScenario() {
     dueAt: Date.now() + initialCadenceDelaySeconds(state.deviceSettings.get(deviceId)) * 1000,
   }));
   let requestNumber = 0;
+  let failedRequests = 0;
   try {
     while (schedule.some((item) => item.reportIndex < count) && !state.stopRequested) {
       const item = schedule.filter((candidate) => candidate.reportIndex < count).sort((left, right) => left.dueAt - right.dueAt)[0];
@@ -542,6 +553,7 @@ async function runScenario() {
             timeout_seconds: timeout,
           },
         });
+        if (!result.ok) failedRequests += 1;
         state.deviceSettings.set(deviceId, packetSettings);
         appendLog(requestNumber, deviceId, packetSettings, result, requestPreview);
         renderDevices();
@@ -549,11 +561,14 @@ async function runScenario() {
         if (item.reportIndex < count) item.dueAt = Date.now() + cadenceDelaySeconds(packetSettings) * 1000;
       }
     }
-    $("run-status").textContent = state.stopRequested ? "Stopped." : `Completed ${requestNumber} request(s).`;
-    $("run-feedback").dataset.runState = state.stopRequested ? "stopped" : "completed";
+    const outcome = state.stopRequested ? "stopped" : failedRequests > requestNumber / 2 ? "failed" : "completed";
+    const summary = `${requestNumber} request(s), ${failedRequests} failed.`;
+    $("run-status").textContent = outcome === "stopped" ? `Stopped. ${summary}`
+      : outcome === "failed" ? `Run failed: most requests failed. ${summary}` : `Completed ${summary}`;
+    setRunFeedback(outcome);
   } catch (error) {
     $("run-status").textContent = `Run failed: ${error.message}`;
-    $("run-feedback").dataset.runState = "failed";
+    setRunFeedback("failed");
   } finally {
     state.running = false;
     schedulePreview();

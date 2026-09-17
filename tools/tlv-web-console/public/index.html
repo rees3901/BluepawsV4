@@ -151,7 +151,10 @@
             </div>
             <p id="recipe-description" class="muted"></p>
             <div class="toolbar">
-              <button id="run-send" class="primary">Run selected scenario</button>
+              <div class="run-action">
+                <button id="run-send" class="primary">Run selected scenario</button>
+                <span id="run-outcome" class="status-pill" role="status" hidden></span>
+              </div>
               <button id="stop-send">Stop</button>
               <button id="clear-log">Clear log</button>
             </div>
