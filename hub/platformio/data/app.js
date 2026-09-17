@@ -44,17 +44,18 @@
     var toastHideTimer = null;
     var temporaryPins = new Map();
     var nextTemporaryPinId = 1;
-    var hubMode = 'home';          // home | portable | off_grid
+    var hubMode = 'home';          // effective: home | portable | off_grid
+    var hubRequestedMode = 'home'; // saved user policy
     var hubPortableMode = false;   // true when hub scans for BLE find beacons
     var pendingHubMode = null;
     var HUB_MODE_DETAILS = {
         home: {
             label: 'Home Hub',
-            body: 'Stops the local hotspot, prefers your primary home Wi-Fi, and resumes normal cloud relay when online. This page will disconnect as the hotspot closes.'
+            body: 'Prefers your primary home Wi-Fi, then tries the saved portable Wi-Fi and finally starts Off-Grid if neither is available. This page disconnects when the hotspot closes.'
         },
         portable: {
             label: 'Portable',
-            body: 'Prefers your saved secondary phone hotspot, keeps cloud relay available, and identifies this hub as portable.'
+            body: 'Uses your saved portable Wi-Fi only. If it is unavailable, the hub starts Off-Grid rather than silently joining the home network.'
         },
         off_grid: {
             label: 'Off-Grid',
@@ -2166,6 +2167,8 @@
             sessionStorage.removeItem('bluepawsLocalSession');
         }
         hubMode = s.hubMode;
+        hubRequestedMode = ['home', 'portable', 'off_grid'].indexOf(s.requestedMode) !== -1
+            ? s.requestedMode : hubMode;
         hubPortableMode = hubMode !== 'home';
         updateHubModeUI();
         if (hubPortableMode && !blePollingTimer) startBlePolling();
@@ -2204,6 +2207,10 @@
             'Log entries: ' + s.logEntries + '<br>' +
             'Free heap: ' + (s.freeHeap / 1024).toFixed(1) + ' KB<br>' +
             'WiFi STA: ' + (s.staConnected ? s.staIP : 'Not connected') + '<br>' +
+            'Selected policy: ' + (s.requestedMode || s.hubMode || 'Unknown') + '<br>' +
+            'Active mode: ' + (s.hubMode || 'Unknown') +
+                (s.automaticFallback ? ' (automatic fallback)' : '') + '<br>' +
+            'Mode source: ' + (s.modeReason || 'Unknown') + '<br>' +
             'Network: ' + (s.network_phase || 'Unknown') + '<br>' +
             'Recovery remaining: ' + Math.ceil((s.recovery_remaining_ms || 0) / 1000) + ' s<br>' +
             'AP IP: ' + s.apIP + '<br>' +
@@ -2250,7 +2257,10 @@
     // 2 seconds to get RSSI proximity data for the device cards.
     // ═══════════════════════════════════════════════
     function requestHubMode(mode) {
-        if (!HUB_MODE_DETAILS[mode] || mode === hubMode) return;
+        // Re-selecting the saved policy while an automatic fallback is active
+        // is an intentional retry, so compare both requested and effective.
+        if (!HUB_MODE_DETAILS[mode] ||
+            (mode === hubRequestedMode && mode === hubMode)) return;
         pendingHubMode = mode;
         document.getElementById('hubModeConfirmTitle').textContent =
             'Switch to ' + HUB_MODE_DETAILS[mode].label + ' mode?';
@@ -2286,6 +2296,7 @@
               }
               if (!d.mode) throw new Error(d.error || 'Mode change failed');
               hubMode = d.mode;
+              hubRequestedMode = d.requestedMode || d.mode;
               hubPortableMode = (hubMode === 'portable' || hubMode === 'off_grid');
               if (hubMode !== 'off_grid') {
                   localSessionToken = '';
@@ -2309,9 +2320,9 @@
         var btnPortable = document.getElementById('btnPortableMode');
         var btnOffGrid = document.getElementById('btnOffGridMode');
         if (btnHome && btnPortable && btnOffGrid) {
-            btnHome.classList.toggle('active', hubMode === 'home');
-            btnPortable.classList.toggle('active', hubMode === 'portable');
-            btnOffGrid.classList.toggle('active', hubMode === 'off_grid');
+            btnHome.classList.toggle('active', hubRequestedMode === 'home');
+            btnPortable.classList.toggle('active', hubRequestedMode === 'portable');
+            btnOffGrid.classList.toggle('active', hubRequestedMode === 'off_grid');
         }
 
         document.body.classList.remove('hub-mode-home', 'hub-mode-portable', 'hub-mode-off-grid');

@@ -726,6 +726,14 @@ void update_ui(UiState &ui)
     }
     const bluepaws::cloud::Status cloud_status = bluepaws::cloud::status();
     bluepaws::web::updateSnapshot(ui.cats, cloud_status);
+    if (ui.overview_mode_dropdown != nullptr &&
+        ui.overview_mode_confirmation != nullptr &&
+        lv_obj_has_flag(ui.overview_mode_confirmation, LV_OBJ_FLAG_HIDDEN)) {
+        // The selector is also the runtime indicator.  Automatic Home ->
+        // Portable -> Off-Grid transitions must therefore be visible here.
+        lv_dropdown_set_selected(ui.overview_mode_dropdown,
+                                 static_cast<uint32_t>(cloud_status.effective_mode));
+    }
     const char *sync_name = !ui.cloud_enabled ? "simulator"
         : (cloud_status.state == bluepaws::cloud::ConnectionState::Online ? "online"
         : (cloud_status.state == bluepaws::cloud::ConnectionState::Connecting ? "connecting"
@@ -1231,11 +1239,7 @@ void update_ui(UiState &ui)
                               static_cast<unsigned>(ui.cats.size()));
         break;
     case AppPage::Overview:
-        apply_overview_mode_theme(
-            ui,
-            cloud_status.automatic_off_grid
-                ? bluepaws::hub::CommunicationsMode::OffGrid
-                : ui.settings.communications_mode);
+        apply_overview_mode_theme(ui, cloud_status.effective_mode);
         if (ui.overview_clock_label != nullptr) {
             const std::time_t wall_time = std::time(nullptr);
             std::tm local_time{};
@@ -1250,11 +1254,13 @@ void update_ui(UiState &ui)
                 lv_label_set_text(ui.overview_clock_label, "--:-- --");
             }
         }
+        const bool automatic_transition =
+            cloud_status.requested_mode != cloud_status.effective_mode;
         lv_label_set_text_fmt(ui.status,
                               "%u cats | %s | %s%s mode | tap background to open",
                               static_cast<unsigned>(ui.cats.size()),
                               sync_name,
-                              cloud_status.automatic_off_grid ? "auto " : "",
+                              automatic_transition ? "auto " : "",
                               bluepaws::hub::communicationsModeName(cloud_status.effective_mode));
         break;
     }
@@ -3085,13 +3091,13 @@ void overview_wake_clicked(lv_event_t *event)
 
 bool set_communications_mode(UiState &ui, bluepaws::hub::CommunicationsMode mode)
 {
-    if (ui.settings.communications_mode == mode) return true;
     const bluepaws::hub::CommunicationsMode previous = ui.settings.communications_mode;
     ESP_LOGI(kTag, "Hub mode requested: %s -> %s",
              bluepaws::hub::communicationsModeName(previous),
              bluepaws::hub::communicationsModeName(mode));
+    const bool preference_changed = previous != mode;
     ui.settings.communications_mode = mode;
-    if (!bluepaws::settings_store::save(ui.settings)) {
+    if (preference_changed && !bluepaws::settings_store::save(ui.settings)) {
         ui.settings.communications_mode = previous;
         if (ui.overview_mode_dropdown != nullptr) {
             lv_dropdown_set_selected(ui.overview_mode_dropdown,
@@ -3102,6 +3108,8 @@ bool set_communications_mode(UiState &ui, bluepaws::hub::CommunicationsMode mode
         if (ui.status != nullptr) lv_label_set_text(ui.status, "Could not save hub mode");
         return false;
     }
+    // Applying even an unchanged preference is deliberate: selecting Home
+    // while Home's automatic fallback is active requests an immediate retry.
     bluepaws::cloud::applyNetworkSettings(ui.settings);
     apply_overview_mode_theme(ui, mode);
     lv_display_trigger_activity(ui.display);
@@ -3114,9 +3122,9 @@ const char *mode_confirmation_body(bluepaws::hub::CommunicationsMode mode)
 {
     switch (mode) {
     case bluepaws::hub::CommunicationsMode::Home:
-        return "Stops the local hotspot, prefers your primary home Wi-Fi, and resumes normal cloud relay when online.";
+        return "Prefers your primary home Wi-Fi, then tries the saved portable Wi-Fi and finally starts Off-Grid if neither is available.";
     case bluepaws::hub::CommunicationsMode::Portable:
-        return "Prefers your secondary phone hotspot, keeps cloud relay available, and identifies this hub as portable.";
+        return "Uses your saved portable Wi-Fi only. If it is unavailable, the hub starts Off-Grid rather than joining the home network.";
     case bluepaws::hub::CommunicationsMode::OffGrid:
         return "Stops internet Wi-Fi attempts and starts the hub hotspot, local dashboard, and offline operation.";
     }
@@ -3129,9 +3137,10 @@ void close_mode_confirmation(UiState &ui)
         lv_obj_add_flag(ui.overview_mode_confirmation, LV_OBJ_FLAG_HIDDEN);
     }
     if (ui.overview_mode_dropdown != nullptr) {
+        const auto effective = bluepaws::cloud::status().effective_mode;
         lv_dropdown_set_selected(
             ui.overview_mode_dropdown,
-            static_cast<uint32_t>(ui.settings.communications_mode));
+            static_cast<uint32_t>(effective));
     }
 }
 
@@ -3160,10 +3169,11 @@ void mode_dropdown_changed(lv_event_t *event)
     const uint32_t selected = lv_dropdown_get_selected(dropdown);
     if (selected > static_cast<uint32_t>(bluepaws::hub::CommunicationsMode::OffGrid)) return;
     const auto requested = static_cast<bluepaws::hub::CommunicationsMode>(selected);
-    if (requested == ui->settings.communications_mode) return;
+    const auto effective = bluepaws::cloud::status().effective_mode;
+    if (requested == ui->settings.communications_mode && requested == effective) return;
     ui->pending_communications_mode = requested;
     lv_dropdown_set_selected(
-        dropdown, static_cast<uint32_t>(ui->settings.communications_mode));
+        dropdown, static_cast<uint32_t>(effective));
     if (ui->overview_mode_confirmation_title != nullptr) {
         lv_label_set_text_fmt(ui->overview_mode_confirmation_title,
                               "Switch to %s mode?",
@@ -3363,7 +3373,8 @@ void create_overview_page(UiState &ui)
     ui.overview_mode_title = mode_title;
     lv_obj_t *mode_dropdown = lv_dropdown_create(header);
     lv_dropdown_set_options(mode_dropdown, "Home Hub\nPortable\nOff-Grid");
-    lv_dropdown_set_selected(mode_dropdown, static_cast<uint32_t>(ui.settings.communications_mode));
+    lv_dropdown_set_selected(mode_dropdown,
+                             static_cast<uint32_t>(bluepaws::cloud::status().effective_mode));
     lv_obj_set_pos(mode_dropdown, ui.portrait ? 100 : 305, ui.portrait ? 10 : 21);
     lv_obj_set_size(mode_dropdown, ui.portrait ? 136 : 190, ui.portrait ? 38 : 34);
     lv_obj_set_style_bg_color(mode_dropdown, lv_color_hex(0x173342), 0);
@@ -3374,7 +3385,7 @@ void create_overview_page(UiState &ui)
     lv_obj_set_style_text_font(mode_dropdown, &lv_font_montserrat_14, 0);
     lv_obj_add_event_cb(mode_dropdown, mode_dropdown_changed, LV_EVENT_VALUE_CHANGED, &ui);
     ui.overview_mode_dropdown = mode_dropdown;
-    apply_overview_mode_theme(ui, ui.settings.communications_mode);
+    apply_overview_mode_theme(ui, bluepaws::cloud::status().effective_mode);
 
     ui.overview_header_wifi_image = make_drawer_image(header, bluepaws::ui::icon_radio_wifi);
     lv_obj_set_pos(ui.overview_header_wifi_image, ui.portrait ? 240 : 510, 18);

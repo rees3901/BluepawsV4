@@ -199,6 +199,9 @@ esp_err_t status_handler(httpd_req_t *request)
     cJSON_AddNumberToObject(json, "freeHeap", esp_get_free_heap_size());
     cJSON_AddStringToObject(json, "mode", mode_name(state.cloud.effective_mode));
     cJSON_AddStringToObject(json, "hubMode", mode_name(state.cloud.effective_mode));
+    cJSON_AddStringToObject(json, "requestedMode", mode_name(state.cloud.requested_mode));
+    cJSON_AddStringToObject(json, "modeReason", cloud::modeReasonName(state.cloud.mode_reason));
+    cJSON_AddBoolToObject(json, "automaticFallback", state.cloud.automatic_off_grid);
     cJSON_AddBoolToObject(json, "wifi_connected", state.cloud.wifi_station_connected);
     cJSON_AddStringToObject(json, "wifi_ssid", state.cloud.wifi_ssid);
     if (state.cloud.wifi_station_connected) {
@@ -233,8 +236,7 @@ esp_err_t status_handler(httpd_req_t *request)
     cJSON_AddBoolToObject(json, "known_wifi_available", false);
     cJSON_AddBoolToObject(json, "provisioning_mode", false);
     cJSON_AddStringToObject(json, "network_phase",
-                            state.cloud.wifi_station_connected
-                                ? "connected" : "off_grid");
+                            cloud::modeReasonName(state.cloud.mode_reason));
     const esp_err_t result = send_json(request, json);
     cJSON_Delete(json);
     return result;
