@@ -4,18 +4,34 @@ The prototype SD-card layout is:
 
 ```text
 /bluepaws/maps/map_manifest.json
-/bluepaws/maps/tiles/{z}/{x}/{y}.jpg
+/bluepaws/maps/layers/osm-road-100km/tiles/{z}/{x}/{y}.jpg
 /bluepaws/maps/vector/united-kingdom.pmtiles
+/bluepaws/maps/imagery/uk-overview-webp.pmtiles
+/bluepaws/maps/imagery/gloucestershire-z15-17-webp.pmtiles
 ```
 
 `vector/united-kingdom.pmtiles` is now the preferred basemap for the local
 browser dashboard. The ESP32-P4 serves byte ranges from the archive and the
 bundled MapLibre/PMTiles client renders them without an internet connection.
-The existing JPEG XYZ packs remain selectable fallbacks and remain the native
-LVGL display format.
+The browser combines the two WebP raster PMTiles imagery archives into one
+`Aerial imagery` choice: the national overview supplies z5-12 and the bounded
+Gloucestershire pack supplies genuine detail at z15-17. The split keeps each
+file below FAT32's 4 GiB limit.
 
-The August 2026 multi-layer test card extends that without breaking the current
-firmware's hard-coded road path:
+The physical P4 display deliberately exposes only the
+`layers/osm-road-100km` JPEG street map. LVGL can decode that compact, reliable
+fallback without a WebGL raster pipeline. It does not list or open aerial,
+satellite or OS layers. High-detail imagery belongs to the preferred phone or
+tablet experience at `http://bluepaws.local` while connected to the hub AP.
+
+Remove obsolete `layers/satellite`, `layers/satellite-v2` and
+`layers/ordnance-survey*` directories from a deployed card only after checking
+the absolute target path and confirming that the OSM street tree, vector
+archive and new imagery archives are intact. The firmware no longer advertises
+those legacy directories.
+
+The August 2026 multi-layer test card layout is retained here as historical
+context; only the OSM road, vector and `imagery/*.pmtiles` entries are active:
 
 ```text
 /bluepaws/maps/map_manifest.json             active OSM road manifest
@@ -28,9 +44,9 @@ firmware's hard-coded road path:
 /bluepaws/maps/legacy/os-zoomstack-fixture/  preserved first hardware proof
 ```
 
-The current firmware reads only the active root `tiles` tree. The two layer
-directories are ready for the forthcoming map-layer switcher; copying them to
-the card now avoids another long preparation step later.
+The current native firmware reads the `osm-road-100km/tiles` tree. The local
+web server reads that same tree as its emergency raster fallback and serves the
+PMTiles archives with HTTP byte ranges.
 
 Copy `map_manifest.example.json` to the SD card as `map_manifest.json` and
 change its region metadata when the first test tile pack is prepared. Raster
@@ -116,10 +132,8 @@ pmtiles verify hub/maps/work/sources/united-kingdom-20260910-z15.pmtiles
 Get-FileHash hub/maps/work/sources/united-kingdom-20260910-z15.pmtiles -Algorithm SHA256
 ```
 
-If a future card genuinely lacks space, remove an optional satellite layer
-only after checking the intended absolute SD path and preserving the road and
-vector packs. The present test card had about 9.4 GB free before this 3.0 GB
-archive, so no satellite deletion was necessary.
+If a future card lacks space, reduce or remove the browser-only imagery packs
+before touching the native road fallback or vector archive.
 
 On Windows, render a quick fixture through the installed QGIS LTR environment:
 
@@ -228,9 +242,32 @@ For the expanded card, use `--profile regional-100km --quality 88` and write
 the output and manifest below
 `D:\bluepaws\maps\layers\ordnance-survey-100km`.
 
-## Aerial layer
+## Browser-only aerial imagery
 
-The preferred close-detail aerial source is the Environment Agency Vertical
+Install raster PMTiles with WebP tiles at these exact paths:
+
+```text
+/bluepaws/maps/imagery/uk-overview-webp.pmtiles
+/bluepaws/maps/imagery/gloucestershire-z15-17-webp.pmtiles
+```
+
+The UK archive contains the openly licensed 2016 EOX Sentinel-2 Cloudless
+overview at z5-12. Build it with `tools/build_uk_satellite_overview.py`; the
+browser may overzoom it for context, but no extra source detail is implied. The
+Gloucestershire archive is intentionally bounded to
+`-2.70,51.55,-1.60,52.20` and supplies z15-17. The web catalogue lists only
+archives with a valid PMTiles v3 header; a missing or interrupted copy is
+therefore hidden rather than presented as a broken layer. MapLibre may overzoom
+the z17 pixels to z19 for framing, but that does not create additional source
+detail.
+
+Create the regional WebP MBTiles database with GDAL/QGIS, then convert it with
+`pmtiles convert input.mbtiles output.pmtiles` and run `pmtiles verify`. Keep every archive below
+4,294,967,295 bytes for FAT32 and preserve the imagery provider's attribution
+and offline-distribution terms. These archives are not decoded by LVGL and must
+not be copied into `layers/*/tiles`.
+
+The preferred close-detail source remains the Environment Agency Vertical
 Aerial Photography collection. It is Open Government Licence data, supplied as
 5 km British National Grid ECW downloads at roughly 10-50 cm resolution where
 surveys exist. QGIS/GDAL can mosaic and reproject selected Gloucester coverage
