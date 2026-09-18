@@ -123,8 +123,6 @@ enum class WifiVerificationState : uint8_t {
 
 enum class MapLayer : uint8_t {
     Street,
-    OrdnanceSurvey,
-    Satellite,
 };
 
 struct MapLayerInfo {
@@ -135,10 +133,8 @@ struct MapLayerInfo {
     uint8_t maximum_zoom;
 };
 
-constexpr std::array<MapLayerInfo, 3> kMapLayers{{
+constexpr std::array<MapLayerInfo, 1> kMapLayers{{
     {"OpenStreetMap", "GB overview; 100 km Gloucester detail", "/sdcard/bluepaws/maps/layers/osm-road-100km/tiles", 5, 17},
-    {"Ordnance Survey", "Official OS mapping; GB overview and regional detail", "/sdcard/bluepaws/maps/layers/ordnance-survey-100km/tiles", 5, 17},
-    {"Satellite", "UK overview with Gloucestershire detail", "/sdcard/bluepaws/maps/layers/satellite/tiles", 5, 14},
 }};
 
 struct UiLayout {
@@ -239,7 +235,6 @@ struct UiState {
     lv_obj_t *camera_contrast_value = nullptr;
     lv_obj_t *camera_zoom_value = nullptr;
     lv_obj_t *map_drawer = nullptr;
-    lv_obj_t *layer_drawer = nullptr;
     lv_obj_t *brightness_popup = nullptr;
     lv_obj_t *brightness_slider = nullptr;
     lv_obj_t *brightness_label = nullptr;
@@ -283,7 +278,6 @@ struct UiState {
     MapLayer active_map_layer = MapLayer::Street;
     bool dark_mode = true;
     bool drawer_open = false;
-    bool layer_drawer_open = false;
     bool quick_settings_open = false;
     bool screensaver_pending = false;
     bool screen_dimmed = false;
@@ -353,19 +347,6 @@ bool map_layer_available(const UiState &ui, MapLayer layer)
         closedir(directory);
         return true;
     }
-    // Some FatFs/VFS combinations have returned an error for directory
-    // metadata while files beneath the same path remain readable. A known
-    // centre tile is therefore a final positive probe for the installed
-    // satellite pack, preventing a valid layer from being greyed out.
-    if (layer == MapLayer::Satellite) {
-        char probe_path[160]{};
-        std::snprintf(probe_path, sizeof(probe_path), "%s/14/8090/5421.jpg", root);
-        struct stat probe_stat {};
-        if (stat(probe_path, &probe_stat) == 0 && S_ISREG(probe_stat.st_mode) &&
-            probe_stat.st_size > 4) {
-            return true;
-        }
-    }
     ESP_LOGW(kTag,
              "Map layer probe failed: %s path=%s stat_errno=%d opendir_errno=%d",
              map_layer_info(layer).name,
@@ -386,35 +367,6 @@ void log_map_storage_probe(const UiState &ui)
                  kMapLayers[i].tile_root);
     }
 
-    constexpr char satellite_probe[] =
-        "/sdcard/bluepaws/maps/layers/satellite/tiles/14/8090/5421.jpg";
-    struct stat tile_stat {};
-    if (stat(satellite_probe, &tile_stat) != 0) {
-        ESP_LOGE(kTag, "Satellite centre tile missing: %s errno=%d", satellite_probe, errno);
-        return;
-    }
-    FILE *tile = std::fopen(satellite_probe, "rb");
-    uint8_t magic[2]{};
-    const size_t read = tile == nullptr ? 0 : std::fread(magic, 1, sizeof(magic), tile);
-    if (tile != nullptr) {
-        std::fclose(tile);
-    }
-    ESP_LOGI(kTag,
-             "Satellite centre tile: bytes=%ld jpeg=%s path=%s",
-             static_cast<long>(tile_stat.st_size),
-             read == 2 && magic[0] == 0xFF && magic[1] == 0xD8 ? "yes" : "no",
-             satellite_probe);
-}
-
-void invalidate_tile_cache(UiState &ui)
-{
-    for (TileCacheEntry &entry : ui.tile_cache) {
-        if (entry.descriptor.data != nullptr) {
-            lv_image_cache_drop(&entry.descriptor);
-        }
-        entry.valid = false;
-    }
-    ui.tiles_dirty = true;
 }
 
 uint32_t uptime_ms()
@@ -1988,7 +1940,6 @@ void navigate_to(UiState &ui, AppPage page)
     ui.active_page = page;
     ui.screensaver_pending = false;
     ui.drawer_open = false;
-    ui.layer_drawer_open = false;
     ESP_LOGI(kTag, "Opening app page %u", static_cast<unsigned>(page));
     lv_async_call(rebuild_current_page, &ui);
 }
@@ -2113,108 +2064,12 @@ lv_obj_t *make_hamburger_control(lv_obj_t *parent,
     return button;
 }
 
-void close_layer_drawer(UiState &ui)
-{
-    ui.layer_drawer_open = false;
-    if (ui.layer_drawer != nullptr) {
-        lv_anim_delete(ui.layer_drawer, nullptr);
-        lv_obj_add_flag(ui.layer_drawer, LV_OBJ_FLAG_HIDDEN);
-    }
-}
-
-void select_map_layer(UiState &ui, MapLayer layer)
-{
-    if (!map_layer_available(ui, layer)) {
-        ESP_LOGW(kTag, "Map layer is not installed: %s", map_layer_info(layer).name);
-        return;
-    }
-
-    const MapLayerInfo &info = map_layer_info(layer);
-    ui.active_map_layer = layer;
-    const uint8_t zoom = static_cast<uint8_t>(std::clamp(
-        static_cast<int>(ui.viewport.zoom()),
-        static_cast<int>(info.minimum_zoom),
-        static_cast<int>(info.maximum_zoom)));
-    ui.viewport.setZoom(zoom);
-    invalidate_tile_cache(ui);
-    close_layer_drawer(ui);
-    ESP_LOGI(kTag, "Map layer changed to %s at z%u", info.name, static_cast<unsigned>(zoom));
-    update_ui(ui);
-}
-
-void street_layer_clicked(lv_event_t *event)
-{
-    select_map_layer(*static_cast<UiState *>(lv_event_get_user_data(event)), MapLayer::Street);
-}
-
-void satellite_layer_clicked(lv_event_t *event)
-{
-    select_map_layer(*static_cast<UiState *>(lv_event_get_user_data(event)), MapLayer::Satellite);
-}
-
-void ordnance_survey_layer_clicked(lv_event_t *event)
-{
-    select_map_layer(*static_cast<UiState *>(lv_event_get_user_data(event)), MapLayer::OrdnanceSurvey);
-}
-
-lv_obj_t *make_layer_option(lv_obj_t *parent,
-                            MapLayer layer,
-                            lv_event_cb_t callback,
-                            UiState &ui)
-{
-    const MapLayerInfo &info = map_layer_info(layer);
-    const bool selected = ui.active_map_layer == layer;
-    const bool available = map_layer_available(ui, layer);
-    ESP_LOGI(kTag,
-             "Map layer %s: %s (%s)",
-             info.name,
-             available ? "available" : "unavailable",
-             info.tile_root);
-    lv_obj_t *button = lv_button_create(parent);
-    lv_obj_set_size(button, LV_PCT(100), 78);
-    lv_obj_set_style_bg_color(
-        button,
-        selected ? lv_color_hex(0x176FA3)
-                 : (ui.dark_mode ? lv_color_hex(0x1B2C39) : lv_color_hex(0xD8D3C9)),
-        0);
-    lv_obj_set_style_bg_opa(button, available ? LV_OPA_COVER : LV_OPA_50, 0);
-    lv_obj_set_style_border_color(
-        button, selected ? lv_color_hex(0x69C6F0) : lv_color_hex(0x60788C), 0);
-    lv_obj_set_style_border_width(button, selected ? 2 : 1, 0);
-    lv_obj_set_style_radius(button, 9, 0);
-    lv_obj_set_style_pad_all(button, 10, 0);
-    lv_obj_add_event_cb(button, callback, LV_EVENT_CLICKED, &ui);
-    if (!available) {
-        lv_obj_add_state(button, LV_STATE_DISABLED);
-    }
-
-    lv_obj_t *title = make_label(
-        button, info.name, ui.dark_mode ? lv_color_hex(0xFFFFFF) : lv_color_hex(0x17324D));
-    lv_obj_set_pos(title, 0, 0);
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_18, 0);
-    lv_obj_t *description = make_label(
-        button,
-        available ? info.description : "Not installed on SD card",
-        ui.dark_mode ? lv_color_hex(0xC2D4DE) : lv_color_hex(0x41657A));
-    lv_obj_set_pos(description, 0, 31);
-    lv_obj_set_width(description, LV_PCT(100));
-    lv_label_set_long_mode(description, LV_LABEL_LONG_DOT);
-    lv_obj_set_style_text_font(description, &lv_font_montserrat_14, 0);
-    if (selected) {
-        lv_obj_t *active = make_label(button, "ACTIVE", lv_color_hex(0xFFFFFF));
-        lv_obj_align(active, LV_ALIGN_TOP_RIGHT, 0, 2);
-        lv_obj_set_style_text_font(active, &lv_font_montserrat_14, 0);
-    }
-    return button;
-}
-
 void drawer_open_clicked(lv_event_t *event)
 {
     auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
     if (ui == nullptr || ui->map_drawer == nullptr) {
         return;
     }
-    close_layer_drawer(*ui);
     ui->drawer_open = true;
     ESP_LOGI(kTag, "Map cat drawer opened");
     lv_obj_remove_flag(ui->map_drawer, LV_OBJ_FLAG_HIDDEN);
@@ -2242,44 +2097,6 @@ void drawer_close_clicked(lv_event_t *event)
     ui->drawer_open = false;
     ESP_LOGI(kTag, "Map cat drawer closed");
     lv_obj_add_flag(ui->map_drawer, LV_OBJ_FLAG_HIDDEN);
-}
-
-void layer_drawer_open_clicked(lv_event_t *event)
-{
-    auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
-    if (ui == nullptr || ui->layer_drawer == nullptr) {
-        return;
-    }
-    if (ui->map_drawer != nullptr) {
-        ui->drawer_open = false;
-        lv_obj_add_flag(ui->map_drawer, LV_OBJ_FLAG_HIDDEN);
-    }
-    ui->layer_drawer_open = true;
-    lv_obj_remove_flag(ui->layer_drawer, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_move_foreground(ui->layer_drawer);
-    const int32_t panel_width = current_layout(*ui).map_panel_width;
-    const int32_t drawer_width = lv_obj_get_width(ui->layer_drawer);
-    lv_obj_set_x(ui->layer_drawer, panel_width);
-    lv_anim_t animation{};
-    lv_anim_init(&animation);
-    lv_anim_set_var(&animation, ui->layer_drawer);
-    lv_anim_set_values(&animation, panel_width, panel_width - drawer_width);
-    lv_anim_set_duration(&animation, 200);
-    lv_anim_set_path_cb(&animation, lv_anim_path_ease_out);
-    lv_anim_set_exec_cb(&animation, [](void *object, int32_t value) {
-        lv_obj_set_x(static_cast<lv_obj_t *>(object), value);
-    });
-    lv_anim_start(&animation);
-    ESP_LOGI(kTag, "Map layer drawer opened");
-}
-
-void layer_drawer_close_clicked(lv_event_t *event)
-{
-    auto *ui = static_cast<UiState *>(lv_event_get_user_data(event));
-    if (ui != nullptr) {
-        close_layer_drawer(*ui);
-        ESP_LOGI(kTag, "Map layer drawer closed");
-    }
 }
 
 bluepaws::ui::PageActions page_actions(UiState &ui, bool show_home)
@@ -2994,13 +2811,6 @@ void create_map_page(UiState &ui)
     constexpr int32_t control_gap = 10;
     make_hamburger_control(
         ui.map_view, control_inset, control_inset, drawer_open_clicked, ui);
-    make_map_control(
-        ui.map_view,
-        layout.map_width - control_inset - control_size,
-        control_inset,
-        "MAP",
-        layer_drawer_open_clicked,
-        ui);
     make_map_control(ui.map_view,
                      control_inset,
                      control_inset + control_size + control_gap,
@@ -3087,57 +2897,6 @@ void create_map_page(UiState &ui)
         lv_obj_add_flag(ui.map_drawer, LV_OBJ_FLAG_HIDDEN);
     }
 
-    const int32_t layer_drawer_width = ui.portrait ? 400 : 340;
-    ui.layer_drawer = lv_obj_create(map_panel);
-    lv_obj_set_pos(ui.layer_drawer, layout.map_panel_width - layer_drawer_width, 0);
-    lv_obj_set_size(ui.layer_drawer, layer_drawer_width, layout.map_height);
-    lv_obj_set_style_bg_color(ui.layer_drawer,
-                              ui.dark_mode ? lv_color_hex(0x101B25) : lv_color_hex(0xE7E2D8),
-                              0);
-    lv_obj_set_style_bg_opa(ui.layer_drawer, LV_OPA_90, 0);
-    lv_obj_set_style_border_color(ui.layer_drawer,
-                                  ui.dark_mode ? lv_color_hex(0x486274)
-                                               : lv_color_hex(0xAFC3D1),
-                                  0);
-    lv_obj_set_style_border_width(ui.layer_drawer, 1, 0);
-    lv_obj_set_style_border_side(ui.layer_drawer, LV_BORDER_SIDE_LEFT, 0);
-    lv_obj_set_style_radius(ui.layer_drawer, 0, 0);
-    lv_obj_set_style_pad_all(ui.layer_drawer, 14, 0);
-    lv_obj_set_style_pad_gap(ui.layer_drawer, 8, 0);
-    lv_obj_set_flex_flow(ui.layer_drawer, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_scroll_dir(ui.layer_drawer, LV_DIR_VER);
-    lv_obj_set_scrollbar_mode(ui.layer_drawer, LV_SCROLLBAR_MODE_AUTO);
-
-    lv_obj_t *layer_header = lv_obj_create(ui.layer_drawer);
-    lv_obj_set_size(layer_header, LV_PCT(100), 44);
-    lv_obj_set_style_bg_opa(layer_header, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(layer_header, 0, 0);
-    lv_obj_set_style_pad_all(layer_header, 0, 0);
-    lv_obj_remove_flag(layer_header, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_t *layer_title = make_label(
-        layer_header,
-        "Map layer",
-        ui.dark_mode ? lv_color_hex(0xFFFFFF) : lv_color_hex(0x17324D));
-    lv_obj_set_pos(layer_title, 0, 7);
-    lv_obj_set_style_text_font(layer_title, &lv_font_montserrat_18, 0);
-    lv_obj_t *layer_close = lv_button_create(layer_header);
-    lv_obj_set_size(layer_close, 46, 46);
-    lv_obj_align(layer_close, LV_ALIGN_RIGHT_MID, 0, 0);
-    lv_obj_set_style_bg_color(layer_close, lv_color_hex(0x2B5878), 0);
-    lv_obj_set_style_bg_opa(layer_close, LV_OPA_70, 0);
-    lv_obj_set_style_radius(layer_close, 9, 0);
-    lv_obj_set_style_pad_all(layer_close, 0, 0);
-    lv_obj_add_event_cb(layer_close, layer_drawer_close_clicked, LV_EVENT_CLICKED, &ui);
-    lv_obj_t *layer_close_label = make_label(layer_close, "X", lv_color_hex(0xFFFFFF));
-    lv_obj_center(layer_close_label);
-
-    make_layer_option(ui.layer_drawer, MapLayer::Street, street_layer_clicked, ui);
-    make_layer_option(
-        ui.layer_drawer, MapLayer::OrdnanceSurvey, ordnance_survey_layer_clicked, ui);
-    make_layer_option(ui.layer_drawer, MapLayer::Satellite, satellite_layer_clicked, ui);
-    if (!ui.layer_drawer_open) {
-        lv_obj_add_flag(ui.layer_drawer, LV_OBJ_FLAG_HIDDEN);
-    }
 }
 
 void style_card(lv_obj_t *card, bool dark_mode)
@@ -5188,7 +4947,6 @@ void create_ui(UiState &ui)
     ui.camera_contrast_value = nullptr;
     ui.camera_zoom_value = nullptr;
     ui.map_drawer = nullptr;
-    ui.layer_drawer = nullptr;
     ui.brightness_popup = nullptr;
     ui.brightness_slider = nullptr;
     ui.brightness_label = nullptr;

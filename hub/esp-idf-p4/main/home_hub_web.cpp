@@ -30,7 +30,7 @@ namespace {
 constexpr char kTag[] = "home_hub_web";
 constexpr char kWebRoot[] = "/web";
 constexpr char kHubId[] = "0010";
-constexpr char kPmtilesFatFsPath[] = "0:/bluepaws/maps/vector/united-kingdom.pmtiles";
+constexpr char kVectorPmtilesFatFsPath[] = "0:/bluepaws/maps/vector/united-kingdom.pmtiles";
 constexpr std::size_t kMaximumPmtilesRange = 1024U * 1024U;
 
 struct MapLayer {
@@ -43,9 +43,39 @@ struct MapLayer {
 
 constexpr MapLayer kMapLayers[] = {
     {"osm", "OpenStreetMap", "/sdcard/bluepaws/maps/layers/osm-road-100km/tiles", 5, 17},
-    {"os", "Ordnance Survey", "/sdcard/bluepaws/maps/layers/ordnance-survey-100km/tiles", 5, 17},
-    {"satellite", "Satellite", "/sdcard/bluepaws/maps/layers/satellite/tiles", 5, 14},
 };
+
+struct PmtilesArchive {
+    const char *id;
+    const char *name;
+    const char *fatfs_path;
+    const char *url;
+    const char *format;
+    const char *attribution;
+    uint8_t minimum_zoom;
+    uint8_t maximum_zoom;
+    std::array<double, 4> bounds;
+};
+
+constexpr PmtilesArchive kVectorArchive{
+    "uk-vector", "Vector (UK)", kVectorPmtilesFatFsPath, "/maps/uk.pmtiles",
+    "pmtiles-vector", "Contains OS data (c) Crown copyright and database right; OpenStreetMap contributors",
+    0, 15, {-8.75, 49.75, 1.85, 60.95}};
+
+// Browser-only WebP imagery. Keeping the national and regional packs separate
+// avoids FAT32's 4 GiB per-file ceiling while MapLibre presents both as one
+// seamless aerial layer. The native P4 display never opens these archives.
+constexpr std::array<PmtilesArchive, 2> kImageryArchives{{
+    {"uk-aerial-overview", "UK satellite overview", "0:/bluepaws/maps/imagery/uk-overview-webp.pmtiles",
+     "/maps/imagery/uk-overview-webp.pmtiles", "pmtiles-raster",
+     "Sentinel-2 cloudless by EOX IT Services GmbH (contains modified Copernicus Sentinel data 2016)", 5, 12,
+     {-8.75, 49.75, 1.85, 60.95}},
+    {"gloucestershire-aerial-detail", "Gloucestershire detail",
+     "0:/bluepaws/maps/imagery/gloucestershire-z15-17-webp.pmtiles",
+     "/maps/imagery/gloucestershire-z15-17-webp.pmtiles", "pmtiles-raster",
+     "Environment Agency aerial photography (Open Government Licence)", 15, 17,
+     {-2.70, 51.55, -1.60, 52.20}},
+}};
 
 struct WebSnapshot {
     std::array<CatRecord, kMaximumCats> cats{};
@@ -316,13 +346,31 @@ bool valid_pmtiles_archive(FIL *file)
     return true;
 }
 
-bool pmtiles_archive_available()
+bool pmtiles_archive_available(const PmtilesArchive &archive)
 {
     FIL file{};
-    if (f_open(&file, kPmtilesFatFsPath, FA_READ) != FR_OK) return false;
+    if (f_open(&file, archive.fatfs_path, FA_READ) != FR_OK) return false;
     const bool valid = valid_pmtiles_archive(&file);
     f_close(&file);
     return valid;
+}
+
+void add_pmtiles_layer(cJSON *layers, const PmtilesArchive &archive, const char *group = nullptr)
+{
+    cJSON *item = cJSON_CreateObject();
+    cJSON_AddStringToObject(item, "id", archive.id);
+    cJSON_AddStringToObject(item, "name", archive.name);
+    cJSON_AddStringToObject(item, "format", archive.format);
+    cJSON_AddStringToObject(item, "url", archive.url);
+    cJSON_AddStringToObject(item, "attribution", archive.attribution);
+    cJSON_AddNumberToObject(item, "minZoom", archive.minimum_zoom);
+    cJSON_AddNumberToObject(item, "maxZoom", archive.maximum_zoom);
+    if (group != nullptr) cJSON_AddStringToObject(item, "group", group);
+    cJSON *bounds = cJSON_AddArrayToObject(item, "bounds");
+    for (double coordinate : archive.bounds) {
+        cJSON_AddItemToArray(bounds, cJSON_CreateNumber(coordinate));
+    }
+    cJSON_AddItemToArray(layers, item);
 }
 
 esp_err_t map_layers_handler(httpd_req_t *request)
@@ -334,16 +382,15 @@ esp_err_t map_layers_handler(httpd_req_t *request)
         cJSON_Delete(response);
         return ESP_ERR_NO_MEM;
     }
-    if (pmtiles_archive_available()) {
-        cJSON *item = cJSON_CreateObject();
-        cJSON_AddStringToObject(item, "id", "uk-vector");
-        cJSON_AddStringToObject(item, "name", "Vector (UK)");
-        cJSON_AddStringToObject(item, "format", "pmtiles");
-        cJSON_AddStringToObject(item, "url", "/maps/uk.pmtiles");
+    if (pmtiles_archive_available(kVectorArchive)) {
+        add_pmtiles_layer(layers, kVectorArchive);
+        cJSON *item = cJSON_GetArrayItem(layers, cJSON_GetArraySize(layers) - 1);
         cJSON_AddStringToObject(item, "style", "/map-style.json");
-        cJSON_AddNumberToObject(item, "minZoom", 0);
-        cJSON_AddNumberToObject(item, "maxZoom", 15);
-        cJSON_AddItemToArray(layers, item);
+    }
+    for (const PmtilesArchive &archive : kImageryArchives) {
+        if (pmtiles_archive_available(archive)) {
+            add_pmtiles_layer(layers, archive, "Aerial imagery");
+        }
     }
     for (const MapLayer &layer : kMapLayers) {
         if (!directory_exists(layer.root)) continue;
@@ -590,17 +637,16 @@ esp_err_t serve_map_tile(httpd_req_t *request)
     return result;
 }
 
-esp_err_t serve_pmtiles_range(httpd_req_t *request)
+esp_err_t serve_pmtiles_archive(httpd_req_t *request, const PmtilesArchive &archive)
 {
     // ESP-IDF's POSIX off_t is signed 32-bit on the P4. The UK archive is
     // about 2.9 GB, so use FatFs directly: FSIZE_t remains unsigned 32-bit on
     // FAT32 and can address the complete archive without offset overflow.
     FIL file{};
-    if (f_open(&file, kPmtilesFatFsPath, FA_READ) != FR_OK ||
+    if (f_open(&file, archive.fatfs_path, FA_READ) != FR_OK ||
         !valid_pmtiles_archive(&file)) {
         f_close(&file);
-        return httpd_resp_send_err(request, HTTPD_404_NOT_FOUND,
-                                   "UK vector archive unavailable");
+        return httpd_resp_send_err(request, HTTPD_404_NOT_FOUND, "PMTiles archive unavailable");
     }
     const uint64_t file_size = static_cast<uint64_t>(f_size(&file));
 
@@ -652,7 +698,7 @@ esp_err_t serve_pmtiles_range(httpd_req_t *request)
         if (buffer != nullptr) heap_caps_free(buffer);
         f_close(&file);
         return httpd_resp_send_err(request, HTTPD_500_INTERNAL_SERVER_ERROR,
-                                   "Could not read vector archive");
+                                   "Could not read PMTiles archive");
     }
     f_close(&file);
 
@@ -666,10 +712,28 @@ esp_err_t serve_pmtiles_range(httpd_req_t *request)
     httpd_resp_set_hdr(request, "Accept-Ranges", "bytes");
     httpd_resp_set_hdr(request, "Content-Range", content_range);
     httpd_resp_set_hdr(request, "Cache-Control", "public, max-age=86400");
-    httpd_resp_set_hdr(request, "ETag", "\"bluepaws-uk-20260910-z15\"");
+    char etag[80]{};
+    std::snprintf(etag, sizeof(etag), "\"bluepaws-%s-%llu\"", archive.id,
+                  static_cast<unsigned long long>(file_size));
+    httpd_resp_set_hdr(request, "ETag", etag);
     const esp_err_t result = httpd_resp_send(request, static_cast<const char *>(buffer), length);
     heap_caps_free(buffer);
     return result;
+}
+
+esp_err_t serve_vector_pmtiles_range(httpd_req_t *request)
+{
+    return serve_pmtiles_archive(request, kVectorArchive);
+}
+
+esp_err_t serve_imagery_pmtiles_range(httpd_req_t *request)
+{
+    for (const PmtilesArchive &archive : kImageryArchives) {
+        if (std::strcmp(request->uri, archive.url) == 0) {
+            return serve_pmtiles_archive(request, archive);
+        }
+    }
+    return httpd_resp_send_err(request, HTTPD_404_NOT_FOUND, "Imagery archive unavailable");
 }
 
 esp_err_t serve_map_font(httpd_req_t *request)
@@ -773,7 +837,8 @@ bool start_server_now()
     ok &= register_uri("/api/status", HTTP_GET, status_handler);
     ok &= register_uri("/api/hub-presence", HTTP_GET, hub_presence_handler);
     ok &= register_uri("/api/map-layers", HTTP_GET, map_layers_handler);
-    ok &= register_uri("/maps/uk.pmtiles", HTTP_GET, serve_pmtiles_range);
+    ok &= register_uri("/maps/uk.pmtiles", HTTP_GET, serve_vector_pmtiles_range);
+    ok &= register_uri("/maps/imagery/*", HTTP_GET, serve_imagery_pmtiles_range);
     ok &= register_uri("/fonts/*", HTTP_GET, serve_map_font);
     ok &= register_uri("/api/commands", HTTP_GET, empty_array_handler);
     ok &= register_uri("/api/ble", HTTP_GET, empty_array_handler);

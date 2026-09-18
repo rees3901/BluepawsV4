@@ -5,7 +5,7 @@
   on-chip LittleFS flash storage.
 
   Key features:
-   - Leaflet.js map with Street/Satellite/Topo layers
+   - Leaflet/MapLibre map with offline vector, street fallback and WebP aerial layers
    - Real-time telemetry via SSE (Server-Sent Events) from GET /events
    - Device cards in a collapsible sidebar showing telemetry + action buttons
    - Follow mode: auto-center map on a specific device
@@ -439,6 +439,55 @@
             });
     }
 
+    function createOfflineAerialLayer(sources) {
+        if (!Array.isArray(sources) || !sources.length ||
+            !window.maplibregl || !window.pmtiles || !L.maplibreGL) {
+            return null;
+        }
+        var style = { version: 8, sources: {}, layers: [] };
+        var minimumZoom = 24;
+        var maximumZoom = 0;
+        sources.forEach(function (source, index) {
+            var sourceId = 'aerial-' + index;
+            var nativeMin = Number(source.minZoom) || 0;
+            var nativeMax = Number(source.maxZoom) || 17;
+            var definition = {
+                type: 'raster',
+                url: 'pmtiles://' + location.origin + source.url,
+                tileSize: 256,
+                minzoom: nativeMin,
+                maxzoom: nativeMax,
+                attribution: source.attribution || 'Offline aerial imagery'
+            };
+            if (Array.isArray(source.bounds) && source.bounds.length === 4) {
+                definition.bounds = source.bounds.map(Number);
+            }
+            style.sources[sourceId] = definition;
+            style.layers.push({
+                id: sourceId,
+                type: 'raster',
+                source: sourceId,
+                minzoom: nativeMin,
+                paint: { 'raster-fade-duration': 0 }
+            });
+            minimumZoom = Math.min(minimumZoom, nativeMin);
+            maximumZoom = Math.max(maximumZoom, nativeMax);
+        });
+        var layer = L.maplibreGL({
+            style: style,
+            interactive: false,
+            pane: 'tilePane',
+            minZoom: minimumZoom,
+            // A small overzoom keeps close inspection useful without pretending
+            // that extra source detail exists beyond the regional z17 pack.
+            maxZoom: maximumZoom + 2
+        });
+        layer.options = layer.options || {};
+        layer.options.minZoom = minimumZoom;
+        layer.options.maxZoom = maximumZoom + 2;
+        return layer;
+    }
+
     function initMap() {
         map = L.map('map', {
             center: [54.5, -3.2],  // UK overview until cached/live collars are available
@@ -489,10 +538,15 @@
                 if (!layers.length) throw new Error('No SD map packs found');
                 var baseLayers = {};
                 var vectorSource = layers.find(function (source) {
-                    return source && source.format === 'pmtiles' && source.url;
+                    return source && source.format === 'pmtiles-vector' && source.url;
+                });
+                var aerialSources = layers.filter(function (source) {
+                    return source && source.format === 'pmtiles-raster' && source.url;
+                }).sort(function (left, right) {
+                    return (Number(left.minZoom) || 0) - (Number(right.minZoom) || 0);
                 });
                 layers.forEach(function (source) {
-                    if (!source || source.format === 'pmtiles' || !source.name || !source.url) return;
+                    if (!source || /^pmtiles-/.test(source.format || '') || !source.name || !source.url) return;
                     baseLayers[source.name] = L.tileLayer(source.url, {
                         minZoom: Number(source.minZoom) || 0,
                         maxZoom: Number(source.maxZoom) || 19,
@@ -501,6 +555,8 @@
                         attribution: 'Bluepaws offline SD map'
                     });
                 });
+                var aerialLayer = createOfflineAerialLayer(aerialSources);
+                if (aerialLayer) baseLayers['Aerial imagery'] = aerialLayer;
                 return (vectorSource ? createOfflineVectorLayer(vectorSource) : Promise.resolve(null))
                     .catch(function (error) {
                         console.warn('Vector map unavailable', error);
