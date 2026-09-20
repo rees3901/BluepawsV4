@@ -1170,15 +1170,16 @@ void update_ui(UiState &ui)
                                                0);
         }
 
+        const bool bluetooth_active = bluepaws::bluetooth::status().enabled;
         if (ui.overview_header_bluetooth_label != nullptr) {
             lv_obj_set_style_text_color(ui.overview_header_bluetooth_label,
-                                        ui.settings.bluetooth_enabled
+                                        bluetooth_active
                                             ? lv_color_hex(0x38BDF8)
                                             : lv_color_hex(0x6E91A5),
                                         0);
         }
         if (ui.overview_header_bluetooth_disabled_label != nullptr) {
-            if (ui.settings.bluetooth_enabled) {
+            if (bluetooth_active) {
                 lv_obj_add_flag(ui.overview_header_bluetooth_disabled_label,
                                 LV_OBJ_FLAG_HIDDEN);
             } else {

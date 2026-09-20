@@ -70,6 +70,8 @@
     var localSessionToken = sessionStorage.getItem('bluepawsLocalSession') || '';
     var bleResults = {};           // Map of device_id → { rssi, age_ms }
     var blePollingTimer = null;    // Interval ID for BLE result polling
+    var blePollingStopTimer = null;// Ends result polling after a manual scan
+    var bleScanRequestPending = false;
     var consoleLog = [];           // Ring buffer of display strings (max 200)
     var consoleLogData = [];       // Structured entries for CSV export
     var MAX_LOG_ENTRIES = 200;
@@ -1433,11 +1435,17 @@
                 '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M2 14l4-4 3 3 5-7v2l-5 7-3-3-4 4v-2z"/></svg>' +
                 ' Trail' +
             '</button>';
-        if (dev.data.entity === 'hub') return html +
-            '<button class="btn-action btn-bluetooth' + (dev.data.hub.ble_enabled ? ' active' : '') + '" ' + ((HubPresencePanel.feedback() && HubPresencePanel.feedback().state === 'pending') || Date.now()-dev.lastUpdate>=15000 ? 'disabled ' : '') + 'data-action="bluetooth" data-id="' + dev.id + '" aria-pressed="' + !!dev.data.hub.ble_enabled +
-            '" title="Turn the hub Bluetooth Home beacon on or off; advertising is active in Home mode"><svg class="bluetooth-action-icon" aria-hidden="true" viewBox="0 0 24 24"><path fill="currentColor" d="M17.71 7.71l-6-6A.997.997 0 0 0 10 2.42v7.17L5.41 5 4 6.41 9.59 12 4 17.59 5.41 19 10 14.41v7.17a.997.997 0 0 0 1.71.71l6-6L13.41 12l4.3-4.29zM12 4.83l2.88 2.88L12 10.59V4.83zm2.88 11.46L12 19.17v-5.76l2.88 2.88z"/></svg> Bluetooth ' + (dev.data.hub.ble_enabled ? 'On' : 'Off') + '</button>' +
+        if (dev.data.entity === 'hub') {
+            var hubBle = dev.data.hub;
+            var bluetoothControl = hubBle.mode === 'home'
+                ? '<button class="btn-action btn-bluetooth' + (hubBle.ble_advertising ? ' active' : '') + '" ' + ((HubPresencePanel.feedback() && HubPresencePanel.feedback().state === 'pending') || Date.now()-dev.lastUpdate>=15000 ? 'disabled ' : '') + 'data-action="bluetooth" data-id="' + dev.id + '" aria-pressed="' + !!hubBle.ble_preference_enabled +
+                  '" title="Turn the Bluetooth Home beacon on or off"><svg class="bluetooth-action-icon" aria-hidden="true" viewBox="0 0 24 24"><path fill="currentColor" d="M17.71 7.71l-6-6A.997.997 0 0 0 10 2.42v7.17L5.41 5 4 6.41 9.59 12 4 17.59 5.41 19 10 14.41v7.17a.997.997 0 0 0 1.71.71l6-6L13.41 12l4.3-4.29zM12 4.83l2.88 2.88L12 10.59V4.83zm2.88 11.46L12 19.17v-5.76l2.88 2.88z"/></svg> Bluetooth ' + (hubBle.ble_advertising ? 'On' : 'Off') + '</button>'
+                : '<button class="btn-action btn-bluetooth' + (hubBle.ble_scanning ? ' active' : '') + '" ' + ((hubBle.ble_scanning || bleScanRequestPending || Date.now()-dev.lastUpdate>=15000) ? 'disabled ' : '') + 'data-action="ble-scan" data-id="' + dev.id +
+                  '" title="Temporarily listen for nearby collar beacons for five seconds"><svg class="bluetooth-action-icon" aria-hidden="true" viewBox="0 0 24 24"><path fill="currentColor" d="M17.71 7.71l-6-6A.997.997 0 0 0 10 2.42v7.17L5.41 5 4 6.41 9.59 12 4 17.59 5.41 19 10 14.41v7.17a.997.997 0 0 0 1.71.71l6-6L13.41 12l4.3-4.29zM12 4.83l2.88 2.88L12 10.59V4.83zm2.88 11.46L12 19.17v-5.76l2.88 2.88z"/></svg> ' + (hubBle.ble_scanning ? 'Scanning…' : 'Scan collars · 5s') + '</button>';
+            return html + bluetoothControl +
             '<button class="btn-action btn-cmd" ' + ((HubPresencePanel.feedback() && HubPresencePanel.feedback().state === 'pending') || Date.now()-dev.lastUpdate>=15000 ? 'disabled ' : '') +
             'data-action="hub-profile" data-id="' + dev.id + '" title="Hub reporting profile">⌘ Cmd</button>';
+        }
         return html + '<button class="btn-action btn-find" data-action="find" data-id="' + dev.id + '" title="Find Alert — trigger buzzer + LED">' +
                 '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a4 4 0 00-4 4c0 1.2.4 2 1 3l-2 5h10l-2-5c.6-1 1-1.8 1-3a4 4 0 00-4-4zm0 13a2 2 0 01-2-2h4a2 2 0 01-2 2z"/></svg>' +
                 ' Find Alert' +
@@ -1463,6 +1471,7 @@
                 if (action === 'trail') toggleTrail(devId);
                 if (dev.data.entity === 'hub') {
                     if (action === 'bluetooth') HubPresencePanel.toggleBluetooth();
+                    if (action === 'ble-scan') requestBleScan();
                     if (action === 'hub-profile') HubPresencePanel.configureProfile();
                     return;
                 }
@@ -2227,8 +2236,7 @@
             ? s.requestedMode : hubMode;
         hubPortableMode = hubMode !== 'home';
         updateHubModeUI();
-        if (hubPortableMode && !blePollingTimer) startBlePolling();
-        if (!hubPortableMode && blePollingTimer) stopBlePolling();
+        if (!hubPortableMode && (blePollingTimer || blePollingStopTimer)) stopBlePolling();
         document.getElementById('connectionAvailable').classList.toggle(
             'hidden', !(hubMode === 'off_grid' && s.known_wifi_available));
     }
@@ -2308,9 +2316,8 @@
     // ═══════════════════════════════════════════════
     // Hub Mode Toggle (Home / Portable)
     //
-    // In Portable mode, the hub stops its BLE home beacon and starts
-    // scanning for collar BLE find beacons. We poll GET /api/ble every
-    // 2 seconds to get RSSI proximity data for the device cards.
+    // Portable and Off-Grid keep BLE completely idle. The user can request a
+    // bounded five-second collar scan; result polling only runs for that scan.
     // ═══════════════════════════════════════════════
     function requestHubMode(mode) {
         // Re-selecting the saved policy while an automatic fallback is active
@@ -2359,11 +2366,7 @@
                   sessionStorage.removeItem('bluepawsLocalSession');
               }
               updateHubModeUI();
-              if (hubPortableMode) {
-                  startBlePolling();
-              } else {
-                  stopBlePolling();
-              }
+              stopBlePolling();
           })
           .catch(function (error) {
               logEvent('ERR', 'Failed to set hub mode: ' + error.message);
@@ -2416,18 +2419,49 @@
         }).catch(function (error) { alert('PIN change failed: ' + error.message); });
     }
 
-    function startBlePolling() {
-        stopBlePolling();
+    function startBlePolling(durationMs) {
+        stopBlePolling(false);
         pollBle();
-        blePollingTimer = setInterval(pollBle, 2000);
+        blePollingTimer = setInterval(pollBle, 500);
+        blePollingStopTimer = setTimeout(function () {
+            pollBle();
+            stopBlePolling(false);
+        }, (durationMs || 5000) + 750);
     }
 
-    function stopBlePolling() {
+    function stopBlePolling(clearResults) {
         if (blePollingTimer) {
             clearInterval(blePollingTimer);
             blePollingTimer = null;
         }
+        if (blePollingStopTimer) {
+            clearTimeout(blePollingStopTimer);
+            blePollingStopTimer = null;
+        }
+        if (clearResults !== false) bleResults = {};
+    }
+
+    function requestBleScan() {
+        if (bleScanRequestPending || !hubPortableMode) return;
+        bleScanRequestPending = true;
         bleResults = {};
+        protectedFetch('/api/ble/scan', {method: 'POST'})
+            .then(function (r) {
+                return r.json().then(function (body) {
+                    if (!r.ok) throw new Error(body.detail || body.error || 'BLE scan unavailable');
+                    return body;
+                });
+            })
+            .then(function (body) {
+                showToast('Listening for nearby collars for 5 seconds');
+                startBlePolling(body.duration_ms || 5000);
+            })
+            .catch(function (error) {
+                showToast(error.message || 'Could not start collar scan');
+            })
+            .finally(function () {
+                bleScanRequestPending = false;
+            });
     }
 
     function pollBle() {

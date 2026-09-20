@@ -283,6 +283,43 @@ esp_err_t empty_array_handler(httpd_req_t *request)
     return httpd_resp_sendstr(request, "[]");
 }
 
+esp_err_t ble_results_handler(httpd_req_t *request)
+{
+    std::array<bluetooth::ScanResult, 16> results{};
+    const std::size_t count = bluetooth::scanResults(results.data(), results.size());
+    cJSON *json = cJSON_CreateArray();
+    for (std::size_t index = 0; index < count; ++index) {
+        cJSON *item = cJSON_CreateObject();
+        cJSON_AddNumberToObject(item, "id", results[index].device_id);
+        cJSON_AddNumberToObject(item, "rssi", results[index].rssi);
+        cJSON_AddNumberToObject(item, "age_ms", results[index].age_ms);
+        cJSON_AddItemToArray(json, item);
+    }
+    const esp_err_t result = send_json(request, json);
+    cJSON_Delete(json);
+    return result;
+}
+
+esp_err_t ble_scan_handler(httpd_req_t *request)
+{
+    constexpr uint32_t kUserScanDurationMs = 5000;
+    if (!bluetooth::requestScan(kUserScanDurationMs)) {
+        cJSON *json = cJSON_CreateObject();
+        cJSON_AddStringToObject(json, "error", "ble_scan_unavailable");
+        cJSON_AddStringToObject(json, "detail",
+                                "Collar scanning is available only in Portable or Off-Grid mode.");
+        const esp_err_t result = send_json(request, json, "409 Conflict");
+        cJSON_Delete(json);
+        return result;
+    }
+    cJSON *json = cJSON_CreateObject();
+    cJSON_AddBoolToObject(json, "scanning", true);
+    cJSON_AddNumberToObject(json, "duration_ms", kUserScanDurationMs);
+    const esp_err_t result = send_json(request, json, "202 Accepted");
+    cJSON_Delete(json);
+    return result;
+}
+
 esp_err_t hub_presence_handler(httpd_req_t *request)
 {
     const WebSnapshot state = snapshot();
@@ -302,7 +339,8 @@ esp_err_t hub_presence_handler(httpd_req_t *request)
     }
     cJSON_AddBoolToObject(json, "ble_advertising", state.bluetooth.advertising);
     cJSON_AddBoolToObject(json, "ble_scanning", state.bluetooth.scanning);
-    cJSON_AddBoolToObject(json, "ble_enabled", state.settings.bluetooth_enabled);
+    cJSON_AddBoolToObject(json, "ble_enabled", state.bluetooth.enabled);
+    cJSON_AddBoolToObject(json, "ble_preference_enabled", state.settings.bluetooth_enabled);
     cJSON_AddBoolToObject(json, "ble_settled", state.bluetooth.settled);
     cJSON_AddNumberToObject(json, "uptime_s", esp_timer_get_time() / 1000000);
     cJSON_AddStringToObject(json, "home_emoji", "Home");
@@ -841,7 +879,8 @@ bool start_server_now()
     ok &= register_uri("/maps/imagery/*", HTTP_GET, serve_imagery_pmtiles_range);
     ok &= register_uri("/fonts/*", HTTP_GET, serve_map_font);
     ok &= register_uri("/api/commands", HTTP_GET, empty_array_handler);
-    ok &= register_uri("/api/ble", HTTP_GET, empty_array_handler);
+    ok &= register_uri("/api/ble", HTTP_GET, ble_results_handler);
+    ok &= register_uri("/api/ble/scan", HTTP_POST, ble_scan_handler);
     ok &= register_uri("/api/history*", HTTP_GET, history_handler);
     ok &= register_uri("/events", HTTP_GET, events_handler);
     ok &= register_uri("/api/command", HTTP_POST, unavailable_handler);
