@@ -30,15 +30,10 @@ are permuted into their new fixed slots and only the newly exposed edge is read
 from SD. The map status reports that work as `new N`, making SD-load stalls
 separate from ordinary redraw latency.
 
-The Live Map's top-right **MAP** control opens a right-hand layer drawer without
-moving the map. It selects the Street pack at `/bluepaws/maps/tiles`, Satellite
-at `/bluepaws/maps/layers/satellite/tiles`, or Aerial at
-`/bluepaws/maps/layers/aerial/tiles`. Missing SD directories are disabled. A
-selection keeps the current centre, clamps zoom to that pack's supported range,
-invalidates the decoded screen slots and redraws the same cat overlays. Each
-slot identity includes the selected layer as well as the XYZ ID;
-missing tiles remain blank rather than silently showing imagery from a different
-layer.
+The Live Map uses the validated OpenStreetMap JPEG pack at
+`/bluepaws/maps/layers/osm-road-100km/tiles`. Vector and aerial experiments are
+not exposed by either the touchscreen or local web dashboard. Missing tiles
+remain blank rather than being replaced with unrelated imagery.
 
 The launcher **Settings** page is backed by ESP-IDF NVS and provides touch
 editing with an on-screen keyboard for primary and secondary Wi-Fi networks,
@@ -73,11 +68,9 @@ P4 NimBLE host drives the ESP32-C6 controller over ESP-Hosted SDIO VHCI and
 advertises `BLUEPAWS_HOME` only in Home mode. Server-sent events also fall back to the dashboard's established
 10-second device polling path. No Wi-Fi passwords, gateway credentials or journal
 records are included in the SPIFFS image or exposed as static files.
-The browser map discovers the installed map packs through `/api/map-layers` and
-streams only validated XYZ JPEG tile requests from the SD card. OpenStreetMap,
-Ordnance Survey, Satellite and Aerial use the same directories and zoom limits
-as the touchscreen map; unavailable packs are omitted and the compact bundled
-coastline/grid remains the fallback when no supported pack is present.
+The browser map discovers the OpenStreetMap pack through `/api/map-layers` and
+streams only validated XYZ JPEG tile requests from the SD card. The compact
+bundled coastline/grid remains the fallback when that pack is absent.
 
 The launcher **Camera** page starts the fitted 2 MP OV02C10 through the
 ESP32-P4's two-lane MIPI-CSI/ISP path and shows a 432 x 432 colour RGB565

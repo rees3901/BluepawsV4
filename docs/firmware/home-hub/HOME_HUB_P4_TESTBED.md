@@ -320,13 +320,11 @@ monitored boot reported ESP32-P4 revision 1.3, 16 MB flash, 32 MB PSRAM,
 800x480 display, GT911 touch and the mounted FAT volume, then entered the UI
 without a panic or reset loop.
 
-The map-layer pass adds a top-right **MAP** control whose 200 ms animation
-slides a picker above the right edge of the existing viewport. Street,
-Satellite and Aerial use separate XYZ roots on the FAT partition; unavailable
-roots are visibly disabled. Changing layer preserves the map centre, clamps to
-the selected pack's zoom range and invalidates the decoded-tile cache so stale
-imagery cannot be reused. Opening either the layer picker or nearby-cat drawer
-closes the other.
+The production map path now uses only the validated OpenStreetMap JPEG XYZ pack
+on the FAT partition. The earlier Satellite, Aerial and vector-layer experiments
+were removed after hardware testing showed that they added storage and runtime
+complexity without a useful improvement. The nearby-cat drawer remains
+independent of the basemap.
 
 Hardware testing showed that moving decoded descriptors between LVGL image
 objects could leave queued draw work associated with a previous screen slot.

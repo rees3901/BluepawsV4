@@ -144,7 +144,7 @@ configuration privacy and asynchronous mode API wiring.
 - `POST /api/command`, `/api/find`, `/api/device-status` — addressed TLV v1.2 commands.
 - `GET /api/security`, `POST /api/security/pin`, `POST /api/security/unlock` — local command guard.
 - `POST /api/hub-mode` — confirmed mode switch; collar state is unchanged.
-- `GET /tiles/{z}/{x}/{y}` — map-source abstraction. The first build returns the bundled vector skeleton rather than network tiles.
+- `GET /tiles/{z}/{x}/{y}` — validated local OpenStreetMap JPEG tiles from SD; the browser uses a bundled grid/coastline fallback when unavailable.
 
 Android, Apple and Windows connectivity-check paths redirect AP-side HTTP clients
 to the absolute `http://192.168.4.1/` address. This includes Windows' `/redirect`
