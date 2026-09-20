@@ -9,12 +9,16 @@ extern "C" {
 #include "freertos/task.h"
 #include "host/ble_gap.h"
 #include "host/ble_hs.h"
+#include "host/ble_hs_adv.h"
 #include "host/util/util.h"
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
 #include "services/gap/ble_svc_gap.h"
 
+#include <algorithm>
+#include <array>
 #include <atomic>
+#include <cstdlib>
 #include <cstring>
 
 namespace bluepaws::bluetooth {
@@ -22,6 +26,14 @@ namespace {
 
 constexpr char kTag[] = "home_hub_ble";
 constexpr char kBeaconName[] = "BLUEPAWS_HOME";
+constexpr char kFindBeaconPrefix[] = "BP_FIND_";
+constexpr std::size_t kMaximumScanResults = 16;
+
+struct StoredScanResult {
+    uint16_t device_id = 0;
+    int8_t rssi = -127;
+    int64_t seen_at_us = 0;
+};
 
 std::atomic_bool g_worker_started{false};
 std::atomic_bool g_initialized{false};
@@ -30,6 +42,10 @@ std::atomic_bool g_advertising{false};
 std::atomic_bool g_scanning{false};
 std::atomic_bool g_desired_enabled{false};
 std::atomic_int g_desired_mode{static_cast<int>(hub::CommunicationsMode::Home)};
+std::atomic<int64_t> g_scan_deadline_us{0};
+std::array<StoredScanResult, kMaximumScanResults> g_scan_results{};
+std::size_t g_scan_result_count = 0;
+portMUX_TYPE g_scan_results_lock = portMUX_INITIALIZER_UNLOCKED;
 uint8_t g_own_address_type = 0;
 
 bool should_advertise()
@@ -42,14 +58,50 @@ bool should_advertise()
 
 bool should_scan()
 {
-    return g_desired_enabled.load() &&
-           g_desired_mode.load() != static_cast<int>(hub::CommunicationsMode::Home);
+    return g_desired_mode.load() != static_cast<int>(hub::CommunicationsMode::Home) &&
+           esp_timer_get_time() < g_scan_deadline_us.load();
+}
+
+void store_scan_result(const ble_gap_disc_desc &discovery)
+{
+    ble_hs_adv_fields fields{};
+    if (ble_hs_adv_parse_fields(&fields, discovery.data, discovery.length_data) != 0 ||
+        fields.name == nullptr ||
+        fields.name_len < sizeof(kFindBeaconPrefix) - 1U + 4U ||
+        std::memcmp(fields.name, kFindBeaconPrefix, sizeof(kFindBeaconPrefix) - 1U) != 0) {
+        return;
+    }
+    char identifier[5]{};
+    std::memcpy(identifier, fields.name + sizeof(kFindBeaconPrefix) - 1U, 4U);
+    char *end = nullptr;
+    const unsigned long parsed = std::strtoul(identifier, &end, 16);
+    if (end != identifier + 4 || parsed == 0 || parsed > UINT16_MAX) return;
+
+    portENTER_CRITICAL(&g_scan_results_lock);
+    StoredScanResult *slot = nullptr;
+    for (std::size_t index = 0; index < g_scan_result_count; ++index) {
+        if (g_scan_results[index].device_id == parsed) {
+            slot = &g_scan_results[index];
+            break;
+        }
+    }
+    if (slot == nullptr && g_scan_result_count < g_scan_results.size()) {
+        slot = &g_scan_results[g_scan_result_count++];
+        slot->device_id = static_cast<uint16_t>(parsed);
+    }
+    if (slot != nullptr) {
+        slot->rssi = discovery.rssi;
+        slot->seen_at_us = esp_timer_get_time();
+    }
+    portEXIT_CRITICAL(&g_scan_results_lock);
 }
 
 int gap_event(ble_gap_event *event, void *)
 {
     if (event == nullptr) return 0;
-    if (event->type == BLE_GAP_EVENT_ADV_COMPLETE) {
+    if (event->type == BLE_GAP_EVENT_DISC) {
+        store_scan_result(event->disc);
+    } else if (event->type == BLE_GAP_EVENT_ADV_COMPLETE) {
         g_advertising = false;
     } else if (event->type == BLE_GAP_EVENT_DISC_COMPLETE) {
         g_scanning = false;
@@ -107,8 +159,8 @@ bool begin_passive_scan()
     // NimBLE's zero/default values select a 30 ms window every 30 ms: a
     // continuous 100% BLE scan.  The C6 shares one 2.4 GHz radio with the
     // Off-Grid SoftAP, so that can starve Wi-Fi beacons and associations.
-    // A 10% listening duty cycle still detects collar advertisements quickly
-    // while leaving deterministic airtime for the local hotspot.
+    // A 10% listening duty cycle is used inside a user-requested five-second
+    // scan. There is no background scan in Portable or Off-Grid mode.
     parameters.itvl = BLE_GAP_SCAN_ITVL_MS(300);
     parameters.window = BLE_GAP_SCAN_WIN_MS(30);
     const int result = ble_gap_disc(g_own_address_type, BLE_HS_FOREVER,
@@ -139,6 +191,7 @@ void on_reset(int reason)
     g_synced = false;
     g_advertising = false;
     g_scanning = false;
+    g_scan_deadline_us = 0;
     ESP_LOGW(kTag, "NimBLE reset: %d", reason);
 }
 
@@ -228,7 +281,7 @@ void control_task(void *)
                 begin_passive_scan();
             }
         }
-        vTaskDelay(pdMS_TO_TICKS(250));
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
 
@@ -251,6 +304,40 @@ void apply(bool enabled, hub::CommunicationsMode mode)
 {
     g_desired_enabled = enabled;
     g_desired_mode = static_cast<int>(mode);
+    if (mode == hub::CommunicationsMode::Home) g_scan_deadline_us = 0;
+}
+
+bool requestScan(uint32_t duration_ms)
+{
+    if (!g_initialized.load() || !g_synced.load() ||
+        g_desired_mode.load() == static_cast<int>(hub::CommunicationsMode::Home) ||
+        duration_ms == 0) return false;
+    portENTER_CRITICAL(&g_scan_results_lock);
+    g_scan_result_count = 0;
+    g_scan_results = {};
+    portEXIT_CRITICAL(&g_scan_results_lock);
+    g_scan_deadline_us = esp_timer_get_time() + static_cast<int64_t>(duration_ms) * 1000;
+    ESP_LOGI(kTag, "User-requested passive BLE scan queued for %lu ms",
+             static_cast<unsigned long>(duration_ms));
+    return true;
+}
+
+std::size_t scanResults(ScanResult *results, std::size_t capacity)
+{
+    if (results == nullptr || capacity == 0) return 0;
+    const int64_t now_us = esp_timer_get_time();
+    portENTER_CRITICAL(&g_scan_results_lock);
+    const std::size_t count = std::min(capacity, g_scan_result_count);
+    for (std::size_t index = 0; index < count; ++index) {
+        results[index] = {
+            .device_id = g_scan_results[index].device_id,
+            .rssi = g_scan_results[index].rssi,
+            .age_ms = static_cast<uint32_t>(
+                std::max<int64_t>(0, now_us - g_scan_results[index].seen_at_us) / 1000),
+        };
+    }
+    portEXIT_CRITICAL(&g_scan_results_lock);
+    return count;
 }
 
 Status status()
@@ -260,7 +347,7 @@ Status status()
     const bool ready = g_initialized.load() && g_synced.load();
     return {
         .initialized = ready,
-        .enabled = g_desired_enabled.load(),
+        .enabled = g_advertising.load() || g_scanning.load(),
         .advertising = g_advertising.load(),
         .scanning = g_scanning.load(),
         .settled = ready &&

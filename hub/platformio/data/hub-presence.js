@@ -20,6 +20,7 @@
             ['Battery','No data','Battery telemetry is not supplied yet; this does not mean the battery is empty.'],
             ['Wi-Fi signal',Number.isFinite(s.wifi_rssi_dbm) ? s.wifi_rssi_dbm+' dBm' : 'Not connected','Less negative values indicate a stronger Wi-Fi connection.'],
             ['Home beacon',s.ble_advertising ? 'Advertising' : 'Off','Actual BLE Home beacon activity.'],
+            ['Collar scan',s.ble_scanning ? 'Scanning now' : 'Off','Portable and Off-Grid only listen during a user-requested five-second scan.'],
             ['Uptime',s.uptime_s+' seconds','Time since the hub last restarted.']
         ];
     }
@@ -65,7 +66,7 @@
                 }).catch(function(e){window.alert(e.message);});
         },
         toggleBluetooth: function () {
-            if (latest && saveRequest) saveRequest({ble_enabled: !latest.ble_enabled});
+            if (latest && saveRequest) saveRequest({ble_enabled: !latest.ble_preference_enabled});
         },
         configureProfile: function () {
             if (!latest || !saveRequest || (feedback && feedback.state === 'pending')) return;
@@ -144,7 +145,7 @@
                     .then(function (s) {
                         var device = view(s); latest = s; onUpdate(device);
                         if (pending !== null &&
-                            (typeof pending.ble_enabled !== 'boolean' || (s.ble_enabled === pending.ble_enabled && s.ble_settled === true)) &&
+                            (typeof pending.ble_enabled !== 'boolean' || (s.ble_preference_enabled === pending.ble_enabled && s.ble_settled === true)) &&
                             (!pending.reporting_profile || s.reporting_profile === pending.reporting_profile)) {
                             clearTimeout(confirmationTimer);
                             notify('confirmed', pending.reporting_profile ? 'Reporting profile: ' + profiles[pending.reporting_profile] + ' — confirmed by hub.' :
