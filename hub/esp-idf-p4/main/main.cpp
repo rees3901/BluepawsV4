@@ -631,6 +631,37 @@ lv_color_t signal_colour(int16_t rssi)
         : (rssi > -95 ? lv_color_hex(0xF2B134) : lv_color_hex(0xEF5A67));
 }
 
+const lv_image_dsc_t *radio_icon(const bluepaws::CatTelemetry &telemetry)
+{
+    switch (telemetry.link) {
+    case bluepaws::TelemetryLink::Lte:
+        return &bluepaws::ui::icon_radio_4g;
+    case bluepaws::TelemetryLink::Wifi:
+        return &bluepaws::ui::icon_radio_wifi;
+    case bluepaws::TelemetryLink::LoRa:
+        return &bluepaws::ui::icon_radio_rf;
+    case bluepaws::TelemetryLink::Unknown:
+    default:
+        return telemetry.source == bluepaws::TelemetrySource::LoRa
+            ? &bluepaws::ui::icon_radio_rf : &bluepaws::ui::icon_radio_antenna;
+    }
+}
+
+uint32_t telemetry_age_seconds(const bluepaws::CatTelemetry &telemetry,
+                               uint32_t now_ms)
+{
+    constexpr uint32_t kPlausibleUnixTime = 1700000000U;
+    if (telemetry.observed_at >= kPlausibleUnixTime) {
+        const std::time_t now = std::time(nullptr);
+        if (now >= static_cast<std::time_t>(kPlausibleUnixTime)) {
+            return now > static_cast<std::time_t>(telemetry.observed_at)
+                ? static_cast<uint32_t>(now - telemetry.observed_at) : 0U;
+        }
+    }
+    return now_ms >= telemetry.received_at_ms
+        ? (now_ms - telemetry.received_at_ms) / 1000U : 0U;
+}
+
 const lv_image_dsc_t *wifi_signal_icon(int16_t rssi)
 {
     return rssi >= -55 ? &bluepaws::ui::icon_signal_full
@@ -804,7 +835,7 @@ void update_ui(UiState &ui)
         }
 
         if (ui.summary_rows[i] != nullptr) {
-            const uint32_t age_seconds = (now_ms - cat->latest.received_at_ms) / 1000U;
+            const uint32_t age_seconds = telemetry_age_seconds(cat->latest, now_ms);
             lv_label_set_text_fmt(ui.summary_rows[i],
                                   "%s\nID %u  |  %u%%  |  %d dBm  |  %lus ago",
                                   cat->name,
@@ -814,7 +845,7 @@ void update_ui(UiState &ui)
                                   static_cast<unsigned long>(age_seconds));
         }
 
-        const uint32_t age_seconds = (now_ms - cat->latest.received_at_ms) / 1000U;
+        const uint32_t age_seconds = telemetry_age_seconds(cat->latest, now_ms);
         const auto relative = cat->has_position
             ? bluepaws::hub::relativePosition(
                 kTestOrigin,
@@ -859,11 +890,7 @@ void update_ui(UiState &ui)
             lv_label_set_text(ui.drawer_signal_labels[i], signal_quality(cat->latest.rssi));
         }
         if (ui.drawer_radio_images[i] != nullptr) {
-            const lv_image_dsc_t *radio_icon = i % 3U == 0U
-                ? &bluepaws::ui::icon_radio_rf
-                : (i % 3U == 1U ? &bluepaws::ui::icon_radio_wifi
-                                 : &bluepaws::ui::icon_radio_4g);
-            lv_image_set_src(ui.drawer_radio_images[i], radio_icon);
+            lv_image_set_src(ui.drawer_radio_images[i], radio_icon(cat->latest));
         }
         if (ui.drawer_distance_labels[i] != nullptr) {
             if (relative.valid) {
@@ -953,8 +980,9 @@ void update_ui(UiState &ui)
         size_t recently_seen = 0;
         for (size_t i = 0; i < ui.cats.size(); ++i) {
             const bluepaws::CatRecord *cat = ui.cats.at(i);
-            if (cat != nullptr && now_ms >= cat->latest.received_at_ms &&
-                now_ms - cat->latest.received_at_ms <= kOverviewRecentlySeenMs) {
+            if (cat != nullptr &&
+                telemetry_age_seconds(cat->latest, now_ms) <=
+                    kOverviewRecentlySeenMs / 1000U) {
                 ++recently_seen;
             }
         }
@@ -962,8 +990,8 @@ void update_ui(UiState &ui)
         for (size_t i = 0; i < ui.cats.size(); ++i) {
             const bluepaws::CatRecord *cat = ui.cats.at(i);
             if (cat == nullptr) continue;
-            const bool stale = now_ms < cat->latest.received_at_ms ||
-                now_ms - cat->latest.received_at_ms > kOverviewRecentlySeenMs;
+            const bool stale = telemetry_age_seconds(cat->latest, now_ms) >
+                kOverviewRecentlySeenMs / 1000U;
             const bool fault = cat->latest.status_code == 3 ||
                 (cat->latest.flags & 0x80U) != 0;
             if (stale || fault) ++attention_count;
@@ -1058,7 +1086,7 @@ void update_ui(UiState &ui)
             lv_obj_remove_flag(ui.overview_cards[slot], LV_OBJ_FLAG_HIDDEN);
             const size_t cat_index = newest_first[slot];
             const bluepaws::CatRecord *cat = ui.cats.at(cat_index);
-            const uint32_t age_seconds = (now_ms - cat->latest.received_at_ms) / 1000U;
+            const uint32_t age_seconds = telemetry_age_seconds(cat->latest, now_ms);
             const auto relative = cat->has_position
                 ? bluepaws::hub::relativePosition(
                     kTestOrigin,
@@ -1093,10 +1121,7 @@ void update_ui(UiState &ui)
             lv_obj_set_style_image_recolor(ui.overview_signal_images[slot],
                                            signal_colour(cat->latest.rssi), 0);
             lv_obj_set_style_image_recolor_opa(ui.overview_signal_images[slot], LV_OPA_COVER, 0);
-            lv_image_set_src(ui.overview_radio_images[slot],
-                             cat_index % 3U == 0U ? &bluepaws::ui::icon_radio_rf
-                                 : (cat_index % 3U == 1U ? &bluepaws::ui::icon_radio_wifi
-                                                        : &bluepaws::ui::icon_radio_4g));
+            lv_image_set_src(ui.overview_radio_images[slot], radio_icon(cat->latest));
             if (relative.valid) {
                 lv_label_set_text_fmt(ui.overview_distance_labels[slot], "%lum",
                                       static_cast<unsigned long>(std::lround(relative.distance_metres)));

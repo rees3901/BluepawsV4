@@ -9,7 +9,7 @@
 #ifndef HOME_HUB_WIFI_PASSWORD
 #define HOME_HUB_WIFI_PASSWORD ""
 #endif
-#define HOME_HUB_GATEWAY_GUID "0016"
+#define HOME_HUB_GATEWAY_GUID "0020"
 #define HOME_HUB_SNAPSHOT_URL \
     "https://ykcdaonkvwemedotdpdr.supabase.co/functions/v1/hub-snapshot" \
     "?gateway_guid16=" HOME_HUB_GATEWAY_GUID "&limit=1"

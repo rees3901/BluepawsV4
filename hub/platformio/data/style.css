@@ -1197,6 +1197,9 @@ body.light .leaflet-control-scale-line {
     letter-spacing: .08em;
 }
 
+.transport-lte { color: #64b5f6; font-weight: 800; letter-spacing: .04em; }
+.transport-wifi { color: #4dd0a8; font-weight: 800; }
+
 .appearance-editor-content { max-width: 440px; }
 .appearance-editor-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:18px; }
 .appearance-editor-eyebrow { color:var(--accent); font-size:.66rem; font-weight:800; letter-spacing:.14em; }

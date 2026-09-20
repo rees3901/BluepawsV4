@@ -2,6 +2,7 @@
 
 #include "bluepaws/hub_settings.h"
 #include "home_hub_bluetooth.h"
+#include "home_hub_config.h"
 #include "home_hub_defaults.h"
 
 #include "cJSON.h"
@@ -25,7 +26,7 @@ namespace {
 
 constexpr char kTag[] = "home_hub_web";
 constexpr char kWebRoot[] = "/web";
-constexpr char kHubId[] = "0010";
+constexpr char kHubId[] = HOME_HUB_GATEWAY_GUID;
 struct MapLayer {
     const char *id;
     const char *name;
@@ -83,6 +84,32 @@ const char *profile_name(uint8_t profile)
     }
 }
 
+const char *link_name(TelemetryLink link)
+{
+    switch (link) {
+    case TelemetryLink::LoRa: return "lora";
+    case TelemetryLink::Lte: return "lte";
+    case TelemetryLink::Wifi: return "wifi";
+    case TelemetryLink::Unknown:
+    default: return "unknown";
+    }
+}
+
+uint32_t telemetry_age_seconds(const CatTelemetry &telemetry)
+{
+    constexpr uint32_t kPlausibleUnixTime = 1700000000U;
+    if (telemetry.observed_at >= kPlausibleUnixTime) {
+        const std::time_t now = std::time(nullptr);
+        if (now >= static_cast<std::time_t>(kPlausibleUnixTime)) {
+            return now > static_cast<std::time_t>(telemetry.observed_at)
+                ? static_cast<uint32_t>(now - telemetry.observed_at) : 0U;
+        }
+    }
+    const uint32_t now_ms = static_cast<uint32_t>(esp_timer_get_time() / 1000);
+    return now_ms >= telemetry.received_at_ms
+        ? (now_ms - telemetry.received_at_ms) / 1000U : 0U;
+}
+
 WebSnapshot snapshot()
 {
     WebSnapshot copy{};
@@ -133,9 +160,8 @@ void add_device_json(cJSON *array, const CatRecord &cat)
     cJSON_AddNumberToObject(item, "fixAge", 0);
     cJSON_AddNumberToObject(item, "rssi", cat.latest.rssi);
     cJSON_AddNumberToObject(item, "snr", cat.latest.snr);
-    const uint32_t now_ms = static_cast<uint32_t>(esp_timer_get_time() / 1000);
-    const uint32_t age = now_ms >= cat.latest.received_at_ms
-        ? (now_ms - cat.latest.received_at_ms) / 1000U : 0;
+    cJSON_AddStringToObject(item, "linkType", link_name(cat.latest.link));
+    const uint32_t age = telemetry_age_seconds(cat.latest);
     cJSON_AddNumberToObject(item, "age", age);
     cJSON_AddNumberToObject(item, "rxWindowMs", age >= 10U ? 0U : (10U - age) * 1000U);
     cJSON_AddBoolToObject(item, "stale", age >= 600U);
@@ -160,12 +186,10 @@ esp_err_t devices_handler(httpd_req_t *request)
 esp_err_t welcome_api_handler(httpd_req_t *request)
 {
     const WebSnapshot state = snapshot();
-    const uint32_t now_ms = static_cast<uint32_t>(esp_timer_get_time() / 1000);
     uint32_t youngest = UINT32_MAX;
     uint32_t recent = 0;
     for (std::size_t i = 0; i < state.count; ++i) {
-        const uint32_t received = state.cats[i].latest.received_at_ms;
-        const uint32_t age = now_ms >= received ? (now_ms - received) / 1000U : 0;
+        const uint32_t age = telemetry_age_seconds(state.cats[i].latest);
         if (age <= 600U) ++recent;
         if (age < youngest) youngest = age;
     }

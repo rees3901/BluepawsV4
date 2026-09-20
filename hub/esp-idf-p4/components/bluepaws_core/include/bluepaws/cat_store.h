@@ -19,6 +19,13 @@ enum class TelemetrySource : uint8_t {
     Restored,
 };
 
+enum class TelemetryLink : uint8_t {
+    Unknown,
+    LoRa,
+    Lte,
+    Wifi,
+};
+
 struct CatTelemetry {
     uint16_t device_id = 0;
     uint32_t sequence = 0;
@@ -36,6 +43,7 @@ struct CatTelemetry {
     uint32_t received_at_ms = 0;
     bool position_valid = false;
     TelemetrySource source = TelemetrySource::Simulation;
+    TelemetryLink link = TelemetryLink::Unknown;
     uint8_t status_code = 1;
     uint8_t power_profile_code = 1;
     uint8_t flags = 0;

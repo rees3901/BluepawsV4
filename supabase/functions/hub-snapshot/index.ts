@@ -79,7 +79,10 @@ Deno.serve(async (request: Request) => {
     supabase.from("device_appearances").select(
       "device_id,avatar_kind,emoji_value,marker_colour",
     ).eq("household_id", householdId),
-    supabase.from("device_latest_positions").select("*").eq(
+    // Keep the embedded hub on the same authoritative projection used by the
+    // web dashboard. The additional home fields are harmless to older hub
+    // firmware and prevent the two clients drifting onto different views.
+    supabase.from("device_latest_positions_with_home").select("*").eq(
       "household_id",
       householdId,
     ),
@@ -157,12 +160,19 @@ function resolveBackendKey() {
   const encoded = Deno.env.get("SUPABASE_SECRET_KEYS");
   if (encoded) {
     try {
-      const keys = JSON.parse(encoded) as Record<string, unknown>;
-      if (typeof keys.default === "string" && keys.default.length > 0) {
-        return keys.default;
+      const keys = JSON.parse(encoded) as unknown;
+      if (Array.isArray(keys) && typeof keys[0] === "string" && keys[0].length > 0) {
+        return keys[0];
+      }
+      if (keys && typeof keys === "object") {
+        const named = keys as Record<string, unknown>;
+        for (const name of ["default", "service_role", "secret"]) {
+          const candidate = named[name];
+          if (typeof candidate === "string" && candidate.length > 0) return candidate;
+        }
       }
     } catch {
-      // Fall through to the legacy key; never log either secret.
+      if (encoded.startsWith("sb_secret_")) return encoded;
     }
   }
   return Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
