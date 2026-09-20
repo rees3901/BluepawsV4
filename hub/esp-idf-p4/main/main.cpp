@@ -98,7 +98,6 @@ enum class AppPage : uint8_t {
     Settings,
     Camera,
     Diagnostics,
-    Overview,
 };
 
 enum class SettingsField : uint8_t {
@@ -490,11 +489,8 @@ void refresh_map_tiles(UiState &ui)
         return;
     }
 
-    const bool overview_map = ui.active_page == AppPage::Overview &&
-        ui.overview_map_view != nullptr;
-    const bluepaws::map::Viewport &render_viewport = overview_map
-        ? ui.overview_viewport : ui.viewport;
-    const MapLayer render_layer = overview_map ? MapLayer::Street : ui.active_map_layer;
+    const bluepaws::map::Viewport &render_viewport = ui.viewport;
+    const MapLayer render_layer = ui.active_map_layer;
     const bluepaws::map::TileGrid visible_grid = render_viewport.visibleTiles(0);
     const bluepaws::map::TileGrid grid = render_viewport.visibleTiles(1);
     ui.visible_tile_count = visible_grid.count;
@@ -710,10 +706,12 @@ void update_ui(UiState &ui)
         ui.screen_dimmed = true;
         guition_jc4880p443c_backlight_set(ui.settings.dim_brightness_percent);
     }
-    if (!camera_active && inactive_ms >= overview_ms && ui.active_page != AppPage::Overview &&
+    if (!camera_active && inactive_ms >= overview_ms &&
+        (ui.active_page != AppPage::Map || !ui.drawer_open) &&
         ui.settings_modal == nullptr && !ui.screensaver_pending) {
         ui.screensaver_pending = true;
-        ui.active_page = AppPage::Overview;
+        ui.active_page = AppPage::Map;
+        ui.drawer_open = true;
         lv_async_call(rebuild_current_page, &ui);
     }
     const size_t cloud_updates = bluepaws::cloud::drain(ui.cats);
@@ -774,49 +772,7 @@ void update_ui(UiState &ui)
         }
     }
 
-    if (ui.active_page == AppPage::Overview && ui.overview_map_view != nullptr) {
-        std::array<bluepaws::map::GeoPoint, bluepaws::kMaximumCats + 1> points{};
-        size_t point_count = 0;
-        points[point_count++] = kTestOrigin;
-        for (size_t i = 0; i < ui.cats.size(); ++i) {
-            const bluepaws::CatRecord *cat = ui.cats.at(i);
-            if (cat != nullptr && cat->has_position) {
-                points[point_count++] = {
-                    static_cast<double>(cat->last_valid_latitude_e7) / 1.0e7,
-                    static_cast<double>(cat->last_valid_longitude_e7) / 1.0e7,
-                };
-            }
-        }
-        const MapLayerInfo &overview_layer = map_layer_info(MapLayer::Street);
-        const auto fit = bluepaws::map::fitPoints(
-            points.data(),
-            point_count,
-            ui.overview_viewport.width(),
-            ui.overview_viewport.height(),
-            30,
-            overview_layer.minimum_zoom,
-            overview_layer.maximum_zoom);
-        if (fit.valid) {
-            const uint8_t relaxed_zoom = fit.zoom > overview_layer.minimum_zoom
-                ? static_cast<uint8_t>(fit.zoom - 1U) : fit.zoom;
-            // Keep the hub at the centre of the radar. The extra zoom-out
-            // level provides the space that a bounds-centred fit would
-            // otherwise gain by shifting the hub away from the crosshair.
-            const bluepaws::map::GeoPoint target_center = kTestOrigin;
-            const bluepaws::map::GeoPoint previous_center = ui.overview_viewport.center();
-            if (ui.overview_viewport.zoom() != relaxed_zoom ||
-                std::abs(previous_center.latitude - target_center.latitude) > 1.0e-8 ||
-                std::abs(previous_center.longitude - target_center.longitude) > 1.0e-8) {
-                ui.overview_viewport = bluepaws::map::Viewport(
-                    ui.overview_viewport.width(),
-                    ui.overview_viewport.height(),
-                    target_center,
-                    relaxed_zoom);
-                ui.tiles_dirty = true;
-            }
-        }
-        refresh_map_tiles(ui);
-    } else if (ui.active_page == AppPage::Map && ui.map_view != nullptr) {
+    if (ui.active_page == AppPage::Map && ui.map_view != nullptr) {
         refresh_map_tiles(ui);
     }
 
@@ -986,7 +942,10 @@ void update_ui(UiState &ui)
                        static_cast<int32_t>(hub_point.y) - 27);
     }
 
-    if (ui.overview_cards[0] != nullptr) {
+    if (ui.overview_header_summary_label != nullptr ||
+        ui.overview_summary_label != nullptr ||
+        ui.overview_safety_label != nullptr ||
+        ui.overview_cards[0] != nullptr) {
         // CatStore is populated from the provisioned household snapshot and
         // subsequently updated by RF/cloud reports. Its size is therefore the
         // affiliated roster, not merely the number of currently active radios.
@@ -1089,6 +1048,9 @@ void update_ui(UiState &ui)
                   });
 
         for (size_t slot = 0; slot < kOverviewRecentCardCount; ++slot) {
+            if (ui.overview_cards[slot] == nullptr) {
+                continue;
+            }
             if (slot >= ui.cats.size()) {
                 lv_obj_add_flag(ui.overview_cards[slot], LV_OBJ_FLAG_HIDDEN);
                 continue;
@@ -1242,6 +1204,24 @@ void update_ui(UiState &ui)
                               static_cast<unsigned long>(cloud_status.last_http_status));
     }
 
+    if (ui.overview_header != nullptr) {
+        apply_overview_mode_theme(ui, cloud_status.effective_mode);
+    }
+    if (ui.overview_clock_label != nullptr) {
+        const std::time_t wall_time = std::time(nullptr);
+        std::tm local_time{};
+        if (wall_time >= 1704067200 && localtime_r(&wall_time, &local_time) != nullptr) {
+            char clock_text[12]{};
+            std::strftime(clock_text, sizeof(clock_text), "%I:%M %p", &local_time);
+            if (clock_text[0] == '0') {
+                std::memmove(clock_text, clock_text + 1, std::strlen(clock_text));
+            }
+            lv_label_set_text(ui.overview_clock_label, clock_text);
+        } else {
+            lv_label_set_text(ui.overview_clock_label, "--:-- --");
+        }
+    }
+
     if (ui.status == nullptr) {
         return;
     }
@@ -1299,31 +1279,6 @@ void update_ui(UiState &ui)
                               ui.sd.mounted ? "mounted" : "unavailable",
                               static_cast<unsigned>(ui.cats.size()));
         break;
-    case AppPage::Overview:
-        apply_overview_mode_theme(ui, cloud_status.effective_mode);
-        if (ui.overview_clock_label != nullptr) {
-            const std::time_t wall_time = std::time(nullptr);
-            std::tm local_time{};
-            if (wall_time >= 1704067200 && localtime_r(&wall_time, &local_time) != nullptr) {
-                char clock_text[12]{};
-                std::strftime(clock_text, sizeof(clock_text), "%I:%M %p", &local_time);
-                if (clock_text[0] == '0') {
-                    std::memmove(clock_text, clock_text + 1, std::strlen(clock_text));
-                }
-                lv_label_set_text(ui.overview_clock_label, clock_text);
-            } else {
-                lv_label_set_text(ui.overview_clock_label, "--:-- --");
-            }
-        }
-        const bool automatic_transition =
-            cloud_status.requested_mode != cloud_status.effective_mode;
-        lv_label_set_text_fmt(ui.status,
-                              "%u cats | %s | %s%s mode | tap background to open",
-                              static_cast<unsigned>(ui.cats.size()),
-                              sync_name,
-                              automatic_transition ? "auto " : "",
-                              bluepaws::hub::communicationsModeName(cloud_status.effective_mode));
-        break;
     }
 }
 
@@ -1337,6 +1292,8 @@ void change_zoom(UiState &ui, int delta);
 lv_obj_t *make_label(lv_obj_t *parent, const char *text, lv_color_t colour);
 void open_quick_settings(UiState &ui);
 void close_quick_settings(UiState &ui, bool animate);
+void mode_dropdown_changed(lv_event_t *event);
+void create_mode_confirmation(UiState &ui);
 
 int32_t point_distance_squared(const lv_point_t &a, const lv_point_t &b)
 {
@@ -1419,6 +1376,18 @@ void map_released(lv_event_t *event)
     ui->map_press_multitouch = false;
     if (!valid_tap) {
         ui->last_map_tap_ms = 0;
+        return;
+    }
+
+    // The unified Map opens as the Home Hub overview. A deliberate tap on
+    // the visible map dismisses the overview drawer; map drag/pinch gestures
+    // remain untouched, and subsequent taps retain double-tap zoom.
+    if (ui->drawer_open && ui->map_drawer != nullptr) {
+        ui->drawer_open = false;
+        ui->screensaver_pending = false;
+        ui->last_map_tap_ms = 0;
+        lv_obj_add_flag(ui->map_drawer, LV_OBJ_FLAG_HIDDEN);
+        ESP_LOGI(kTag, "Map overview drawer closed by map tap");
         return;
     }
 
@@ -1940,7 +1909,7 @@ void navigate_to(UiState &ui, AppPage page)
     }
     ui.active_page = page;
     ui.screensaver_pending = false;
-    ui.drawer_open = false;
+    ui.drawer_open = page == AppPage::Map;
     ESP_LOGI(kTag, "Opening app page %u", static_cast<unsigned>(page));
     lv_async_call(rebuild_current_page, &ui);
 }
@@ -1968,11 +1937,6 @@ void settings_app_clicked(lv_event_t *event)
 void camera_app_clicked(lv_event_t *event)
 {
     navigate_to(*static_cast<UiState *>(lv_event_get_user_data(event)), AppPage::Camera);
-}
-
-void overview_app_clicked(lv_event_t *event)
-{
-    navigate_to(*static_cast<UiState *>(lv_event_get_user_data(event)), AppPage::Overview);
 }
 
 void diagnostics_app_clicked(lv_event_t *event)
@@ -2096,6 +2060,7 @@ void drawer_close_clicked(lv_event_t *event)
         return;
     }
     ui->drawer_open = false;
+    ui->screensaver_pending = false;
     ESP_LOGI(kTag, "Map cat drawer closed");
     lv_obj_add_flag(ui->map_drawer, LV_OBJ_FLAG_HIDDEN);
 }
@@ -2370,7 +2335,7 @@ void create_launcher(UiState &ui)
     bluepaws::ui::create_app_tile(content,
                                   tile_width,
                                   tile_height,
-                                  "Live Map",
+                                  "Map & Overview",
                                   &bluepaws::ui::icon_map,
                                   nullptr,
                                   false,
@@ -2410,17 +2375,6 @@ void create_launcher(UiState &ui)
                                   0x007D8A,
                                   ui.dark_mode,
                                   camera_app_clicked,
-                                  &ui);
-    bluepaws::ui::create_app_tile(content,
-                                  tile_width,
-                                  tile_height,
-                                  "Overview",
-                                  nullptr,
-                                  LV_SYMBOL_EYE_OPEN,
-                                  false,
-                                  0x155E75,
-                                  ui.dark_mode,
-                                  overview_app_clicked,
                                   &ui);
     bluepaws::ui::create_app_tile(content,
                                   tile_width,
@@ -2743,18 +2697,104 @@ void create_drawer_cat_card(lv_obj_t *parent, size_t index, UiState &ui)
     ui.drawer_card_expanded[index] = false;
 }
 
+lv_obj_t *create_map_overview_frame(UiState &ui)
+{
+    lv_obj_t *content = bluepaws::ui::create_page_frame(
+        lv_screen_active(), "Home Hub", "", true, {}, &ui.status);
+    lv_obj_t *header = lv_obj_get_parent(ui.status);
+    ui.overview_header = header;
+    lv_obj_add_flag(ui.status, LV_OBJ_FLAG_HIDDEN);
+
+    lv_obj_t *title = lv_obj_get_child(header, 0);
+    lv_obj_set_pos(title, ui.portrait ? 8 : 12, 5);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_18, 0);
+
+    ui.overview_header_summary_label = make_label(
+        header, "No affiliated collars", lv_color_hex(0xB8D4E2));
+    lv_obj_set_pos(ui.overview_header_summary_label, 12, 31);
+    lv_obj_set_width(ui.overview_header_summary_label, 216);
+    lv_label_set_long_mode(ui.overview_header_summary_label, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_font(ui.overview_header_summary_label,
+                               &lv_font_montserrat_14, 0);
+    if (ui.portrait) lv_obj_add_flag(ui.overview_header_summary_label, LV_OBJ_FLAG_HIDDEN);
+
+    ui.overview_mode_title = make_label(header, "Hub mode", lv_color_hex(0x80C9F2));
+    lv_obj_set_pos(ui.overview_mode_title, ui.portrait ? 100 : 236, 3);
+    lv_obj_set_style_text_font(ui.overview_mode_title, &lv_font_montserrat_14, 0);
+    if (ui.portrait) lv_obj_add_flag(ui.overview_mode_title, LV_OBJ_FLAG_HIDDEN);
+
+    ui.overview_mode_dropdown = lv_dropdown_create(header);
+    lv_dropdown_set_options(ui.overview_mode_dropdown, "Home Hub\nPortable\nOff-Grid");
+    lv_dropdown_set_selected(ui.overview_mode_dropdown,
+                             static_cast<uint32_t>(bluepaws::cloud::status().effective_mode));
+    lv_obj_set_pos(ui.overview_mode_dropdown, ui.portrait ? 100 : 236,
+                   ui.portrait ? 10 : 21);
+    lv_obj_set_size(ui.overview_mode_dropdown, ui.portrait ? 136 : 178,
+                    ui.portrait ? 38 : 34);
+    lv_obj_set_style_bg_color(ui.overview_mode_dropdown, lv_color_hex(0x173342), 0);
+    lv_obj_set_style_border_color(ui.overview_mode_dropdown, lv_color_hex(0x80C9F2), 0);
+    lv_obj_set_style_border_width(ui.overview_mode_dropdown, 1, 0);
+    lv_obj_set_style_radius(ui.overview_mode_dropdown, 8, 0);
+    lv_obj_set_style_text_color(ui.overview_mode_dropdown, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_font(ui.overview_mode_dropdown, &lv_font_montserrat_14, 0);
+    lv_obj_add_event_cb(ui.overview_mode_dropdown, mode_dropdown_changed,
+                        LV_EVENT_VALUE_CHANGED, &ui);
+
+    ui.overview_header_wifi_image = make_drawer_image(header, bluepaws::ui::icon_radio_wifi);
+    lv_obj_set_pos(ui.overview_header_wifi_image, ui.portrait ? 240 : 430, 18);
+    lv_image_set_scale(ui.overview_header_wifi_image, 288);
+    lv_obj_set_style_image_recolor(ui.overview_header_wifi_image,
+                                   lv_color_hex(0x6E91A5), 0);
+    lv_obj_set_style_image_recolor_opa(ui.overview_header_wifi_image, LV_OPA_COVER, 0);
+
+    ui.overview_header_signal_image = make_drawer_image(header, bluepaws::ui::icon_signal_full);
+    lv_obj_set_pos(ui.overview_header_signal_image, ui.portrait ? 266 : 458, 17);
+    lv_image_set_scale(ui.overview_header_signal_image, 320);
+
+    ui.overview_header_bluetooth_label = make_label(
+        header, LV_SYMBOL_BLUETOOTH,
+        ui.settings.bluetooth_enabled ? lv_color_hex(0x38BDF8) : lv_color_hex(0x6E91A5));
+    lv_obj_set_pos(ui.overview_header_bluetooth_label, ui.portrait ? 294 : 493, 17);
+    lv_obj_set_style_text_font(ui.overview_header_bluetooth_label,
+                               &lv_font_montserrat_18, 0);
+    ui.overview_header_bluetooth_disabled_label = make_label(
+        header, LV_SYMBOL_CLOSE, lv_color_hex(0xEF4444));
+    lv_obj_set_pos(ui.overview_header_bluetooth_disabled_label,
+                   ui.portrait ? 298 : 497, 20);
+    lv_obj_set_style_text_font(ui.overview_header_bluetooth_disabled_label,
+                               &lv_font_montserrat_14, 0);
+    if (ui.settings.bluetooth_enabled) {
+        lv_obj_add_flag(ui.overview_header_bluetooth_disabled_label, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    ui.overview_header_battery_image = make_drawer_image(
+        header, bluepaws::ui::icon_battery_full);
+    lv_obj_set_pos(ui.overview_header_battery_image, ui.portrait ? 315 : 519, 17);
+    lv_image_set_scale(ui.overview_header_battery_image, 320);
+    ui.overview_header_battery_label = make_label(header, "--%", lv_color_hex(0xAFC3CE));
+    lv_obj_set_pos(ui.overview_header_battery_label, ui.portrait ? 344 : 548, 18);
+    lv_obj_set_style_text_font(ui.overview_header_battery_label,
+                               &lv_font_montserrat_18, 0);
+
+    ui.overview_clock_label = make_label(header, "--:-- --", lv_color_hex(0xFFFFFF));
+    lv_obj_set_pos(ui.overview_clock_label, ui.portrait ? 378 : 644, 17);
+    lv_obj_set_width(ui.overview_clock_label, ui.portrait ? 82 : 132);
+    lv_obj_set_style_text_align(ui.overview_clock_label, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_style_text_font(ui.overview_clock_label,
+                               ui.portrait ? &lv_font_montserrat_14
+                                           : &lv_font_montserrat_22,
+                               0);
+
+    apply_overview_mode_theme(ui, bluepaws::cloud::status().effective_mode);
+    return content;
+}
+
 void create_map_page(UiState &ui)
 {
     const UiLayout &layout = current_layout(ui);
     ui.tiles_dirty = true;
     ui.tile_images_bound = false;
-    lv_obj_t *content = bluepaws::ui::create_page_frame(
-        lv_screen_active(),
-        "BluePaws | Live Map",
-        "Loading offline map...",
-        ui.dark_mode,
-        page_actions(ui, true),
-        &ui.status);
+    lv_obj_t *content = create_map_overview_frame(ui);
     lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
 
     lv_obj_t *map_panel = lv_obj_create(content);
@@ -2864,10 +2904,23 @@ void create_map_page(UiState &ui)
     lv_obj_remove_flag(drawer_header, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_t *cats_title = make_label(
         drawer_header,
-        "Nearby cats",
+        "Home Hub overview",
         ui.dark_mode ? lv_color_hex(0xFFFFFF) : lv_color_hex(0x17324D));
     lv_obj_set_pos(cats_title, 0, 7);
     lv_obj_set_style_text_font(cats_title, &lv_font_montserrat_18, 0);
+
+    lv_obj_t *launcher_button = lv_button_create(drawer_header);
+    lv_obj_set_size(launcher_button, 46, 46);
+    lv_obj_align(launcher_button, LV_ALIGN_RIGHT_MID, -52, 0);
+    lv_obj_set_style_bg_color(launcher_button, lv_color_hex(0x24475F), 0);
+    lv_obj_set_style_bg_opa(launcher_button, LV_OPA_70, 0);
+    lv_obj_set_style_radius(launcher_button, 9, 0);
+    lv_obj_set_style_pad_all(launcher_button, 0, 0);
+    lv_obj_add_event_cb(launcher_button, launcher_clicked, LV_EVENT_CLICKED, &ui);
+    lv_obj_t *launcher_label = make_label(
+        launcher_button, LV_SYMBOL_HOME, lv_color_hex(0xFFFFFF));
+    lv_obj_center(launcher_label);
+
     lv_obj_t *close_button = lv_button_create(drawer_header);
     lv_obj_set_size(close_button, 46, 46);
     lv_obj_align(close_button, LV_ALIGN_RIGHT_MID, 0, 0);
@@ -2878,6 +2931,36 @@ void create_map_page(UiState &ui)
     lv_obj_add_event_cb(close_button, drawer_close_clicked, LV_EVENT_CLICKED, &ui);
     lv_obj_t *close_label = make_label(close_button, "X", lv_color_hex(0xFFFFFF));
     lv_obj_center(close_label);
+
+    ui.overview_safety_panel = lv_obj_create(ui.map_drawer);
+    lv_obj_set_size(ui.overview_safety_panel, LV_PCT(100), 44);
+    lv_obj_set_style_bg_color(ui.overview_safety_panel, lv_color_hex(0x0B3327), 0);
+    lv_obj_set_style_bg_opa(ui.overview_safety_panel, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(ui.overview_safety_panel, lv_color_hex(0x42D985), 0);
+    lv_obj_set_style_border_width(ui.overview_safety_panel, 2, 0);
+    lv_obj_set_style_radius(ui.overview_safety_panel, 9, 0);
+    lv_obj_set_style_pad_all(ui.overview_safety_panel, 0, 0);
+    lv_obj_remove_flag(ui.overview_safety_panel, LV_OBJ_FLAG_SCROLLABLE);
+    ui.overview_safety_label = make_label(
+        ui.overview_safety_panel,
+        LV_SYMBOL_OK "  All pets accounted for",
+        lv_color_hex(0x62E89A));
+    lv_obj_set_style_text_font(ui.overview_safety_label, &lv_font_montserrat_14, 0);
+    lv_obj_center(ui.overview_safety_label);
+
+    ui.overview_summary_label = make_label(
+        ui.map_drawer,
+        "No affiliated collars",
+        ui.dark_mode ? lv_color_hex(0x9FC2D2) : lv_color_hex(0x496B7C));
+    lv_obj_set_width(ui.overview_summary_label, LV_PCT(100));
+    lv_obj_set_style_text_align(ui.overview_summary_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(ui.overview_summary_label, &lv_font_montserrat_14, 0);
+
+    lv_obj_t *tracked_title = make_label(
+        ui.map_drawer,
+        "Tracked collars",
+        ui.dark_mode ? lv_color_hex(0xFFFFFF) : lv_color_hex(0x17324D));
+    lv_obj_set_style_text_font(tracked_title, &lv_font_montserrat_14, 0);
 
     lv_obj_t *drawer_scroll = lv_obj_create(ui.map_drawer);
     lv_obj_set_width(drawer_scroll, LV_PCT(100));
@@ -2897,6 +2980,8 @@ void create_map_page(UiState &ui)
     if (!ui.drawer_open) {
         lv_obj_add_flag(ui.map_drawer, LV_OBJ_FLAG_HIDDEN);
     }
+
+    create_mode_confirmation(ui);
 
 }
 
@@ -3510,7 +3595,7 @@ const char *settings_field_title(SettingsField field)
     case SettingsField::SecondarySsid: return "Secondary Wi-Fi name";
     case SettingsField::SecondaryPassword: return "Secondary Wi-Fi password";
     case SettingsField::AccessPointPassword: return "Off-grid local network password";
-    case SettingsField::OverviewTimeout: return "Overview timeout (seconds)";
+    case SettingsField::OverviewTimeout: return "Map overview timeout (seconds)";
     case SettingsField::DimTimeout: return "Dim timeout (seconds)";
     case SettingsField::ScreenOffTimeout: return "Screen-off timeout (seconds)";
     case SettingsField::DimBrightness: return "Dim brightness (percent)";
@@ -4404,7 +4489,7 @@ void create_settings_page(UiState &ui)
     std::snprintf(dim, sizeof(dim), "%u seconds", ui.settings.dim_timeout_seconds);
     std::snprintf(off, sizeof(off), "%u seconds", ui.settings.screen_off_timeout_seconds);
     std::snprintf(dim_level, sizeof(dim_level), "%u%% brightness", ui.settings.dim_brightness_percent);
-    create_setting_card(display_tab, "SHOW OVERVIEW AFTER", overview,
+    create_setting_card(display_tab, "SHOW MAP OVERVIEW AFTER", overview,
                         SettingsField::OverviewTimeout, lv_color_hex(0xB65E36), ui);
     create_setting_card(display_tab, "DIM SCREEN AFTER", dim,
                         SettingsField::DimTimeout, lv_color_hex(0xB65E36), ui);
@@ -4992,17 +5077,17 @@ void create_ui(UiState &ui)
     case AppPage::Diagnostics:
         create_diagnostics_page(ui);
         break;
-    case AppPage::Overview:
-        create_overview_page(ui);
-        break;
     }
 
-    if (ui.active_page != AppPage::Overview) create_quick_settings_tray(ui);
+    create_quick_settings_tray(ui);
 
-    update_ui(ui);
     if (ui.update_timer == nullptr) {
         ui.update_timer = lv_timer_create(update_timer, 1000, &ui);
     }
+    // Building the map overview and refreshing every dynamic card are both
+    // stack-heavy operations. Do not nest update_ui() inside create_ui(); let
+    // LVGL run it on the next timer cycle after the page builder has unwound.
+    lv_timer_ready(ui.update_timer);
     if (ui.gesture_timer == nullptr) {
         ui.gesture_timer = lv_timer_create(gesture_timer, kGesturePollMs, &ui);
     }
