@@ -52,6 +52,7 @@ constexpr EventBits_t kConnectedBit = BIT0;
 constexpr EventBits_t kReconfigureBit = BIT1;
 constexpr EventBits_t kDisconnectedBit = BIT2;
 constexpr EventBits_t kWifiScanBit = BIT3;
+constexpr uint64_t kStationReconnectDelayUs = 5ULL * 1000ULL * 1000ULL;
 constexpr std::size_t kResponseBytes = 64U * 1024U;
 constexpr char kStateDirectory[] = "/sdcard/bluepaws/data/state-v1";
 constexpr char kAvatarDirectory[] = "/sdcard/bluepaws/data/avatars-v1";
@@ -86,6 +87,7 @@ WifiScanSnapshot *g_wifi_scan = nullptr;
 bool g_wifi_initialized = false;
 bool g_cloud_authorized = false;
 std::atomic_bool g_station_allowed{false};
+esp_timer_handle_t g_reconnect_timer = nullptr;
 
 void time_sync_notification(struct timeval *) {
     portENTER_CRITICAL(&g_status_lock);
@@ -569,6 +571,28 @@ bool fetch_snapshot() {
     return success;
 }
 
+void reconnect_station(void *) {
+    if (!g_station_allowed.load()) return;
+    const esp_err_t error = esp_wifi_connect();
+    if (error != ESP_OK && error != ESP_ERR_WIFI_CONN) {
+        ESP_LOGW(kTag, "Scheduled Wi-Fi reconnect failed to start: %s",
+                 esp_err_to_name(error));
+    }
+}
+
+void schedule_station_reconnect() {
+    if (!g_station_allowed.load() || g_reconnect_timer == nullptr) return;
+    // A single timer owns retries. Repeated disconnect events can therefore
+    // never turn into a hot reconnect loop that starves LVGL or the idle task.
+    esp_timer_stop(g_reconnect_timer);
+    const esp_err_t error = esp_timer_start_once(g_reconnect_timer,
+                                                  kStationReconnectDelayUs);
+    if (error != ESP_OK) {
+        ESP_LOGW(kTag, "Could not schedule Wi-Fi reconnect: %s",
+                 esp_err_to_name(error));
+    }
+}
+
 void wifi_event(void *, esp_event_base_t base, int32_t id, void *) {
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
         if (g_station_allowed.load()) esp_wifi_connect();
@@ -577,8 +601,9 @@ void wifi_event(void *, esp_event_base_t base, int32_t id, void *) {
         xEventGroupSetBits(g_wifi, kDisconnectedBit);
         clear_station_link();
         set_state(ConnectionState::Connecting);
-        if (g_station_allowed.load()) esp_wifi_connect();
+        schedule_station_reconnect();
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
+        if (g_reconnect_timer != nullptr) esp_timer_stop(g_reconnect_timer);
         xEventGroupClearBits(g_wifi, kDisconnectedBit);
         xEventGroupSetBits(g_wifi, kConnectedBit);
         refresh_station_link();
@@ -604,6 +629,7 @@ bool configure_wifi(const hub::Settings &settings, unsigned network_index, bool 
     if (!station_enabled && !access_point_enabled) return false;
 
     g_station_allowed.store(false);
+    if (g_reconnect_timer != nullptr) esp_timer_stop(g_reconnect_timer);
     clear_station_link();
     if (restart && g_wifi_initialized) {
         esp_wifi_disconnect();
@@ -708,6 +734,16 @@ bool start_wifi(const hub::Settings &settings) {
     esp_netif_create_default_wifi_ap();
     wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
     if (esp_wifi_init(&init) != ESP_OK) return false;
+    if (g_reconnect_timer == nullptr) {
+        esp_timer_create_args_t reconnect_timer_args{};
+        reconnect_timer_args.callback = reconnect_station;
+        reconnect_timer_args.name = "wifi_reconnect";
+        reconnect_timer_args.skip_unhandled_events = true;
+        if (esp_timer_create(&reconnect_timer_args, &g_reconnect_timer) != ESP_OK) {
+            ESP_LOGE(kTag, "Could not create Wi-Fi reconnect timer");
+            return false;
+        }
+    }
     esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event, nullptr);
     esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event, nullptr);
     const bool explicit_off_grid =
@@ -720,6 +756,38 @@ bool start_wifi(const hub::Settings &settings) {
     else set_network_mode(settings, network_index);
     return configure_wifi(settings, network_index, false,
                           explicit_off_grid || automatic_off_grid, !explicit_off_grid);
+}
+
+void apply_runtime_reconfiguration(hub::Settings &settings,
+                                   unsigned &preferred,
+                                   unsigned &network_index,
+                                   bool &explicit_off_grid,
+                                   bool &off_grid_active,
+                                   bool &tried_alternate,
+                                   uint32_t &cloud_delay_ms) {
+    settings = network_settings();
+    preferred = preferred_network(settings);
+    network_index = first_available_network(settings, preferred);
+    explicit_off_grid = settings.communications_mode ==
+                        hub::CommunicationsMode::OffGrid;
+    off_grid_active = explicit_off_grid ||
+        (!usable_network(settings, 0) && !usable_network(settings, 1));
+    tried_alternate = network_index != preferred ||
+        !usable_network(settings, preferred == 0 ? 1U : 0U);
+    xEventGroupClearBits(g_wifi, kConnectedBit | kDisconnectedBit);
+    if (off_grid_active) {
+        set_state(ConnectionState::Degraded);
+        set_off_grid_mode(settings, !explicit_off_grid);
+    } else {
+        set_state(ConnectionState::Connecting);
+        set_network_mode(settings, network_index);
+    }
+    if (!configure_wifi(settings, network_index, true, off_grid_active,
+                        !explicit_off_grid)) {
+        set_state(ConnectionState::Degraded);
+        ESP_LOGE(kTag, "Wi-Fi reconfiguration failed; networking left degraded");
+    }
+    cloud_delay_ms = HOME_HUB_SYNC_INTERVAL_MS;
 }
 
 void sync_task(void *) {
@@ -751,8 +819,18 @@ void sync_task(void *) {
             // saved credential wakes this task immediately through reconfigure.
             const EventBits_t events = xEventGroupWaitBits(
                 g_wifi, kReconfigureBit | kWifiScanBit,
-                pdFALSE, pdFALSE, portMAX_DELAY);
-            if (handle_wifi_scan(events)) continue;
+                pdTRUE, pdFALSE, portMAX_DELAY);
+            const bool scanned = handle_wifi_scan(events);
+            if ((events & kReconfigureBit) != 0) {
+                apply_runtime_reconfiguration(settings, preferred, network_index,
+                                              explicit_off_grid, off_grid_active,
+                                              tried_alternate, cloud_delay_ms);
+                continue;
+            }
+            if (scanned) continue;
+            // Defensive yield: an unexpected wake-up must never become a
+            // priority-5 busy loop, even if a future event bit is added here.
+            vTaskDelay(pdMS_TO_TICKS(20));
             continue;
         }
         const bool both_configured = usable_network(settings, 0) &&
@@ -770,23 +848,9 @@ void sync_task(void *) {
         if (handle_wifi_scan(connected)) continue;
         if ((connected & kReconfigureBit) != 0) {
             xEventGroupClearBits(g_wifi, kReconfigureBit | kConnectedBit);
-            settings = network_settings();
-            preferred = preferred_network(settings);
-            network_index = first_available_network(settings, preferred);
-            explicit_off_grid = settings.communications_mode == hub::CommunicationsMode::OffGrid;
-            off_grid_active = explicit_off_grid ||
-                (!usable_network(settings, 0) && !usable_network(settings, 1));
-            tried_alternate = network_index != preferred ||
-                !usable_network(settings, preferred == 0 ? 1U : 0U);
-            if (off_grid_active) {
-                set_state(ConnectionState::Degraded);
-                set_off_grid_mode(settings, !explicit_off_grid);
-            } else {
-                set_state(ConnectionState::Connecting);
-                set_network_mode(settings, network_index);
-            }
-            configure_wifi(settings, network_index, true, off_grid_active, !explicit_off_grid);
-            cloud_delay_ms = HOME_HUB_SYNC_INTERVAL_MS;
+            apply_runtime_reconfiguration(settings, preferred, network_index,
+                                          explicit_off_grid, off_grid_active,
+                                          tried_alternate, cloud_delay_ms);
             continue;
         }
         if ((connected & kConnectedBit) != 0) {
