@@ -211,6 +211,20 @@
             '</span>';
     }
 
+    function renderTransportBadge(linkType) {
+        var type = String(linkType || '').toLowerCase();
+        if (type === 'lte') {
+            return '<span class="transport-badge transport-lte" title="Received through the collar LTE connection">4G</span>';
+        }
+        if (type === 'wifi') {
+            return '<span class="transport-badge transport-wifi" title="Received over Wi-Fi">Wi-Fi</span>';
+        }
+        if (type === 'lora') {
+            return '<span class="transport-badge transport-rf" title="Received from the collar by LoRa radio">RF</span>';
+        }
+        return '<span class="transport-badge" title="Transport not reported">?</span>';
+    }
+
     // ═══════════════════════════════════════════════
     // Battery Level — 5-Stage Indicator
     //
@@ -1546,7 +1560,7 @@
                     (offline ? '<div class="card-offline-summary">No reports for ' + lastSeenStr + '</div>' :
                     '<div class="card-indicators">' +
                         '<span class="card-indicator-group">' + renderBatteryBars(isHub ? null : data.batt) + '</span>' +
-                        '<span class="card-indicator-group">' + (isHub ? hubSignal(data, stale) : renderSignalBars(data.rssi, data.snr) + '<span class="transport-badge transport-rf" title="Received directly from the collar by local radio">RF</span>') + '</span>' +
+                        '<span class="card-indicator-group">' + (isHub ? hubSignal(data, stale) : renderSignalBars(data.rssi, data.snr) + renderTransportBadge(data.linkType)) + '</span>' +
                         (isHub ? '' : '<span class="collar-awake" data-awake="' + dev.id + '" hidden></span>') +
                         (hubPortableMode && bleResults[dev.id] ? '<span class="card-indicator-group">' + renderBleProximity(bleResults[dev.id].rssi) + '</span>' : '') +
                     '</div>' +

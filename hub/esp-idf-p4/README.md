@@ -140,6 +140,12 @@ revision 1.3 hardware with only a grey backlit panel.
 - The SD tile loader, ESP32-C6 networking and future SX1262 LoRa receiver are
   adapters around `CatStore`. The store rejects older observation timestamps
   and revisions so delayed replay cannot overwrite newer cloud/LTE truth.
+- While online, gateway `0020` polls the same
+  `device_latest_positions_with_home` projection as the web dashboard every
+  five seconds. Position reports and newer no-fix presence reports are merged
+  separately: a heartbeat may refresh status and battery, but cannot give an
+  older coordinate a newer timestamp. Transport metadata drives the RF, Wi-Fi
+  or 4G card badge instead of card order.
 
 Runtime state is separate from the map packs:
 

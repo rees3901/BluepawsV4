@@ -138,6 +138,7 @@ void storeRejectsOlderTruth() {
     cloud.latitude_e7 = 519000000;
     cloud.position_valid = true;
     cloud.source = bluepaws::TelemetrySource::Cloud;
+    cloud.link = bluepaws::TelemetryLink::Lte;
     assert(store.apply(cloud) == bluepaws::ApplyResult::Added);
 
     auto delayed_lora = cloud;
@@ -154,6 +155,30 @@ void storeRejectsOlderTruth() {
     newer_cloud.latitude_e7 = 520000000;
     assert(store.apply(newer_cloud) == bluepaws::ApplyResult::Updated);
     assert(store.find(1001)->last_valid_latitude_e7 == newer_cloud.latitude_e7);
+
+    auto newer_local = newer_cloud;
+    newer_local.observed_at = 201;
+    newer_local.revision = 0;
+    newer_local.sequence = 8;
+    newer_local.latitude_e7 = 521000000;
+    newer_local.source = bluepaws::TelemetrySource::LoRa;
+    newer_local.link = bluepaws::TelemetryLink::LoRa;
+    assert(store.apply(newer_local) == bluepaws::ApplyResult::Updated);
+
+    auto delayed_cloud_replay = newer_cloud;
+    delayed_cloud_replay.revision = 999;
+    delayed_cloud_replay.latitude_e7 = 499000000;
+    assert(store.apply(delayed_cloud_replay) == bluepaws::ApplyResult::IgnoredStale);
+    assert(store.find(1001)->last_valid_latitude_e7 == newer_local.latitude_e7);
+
+    auto lte_presence = newer_cloud;
+    lte_presence.observed_at = 202;
+    lte_presence.revision = 1000;
+    lte_presence.position_valid = false;
+    lte_presence.status_code = 0;
+    assert(store.apply(lte_presence) == bluepaws::ApplyResult::Updated);
+    assert(store.find(1001)->last_valid_latitude_e7 == newer_local.latitude_e7);
+    assert(store.find(1001)->latest.link == bluepaws::TelemetryLink::Lte);
     assert(store.setAppearance(1001, "🐈", "#1e88e5", true));
     assert(store.find(1001)->appearance.photo_available);
 }

@@ -297,6 +297,37 @@ const char *string_or(const cJSON *object, const char *field, const char *fallba
     return cJSON_IsString(value) && value->valuestring != nullptr ? value->valuestring : fallback;
 }
 
+TelemetryLink link_type(const cJSON *position) {
+    const char *value = string_or(position, "link_type", "");
+    if (std::strcmp(value, "lte") == 0) return TelemetryLink::Lte;
+    if (std::strcmp(value, "lora") == 0) return TelemetryLink::LoRa;
+    if (std::strcmp(value, "wifi") == 0) return TelemetryLink::Wifi;
+    return TelemetryLink::Unknown;
+}
+
+void apply_cloud_metadata(CloudUpdate &update, const cJSON *device,
+                          const cJSON *appearance) {
+    if (device != nullptr) {
+        std::strncpy(update.name, string_or(device, "display_name", ""),
+                     sizeof(update.name) - 1);
+    }
+    if (appearance != nullptr) {
+        std::strncpy(update.emoji, string_or(appearance, "emoji_value", ""),
+                     sizeof(update.emoji) - 1);
+        std::strncpy(update.marker_colour,
+                     string_or(appearance, "marker_colour", ""),
+                     sizeof(update.marker_colour) - 1);
+        update.photo_available = std::strcmp(
+            string_or(appearance, "avatar_kind", "emoji"), "photo") == 0;
+    }
+}
+
+bool queue_cloud_update(const CloudUpdate &update) {
+    if (xQueueSend(g_updates, &update, pdMS_TO_TICKS(50)) == pdTRUE) return true;
+    ESP_LOGW(kTag, "Cloud update queue full");
+    return false;
+}
+
 bool parse_snapshot(const char *json, std::size_t length) {
     cJSON *root = cJSON_ParseWithLength(json, length);
     if (root == nullptr) return false;
@@ -319,10 +350,14 @@ bool parse_snapshot(const char *json, std::size_t length) {
             std::max(0, number_or(position, "message_id", 0)));
         update.telemetry.revision = static_cast<uint64_t>(std::max(
             0.0, real_or(position, "position_id", real_or(position, "observation_id", 0.0))));
+        const cJSON *latitude = cJSON_GetObjectItemCaseSensitive(position, "latitude");
+        const cJSON *longitude = cJSON_GetObjectItemCaseSensitive(position, "longitude");
+        const double latitude_value = cJSON_IsNumber(latitude) ? latitude->valuedouble : 0.0;
+        const double longitude_value = cJSON_IsNumber(longitude) ? longitude->valuedouble : 0.0;
         update.telemetry.latitude_e7 = static_cast<int32_t>(std::llround(
-            real_or(position, "latitude", 0.0) * 1.0e7));
+            latitude_value * 1.0e7));
         update.telemetry.longitude_e7 = static_cast<int32_t>(std::llround(
-            real_or(position, "longitude", 0.0) * 1.0e7));
+            longitude_value * 1.0e7));
         update.telemetry.battery_percent = static_cast<uint8_t>(std::clamp(
             number_or(position, "battery", 0), 0, 100));
         update.telemetry.battery_mv = static_cast<uint16_t>(std::clamp(
@@ -330,13 +365,21 @@ bool parse_snapshot(const char *json, std::size_t length) {
         update.telemetry.rssi = static_cast<int16_t>(std::clamp(
             number_or(position, "link_rssi_dbm", -127), -32768, 32767));
         update.telemetry.snr = static_cast<float>(real_or(position, "link_snr_db", 0.0));
-        update.telemetry.observed_at = parse_timestamp(
+        const uint32_t recorded_at = parse_timestamp(
             cJSON_GetObjectItemCaseSensitive(position, "recorded_at"));
+        const uint32_t received_at = parse_timestamp(
+            cJSON_GetObjectItemCaseSensitive(position, "received_at"));
+        // Match the web dashboard: a collar clock ahead of the backend must
+        // not freeze freshness at zero or defeat a later local observation.
+        update.telemetry.observed_at = recorded_at != 0 && received_at != 0
+            ? std::min(recorded_at, received_at)
+            : std::max(recorded_at, received_at);
         update.telemetry.received_at_ms = uptime_ms();
-        update.telemetry.position_valid =
-            std::abs(real_or(position, "latitude", 0.0)) <= 90.0 &&
-            std::abs(real_or(position, "longitude", 0.0)) <= 180.0;
+        update.telemetry.position_valid = cJSON_IsNumber(latitude) &&
+            cJSON_IsNumber(longitude) && std::abs(latitude_value) <= 90.0 &&
+            std::abs(longitude_value) <= 180.0;
         update.telemetry.source = TelemetrySource::Cloud;
+        update.telemetry.link = link_type(position);
         update.telemetry.status_code = static_cast<uint8_t>(std::clamp(
             number_or(position, "status_code", 1), 0, 3));
         update.telemetry.power_profile_code = static_cast<uint8_t>(std::clamp(
@@ -347,37 +390,68 @@ bool parse_snapshot(const char *json, std::size_t length) {
             number_or(position, "tx_reason", 0), 0, 255));
 
         const cJSON *device = find_by_id(devices, "device_id", device_id);
-        if (device != nullptr) {
-            std::strncpy(update.name, string_or(device, "display_name", ""),
-                         sizeof(update.name) - 1);
-            const uint32_t presence_at = parse_timestamp(
-                cJSON_GetObjectItemCaseSensitive(device, "last_seen_at"));
-            if (presence_at > update.telemetry.observed_at) {
-                update.telemetry.observed_at = presence_at;
-                update.telemetry.status_code = static_cast<uint8_t>(std::clamp(
-                    number_or(device, "last_seen_status_code", update.telemetry.status_code), 0, 3));
-                update.telemetry.power_profile_code = static_cast<uint8_t>(std::clamp(
-                    number_or(device, "last_seen_power_profile_code", update.telemetry.power_profile_code), 0, 4));
-                update.telemetry.tx_reason = static_cast<uint8_t>(std::clamp(
-                    number_or(device, "last_seen_tx_reason", update.telemetry.tx_reason), 0, 255));
-                update.telemetry.battery_mv = static_cast<uint16_t>(std::clamp(
-                    number_or(device, "last_seen_battery_mv", update.telemetry.battery_mv), 0, 65535));
+        const cJSON *appearance = find_by_id(appearances, "device_id", device_id);
+        apply_cloud_metadata(update, device, appearance);
+        if (!queue_cloud_update(update)) {
+            valid = false;
+            break;
+        }
+
+        // Presence is activity, not a replacement position. Queue it as a
+        // no-fix observation so a recent wake/check-in can update status and
+        // battery without stamping an older coordinate with a newer time.
+        const uint32_t presence_at = device == nullptr ? 0 : parse_timestamp(
+            cJSON_GetObjectItemCaseSensitive(device, "last_seen_at"));
+        if (presence_at > update.telemetry.observed_at) {
+            CloudUpdate presence = update;
+            presence.telemetry.observed_at = presence_at;
+            presence.telemetry.position_valid = false;
+            presence.telemetry.status_code = static_cast<uint8_t>(std::clamp(
+                number_or(device, "last_seen_status_code", presence.telemetry.status_code), 0, 3));
+            presence.telemetry.power_profile_code = static_cast<uint8_t>(std::clamp(
+                number_or(device, "last_seen_power_profile_code", presence.telemetry.power_profile_code), 0, 4));
+            presence.telemetry.tx_reason = static_cast<uint8_t>(std::clamp(
+                number_or(device, "last_seen_tx_reason", presence.telemetry.tx_reason), 0, 255));
+            presence.telemetry.battery_mv = static_cast<uint16_t>(std::clamp(
+                number_or(device, "last_seen_battery_mv", presence.telemetry.battery_mv), 0, 65535));
+            if (!queue_cloud_update(presence)) {
+                valid = false;
+                break;
             }
         }
-        const cJSON *appearance = find_by_id(appearances, "device_id", device_id);
-        if (appearance != nullptr) {
-            std::strncpy(update.emoji, string_or(appearance, "emoji_value", ""),
-                         sizeof(update.emoji) - 1);
-            std::strncpy(update.marker_colour,
-                         string_or(appearance, "marker_colour", ""),
-                         sizeof(update.marker_colour) - 1);
-            update.photo_available = std::strcmp(
-                string_or(appearance, "avatar_kind", "emoji"), "photo") == 0;
-        }
-        if (xQueueSend(g_updates, &update, pdMS_TO_TICKS(50)) != pdTRUE) {
-            valid = false;
-            ESP_LOGW(kTag, "Cloud update queue full");
-            break;
+    }
+
+    // The web dashboard also shows affiliated collars that have checked in but
+    // have never supplied a valid position. Preserve that roster parity.
+    if (valid && cJSON_IsArray(devices)) {
+        const cJSON *device = nullptr;
+        cJSON_ArrayForEach(device, devices) {
+            const int device_id = number_or(device, "device_id", 0);
+            if (device_id <= 0 || device_id > 65535 ||
+                find_by_id(latest, "device_uid", device_id) != nullptr) continue;
+            const uint32_t presence_at = parse_timestamp(
+                cJSON_GetObjectItemCaseSensitive(device, "last_seen_at"));
+            if (presence_at == 0) continue;
+            CloudUpdate presence{};
+            presence.telemetry.device_id = static_cast<uint16_t>(device_id);
+            presence.telemetry.observed_at = presence_at;
+            presence.telemetry.received_at_ms = uptime_ms();
+            presence.telemetry.position_valid = false;
+            presence.telemetry.source = TelemetrySource::Cloud;
+            presence.telemetry.status_code = static_cast<uint8_t>(std::clamp(
+                number_or(device, "last_seen_status_code", 1), 0, 3));
+            presence.telemetry.power_profile_code = static_cast<uint8_t>(std::clamp(
+                number_or(device, "last_seen_power_profile_code", 1), 0, 4));
+            presence.telemetry.tx_reason = static_cast<uint8_t>(std::clamp(
+                number_or(device, "last_seen_tx_reason", 0), 0, 255));
+            presence.telemetry.battery_mv = static_cast<uint16_t>(std::clamp(
+                number_or(device, "last_seen_battery_mv", 0), 0, 65535));
+            apply_cloud_metadata(presence, device,
+                find_by_id(appearances, "device_id", device_id));
+            if (!queue_cloud_update(presence)) {
+                valid = false;
+                break;
+            }
         }
     }
     cJSON_Delete(root);

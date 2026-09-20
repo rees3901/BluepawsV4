@@ -50,6 +50,8 @@ void CatSimulator::update(uint32_t now_ms, CatStore &store) const {
         telemetry.received_at_ms = now_ms;
         telemetry.position_valid = true;
         telemetry.source = TelemetrySource::Simulation;
+        telemetry.link = i % 3U == 0U ? TelemetryLink::LoRa
+            : (i % 3U == 1U ? TelemetryLink::Wifi : TelemetryLink::Lte);
         store.apply(telemetry);
         store.setName(telemetry.device_id, kNames[i]);
     }
