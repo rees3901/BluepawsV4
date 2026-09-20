@@ -58,7 +58,7 @@ struct PmtilesArchive {
 };
 
 constexpr PmtilesArchive kVectorArchive{
-    "uk-vector", "Vector (UK)", kVectorPmtilesFatFsPath, "/maps/uk.pmtiles",
+    "uk-vector", "Scalable vector map (UK)", kVectorPmtilesFatFsPath, "/maps/uk.pmtiles",
     "pmtiles-vector", "Contains OS data (c) Crown copyright and database right; OpenStreetMap contributors",
     0, 15, {-8.75, 49.75, 1.85, 60.95}};
 

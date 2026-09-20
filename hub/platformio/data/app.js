@@ -563,7 +563,7 @@
                         return null;
                     })
                     .then(function (vectorLayer) {
-                        if (vectorLayer) baseLayers[vectorSource.name || 'Vector (UK)'] = vectorLayer;
+                        if (vectorLayer) baseLayers[vectorSource.name || 'Scalable vector map (UK)'] = vectorLayer;
                         var names = Object.keys(baseLayers);
                         if (!names.length) throw new Error('No valid SD map packs found');
                         usingSdMaps = true;
@@ -572,7 +572,7 @@
 
                         // PMTiles is the default whenever the archive is present;
                         // raster layers remain selectable as an instant fallback.
-                        var initialName = vectorLayer ? (vectorSource.name || 'Vector (UK)') : names[0];
+                        var initialName = vectorLayer ? (vectorSource.name || 'Scalable vector map (UK)') : names[0];
                         var initialLayer = baseLayers[initialName];
                         var initialOptions = initialLayer.options || {};
                         if (Number.isFinite(initialOptions.minZoom)) map.setMinZoom(initialOptions.minZoom);
