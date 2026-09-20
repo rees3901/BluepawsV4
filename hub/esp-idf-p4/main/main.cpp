@@ -273,7 +273,7 @@ struct UiState {
     bool map_press_active = false;
     bool map_press_moved = false;
     bool map_press_multitouch = false;
-    AppPage active_page = AppPage::Launcher;
+    AppPage active_page = AppPage::Map;
     MapLayer active_map_layer = MapLayer::Street;
     bool dark_mode = true;
     bool drawer_open = false;
@@ -1916,7 +1916,7 @@ void navigate_to(UiState &ui, AppPage page)
 
 void launcher_clicked(lv_event_t *event)
 {
-    navigate_to(*static_cast<UiState *>(lv_event_get_user_data(event)), AppPage::Launcher);
+    navigate_to(*static_cast<UiState *>(lv_event_get_user_data(event)), AppPage::Map);
 }
 
 void map_app_clicked(lv_event_t *event)
@@ -2099,7 +2099,7 @@ lv_obj_t *make_quick_setting(lv_obj_t *parent,
                              lv_event_cb_t callback)
 {
     lv_obj_t *button = lv_button_create(parent);
-    lv_obj_set_size(button, ui.portrait ? 84 : 108, 78);
+    lv_obj_set_size(button, ui.portrait ? 72 : 100, 78);
     lv_obj_set_style_bg_color(button,
                               ui.dark_mode ? lv_color_hex(0x243746) : lv_color_hex(0xDDD8CF),
                               0);
@@ -2136,7 +2136,7 @@ lv_obj_t *make_quick_setting_symbol(lv_obj_t *parent,
                                     lv_event_cb_t callback)
 {
     lv_obj_t *button = lv_button_create(parent);
-    lv_obj_set_size(button, ui.portrait ? 84 : 108, 78);
+    lv_obj_set_size(button, ui.portrait ? 72 : 100, 78);
     lv_obj_set_style_bg_color(button,
                               ui.dark_mode ? lv_color_hex(0x243746) : lv_color_hex(0xDDD8CF),
                               0);
@@ -2235,17 +2235,19 @@ void create_quick_settings_tray(UiState &ui)
     lv_obj_set_style_pad_all(controls, 0, 0);
     lv_obj_remove_flag(controls, LV_OBJ_FLAG_SCROLLABLE);
 
-    make_quick_setting(controls, bluepaws::ui::icon_home, "Home", ui, launcher_clicked);
+    make_quick_setting(controls, bluepaws::ui::icon_home, "Home", ui, map_app_clicked);
     make_quick_setting(
         controls, bluepaws::ui::icon_brightness, "Brightness", ui, brightness_clicked);
     make_quick_setting_symbol(controls, LV_SYMBOL_VOLUME_MAX, "Volume", ui, volume_clicked);
     make_quick_setting(
-        controls, bluepaws::ui::icon_rotate, "Orientation", ui, orientation_clicked);
+        controls, bluepaws::ui::icon_rotate, "Rotate", ui, orientation_clicked);
     make_quick_setting(controls,
                        bluepaws::ui::icon_night_mode,
-                       ui.dark_mode ? "Light mode" : "Dark mode",
+                       ui.dark_mode ? "Light" : "Dark",
                        ui,
                        theme_clicked);
+    make_quick_setting(
+        controls, bluepaws::ui::icon_settings, "Settings", ui, settings_app_clicked);
 
     lv_obj_t *handle = lv_button_create(screen);
     lv_obj_set_size(handle, 72, 10);
@@ -2897,40 +2899,20 @@ void create_map_page(UiState &ui)
     lv_obj_remove_flag(ui.map_drawer, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *drawer_header = lv_obj_create(ui.map_drawer);
-    lv_obj_set_size(drawer_header, LV_PCT(100), 48);
+    lv_obj_set_size(drawer_header, LV_PCT(100), 56);
     lv_obj_set_style_bg_opa(drawer_header, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(drawer_header, 0, 0);
     lv_obj_set_style_pad_all(drawer_header, 0, 0);
     lv_obj_remove_flag(drawer_header, LV_OBJ_FLAG_SCROLLABLE);
+    make_hamburger_control(
+        drawer_header, 0, 1, drawer_close_clicked, ui);
+
     lv_obj_t *cats_title = make_label(
         drawer_header,
         "Home Hub overview",
         ui.dark_mode ? lv_color_hex(0xFFFFFF) : lv_color_hex(0x17324D));
-    lv_obj_set_pos(cats_title, 0, 7);
+    lv_obj_set_pos(cats_title, 68, 17);
     lv_obj_set_style_text_font(cats_title, &lv_font_montserrat_18, 0);
-
-    lv_obj_t *launcher_button = lv_button_create(drawer_header);
-    lv_obj_set_size(launcher_button, 46, 46);
-    lv_obj_align(launcher_button, LV_ALIGN_RIGHT_MID, -52, 0);
-    lv_obj_set_style_bg_color(launcher_button, lv_color_hex(0x24475F), 0);
-    lv_obj_set_style_bg_opa(launcher_button, LV_OPA_70, 0);
-    lv_obj_set_style_radius(launcher_button, 9, 0);
-    lv_obj_set_style_pad_all(launcher_button, 0, 0);
-    lv_obj_add_event_cb(launcher_button, launcher_clicked, LV_EVENT_CLICKED, &ui);
-    lv_obj_t *launcher_label = make_label(
-        launcher_button, LV_SYMBOL_HOME, lv_color_hex(0xFFFFFF));
-    lv_obj_center(launcher_label);
-
-    lv_obj_t *close_button = lv_button_create(drawer_header);
-    lv_obj_set_size(close_button, 46, 46);
-    lv_obj_align(close_button, LV_ALIGN_RIGHT_MID, 0, 0);
-    lv_obj_set_style_bg_color(close_button, lv_color_hex(0x2B5878), 0);
-    lv_obj_set_style_bg_opa(close_button, LV_OPA_70, 0);
-    lv_obj_set_style_radius(close_button, 9, 0);
-    lv_obj_set_style_pad_all(close_button, 0, 0);
-    lv_obj_add_event_cb(close_button, drawer_close_clicked, LV_EVENT_CLICKED, &ui);
-    lv_obj_t *close_label = make_label(close_button, "X", lv_color_hex(0xFFFFFF));
-    lv_obj_center(close_label);
 
     ui.overview_safety_panel = lv_obj_create(ui.map_drawer);
     lv_obj_set_size(ui.overview_safety_panel, LV_PCT(100), 44);
@@ -3039,7 +3021,7 @@ void overview_wake_clicked(lv_event_t *event)
     ui->screen_off = false;
     ui->screen_dimmed = false;
     guition_jc4880p443c_backlight_set(ui->brightness_percent);
-    navigate_to(*ui, AppPage::Launcher);
+    navigate_to(*ui, AppPage::Map);
 }
 
 bool set_communications_mode(UiState &ui, bluepaws::hub::CommunicationsMode mode)
@@ -4362,6 +4344,48 @@ void style_settings_tab(lv_obj_t *tab, const UiState &ui)
     lv_obj_set_scrollbar_mode(tab, LV_SCROLLBAR_MODE_AUTO);
 }
 
+void create_settings_tool_entry(lv_obj_t *tab,
+                                const char *title,
+                                const char *description,
+                                const lv_image_dsc_t *icon,
+                                const char *symbol,
+                                lv_event_cb_t callback,
+                                UiState &ui)
+{
+    lv_obj_t *description_label = make_label(
+        tab, description,
+        ui.dark_mode ? lv_color_hex(0xC7D9E5) : lv_color_hex(0x38576D));
+    lv_obj_set_width(description_label, LV_PCT(100));
+    lv_label_set_long_mode(description_label, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_font(description_label, &lv_font_montserrat_14, 0);
+
+    lv_obj_t *button = lv_button_create(tab);
+    lv_obj_set_size(button, LV_PCT(100), 92);
+    lv_obj_set_style_bg_color(button, lv_color_hex(0x176D91), 0);
+    lv_obj_set_style_bg_color(button, lv_color_hex(0x218BB5), LV_STATE_PRESSED);
+    lv_obj_set_style_border_color(button, lv_color_hex(0x42D8F5), 0);
+    lv_obj_set_style_border_width(button, 1, 0);
+    lv_obj_set_style_radius(button, 12, 0);
+    lv_obj_set_style_pad_all(button, 12, 0);
+    lv_obj_add_event_cb(button, callback, LV_EVENT_CLICKED, &ui);
+
+    if (icon != nullptr) {
+        lv_obj_t *image = lv_image_create(button);
+        lv_image_set_src(image, icon);
+        lv_obj_set_style_image_recolor(image, lv_color_hex(0xFFFFFF), 0);
+        lv_obj_set_style_image_recolor_opa(image, LV_OPA_COVER, 0);
+        lv_obj_align(image, LV_ALIGN_LEFT_MID, 4, 0);
+    }
+    lv_obj_t *label = make_label(button, title, lv_color_hex(0xFFFFFF));
+    lv_obj_set_style_text_font(label, &lv_font_montserrat_18, 0);
+    lv_obj_align(label, LV_ALIGN_CENTER, icon != nullptr || symbol != nullptr ? 18 : 0, 0);
+    if (symbol != nullptr) {
+        lv_obj_t *symbol_label = make_label(button, symbol, lv_color_hex(0xFFFFFF));
+        lv_obj_set_style_text_font(symbol_label, &lv_font_montserrat_22, 0);
+        lv_obj_align(symbol_label, LV_ALIGN_LEFT_MID, 4, 0);
+    }
+}
+
 void create_settings_page(UiState &ui)
 {
     lv_obj_t *content = bluepaws::ui::create_page_frame(
@@ -4394,7 +4418,10 @@ void create_settings_page(UiState &ui)
 
     lv_obj_t *wifi_tab = lv_tabview_add_tab(tabview, "Wi-Fi");
     lv_obj_t *off_grid_tab = lv_tabview_add_tab(tabview, "Off-grid");
-    lv_obj_t *display_tab = lv_tabview_add_tab(tabview, "Display & power");
+    lv_obj_t *display_tab = lv_tabview_add_tab(tabview, "Display");
+    lv_obj_t *cats_tab = lv_tabview_add_tab(tabview, "Cats");
+    lv_obj_t *camera_tab = lv_tabview_add_tab(tabview, "Camera");
+    lv_obj_t *diagnostics_tab = lv_tabview_add_tab(tabview, "Diag");
 
     // LVGL 9 renders tab headers as button children rather than LV_PART_ITEMS.
     // Style the buttons and their labels directly so inactive tabs remain
@@ -4432,6 +4459,9 @@ void create_settings_page(UiState &ui)
     style_settings_tab(wifi_tab, ui);
     style_settings_tab(off_grid_tab, ui);
     style_settings_tab(display_tab, ui);
+    style_settings_tab(cats_tab, ui);
+    style_settings_tab(camera_tab, ui);
+    style_settings_tab(diagnostics_tab, ui);
 
     const auto value_or = [](const char *value, const char *fallback) {
         return value[0] == '\0' ? fallback : value;
@@ -4498,7 +4528,45 @@ void create_settings_page(UiState &ui)
     create_setting_card(display_tab, "DIMMED BRIGHTNESS", dim_level,
                         SettingsField::DimBrightness, lv_color_hex(0xB65E36), ui);
 
-    lv_tabview_set_active(tabview, std::min<uint8_t>(ui.settings_tab_index, 2), LV_ANIM_OFF);
+    make_settings_section(cats_tab, "AFFILIATED COLLARS", ui.dark_mode);
+    const int32_t summary_card_height = ui.portrait ? 76 : 82;
+    for (size_t i = 0; i < ui.summary_rows.size(); ++i) {
+        lv_obj_t *card = lv_obj_create(cats_tab);
+        lv_obj_set_size(card, LV_PCT(100), summary_card_height);
+        style_card(card, ui.dark_mode);
+        lv_obj_set_style_border_color(card, lv_color_hex(kMarkerColours[i]), 0);
+        lv_obj_set_style_border_width(card, 3, 0);
+        ui.summary_rows[i] = make_label(
+            card, "Waiting for report...",
+            ui.dark_mode ? lv_color_hex(0xF3F8FB) : lv_color_hex(0x17324D));
+        lv_obj_set_width(ui.summary_rows[i], LV_PCT(100));
+        lv_obj_set_style_text_font(ui.summary_rows[i], &lv_font_montserrat_14, 0);
+    }
+
+    make_settings_section(camera_tab, "CAMERA AND REGISTRATION", ui.dark_mode);
+    create_settings_tool_entry(
+        camera_tab,
+        "Open Camera / QR scanner",
+        "Opens the dedicated camera workspace for Wi-Fi QR codes, collar registration codes and pet photos.",
+        nullptr,
+        "QR",
+        camera_app_clicked,
+        ui);
+
+    make_settings_section(diagnostics_tab, "SYSTEM DIAGNOSTICS", ui.dark_mode);
+    lv_obj_t *diagnostics_panel = lv_obj_create(diagnostics_tab);
+    lv_obj_set_size(diagnostics_panel, LV_PCT(100), ui.portrait ? 430 : 300);
+    style_card(diagnostics_panel, ui.dark_mode);
+    lv_obj_set_style_pad_all(diagnostics_panel, 16, 0);
+    ui.diagnostics_text = make_label(
+        diagnostics_panel,
+        "Collecting diagnostics...",
+        ui.dark_mode ? lv_color_hex(0xF3F8FB) : lv_color_hex(0x17324D));
+    lv_obj_set_width(ui.diagnostics_text, LV_PCT(100));
+    lv_label_set_long_mode(ui.diagnostics_text, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_font(ui.diagnostics_text, &lv_font_montserrat_14, 0);
+
+    lv_tabview_set_active(tabview, std::min<uint8_t>(ui.settings_tab_index, 5), LV_ANIM_OFF);
 }
 
 void camera_apply_wifi_clicked(lv_event_t *event)
