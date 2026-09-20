@@ -10,9 +10,11 @@ The prototype SD-card layout is:
 /bluepaws/maps/imagery/gloucestershire-z15-17-webp.pmtiles
 ```
 
-`vector/united-kingdom.pmtiles` is now the preferred basemap for the local
-browser dashboard. The ESP32-P4 serves byte ranges from the archive and the
-bundled MapLibre/PMTiles client renders them without an internet connection.
+`vector/united-kingdom.pmtiles` is the preferred, browser-only basemap for the
+local dashboard. It contains MVT geometry rather than pre-rendered pictures:
+the ESP32-P4 serves byte ranges from the archive and the bundled
+MapLibre/PMTiles client styles and renders the features without an internet
+connection.
 The browser combines the two WebP raster PMTiles imagery archives into one
 `Aerial imagery` choice: the national overview supplies z5-12 and the bounded
 Gloucestershire pack supplies genuine detail at z15-17. The split keeps each
@@ -110,7 +112,7 @@ the local web server additionally supports efficient PMTiles byte ranges.
 
 ## United Kingdom PMTiles archive
 
-The current all-UK archive is a bounded extract of the 10 September 2026
+The current all-UK archive is a bounded extract of the 20 September 2026
 Protomaps planet build:
 
 - Bounds: `-8.7,49.8,1.8,60.9`
@@ -118,18 +120,20 @@ Protomaps planet build:
 - Browser display zoom: 0-22 (z15 vector tiles are over-zoomed above their
   native level; this improves close inspection without increasing card usage)
 - Installed path: `/bluepaws/maps/vector/united-kingdom.pmtiles`
-- Size: `2,978,574,900` bytes (below FAT32's 4 GiB single-file limit)
-- Tile entries: `901,702`
-- SHA-256: `1E4CFED267E4F5E787EB0C6FAFBB3DA74552C7B9AE600A97940C7D858151B2AD`
+- Size: `2,983,266,339` bytes (below FAT32's 4 GiB single-file limit)
+- Addressed tiles: `2,286,511`
+- Tile entries: `901,719`
+- Tile type: MVT, gzip-compressed
+- SHA-256: `7E77CD66CACB058E6D7974CCEE4159C14F914D9702378D8198BA14B8BB00152C`
 
 Build and verify a replacement with the current PMTiles CLI:
 
 ```powershell
-pmtiles extract https://build.protomaps.com/20260910.pmtiles `
-  hub/maps/work/sources/united-kingdom-20260910-z15.pmtiles `
+pmtiles extract https://build.protomaps.com/20260920.pmtiles `
+  hub/maps/work/sources/united-kingdom-20260920-z15.pmtiles `
   --bbox=-8.7,49.8,1.8,60.9 --maxzoom=15 --download-threads=8
-pmtiles verify hub/maps/work/sources/united-kingdom-20260910-z15.pmtiles
-Get-FileHash hub/maps/work/sources/united-kingdom-20260910-z15.pmtiles -Algorithm SHA256
+pmtiles verify hub/maps/work/sources/united-kingdom-20260920-z15.pmtiles
+Get-FileHash hub/maps/work/sources/united-kingdom-20260920-z15.pmtiles -Algorithm SHA256
 ```
 
 If a future card lacks space, reduce or remove the browser-only imagery packs
