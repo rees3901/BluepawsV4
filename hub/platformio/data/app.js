@@ -5,7 +5,7 @@
   on-chip LittleFS flash storage.
 
   Key features:
-   - Leaflet/MapLibre map with offline vector, street fallback and WebP aerial layers
+   - Leaflet map with the offline OpenStreetMap raster pack
    - Real-time telemetry via SSE (Server-Sent Events) from GET /events
    - Device cards in a collapsible sidebar showing telemetry + action buttons
    - Follow mode: auto-center map on a specific device
@@ -400,96 +400,8 @@
 
     // ═══════════════════════════════════════════════
     // Map Initialisation
-    // Leaflet retains markers, trails and tools. MapLibre renders the default
-    // SD-backed PMTiles vector basemap underneath those familiar overlays.
+    // Leaflet renders the dependable SD-backed OpenStreetMap raster pack.
     // ═══════════════════════════════════════════════
-    // The UK archive stores source tiles through z15, but vector geometry can
-    // be over-zoomed without fetching additional tiles. Keep these two limits
-    // separate so close-range collar and building inspection is not capped by
-    // the archive's native zoom.
-    var OFFLINE_VECTOR_DISPLAY_MAX_ZOOM = 22;
-
-    function createOfflineVectorLayer(source) {
-        if (!source || !window.maplibregl || !window.pmtiles || !L.maplibreGL) {
-            return Promise.reject(new Error('Vector renderer unavailable'));
-        }
-        return fetch(source.style || '/map-style.json', {cache: 'no-store'})
-            .then(function (response) {
-                if (!response.ok) throw new Error('Vector style unavailable');
-                return response.json();
-            })
-            .then(function (style) {
-                var sourceName = Object.keys(style.sources || {})[0];
-                if (!sourceName) throw new Error('Vector style has no source');
-                style.glyphs = location.origin + '/fonts/{fontstack}/{range}.pbf';
-                delete style.sprite;
-                var nativeMaxZoom = Number(source.maxZoom) || 15;
-                style.sources[sourceName] = {
-                    type: 'vector',
-                    url: 'pmtiles://' + location.origin + source.url,
-                    minzoom: Number(source.minZoom) || 0,
-                    maxzoom: nativeMaxZoom,
-                    attribution: '© OpenStreetMap contributors'
-                };
-                return L.maplibreGL({
-                    style: style,
-                    interactive: false,
-                    pane: 'tilePane',
-                    minZoom: Number(source.minZoom) || 0,
-                    maxZoom: OFFLINE_VECTOR_DISPLAY_MAX_ZOOM
-                });
-            });
-    }
-
-    function createOfflineAerialLayer(sources) {
-        if (!Array.isArray(sources) || !sources.length ||
-            !window.maplibregl || !window.pmtiles || !L.maplibreGL) {
-            return null;
-        }
-        var style = { version: 8, sources: {}, layers: [] };
-        var minimumZoom = 24;
-        var maximumZoom = 0;
-        sources.forEach(function (source, index) {
-            var sourceId = 'aerial-' + index;
-            var nativeMin = Number(source.minZoom) || 0;
-            var nativeMax = Number(source.maxZoom) || 17;
-            var definition = {
-                type: 'raster',
-                url: 'pmtiles://' + location.origin + source.url,
-                tileSize: 256,
-                minzoom: nativeMin,
-                maxzoom: nativeMax,
-                attribution: source.attribution || 'Offline aerial imagery'
-            };
-            if (Array.isArray(source.bounds) && source.bounds.length === 4) {
-                definition.bounds = source.bounds.map(Number);
-            }
-            style.sources[sourceId] = definition;
-            style.layers.push({
-                id: sourceId,
-                type: 'raster',
-                source: sourceId,
-                minzoom: nativeMin,
-                paint: { 'raster-fade-duration': 0 }
-            });
-            minimumZoom = Math.min(minimumZoom, nativeMin);
-            maximumZoom = Math.max(maximumZoom, nativeMax);
-        });
-        var layer = L.maplibreGL({
-            style: style,
-            interactive: false,
-            pane: 'tilePane',
-            minZoom: minimumZoom,
-            // A small overzoom keeps close inspection useful without pretending
-            // that extra source detail exists beyond the regional z17 pack.
-            maxZoom: maximumZoom + 2
-        });
-        layer.options = layer.options || {};
-        layer.options.minZoom = minimumZoom;
-        layer.options.maxZoom = maximumZoom + 2;
-        return layer;
-    }
-
     function initMap() {
         map = L.map('map', {
             center: [54.5, -3.2],  // UK overview until cached/live collars are available
@@ -497,7 +409,7 @@
             zoomControl: false        // We add our own zoom control below
         });
 
-        // Start with the bundled vector skeleton so the map remains useful if
+        // Start with the bundled fallback grid so the map remains useful if
         // the SD card is absent. P4 hubs replace it with SD-backed raster tiles.
         var SkeletonGrid = L.GridLayer.extend({
             createTile: function () {
@@ -538,66 +450,26 @@
             .then(function (catalogue) {
                 var layers = catalogue && Array.isArray(catalogue.layers) ? catalogue.layers : [];
                 if (!layers.length) throw new Error('No SD map packs found');
-                var baseLayers = {};
-                var vectorSource = layers.find(function (source) {
-                    return source && source.format === 'pmtiles-vector' && source.url;
+                var source = layers.find(function (candidate) {
+                    return candidate && candidate.id === 'osm' && candidate.url;
                 });
-                var aerialSources = layers.filter(function (source) {
-                    return source && source.format === 'pmtiles-raster' && source.url;
-                }).sort(function (left, right) {
-                    return (Number(left.minZoom) || 0) - (Number(right.minZoom) || 0);
+                if (!source) throw new Error('OpenStreetMap SD pack not found');
+                var streetLayer = L.tileLayer(source.url, {
+                    minZoom: Number(source.minZoom) || 0,
+                    maxZoom: Number(source.maxZoom) || 19,
+                    tileSize: 256,
+                    noWrap: true,
+                    attribution: 'Bluepaws offline OpenStreetMap'
                 });
-                layers.forEach(function (source) {
-                    if (!source || /^pmtiles-/.test(source.format || '') || !source.name || !source.url) return;
-                    baseLayers[source.name] = L.tileLayer(source.url, {
-                        minZoom: Number(source.minZoom) || 0,
-                        maxZoom: Number(source.maxZoom) || 19,
-                        tileSize: 256,
-                        noWrap: true,
-                        attribution: 'Bluepaws offline SD map'
-                    });
-                });
-                var aerialLayer = createOfflineAerialLayer(aerialSources);
-                if (aerialLayer) baseLayers['Aerial imagery'] = aerialLayer;
-                return (vectorSource ? createOfflineVectorLayer(vectorSource) : Promise.resolve(null))
-                    .catch(function (error) {
-                        console.warn('Vector map unavailable', error);
-                        return null;
-                    })
-                    .then(function (vectorLayer) {
-                        if (vectorLayer) baseLayers[vectorSource.name || 'Scalable vector map (UK)'] = vectorLayer;
-                        var names = Object.keys(baseLayers);
-                        if (!names.length) throw new Error('No valid SD map packs found');
-                        usingSdMaps = true;
-                        map.removeLayer(mapSources.skeleton);
-                        if (fallbackCoastline) map.removeLayer(fallbackCoastline);
-
-                        // PMTiles is the default whenever the archive is present;
-                        // raster layers remain selectable as an instant fallback.
-                        var initialName = vectorLayer ? (vectorSource.name || 'Scalable vector map (UK)') : names[0];
-                        var initialLayer = baseLayers[initialName];
-                        var initialOptions = initialLayer.options || {};
-                        if (Number.isFinite(initialOptions.minZoom)) map.setMinZoom(initialOptions.minZoom);
-                        if (Number.isFinite(initialOptions.maxZoom)) map.setMaxZoom(initialOptions.maxZoom);
-                        if (Number.isFinite(initialOptions.minZoom) && map.getZoom() < initialOptions.minZoom) {
-                            map.setZoom(initialOptions.minZoom);
-                        } else if (Number.isFinite(initialOptions.maxZoom) && map.getZoom() > initialOptions.maxZoom) {
-                            map.setZoom(initialOptions.maxZoom);
-                        }
-                        initialLayer.addTo(map);
-                        L.control.layers(baseLayers, null, {position: 'topright'}).addTo(map);
-                        map.on('baselayerchange', function (event) {
-                            var options = event.layer && event.layer.options ? event.layer.options : {};
-                            if (Number.isFinite(options.minZoom)) map.setMinZoom(options.minZoom);
-                            if (Number.isFinite(options.maxZoom)) map.setMaxZoom(options.maxZoom);
-                            if (Number.isFinite(options.minZoom) && map.getZoom() < options.minZoom) {
-                                map.setZoom(options.minZoom);
-                            } else if (Number.isFinite(options.maxZoom) && map.getZoom() > options.maxZoom) {
-                                map.setZoom(options.maxZoom);
-                            }
-                        });
-                        console.info('Offline map ready:', initialName, names.length, 'layer(s)');
-                    });
+                usingSdMaps = true;
+                map.removeLayer(mapSources.skeleton);
+                if (fallbackCoastline) map.removeLayer(fallbackCoastline);
+                map.setMinZoom(streetLayer.options.minZoom);
+                map.setMaxZoom(streetLayer.options.maxZoom);
+                if (map.getZoom() < streetLayer.options.minZoom) map.setZoom(streetLayer.options.minZoom);
+                if (map.getZoom() > streetLayer.options.maxZoom) map.setZoom(streetLayer.options.maxZoom);
+                streetLayer.addTo(map);
+                console.info('Offline OpenStreetMap ready');
             })
             .catch(function (error) { console.warn('Using compact fallback map', error); });
 
