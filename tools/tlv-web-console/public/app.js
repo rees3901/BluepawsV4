@@ -27,8 +27,8 @@ async function boot() {
   state.meta = await api("/api/meta");
   state.wrapper = state.meta.defaultWrapper;
   renderRecipeOptions();
-  renderWrapperForm();
   await refreshCredentials();
+  renderWrapperForm();
   bindEvents();
   $("server-status").textContent = "Local server connected";
 }
@@ -260,7 +260,13 @@ function renderWrapperForm() {
         ${option("lora_hub", "LoRa home-hub relay", wrapper.transport)}
       </select>
     </label>
-    <label>Gateway GUID16 <input data-wrapper="gatewayGuid16" value="${wrapper.gatewayGuid16 || "0010"}"><small>Hub IDs are multiples of 16</small></label>
+    <label>Gateway GUID16 <input data-wrapper="gatewayGuid16" value="${wrapper.gatewayGuid16 || "0010"}" placeholder="0020"><small>Hub IDs are multiples of 16</small></label>
+    ${wrapper.transport === "lora_hub" ? `
+      <label class="secret-field">Gateway bearer token
+        <input id="gateway-bearer-token" type="text" spellcheck="false" autocomplete="off" value="" placeholder="Loading gateway token…" />
+        <small id="gateway-bearer-status">Used as the Authorization bearer token for this hub relay.</small>
+      </label>
+    ` : ""}
     <label>Gateway RX Unix <input data-wrapper="gatewayRxTimeUnix" type="number" value="${wrapper.gatewayRxTimeUnix || Math.floor(Date.now() / 1000)}"></label>
     <label>Link RSSI dBm <input data-wrapper="linkRssiDbm" type="number" step="0.1" value="${wrapper.linkRssiDbm ?? ""}"></label>
     <label>Link SNR dB <input data-wrapper="linkSnrDb" type="number" step="0.1" value="${wrapper.linkSnrDb ?? ""}"></label>
@@ -268,10 +274,11 @@ function renderWrapperForm() {
     <label>Cell RSRQ dB <input data-wrapper="cellRsrqDb" type="number" step="0.1" value="${wrapper.cellRsrqDb ?? ""}"></label>
     <label>Cell SINR dB <input data-wrapper="cellSinrDb" type="number" step="0.1" value="${wrapper.cellSinrDb ?? ""}"></label>
   `;
-  $("wrapper-form").querySelectorAll("input,select").forEach((input) => {
+  $("wrapper-form").querySelectorAll("[data-wrapper]").forEach((input) => {
     input.addEventListener("input", updateWrapperFromEvent);
     input.addEventListener("change", updateWrapperFromEvent);
   });
+  bindGatewayBearerToken();
 }
 
 function renderRecipeOptions() {
@@ -320,8 +327,44 @@ function updateDetailFromEvent(event) {
 
 function updateWrapperFromEvent(event) {
   const field = event.target.dataset.wrapper;
-  state.wrapper[field] = coerce(event.target.value);
+  state.wrapper[field] = field === "gatewayGuid16" ? String(event.target.value).trim().toUpperCase() : coerce(event.target.value);
   schedulePreview();
+  if (field === "transport" || (field === "gatewayGuid16" && event.type === "change")) renderWrapperForm();
+}
+
+async function bindGatewayBearerToken() {
+  const input = $("gateway-bearer-token");
+  const status = $("gateway-bearer-status");
+  if (!input || !status) return;
+  const gatewayGuid16 = String(state.wrapper.gatewayGuid16 || "0010").trim().toUpperCase();
+  try {
+    const result = await api(`/api/credentials/gateway-token?gateway_guid16=${encodeURIComponent(gatewayGuid16)}`);
+    input.value = result.bearer_token;
+    input.placeholder = "";
+    status.textContent = `Loaded token for gateway ${result.gateway_guid16}. Edits affect this local session until saved.`;
+    input.addEventListener("change", updateGatewayBearerToken);
+  } catch (error) {
+    input.value = "";
+    input.disabled = true;
+    status.textContent = error.message;
+  }
+}
+
+async function updateGatewayBearerToken(event) {
+  const input = event.target;
+  const status = $("gateway-bearer-status");
+  const gatewayGuid16 = String(state.wrapper.gatewayGuid16 || "0010").trim().toUpperCase();
+  try {
+    const result = await api("/api/credentials/gateway-token", {
+      method: "POST",
+      body: { gateway_guid16: gatewayGuid16, bearer_token: input.value },
+    });
+    state.credentials = result.bundle;
+    status.textContent = `Updated token for gateway ${gatewayGuid16}. Use Save bundle JSON to persist it.`;
+    schedulePreview();
+  } catch (error) {
+    status.textContent = error.message;
+  }
 }
 
 function openGoogleMapsForSelected() {
@@ -516,6 +559,7 @@ async function runScenario() {
   }));
   let requestNumber = 0;
   let failedRequests = 0;
+  let activeRequest = null;
   try {
     while (schedule.some((item) => item.reportIndex < count) && !state.stopRequested) {
       const item = schedule.filter((candidate) => candidate.reportIndex < count).sort((left, right) => left.dueAt - right.dueAt)[0];
@@ -544,6 +588,7 @@ async function runScenario() {
         requestNumber += 1;
         $("run-status").textContent = `Sending request ${requestNumber}: device ${deviceId}, cycle ${cycle + 1}/${count}`;
         const requestPreview = buildRequestPreview(wrapper, state.wrapper.endpoint);
+        activeRequest = { requestNumber, deviceId, packetSettings, requestPreview };
         const result = await api("/api/send-one", {
           method: "POST",
           body: {
@@ -556,6 +601,7 @@ async function runScenario() {
         if (!result.ok) failedRequests += 1;
         state.deviceSettings.set(deviceId, packetSettings);
         appendLog(requestNumber, deviceId, packetSettings, result, requestPreview);
+        activeRequest = null;
         renderDevices();
         item.reportIndex += 1;
         if (item.reportIndex < count) item.dueAt = Date.now() + cadenceDelaySeconds(packetSettings) * 1000;
@@ -567,6 +613,16 @@ async function runScenario() {
       : outcome === "failed" ? `Run failed: most requests failed. ${summary}` : `Completed ${summary}`;
     setRunFeedback(outcome);
   } catch (error) {
+    if (activeRequest) {
+      appendLog(activeRequest.requestNumber, activeRequest.deviceId, activeRequest.packetSettings, {
+        status: 0,
+        ok: false,
+        elapsed_ms: 0,
+        request: activeRequest.requestPreview,
+        response: { error: error.message },
+      }, activeRequest.requestPreview);
+      failedRequests += 1;
+    }
     $("run-status").textContent = `Run failed: ${error.message}`;
     setRunFeedback("failed");
   } finally {

@@ -134,6 +134,26 @@ async function handleApi(request, response, url) {
     return;
   }
 
+  if (request.method === "GET" && url.pathname === "/api/credentials/gateway-token") {
+    const gateway = findGateway(url.searchParams.get("gateway_guid16"));
+    json(response, 200, {
+      gateway_guid16: gateway.gateway_guid16,
+      bearer_token: gateway.bearer_token,
+    });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/credentials/gateway-token") {
+    const body = await readJson(request);
+    const gateway = findGateway(body.gateway_guid16);
+    credentialBundle = upsertGateway(credentialBundle, {
+      ...gateway,
+      bearer_token: body.bearer_token,
+    });
+    json(response, 200, { path: credentialPath, bundle: summarizeBundle(credentialBundle) });
+    return;
+  }
+
   if (request.method === "POST" && url.pathname === "/api/provisioning-sql") {
     const body = await readJson(request);
     json(response, 200, { sql: provisioningSql(credentialBundle, body.household_id, body.key_version || 1) });
@@ -156,26 +176,34 @@ async function handleApi(request, response, url) {
   }
 
   if (request.method === "POST" && url.pathname === "/api/build") {
-    const body = await readJson(request);
-    const credential = findDevice(body.device?.deviceId);
-    json(response, 200, previewPacket(body.device, credential, body.wrapper || defaultWrapperSettings()));
+    try {
+      const body = await readJson(request);
+      const credential = findDevice(body.device?.deviceId);
+      json(response, 200, previewPacket(body.device, credential, body.wrapper || defaultWrapperSettings()));
+    } catch (error) {
+      json(response, 400, { error: error.message || "Invalid packet preview input" });
+    }
     return;
   }
 
   if (request.method === "POST" && url.pathname === "/api/send-one") {
-    const body = await readJson(request);
-    const wrapper = body.wrapper || defaultWrapperSettings();
-    const credential = findDevice(body.device?.deviceId);
-    const gatewayCredential = ["lora_hub", "lora_gateway"].includes(wrapper.transport) ? findGateway(wrapper.gatewayGuid16) : null;
-    const result = await sendPacket({
-      deviceSettings: body.device,
-      credential,
-      gatewayCredential,
-      wrapperSettings: wrapper,
-      endpoint: body.endpoint || wrapper.endpoint || DEFAULT_ENDPOINT,
-      timeoutSeconds: body.timeout_seconds || 15,
-    });
-    json(response, 200, result);
+    try {
+      const body = await readJson(request);
+      const wrapper = body.wrapper || defaultWrapperSettings();
+      const credential = findDevice(body.device?.deviceId);
+      const gatewayCredential = ["lora_hub", "lora_gateway"].includes(wrapper.transport) ? findGateway(wrapper.gatewayGuid16) : null;
+      const result = await sendPacket({
+        deviceSettings: body.device,
+        credential,
+        gatewayCredential,
+        wrapperSettings: wrapper,
+        endpoint: body.endpoint || wrapper.endpoint || DEFAULT_ENDPOINT,
+        timeoutSeconds: body.timeout_seconds || 15,
+      });
+      json(response, 200, result);
+    } catch (error) {
+      json(response, 400, { error: error.message || "Invalid send input" });
+    }
     return;
   }
 
