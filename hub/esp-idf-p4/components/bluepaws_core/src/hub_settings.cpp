@@ -72,6 +72,14 @@ uint32_t reportingIntervalMs(ReportingProfile profile) {
     return 60000U;
 }
 
+uint32_t controlPollIntervalMs(bool pending, uint8_t consecutive_failures) {
+    if (pending) return kControlPollPendingMs;
+    if (consecutive_failures == 0) return kControlPollIdleMs;
+    if (consecutive_failures == 1) return kControlPollFailureInitialMs;
+    if (consecutive_failures == 2) return kControlPollFailureInitialMs * 2U;
+    return kControlPollFailureMaximumMs;
+}
+
 void sanitize(Settings &settings) {
     settings.primary.ssid[kWifiSsidBytes - 1] = '\0';
     settings.primary.password[kWifiPasswordBytes - 1] = '\0';

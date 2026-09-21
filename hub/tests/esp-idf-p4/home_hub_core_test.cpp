@@ -245,6 +245,17 @@ void communicationsModesUseOneDeterministicPolicy() {
     assert(!bluepaws::hub::modeAllowsNetwork(CommunicationsMode::Home, 2));
 }
 
+void hubControlPollingUsesAdaptiveCadence() {
+    using bluepaws::hub::controlPollIntervalMs;
+    assert(controlPollIntervalMs(false, 0) == 30000U);
+    assert(controlPollIntervalMs(true, 0) == 5000U);
+    assert(controlPollIntervalMs(true, 9) == 5000U);
+    assert(controlPollIntervalMs(false, 1) == 60000U);
+    assert(controlPollIntervalMs(false, 2) == 120000U);
+    assert(controlPollIntervalMs(false, 3) == 300000U);
+    assert(controlPollIntervalMs(false, 255) == 300000U);
+}
+
 void relativePositionProvidesDistanceAndClockDirection() {
     const bluepaws::map::GeoPoint hub{51.8642, -2.2382};
     const auto north_east = bluepaws::hub::relativePosition(hub, {51.8652, -2.2372});
@@ -296,6 +307,7 @@ int main() {
     storeRejectsOlderTruth();
     settingsRemainSafeAndOrdered();
     communicationsModesUseOneDeterministicPolicy();
+    hubControlPollingUsesAdaptiveCadence();
     relativePositionProvidesDistanceAndClockDirection();
     qrPayloadsAreStrictAndEscaped();
     std::puts("Home Hub portable core: all tests passed");

@@ -9,7 +9,9 @@
 - Cloud edits are Family owner/member-only. Local edits use the hub's existing
   command-access boundary (optional Off-Grid PIN); no credentials reach browsers.
 - Cloud settings have a revision. A lightweight authenticated settings read
-  checks for changes about every five seconds; after the BLE task applies them,
+  runs immediately at startup/reconnect, every 30 seconds while idle, and every
+  five seconds while an observed revision is being applied. After the BLE task
+  applies it,
   an immediate self-report confirms application. The periodic heartbeat remains
   independent. Local overrides persist in NVS
   and are not uploaded as cloud edits. A subsequent explicit cloud edit wins.
@@ -126,7 +128,7 @@ a collar token/HMAC. This is a distinct JSON branch, not a TLV format change.
   "applied_revision": 0,
   "reporting_profile": "power_save",
   "report_interval_s": 180,
-  "control_poll_s": 5
+  "control_poll_s": 30
 }
 ```
 
@@ -166,12 +168,16 @@ No database migration, collar protocol change, or new browser credentials.
 REST remains outbound through the router/NAT. A browser cannot assume it can
 reach the hub's LAN address. A persistent private WebSocket would need its own
 gateway authentication and reconnect design; it is not introduced here.
-Five-second polling is a bench/product-development latency choice (up to 720
-settings calls/hour per online hub); revisit event delivery/cost before fleet rollout.
+Healthy idle polling runs every 30 seconds (up to 120 settings calls/hour per
+online hub). A newly observed revision temporarily selects five seconds until
+application is acknowledged. Startup and uplink restoration force an immediate
+check. Consecutive settings-read failures back off to 60 seconds, 120 seconds,
+then five minutes.
 Polling shares the existing single cloud worker/TLS connection budget. LoRa
 reception stays in its higher-priority task; queued live collar work wins.
-Settings reads back off to 60 seconds on failures. Two-second HTTP timeouts and
-other cloud work mean five seconds is an aim, not a guaranteed delivery deadline.
+Successful `hub_status` responses are also inspected for their returned settings,
+avoiding a redundant request when the heartbeat already supplies current state.
+Other cloud work means the selected cadence is an aim, not a guaranteed deadline.
 
 The cloud button shows **reported** Bluetooth, not the desired database value.
 After saving: updating → hub-confirmed, or an actionable unconfirmed warning
@@ -207,7 +213,7 @@ primary-Home-Wi-Fi safety gate remains unchanged.
 
 These are **reporting profiles**, independent of Home/Portable/Off-Grid. There
 is no Lost Alert or Debug hub profile. They do not sleep the hub or slow LoRa RX,
-GNSS reading, BLE, the captive portal, or five-second settings checks. Consequently
+GNSS reading, BLE, the captive portal, or adaptive settings checks. Consequently
 Power Save reduces self-report traffic, not all hub power consumption.
 Local status remains available every five seconds; its contact timeout remains
 15 seconds regardless of cloud reporting cadence.
@@ -255,7 +261,7 @@ For **reporting profiles, contact clock and sleep indicator** (this update):
    Migration must precede this new Edge handler.
 3. Merge for Vercel and update Home Hub firmware plus public assets, **preserving
    its existing journal/config**. No collar flash is needed.
-4. Confirm `/api/hub-presence` includes `reporting_profile`, `control_poll_s: 5`
+4. Confirm `/api/hub-presence` includes `reporting_profile`, `control_poll_s: 30`
    and `ble_settled`. Test all three profiles, reboot persistence, BLE confirmation
    and uninterrupted collar reception on real hardware.
 
@@ -264,7 +270,7 @@ older firmware without the prompt-control path. Changing the website alone
 cannot speed up that image. WebSockets remain a possible later improvement:
 they reduce polling traffic/latency, but need gateway-scoped authorization,
 reconnect/token recovery and durable revision reconciliation. REST is retained
-here; its five-second polling cost should be revisited before a fleet rollout.
+here; its adaptive polling cost should be reviewed with fleet telemetry.
 
 Regression additions: `tools/test_hub_reporting.cpp` tests the real firmware
 cadence helper and millis rollover. `tools/test_collar_feedback_db.mjs` applies

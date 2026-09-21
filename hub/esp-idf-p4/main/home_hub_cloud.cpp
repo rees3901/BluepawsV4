@@ -87,7 +87,7 @@ portMUX_TYPE g_settings_lock = portMUX_INITIALIZER_UNLOCKED;
 portMUX_TYPE g_wifi_scan_lock = portMUX_INITIALIZER_UNLOCKED;
 // Keep the network task's full settings copy in PSRAM. Internal DRAM is tight
 // before FreeRTOS creates app_main, whereas this state is accessed only during
-// five-second control/network cycles.
+// periodic control/network cycles.
 hub::Settings *g_network_settings = nullptr;
 // The application is already close to the ESP32-P4 internal DRAM limit before
 // app_main starts. Keep scan results in PSRAM so adding the picker cannot stop
@@ -101,6 +101,11 @@ uint32_t g_last_self_report_ms = 0;
 uint32_t g_self_report_retry_ms = HOME_HUB_SYNC_INTERVAL_MS;
 bool g_self_reported = false;
 std::atomic_bool g_force_self_report{false};
+std::atomic_bool g_force_control_poll{true};
+std::atomic_bool g_control_pending{false};
+uint32_t g_last_control_poll_ms = 0;
+uint8_t g_control_poll_failures = 0;
+bool g_control_poll_started = false;
 
 void time_sync_notification(struct timeval *) {
     portENTER_CRITICAL(&g_status_lock);
@@ -688,7 +693,10 @@ bool parse_control_settings(const char *json, std::size_t length) {
     applied_revision = g_status.applied_settings_revision;
     portEXIT_CRITICAL(&g_status_lock);
     if (update.revision > applied_revision && g_controls != nullptr) {
+        g_control_pending.store(true);
         xQueueOverwrite(g_controls, &update);
+    } else if (update.revision <= applied_revision) {
+        g_control_pending.store(false);
     }
     cJSON_Delete(root);
     return true;
@@ -749,6 +757,33 @@ bool fetch_hub_settings() {
                  esp_err_to_name(result), status_code,
                  static_cast<unsigned>(buffer.length));
     }
+    return success;
+}
+
+bool poll_hub_settings_if_due() {
+    const uint32_t now_ms = uptime_ms();
+    const uint32_t interval_ms = hub::controlPollIntervalMs(
+        g_control_pending.load(), g_control_poll_failures);
+    const bool forced = g_force_control_poll.exchange(false);
+    if (!forced && g_control_poll_started &&
+        static_cast<uint32_t>(now_ms - g_last_control_poll_ms) < interval_ms) {
+        return true;
+    }
+
+    g_control_poll_started = true;
+    g_last_control_poll_ms = now_ms;
+    const bool success = fetch_hub_settings();
+    if (success) {
+        g_control_poll_failures = 0;
+    } else if (g_control_poll_failures < 3) {
+        ++g_control_poll_failures;
+    }
+
+    portENTER_CRITICAL(&g_status_lock);
+    g_status.control_poll_seconds = g_control_pending.load()
+        ? static_cast<uint8_t>(hub::kControlPollPendingMs / 1000U)
+        : static_cast<uint8_t>(hub::kControlPollIdleMs / 1000U);
+    portEXIT_CRITICAL(&g_status_lock);
     return success;
 }
 
@@ -850,6 +885,13 @@ bool post_hub_presence() {
             : cJSON_GetObjectItemCaseSensitive(response, "accepted");
         accepted = cJSON_IsTrue(value);
         cJSON_Delete(response);
+        // The self-report response carries the current settings object. Reuse
+        // it so a successful heartbeat can avoid a separate settings request.
+        if (accepted && parse_control_settings(buffer.data, buffer.length)) {
+            g_control_poll_started = true;
+            g_last_control_poll_ms = now_ms;
+            g_control_poll_failures = 0;
+        }
     }
     esp_http_client_cleanup(client);
     std::memset(authorization, 0, sizeof(authorization));
@@ -906,6 +948,7 @@ void wifi_event(void *, esp_event_base_t base, int32_t id, void *) {
         xEventGroupSetBits(g_wifi, kConnectedBit);
         refresh_station_link();
         set_state(ConnectionState::Online);
+        g_force_control_poll.store(true);
     }
 }
 
@@ -1197,7 +1240,8 @@ void sync_task(void *) {
             }
             cloud_delay_ms = HOME_HUB_SYNC_INTERVAL_MS;
         } else {
-            if (g_cloud_authorized) fetch_hub_settings();
+            if (g_cloud_authorized) post_hub_presence();
+            if (g_cloud_authorized) poll_hub_settings_if_due();
             const bool snapshot_ok = !g_cloud_authorized || fetch_snapshot();
             if (snapshot_ok) {
                 set_network_mode(settings, network_index);
@@ -1206,7 +1250,6 @@ void sync_task(void *) {
                 cloud_delay_ms = std::min(cloud_delay_ms * 2U,
                                           static_cast<uint32_t>(HOME_HUB_SYNC_MAX_BACKOFF_MS));
             }
-            if (g_cloud_authorized) post_hub_presence();
         }
         // A manual mode selection or link loss interrupts cloud backoff immediately.
         const EventBits_t events = xEventGroupWaitBits(
@@ -1236,7 +1279,7 @@ bool start(const hub::Settings &settings) {
     g_status.applied_settings_revision = settings.cloud_settings_revision;
     g_status.bluetooth_enabled = settings.bluetooth_enabled;
     g_status.reporting_profile = settings.reporting_profile;
-    g_status.control_poll_seconds = HOME_HUB_SYNC_INTERVAL_MS / 1000U;
+    g_status.control_poll_seconds = hub::kControlPollIdleMs / 1000U;
     portEXIT_CRITICAL(&g_status_lock);
     g_updates = xQueueCreate(kMaximumCats * 2, sizeof(CloudUpdate));
     g_controls = xQueueCreate(1, sizeof(ControlUpdate));
@@ -1324,9 +1367,11 @@ void acknowledgeControlUpdate(uint64_t revision, bool bluetooth_enabled,
         g_status.applied_settings_revision = revision;
         g_status.bluetooth_enabled = bluetooth_enabled;
         g_status.reporting_profile = reporting_profile;
+        g_status.control_poll_seconds = hub::kControlPollIdleMs / 1000U;
     }
     portEXIT_CRITICAL(&g_status_lock);
-    g_force_self_report = true;
+    g_control_pending.store(false);
+    g_force_self_report.store(true);
     ESP_LOGI(kTag, "Hub settings revision %llu applied: Bluetooth=%s profile=%s",
              static_cast<unsigned long long>(revision),
              bluetooth_enabled ? "On" : "Off",

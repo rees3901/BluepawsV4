@@ -355,7 +355,7 @@ esp_err_t hub_presence_handler(httpd_req_t *request)
                             static_cast<double>(state.settings.cloud_settings_revision));
     cJSON_AddNumberToObject(json, "report_interval_s",
                             hub::reportingIntervalMs(state.settings.reporting_profile) / 1000U);
-    cJSON_AddNumberToObject(json, "control_poll_s", 5);
+    cJSON_AddNumberToObject(json, "control_poll_s", state.cloud.control_poll_seconds);
     const esp_err_t result = send_json(request, json);
     cJSON_Delete(json);
     return result;

@@ -41,7 +41,7 @@ struct Status {
     uint64_t applied_settings_revision = 0;
     bool bluetooth_enabled = true;
     hub::ReportingProfile reporting_profile = hub::ReportingProfile::Normal;
-    uint8_t control_poll_seconds = 5;
+    uint8_t control_poll_seconds = 30;
     hub::CommunicationsMode requested_mode = hub::CommunicationsMode::Home;
     hub::CommunicationsMode effective_mode = hub::CommunicationsMode::Home;
     ModeReason mode_reason = ModeReason::ManualSelection;

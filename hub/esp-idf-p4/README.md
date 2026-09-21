@@ -7,7 +7,9 @@ LoRa/off-grid testbed.
 
 The on-device application starts the screen in 800 x 480 landscape,
 restores its last authoritative snapshot from SD, connects through the onboard
-ESP32-C6 and reconciles gateway-authenticated Supabase state every five seconds.
+ESP32-C6 and reconciles gateway-authenticated Supabase state with adaptive polling:
+immediate on startup/reconnect, 30 seconds while idle, and five seconds while an
+observed settings revision is awaiting application.
 When no local gateway credential is provisioned it instead runs eight
 deterministic simulated cats through `bluepaws_core`, displaying their
 positions and telemetry in LVGL, and exposes touch-operated map controls.

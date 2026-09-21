@@ -12,6 +12,10 @@ constexpr std::size_t kWifiPasswordBytes = 65;
 constexpr std::size_t kHubDisplayNameBytes = 33;
 constexpr std::size_t kHubEmojiBytes = 9;
 constexpr std::size_t kHubMarkerColourBytes = 8;
+constexpr uint32_t kControlPollPendingMs = 5000U;
+constexpr uint32_t kControlPollIdleMs = 30000U;
+constexpr uint32_t kControlPollFailureInitialMs = 60000U;
+constexpr uint32_t kControlPollFailureMaximumMs = 300000U;
 
 enum class CommunicationsMode : uint8_t {
     Home = 0,
@@ -67,6 +71,7 @@ bool validAccessPointPassword(const char *value);
 const char *communicationsModeName(CommunicationsMode mode);
 const char *reportingProfileName(ReportingProfile profile);
 uint32_t reportingIntervalMs(ReportingProfile profile);
+uint32_t controlPollIntervalMs(bool pending, uint8_t consecutive_failures);
 RelativePosition relativePosition(map::GeoPoint origin, map::GeoPoint target);
 
 }  // namespace bluepaws::hub
