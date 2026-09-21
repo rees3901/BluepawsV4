@@ -4,6 +4,7 @@
 #include "home_hub_bluetooth.h"
 #include "home_hub_config.h"
 #include "home_hub_defaults.h"
+#include "home_hub_testbed_telemetry.h"
 
 #include "cJSON.h"
 #include "esp_http_server.h"
@@ -308,15 +309,32 @@ esp_err_t ble_scan_handler(httpd_req_t *request)
 esp_err_t hub_presence_handler(httpd_req_t *request)
 {
     const WebSnapshot state = snapshot();
+    const uint32_t uptime_seconds = static_cast<uint32_t>(esp_timer_get_time() / 1000000);
+    const testbed::TelemetrySample telemetry = testbed::telemetrySample(uptime_seconds);
     cJSON *json = cJSON_CreateObject();
     cJSON_AddStringToObject(json, "gateway_guid16", kHubId);
-    cJSON_AddStringToObject(json, "display_name", "Home Hub");
+    cJSON_AddStringToObject(json, "display_name", state.settings.display_name);
     cJSON_AddStringToObject(json, "mode", mode_name(state.cloud.effective_mode));
-    cJSON_AddStringToObject(json, "reporting_profile", "normal");
-    cJSON_AddNumberToObject(json, "latitude", defaults::kStarterLocation.latitude);
-    cJSON_AddNumberToObject(json, "longitude", defaults::kStarterLocation.longitude);
-    cJSON_AddStringToObject(json, "position_source", "starter");
-    cJSON_AddNullToObject(json, "fix_age_s");
+    cJSON_AddStringToObject(json, "reporting_profile",
+                            hub::reportingProfileName(state.settings.reporting_profile));
+    if (telemetry.has_position) {
+        cJSON_AddNumberToObject(json, "latitude", telemetry.latitude);
+        cJSON_AddNumberToObject(json, "longitude", telemetry.longitude);
+        cJSON_AddNumberToObject(json, "fix_age_s", 0);
+    } else {
+        cJSON_AddNullToObject(json, "latitude");
+        cJSON_AddNullToObject(json, "longitude");
+        cJSON_AddNullToObject(json, "fix_age_s");
+    }
+    cJSON_AddStringToObject(json, "position_source",
+                            telemetry.position_simulated ? "simulated" : "gnss");
+    if (telemetry.has_battery) {
+        cJSON_AddNumberToObject(json, "battery_percent", telemetry.battery_percent);
+    } else {
+        cJSON_AddNullToObject(json, "battery_percent");
+    }
+    cJSON_AddBoolToObject(json, "position_simulated", telemetry.position_simulated);
+    cJSON_AddBoolToObject(json, "battery_simulated", telemetry.battery_simulated);
     if (state.cloud.wifi_station_connected) {
         cJSON_AddNumberToObject(json, "wifi_rssi_dbm", state.cloud.wifi_rssi_dbm);
     } else {
@@ -324,14 +342,20 @@ esp_err_t hub_presence_handler(httpd_req_t *request)
     }
     cJSON_AddBoolToObject(json, "ble_advertising", state.bluetooth.advertising);
     cJSON_AddBoolToObject(json, "ble_scanning", state.bluetooth.scanning);
-    cJSON_AddBoolToObject(json, "ble_enabled", state.bluetooth.enabled);
+    // This is the user's persistent preference.  The physical radio can be
+    // listening-only (or idle) in Portable/Off-Grid mode without changing it.
+    cJSON_AddBoolToObject(json, "ble_enabled", state.settings.bluetooth_enabled);
     cJSON_AddBoolToObject(json, "ble_preference_enabled", state.settings.bluetooth_enabled);
     cJSON_AddBoolToObject(json, "ble_settled", state.bluetooth.settled);
-    cJSON_AddNumberToObject(json, "uptime_s", esp_timer_get_time() / 1000000);
-    cJSON_AddStringToObject(json, "home_emoji", "Home");
-    cJSON_AddStringToObject(json, "portable_emoji", "Hub");
-    cJSON_AddStringToObject(json, "marker_colour", "#38bdf8");
-    cJSON_AddNumberToObject(json, "control_poll_s", 1);
+    cJSON_AddNumberToObject(json, "uptime_s", uptime_seconds);
+    cJSON_AddStringToObject(json, "home_emoji", state.settings.home_emoji);
+    cJSON_AddStringToObject(json, "portable_emoji", state.settings.portable_emoji);
+    cJSON_AddStringToObject(json, "marker_colour", state.settings.marker_colour);
+    cJSON_AddNumberToObject(json, "applied_revision",
+                            static_cast<double>(state.settings.cloud_settings_revision));
+    cJSON_AddNumberToObject(json, "report_interval_s",
+                            hub::reportingIntervalMs(state.settings.reporting_profile) / 1000U);
+    cJSON_AddNumberToObject(json, "control_poll_s", state.cloud.control_poll_seconds);
     const esp_err_t result = send_json(request, json);
     cJSON_Delete(json);
     return result;

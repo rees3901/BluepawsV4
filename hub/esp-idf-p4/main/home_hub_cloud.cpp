@@ -4,7 +4,9 @@
 #include "home_hub_secrets.h"
 #endif
 #include "home_hub_config.h"
+#include "home_hub_bluetooth.h"
 #include "home_hub_mdns.h"
+#include "home_hub_testbed_telemetry.h"
 #include "bluepaws/hub_mode_policy.h"
 
 #include "cJSON.h"
@@ -15,6 +17,7 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_netif_sntp.h"
+#include "esp_system.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
@@ -54,6 +57,7 @@ constexpr EventBits_t kDisconnectedBit = BIT2;
 constexpr EventBits_t kWifiScanBit = BIT3;
 constexpr uint64_t kStationReconnectDelayUs = 5ULL * 1000ULL * 1000ULL;
 constexpr std::size_t kResponseBytes = 64U * 1024U;
+constexpr std::size_t kPresenceResponseBytes = 4096U;
 constexpr char kStateDirectory[] = "/sdcard/bluepaws/data/state-v1";
 constexpr char kAvatarDirectory[] = "/sdcard/bluepaws/data/avatars-v1";
 constexpr char kSnapshotPath[] = "/sdcard/bluepaws/data/state-v1/latest.json";
@@ -69,17 +73,22 @@ struct CloudUpdate {
 
 struct HttpBuffer {
     char *data = nullptr;
+    std::size_t capacity = 0;
     std::size_t length = 0;
     bool overflow = false;
 };
 
 QueueHandle_t g_updates = nullptr;
+QueueHandle_t g_controls = nullptr;
 EventGroupHandle_t g_wifi = nullptr;
 Status g_status{};
 portMUX_TYPE g_status_lock = portMUX_INITIALIZER_UNLOCKED;
 portMUX_TYPE g_settings_lock = portMUX_INITIALIZER_UNLOCKED;
 portMUX_TYPE g_wifi_scan_lock = portMUX_INITIALIZER_UNLOCKED;
-hub::Settings g_network_settings{};
+// Keep the network task's full settings copy in PSRAM. Internal DRAM is tight
+// before FreeRTOS creates app_main, whereas this state is accessed only during
+// periodic control/network cycles.
+hub::Settings *g_network_settings = nullptr;
 // The application is already close to the ESP32-P4 internal DRAM limit before
 // app_main starts. Keep scan results in PSRAM so adding the picker cannot stop
 // FreeRTOS from allocating the main task.
@@ -88,6 +97,15 @@ bool g_wifi_initialized = false;
 bool g_cloud_authorized = false;
 std::atomic_bool g_station_allowed{false};
 esp_timer_handle_t g_reconnect_timer = nullptr;
+uint32_t g_last_self_report_ms = 0;
+uint32_t g_self_report_retry_ms = HOME_HUB_SYNC_INTERVAL_MS;
+bool g_self_reported = false;
+std::atomic_bool g_force_self_report{false};
+std::atomic_bool g_force_control_poll{true};
+std::atomic_bool g_control_pending{false};
+uint32_t g_last_control_poll_ms = 0;
+uint8_t g_control_poll_failures = 0;
+bool g_control_poll_started = false;
 
 void time_sync_notification(struct timeval *) {
     portENTER_CRITICAL(&g_status_lock);
@@ -247,6 +265,67 @@ void note_result(bool success, uint32_t http_status) {
         g_status.state = ConnectionState::Degraded;
     }
     portEXIT_CRITICAL(&g_status_lock);
+}
+
+void note_self_report_result(bool success, uint32_t http_status) {
+    portENTER_CRITICAL(&g_status_lock);
+    g_status.last_self_report_http_status = http_status;
+    if (success) {
+        ++g_status.successful_self_reports;
+        g_status.last_self_report_uptime_ms = uptime_ms();
+    } else {
+        ++g_status.failed_self_reports;
+    }
+    portEXIT_CRITICAL(&g_status_lock);
+}
+
+const char *cloud_mode_name(hub::CommunicationsMode mode) {
+    switch (mode) {
+    case hub::CommunicationsMode::Portable: return "portable";
+    case hub::CommunicationsMode::OffGrid: return "off_grid";
+    case hub::CommunicationsMode::Home: return "home";
+    }
+    return "home";
+}
+
+bool parse_reporting_profile(const char *value, hub::ReportingProfile &profile) {
+    if (value == nullptr) return false;
+    if (std::strcmp(value, "power_save") == 0) {
+        profile = hub::ReportingProfile::PowerSave;
+        return true;
+    }
+    if (std::strcmp(value, "normal") == 0) {
+        profile = hub::ReportingProfile::Normal;
+        return true;
+    }
+    if (std::strcmp(value, "active") == 0) {
+        profile = hub::ReportingProfile::Active;
+        return true;
+    }
+    return false;
+}
+
+bool copy_control_text(char *destination, std::size_t capacity, const cJSON *value) {
+    if (destination == nullptr || capacity == 0 || !cJSON_IsString(value) ||
+        value->valuestring == nullptr) return false;
+    const std::size_t length = std::strlen(value->valuestring);
+    if (length == 0 || length >= capacity) return false;
+    for (std::size_t index = 0; index < length; ++index) {
+        const unsigned char byte = static_cast<unsigned char>(value->valuestring[index]);
+        if (byte < 0x20U || byte == 0x7fU) return false;
+    }
+    std::memcpy(destination, value->valuestring, length + 1);
+    return true;
+}
+
+bool valid_marker_colour(const char *value) {
+    if (value == nullptr || std::strlen(value) != 7 || value[0] != '#') return false;
+    for (std::size_t index = 1; index < 7; ++index) {
+        const char c = value[index];
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') ||
+              (c >= 'A' && c <= 'F'))) return false;
+    }
+    return true;
 }
 
 // Howard Hinnant's civil-date conversion, reduced to the UTC subset needed by
@@ -519,7 +598,8 @@ esp_err_t http_event(esp_http_client_event_t *event) {
     auto *buffer = static_cast<HttpBuffer *>(event->user_data);
     if (event->event_id == HTTP_EVENT_ON_DATA && event->data_len > 0) {
         const std::size_t incoming = static_cast<std::size_t>(event->data_len);
-        if (buffer->length + incoming >= kResponseBytes) {
+        if (buffer->data == nullptr || buffer->capacity == 0 ||
+            buffer->length + incoming >= buffer->capacity) {
             buffer->overflow = true;
             return ESP_FAIL;
         }
@@ -534,7 +614,7 @@ bool fetch_snapshot() {
     auto *storage = static_cast<char *>(heap_caps_malloc(kResponseBytes, MALLOC_CAP_SPIRAM));
     if (storage == nullptr) storage = static_cast<char *>(std::malloc(kResponseBytes));
     if (storage == nullptr) return false;
-    HttpBuffer buffer{storage, 0, false};
+    HttpBuffer buffer{storage, kResponseBytes, 0, false};
     esp_http_client_config_t config{};
     config.url = HOME_HUB_SNAPSHOT_URL;
     config.event_handler = http_event;
@@ -569,6 +649,266 @@ bool fetch_snapshot() {
                            esp_err_to_name(result), status_code,
                            static_cast<unsigned>(buffer.length), buffer.overflow);
     return success;
+}
+
+bool parse_control_settings(const char *json, std::size_t length) {
+    cJSON *root = cJSON_ParseWithLength(json, length);
+    if (root == nullptr) return false;
+    const cJSON *settings = cJSON_GetObjectItemCaseSensitive(root, "settings");
+    if (cJSON_IsNull(settings)) {
+        cJSON_Delete(root);
+        return true;
+    }
+    if (!cJSON_IsObject(settings)) {
+        cJSON_Delete(root);
+        return false;
+    }
+
+    const cJSON *revision = cJSON_GetObjectItemCaseSensitive(settings, "revision");
+    const cJSON *bluetooth = cJSON_GetObjectItemCaseSensitive(settings, "ble_enabled");
+    ControlUpdate update{};
+    const bool valid_revision = cJSON_IsNumber(revision) && revision->valuedouble >= 0.0 &&
+        revision->valuedouble <= 9007199254740991.0;
+    const bool valid = valid_revision && cJSON_IsBool(bluetooth) &&
+        parse_reporting_profile(string_or(settings, "reporting_profile", nullptr),
+                                update.reporting_profile) &&
+        copy_control_text(update.display_name, sizeof(update.display_name),
+                          cJSON_GetObjectItemCaseSensitive(settings, "display_name")) &&
+        copy_control_text(update.home_emoji, sizeof(update.home_emoji),
+                          cJSON_GetObjectItemCaseSensitive(settings, "home_emoji")) &&
+        copy_control_text(update.portable_emoji, sizeof(update.portable_emoji),
+                          cJSON_GetObjectItemCaseSensitive(settings, "portable_emoji")) &&
+        copy_control_text(update.marker_colour, sizeof(update.marker_colour),
+                          cJSON_GetObjectItemCaseSensitive(settings, "marker_colour")) &&
+        valid_marker_colour(update.marker_colour);
+    if (!valid) {
+        cJSON_Delete(root);
+        return false;
+    }
+    update.revision = static_cast<uint64_t>(revision->valuedouble);
+    update.bluetooth_enabled = cJSON_IsTrue(bluetooth);
+
+    uint64_t applied_revision = 0;
+    portENTER_CRITICAL(&g_status_lock);
+    applied_revision = g_status.applied_settings_revision;
+    portEXIT_CRITICAL(&g_status_lock);
+    if (update.revision > applied_revision && g_controls != nullptr) {
+        g_control_pending.store(true);
+        xQueueOverwrite(g_controls, &update);
+    } else if (update.revision <= applied_revision) {
+        g_control_pending.store(false);
+    }
+    cJSON_Delete(root);
+    return true;
+}
+
+bool fetch_hub_settings() {
+    auto *storage = static_cast<char *>(heap_caps_malloc(
+        kPresenceResponseBytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (storage == nullptr) storage = static_cast<char *>(std::malloc(kPresenceResponseBytes));
+    if (storage == nullptr) return false;
+    HttpBuffer buffer{storage, kPresenceResponseBytes, 0, false};
+    cJSON *json = cJSON_CreateObject();
+    if (json == nullptr) {
+        std::free(storage);
+        return false;
+    }
+    cJSON_AddStringToObject(json, "format", "hub_settings");
+    cJSON_AddStringToObject(json, "ingest_path", "hub_self");
+    cJSON_AddStringToObject(json, "gateway_guid16", HOME_HUB_GATEWAY_GUID);
+    char *body = cJSON_PrintUnformatted(json);
+    cJSON_Delete(json);
+    if (body == nullptr) {
+        std::free(storage);
+        return false;
+    }
+
+    esp_http_client_config_t config{};
+    config.url = HOME_HUB_INGEST_URL;
+    config.event_handler = http_event;
+    config.user_data = &buffer;
+    config.timeout_ms = 3000;
+    config.crt_bundle_attach = esp_crt_bundle_attach;
+    config.buffer_size = 2048;
+    config.buffer_size_tx = 1024;
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (client == nullptr) {
+        cJSON_free(body);
+        std::free(storage);
+        return false;
+    }
+    char authorization[256]{};
+    std::snprintf(authorization, sizeof(authorization), "Bearer %s", HOME_HUB_GATEWAY_TOKEN);
+    esp_http_client_set_method(client, HTTP_METHOD_POST);
+    esp_http_client_set_header(client, "Authorization", authorization);
+    esp_http_client_set_header(client, "Content-Type", "application/json");
+    esp_http_client_set_header(client, "Accept", "application/json");
+    esp_http_client_set_post_field(client, body, static_cast<int>(std::strlen(body)));
+    const esp_err_t result = esp_http_client_perform(client);
+    const int status_code = result == ESP_OK ? esp_http_client_get_status_code(client) : 0;
+    const bool success = result == ESP_OK && status_code == 200 && !buffer.overflow &&
+                         parse_control_settings(buffer.data, buffer.length);
+    esp_http_client_cleanup(client);
+    std::memset(authorization, 0, sizeof(authorization));
+    cJSON_free(body);
+    std::free(storage);
+    if (!success) {
+        ESP_LOGW(kTag, "Hub settings poll failed: transport=%s http=%d bytes=%u",
+                 esp_err_to_name(result), status_code,
+                 static_cast<unsigned>(buffer.length));
+    }
+    return success;
+}
+
+bool poll_hub_settings_if_due() {
+    const uint32_t now_ms = uptime_ms();
+    const uint32_t interval_ms = hub::controlPollIntervalMs(
+        g_control_pending.load(), g_control_poll_failures);
+    const bool forced = g_force_control_poll.exchange(false);
+    if (!forced && g_control_poll_started &&
+        static_cast<uint32_t>(now_ms - g_last_control_poll_ms) < interval_ms) {
+        return true;
+    }
+
+    g_control_poll_started = true;
+    g_last_control_poll_ms = now_ms;
+    const bool success = fetch_hub_settings();
+    if (success) {
+        g_control_poll_failures = 0;
+    } else if (g_control_poll_failures < 3) {
+        ++g_control_poll_failures;
+    }
+
+    portENTER_CRITICAL(&g_status_lock);
+    g_status.control_poll_seconds = g_control_pending.load()
+        ? static_cast<uint8_t>(hub::kControlPollPendingMs / 1000U)
+        : static_cast<uint8_t>(hub::kControlPollIdleMs / 1000U);
+    portEXIT_CRITICAL(&g_status_lock);
+    return success;
+}
+
+bool post_hub_presence() {
+    const uint32_t now_ms = uptime_ms();
+    Status live{};
+    portENTER_CRITICAL(&g_status_lock);
+    live = g_status;
+    portEXIT_CRITICAL(&g_status_lock);
+    const bool force_report = g_force_self_report.exchange(false);
+    const uint32_t due_ms = g_self_reported
+        ? (g_self_report_retry_ms == HOME_HUB_SYNC_INTERVAL_MS
+            ? hub::reportingIntervalMs(live.reporting_profile)
+            : g_self_report_retry_ms)
+        : 0U;
+    if (!force_report && g_self_reported &&
+        static_cast<uint32_t>(now_ms - g_last_self_report_ms) < due_ms) {
+        return true;
+    }
+    g_last_self_report_ms = now_ms;
+    if (!live.wifi_station_connected) return false;
+
+    const bluetooth::Status bluetooth_status = bluetooth::status();
+    const testbed::TelemetrySample telemetry = testbed::telemetrySample(now_ms / 1000U);
+
+    cJSON *json = cJSON_CreateObject();
+    if (json == nullptr) return false;
+    cJSON_AddStringToObject(json, "format", "hub_status");
+    cJSON_AddStringToObject(json, "ingest_path", "hub_self");
+    cJSON_AddStringToObject(json, "gateway_guid16", HOME_HUB_GATEWAY_GUID);
+    cJSON_AddStringToObject(json, "mode", cloud_mode_name(live.effective_mode));
+    if (telemetry.has_position) {
+        cJSON_AddNumberToObject(json, "latitude", telemetry.latitude);
+        cJSON_AddNumberToObject(json, "longitude", telemetry.longitude);
+        cJSON_AddNumberToObject(json, "fix_age_s", 0);
+    } else {
+        cJSON_AddNullToObject(json, "latitude");
+        cJSON_AddNullToObject(json, "longitude");
+        cJSON_AddNullToObject(json, "fix_age_s");
+    }
+    if (telemetry.has_battery) {
+        cJSON_AddNumberToObject(json, "battery_percent", telemetry.battery_percent);
+    } else {
+        cJSON_AddNullToObject(json, "battery_percent");
+    }
+    cJSON_AddBoolToObject(json, "position_simulated", telemetry.position_simulated);
+    cJSON_AddBoolToObject(json, "battery_simulated", telemetry.battery_simulated);
+    cJSON_AddNumberToObject(json, "uptime_s", now_ms / 1000U);
+    cJSON_AddNumberToObject(json, "wifi_rssi_dbm", live.wifi_rssi_dbm);
+    cJSON_AddBoolToObject(json, "ble_enabled", live.bluetooth_enabled);
+    cJSON_AddBoolToObject(json, "ble_advertising", bluetooth_status.advertising);
+    cJSON_AddNumberToObject(json, "free_heap", esp_get_free_heap_size());
+    cJSON_AddNumberToObject(json, "applied_revision",
+                            static_cast<double>(live.applied_settings_revision));
+    cJSON_AddStringToObject(json, "reporting_profile",
+                            hub::reportingProfileName(live.reporting_profile));
+    cJSON_AddNumberToObject(json, "report_interval_s",
+                            hub::reportingIntervalMs(live.reporting_profile) / 1000U);
+    cJSON_AddNumberToObject(json, "control_poll_s", live.control_poll_seconds);
+
+    char *body = cJSON_PrintUnformatted(json);
+    cJSON_Delete(json);
+    if (body == nullptr) return false;
+    auto *storage = static_cast<char *>(heap_caps_malloc(
+        kPresenceResponseBytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (storage == nullptr) storage = static_cast<char *>(std::malloc(kPresenceResponseBytes));
+    if (storage == nullptr) {
+        cJSON_free(body);
+        return false;
+    }
+    HttpBuffer buffer{storage, kPresenceResponseBytes, 0, false};
+    esp_http_client_config_t config{};
+    config.url = HOME_HUB_INGEST_URL;
+    config.event_handler = http_event;
+    config.user_data = &buffer;
+    config.timeout_ms = 5000;
+    config.crt_bundle_attach = esp_crt_bundle_attach;
+    config.buffer_size = 2048;
+    config.buffer_size_tx = 2048;
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (client == nullptr) {
+        std::free(storage);
+        cJSON_free(body);
+        return false;
+    }
+    char authorization[256]{};
+    std::snprintf(authorization, sizeof(authorization), "Bearer %s", HOME_HUB_GATEWAY_TOKEN);
+    esp_http_client_set_method(client, HTTP_METHOD_POST);
+    esp_http_client_set_header(client, "Authorization", authorization);
+    esp_http_client_set_header(client, "Content-Type", "application/json");
+    esp_http_client_set_header(client, "Accept", "application/json");
+    esp_http_client_set_post_field(client, body, static_cast<int>(std::strlen(body)));
+    const esp_err_t result = esp_http_client_perform(client);
+    const int status_code = result == ESP_OK ? esp_http_client_get_status_code(client) : 0;
+    bool accepted = false;
+    if (result == ESP_OK && status_code == 200 && !buffer.overflow) {
+        cJSON *response = cJSON_ParseWithLength(buffer.data, buffer.length);
+        const cJSON *value = response == nullptr ? nullptr
+            : cJSON_GetObjectItemCaseSensitive(response, "accepted");
+        accepted = cJSON_IsTrue(value);
+        cJSON_Delete(response);
+        // The self-report response carries the current settings object. Reuse
+        // it so a successful heartbeat can avoid a separate settings request.
+        if (accepted && parse_control_settings(buffer.data, buffer.length)) {
+            g_control_poll_started = true;
+            g_last_control_poll_ms = now_ms;
+            g_control_poll_failures = 0;
+        }
+    }
+    esp_http_client_cleanup(client);
+    std::memset(authorization, 0, sizeof(authorization));
+    std::free(storage);
+    cJSON_free(body);
+
+    g_self_reported = true;
+    g_self_report_retry_ms = accepted ? HOME_HUB_SYNC_INTERVAL_MS
+        : std::min(g_self_report_retry_ms * 2U,
+                   static_cast<uint32_t>(HOME_HUB_SYNC_MAX_BACKOFF_MS));
+    note_self_report_result(accepted, static_cast<uint32_t>(std::max(0, status_code)));
+    ESP_LOGI(kTag,
+             "Hub self-report: accepted=%d http=%d mode=%s battery=%u%% simulated=%d",
+             accepted, status_code, cloud_mode_name(live.effective_mode),
+             static_cast<unsigned>(telemetry.battery_percent),
+             telemetry.position_simulated || telemetry.battery_simulated);
+    return accepted;
 }
 
 void reconnect_station(void *) {
@@ -608,12 +948,13 @@ void wifi_event(void *, esp_event_base_t base, int32_t id, void *) {
         xEventGroupSetBits(g_wifi, kConnectedBit);
         refresh_station_link();
         set_state(ConnectionState::Online);
+        g_force_control_poll.store(true);
     }
 }
 
 hub::Settings network_settings() {
     portENTER_CRITICAL(&g_settings_lock);
-    const hub::Settings copy = g_network_settings;
+    const hub::Settings copy = *g_network_settings;
     portEXIT_CRITICAL(&g_settings_lock);
     return copy;
 }
@@ -898,12 +1239,17 @@ void sync_task(void *) {
                 ESP_LOGI(kTag, "Trusted Wi-Fi restored; automatic off-grid AP stopped");
             }
             cloud_delay_ms = HOME_HUB_SYNC_INTERVAL_MS;
-        } else if (!g_cloud_authorized || fetch_snapshot()) {
-            set_network_mode(settings, network_index);
-            cloud_delay_ms = HOME_HUB_SYNC_INTERVAL_MS;
         } else {
-            cloud_delay_ms = std::min(cloud_delay_ms * 2U,
-                                      static_cast<uint32_t>(HOME_HUB_SYNC_MAX_BACKOFF_MS));
+            if (g_cloud_authorized) post_hub_presence();
+            if (g_cloud_authorized) poll_hub_settings_if_due();
+            const bool snapshot_ok = !g_cloud_authorized || fetch_snapshot();
+            if (snapshot_ok) {
+                set_network_mode(settings, network_index);
+                cloud_delay_ms = HOME_HUB_SYNC_INTERVAL_MS;
+            } else {
+                cloud_delay_ms = std::min(cloud_delay_ms * 2U,
+                                          static_cast<uint32_t>(HOME_HUB_SYNC_MAX_BACKOFF_MS));
+            }
         }
         // A manual mode selection or link loss interrupts cloud backoff immediately.
         const EventBits_t events = xEventGroupWaitBits(
@@ -921,27 +1267,41 @@ bool start(const hub::Settings &settings) {
         ESP_LOGW(kTag, "Cloud sync disabled: home_hub_secrets.h is not provisioned");
         set_state(ConnectionState::Disabled);
     }
+    if (g_network_settings == nullptr) {
+        g_network_settings = static_cast<hub::Settings *>(heap_caps_malloc(
+            sizeof(hub::Settings), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    }
+    if (g_network_settings == nullptr) return false;
     portENTER_CRITICAL(&g_settings_lock);
-    g_network_settings = settings;
+    *g_network_settings = settings;
     portEXIT_CRITICAL(&g_settings_lock);
+    portENTER_CRITICAL(&g_status_lock);
+    g_status.applied_settings_revision = settings.cloud_settings_revision;
+    g_status.bluetooth_enabled = settings.bluetooth_enabled;
+    g_status.reporting_profile = settings.reporting_profile;
+    g_status.control_poll_seconds = hub::kControlPollIdleMs / 1000U;
+    portEXIT_CRITICAL(&g_status_lock);
     g_updates = xQueueCreate(kMaximumCats * 2, sizeof(CloudUpdate));
+    g_controls = xQueueCreate(1, sizeof(ControlUpdate));
     g_wifi = xEventGroupCreate();
     if (g_wifi_scan == nullptr) {
         g_wifi_scan = static_cast<WifiScanSnapshot *>(
             heap_caps_calloc(1, sizeof(WifiScanSnapshot),
                              MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     }
-    if (g_updates == nullptr || g_wifi == nullptr || g_wifi_scan == nullptr) return false;
+    if (g_updates == nullptr || g_controls == nullptr || g_wifi == nullptr ||
+        g_wifi_scan == nullptr) return false;
     if (g_cloud_authorized) restore_cached_snapshot();
     const bool started = xTaskCreate(sync_task, "hub_cloud", 12288, nullptr, 5, nullptr) == pdPASS;
     return started && g_cloud_authorized;
 }
 
 bool applyNetworkSettings(const hub::Settings &input) {
+    if (g_network_settings == nullptr) return false;
     hub::Settings settings = input;
     hub::sanitize(settings);
     portENTER_CRITICAL(&g_settings_lock);
-    g_network_settings = settings;
+    *g_network_settings = settings;
     portEXIT_CRITICAL(&g_settings_lock);
     if (g_wifi != nullptr) xEventGroupSetBits(g_wifi, kReconfigureBit);
     return true;
@@ -994,6 +1354,28 @@ std::size_t drain(CatStore &store) {
         }
     }
     return count;
+}
+
+bool takeControlUpdate(ControlUpdate &update) {
+    return g_controls != nullptr && xQueueReceive(g_controls, &update, 0) == pdTRUE;
+}
+
+void acknowledgeControlUpdate(uint64_t revision, bool bluetooth_enabled,
+                              hub::ReportingProfile reporting_profile) {
+    portENTER_CRITICAL(&g_status_lock);
+    if (revision >= g_status.applied_settings_revision) {
+        g_status.applied_settings_revision = revision;
+        g_status.bluetooth_enabled = bluetooth_enabled;
+        g_status.reporting_profile = reporting_profile;
+        g_status.control_poll_seconds = hub::kControlPollIdleMs / 1000U;
+    }
+    portEXIT_CRITICAL(&g_status_lock);
+    g_control_pending.store(false);
+    g_force_self_report.store(true);
+    ESP_LOGI(kTag, "Hub settings revision %llu applied: Bluetooth=%s profile=%s",
+             static_cast<unsigned long long>(revision),
+             bluetooth_enabled ? "On" : "Off",
+             hub::reportingProfileName(reporting_profile));
 }
 
 Status status() {

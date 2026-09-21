@@ -54,6 +54,32 @@ const char *communicationsModeName(CommunicationsMode mode) {
     return "Home";
 }
 
+const char *reportingProfileName(ReportingProfile profile) {
+    switch (profile) {
+    case ReportingProfile::PowerSave: return "power_save";
+    case ReportingProfile::Active: return "active";
+    case ReportingProfile::Normal: return "normal";
+    }
+    return "normal";
+}
+
+uint32_t reportingIntervalMs(ReportingProfile profile) {
+    switch (profile) {
+    case ReportingProfile::PowerSave: return 180000U;
+    case ReportingProfile::Active: return 30000U;
+    case ReportingProfile::Normal: return 60000U;
+    }
+    return 60000U;
+}
+
+uint32_t controlPollIntervalMs(bool pending, uint8_t consecutive_failures) {
+    if (pending) return kControlPollPendingMs;
+    if (consecutive_failures == 0) return kControlPollIdleMs;
+    if (consecutive_failures == 1) return kControlPollFailureInitialMs;
+    if (consecutive_failures == 2) return kControlPollFailureInitialMs * 2U;
+    return kControlPollFailureMaximumMs;
+}
+
 void sanitize(Settings &settings) {
     settings.primary.ssid[kWifiSsidBytes - 1] = '\0';
     settings.primary.password[kWifiPasswordBytes - 1] = '\0';
@@ -61,6 +87,10 @@ void sanitize(Settings &settings) {
     settings.secondary.password[kWifiPasswordBytes - 1] = '\0';
     settings.access_point_ssid[kWifiSsidBytes - 1] = '\0';
     settings.access_point_password[kWifiPasswordBytes - 1] = '\0';
+    settings.display_name[kHubDisplayNameBytes - 1] = '\0';
+    settings.home_emoji[kHubEmojiBytes - 1] = '\0';
+    settings.portable_emoji[kHubEmojiBytes - 1] = '\0';
+    settings.marker_colour[kHubMarkerColourBytes - 1] = '\0';
 
     // Replace persisted legacy names too: the SSID is the offline entry address.
     std::strncpy(settings.access_point_ssid, "BluePaws.local_IP:192.168.4.1",
@@ -73,6 +103,22 @@ void sanitize(Settings &settings) {
     if (static_cast<uint8_t>(settings.communications_mode) >
         static_cast<uint8_t>(CommunicationsMode::OffGrid)) {
         settings.communications_mode = CommunicationsMode::Home;
+    }
+    if (static_cast<uint8_t>(settings.reporting_profile) >
+        static_cast<uint8_t>(ReportingProfile::Active)) {
+        settings.reporting_profile = ReportingProfile::Normal;
+    }
+    if (settings.display_name[0] == '\0') {
+        std::strncpy(settings.display_name, "Home Hub", sizeof(settings.display_name) - 1);
+    }
+    if (settings.home_emoji[0] == '\0') {
+        std::strncpy(settings.home_emoji, "Home", sizeof(settings.home_emoji) - 1);
+    }
+    if (settings.portable_emoji[0] == '\0') {
+        std::strncpy(settings.portable_emoji, "Hub", sizeof(settings.portable_emoji) - 1);
+    }
+    if (std::strlen(settings.marker_colour) != 7 || settings.marker_colour[0] != '#') {
+        std::memcpy(settings.marker_colour, "#38bdf8", sizeof(settings.marker_colour));
     }
 
     settings.overview_timeout_seconds = std::clamp<uint16_t>(

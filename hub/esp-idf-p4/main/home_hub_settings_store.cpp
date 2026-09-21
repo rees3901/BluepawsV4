@@ -38,6 +38,11 @@ uint8_t get_u8(nvs_handle_t handle, const char *key, uint8_t fallback) {
     return nvs_get_u8(handle, key, &value) == ESP_OK ? value : fallback;
 }
 
+uint64_t get_u64(nvs_handle_t handle, const char *key, uint64_t fallback) {
+    uint64_t value = fallback;
+    return nvs_get_u64(handle, key, &value) == ESP_OK ? value : fallback;
+}
+
 bool set_string(nvs_handle_t handle, const char *key, const char *value) {
     return nvs_set_str(handle, key, value) == ESP_OK;
 }
@@ -61,6 +66,10 @@ bool load(hub::Settings &settings) {
     get_string(handle, "sec_pass", settings.secondary.password, sizeof(settings.secondary.password));
     get_string(handle, "ap_ssid", settings.access_point_ssid, sizeof(settings.access_point_ssid));
     get_string(handle, "ap_pass", settings.access_point_password, sizeof(settings.access_point_password));
+    get_string(handle, "hub_name", settings.display_name, sizeof(settings.display_name));
+    get_string(handle, "home_emoji", settings.home_emoji, sizeof(settings.home_emoji));
+    get_string(handle, "port_emoji", settings.portable_emoji, sizeof(settings.portable_emoji));
+    get_string(handle, "marker", settings.marker_colour, sizeof(settings.marker_colour));
     settings.overview_timeout_seconds = get_u16(handle, "overview_s", settings.overview_timeout_seconds);
     settings.dim_timeout_seconds = get_u16(handle, "dim_s", settings.dim_timeout_seconds);
     settings.screen_off_timeout_seconds = get_u16(handle, "off_s", settings.screen_off_timeout_seconds);
@@ -70,6 +79,9 @@ bool load(hub::Settings &settings) {
     settings.communications_mode = static_cast<hub::CommunicationsMode>(
         get_u8(handle, "comm_mode", static_cast<uint8_t>(settings.communications_mode)));
     settings.bluetooth_enabled = get_u8(handle, "bt_en", settings.bluetooth_enabled ? 1U : 0U) != 0;
+    settings.reporting_profile = static_cast<hub::ReportingProfile>(
+        get_u8(handle, "report_prof", static_cast<uint8_t>(settings.reporting_profile)));
+    settings.cloud_settings_revision = get_u64(handle, "cloud_rev", settings.cloud_settings_revision);
     nvs_close(handle);
     hub::sanitize(settings);
     ESP_LOGI(kTag, "Loaded Home Hub settings from NVS");
@@ -89,6 +101,10 @@ bool save(const hub::Settings &input) {
     ok = set_string(handle, "sec_pass", settings.secondary.password) && ok;
     ok = set_string(handle, "ap_ssid", settings.access_point_ssid) && ok;
     ok = set_string(handle, "ap_pass", settings.access_point_password) && ok;
+    ok = set_string(handle, "hub_name", settings.display_name) && ok;
+    ok = set_string(handle, "home_emoji", settings.home_emoji) && ok;
+    ok = set_string(handle, "port_emoji", settings.portable_emoji) && ok;
+    ok = set_string(handle, "marker", settings.marker_colour) && ok;
     ok = nvs_set_u16(handle, "overview_s", settings.overview_timeout_seconds) == ESP_OK && ok;
     ok = nvs_set_u16(handle, "dim_s", settings.dim_timeout_seconds) == ESP_OK && ok;
     ok = nvs_set_u16(handle, "off_s", settings.screen_off_timeout_seconds) == ESP_OK && ok;
@@ -98,6 +114,9 @@ bool save(const hub::Settings &input) {
     ok = nvs_set_u8(handle, "comm_mode",
                     static_cast<uint8_t>(settings.communications_mode)) == ESP_OK && ok;
     ok = nvs_set_u8(handle, "bt_en", settings.bluetooth_enabled ? 1U : 0U) == ESP_OK && ok;
+    ok = nvs_set_u8(handle, "report_prof",
+                    static_cast<uint8_t>(settings.reporting_profile)) == ESP_OK && ok;
+    ok = nvs_set_u64(handle, "cloud_rev", settings.cloud_settings_revision) == ESP_OK && ok;
     ok = nvs_commit(handle) == ESP_OK && ok;
     nvs_close(handle);
     if (ok) ESP_LOGI(kTag, "Saved Home Hub settings to NVS");

@@ -159,6 +159,21 @@ try {
   hub=await report(16);
   assert.equal(hub.reporting_profile,'normal','old Edge signature still works');
   assert.equal(hub.control_poll_s,null);
+  await db.exec('reset role');
+  await db.exec(readFileSync(new URL('../supabase/migrations/20260921090057_add_hub_testbed_telemetry.sql', import.meta.url),'utf8'));
+  await db.exec('set role service_role');
+  hub=(await db.query(
+    "select * from bluepaws_record_hub_presence(16,'home',51.905879,-2.239486,0,600,-42,false,false,99000,$1,'normal',null,93,true,true)",
+    [rev])).rows[0];
+  assert.equal(hub.battery_percent,93);
+  assert.equal(hub.position_simulated,true);
+  assert.equal(hub.battery_simulated,true);
+  await assert.rejects(db.query(
+    "select * from bluepaws_record_hub_presence(16,'home',null,null,null,600,-42,false,false,99000,$1,'normal',null,null,true,false)",
+    [rev]),/Invalid hub report/);
+  hub=await report(16);
+  assert.equal(hub.battery_percent,null,'older reports clear unsupported battery data');
+  assert.equal(hub.position_simulated,false,'older reports cannot leave stale simulation labels');
   await db.exec('reset role; set role anon');
   await assert.rejects(profileReport('active'),/permission denied/);
   await db.exec(`reset role; delete from household_members where user_id='${family}'; set role authenticated`);

@@ -47,11 +47,19 @@ export function parseHubPresence(value: unknown) {
     return n;
   };
   const boolean = (k: string) => { if (typeof p[k] !== "boolean") throw new Error("invalid_" + k); return p[k] as boolean; };
+  const optionalBoolean = (k: string) => p[k] === undefined ? false : boolean(k);
   const lat = p.latitude ?? null, lon = p.longitude ?? null;
+  const battery = p.battery_percent ?? null;
   const reporting = p.reporting_profile === undefined ? "normal" : p.reporting_profile;
   if (typeof reporting !== "string" || !["normal","power_save","active"].includes(reporting)) throw new Error("invalid_reporting_profile");
   if ((lat === null) !== (lon === null) || (lat !== null && (typeof lat !== "number" || !Number.isFinite(lat) || Math.abs(lat) > 90
       || typeof lon !== "number" || !Number.isFinite(lon) || Math.abs(lon) > 180))) throw new Error("invalid_position");
+  const positionSimulated = optionalBoolean("position_simulated");
+  const batterySimulated = optionalBoolean("battery_simulated");
+  if (battery !== null && (typeof battery !== "number" || !Number.isSafeInteger(battery) || battery < 0 || battery > 100))
+    throw new Error("invalid_battery_percent");
+  if (positionSimulated && lat === null) throw new Error("invalid_position_simulated");
+  if (batterySimulated && battery === null) throw new Error("invalid_battery_simulated");
   return {
     p_gateway: id, p_mode: String(p.mode), p_lat: lat, p_lon: lon,
     p_fix_age_s: lat === null ? null : integer("fix_age_s", 0, 604800),
@@ -62,6 +70,9 @@ export function parseHubPresence(value: unknown) {
     p_applied: integer("applied_revision", 0, Number.MAX_SAFE_INTEGER),
     p_reporting_profile: reporting,
     p_control_poll_s: p.control_poll_s == null ? null : integer("control_poll_s", 1, 60),
+    p_battery_percent: battery,
+    p_position_simulated: positionSimulated,
+    p_battery_simulated: batterySimulated,
   };
 }
 

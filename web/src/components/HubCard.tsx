@@ -67,7 +67,8 @@ export function HubCard({ hub, onSaved, cardProps }: { hub: HubPresence; onSaved
     onBluetoothToggle={() => void save({enabled: !hub.ble_enabled})}
     hubDetails={<>
       <span className="label">Hub ID</span><span className="value">{hub.gateway_guid16.toString(16).padStart(4, "0")}</span>
-      <span className="label">GPS fix</span><span className="value">{hub.fix_at ? new Date(hub.fix_at).toLocaleString() : "Not acquired"}</span>
+      <span className="label">GPS fix</span><span className="value">{hub.position_simulated ? "Simulated testbed" : hub.fix_at ? new Date(hub.fix_at).toLocaleString() : "Not acquired"}</span>
+      <span className="label">Battery</span><span className="value">{hub.battery_percent == null ? "No data" : `${hub.battery_percent}%${hub.battery_simulated ? " · simulated" : ""}`}</span>
       <span className="label">Home beacon</span><span className="value">{hub.ble_advertising ? "Advertising" : "Off"}</span>
       <span className="label">Reporting profile</span><span className="value">{HUB_REPORTING[hub.reporting_profile ?? "normal"].label}</span>
     </>}

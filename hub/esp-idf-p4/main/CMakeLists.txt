@@ -3,6 +3,7 @@ idf_component_register(
          "home_hub_bluetooth.cpp"
          "home_hub_mdns.cpp"
          "home_hub_settings_store.cpp" "home_hub_camera.cpp"
+         "home_hub_testbed_telemetry.cpp"
     INCLUDE_DIRS "."
     REQUIRES
         bluepaws_core

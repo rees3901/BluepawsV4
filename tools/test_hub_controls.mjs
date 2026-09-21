@@ -102,7 +102,8 @@ test('hub profile confirmation needs reported profile and revision; Power Save c
 });
 
 function localHarness() {
-  let state={gateway_guid16:'0010',mode:'home',ble_enabled:true,ble_settled:true};
+  let state={gateway_guid16:'0010',mode:'home',ble_enabled:true,
+    ble_preference_enabled:true,ble_settled:true};
   let unreachable=false;
   const updates=[],feedbacks=[],timers=new Map(),intervals=[];
   let n=0;
@@ -116,7 +117,11 @@ function localHarness() {
   const panel=ctx.HubPresencePanel;
   panel.start(async(url,options)=>{
     assert.equal(url,'/api/hub-preferences');
-    state={...state,...JSON.parse(options.body),ble_settled:false};
+    const request=JSON.parse(options.body);
+    state={...state,...request,
+      ...(typeof request.ble_enabled==='boolean'
+        ? {ble_preference_enabled:request.ble_enabled} : {}),
+      ble_settled:false};
     return {ok:true};
   },v=>updates.push(v),id=>feedbacks.push(id));
   return {panel,updates,feedbacks,timers,intervals,

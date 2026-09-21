@@ -6,6 +6,7 @@ export interface HubPresence {
   avatar_kind?: "emoji" | "photo"; avatar_storage_path?: string | null;
   gateway_guid16: number; household_id: string; mode: "home" | "portable" | "off_grid";
   received_at: string; latitude: number | null; longitude: number | null; fix_at: string | null;
+  battery_percent?: number | null; position_simulated?: boolean; battery_simulated?: boolean;
   uptime_s: number; wifi_rssi_dbm: number | null; ble_enabled: boolean; ble_advertising: boolean;
   free_heap: number; display_name: string; home_emoji: string; portable_emoji: string;
   marker_colour: string; desired_ble_enabled: boolean; settings_revision: number; applied_revision: number;
@@ -20,6 +21,9 @@ export function hubMapDevice(hub: HubPresence): TelemetryDevice {
     hubReportingProfile: hub.reporting_profile,
     lat: hub.latitude ?? 0, lon: hub.longitude ?? 0, hasGps: hub.latitude !== null && hub.longitude !== null,
     lastUpdate: Date.parse(hub.received_at), seq: 0, time: 0, status: hub.mode === "home" ? "Home" : "Out",
-    profile: "Normal", error: "None", batt: 0, rssi: hub.wifi_rssi_dbm, snr: null, bleHome: hub.ble_advertising,
-    ingestPath: null, source: hub.fix_at ? "Hub GNSS · " + new Date(hub.fix_at).toLocaleString() : "No hub GPS fix yet" };
+    profile: "Normal", error: "None", batt: 0, batteryPercent: hub.battery_percent ?? null,
+    rssi: hub.wifi_rssi_dbm, snr: null, bleHome: hub.ble_advertising,
+    ingestPath: null, source: hub.position_simulated
+      ? "Simulated test position"
+      : hub.fix_at ? "Hub GNSS · " + new Date(hub.fix_at).toLocaleString() : "No hub GPS fix yet" };
 }
