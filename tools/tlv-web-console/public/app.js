@@ -260,7 +260,7 @@ function renderWrapperForm() {
         ${option("lora_hub", "LoRa home-hub relay", wrapper.transport)}
       </select>
     </label>
-    <label>Gateway GUID16 <input data-wrapper="gatewayGuid16" value="${wrapper.gatewayGuid16 || "0010"}"><small>Hub IDs are multiples of 16</small></label>
+    <label>Gateway GUID16 <input data-wrapper="gatewayGuid16" value="${wrapper.gatewayGuid16 || "0010"}" placeholder="0020"><small>Hub IDs are multiples of 16</small></label>
     ${wrapper.transport === "lora_hub" ? `
       <label class="secret-field">Gateway bearer token
         <input id="gateway-bearer-token" type="text" spellcheck="false" autocomplete="off" value="" placeholder="Loading gateway token…" />
@@ -329,7 +329,7 @@ function updateWrapperFromEvent(event) {
   const field = event.target.dataset.wrapper;
   state.wrapper[field] = field === "gatewayGuid16" ? String(event.target.value).trim().toUpperCase() : coerce(event.target.value);
   schedulePreview();
-  if (field === "transport" || field === "gatewayGuid16") renderWrapperForm();
+  if (field === "transport" || (field === "gatewayGuid16" && event.type === "change")) renderWrapperForm();
 }
 
 async function bindGatewayBearerToken() {
