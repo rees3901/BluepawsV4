@@ -107,6 +107,7 @@ button.danger { border-color: #7c2636; color: #ffd4dc; }
   min-width: 230px;
   background: #0a1d2d;
 }
+.tab[data-tab="workbench"] { margin-left: auto; }
 .tab.active { background: var(--blue); color: #00111f; }
 .tab-panel { display: none; }
 .tab-panel.active { display: block; }
@@ -233,6 +234,12 @@ textarea { min-height: 120px; resize: vertical; }
 }
 label { display: grid; gap: 6px; color: var(--muted); font-size: 13px; font-weight: 700; }
 label.check { display: flex; align-items: center; gap: 8px; grid-column: 1 / -1; }
+.secret-field {
+  grid-column: 1 / -1;
+}
+.secret-field input {
+  font-family: "Cascadia Code", Consolas, monospace;
+}
 .cadence-summary {
   grid-column: 1 / -1;
   margin: 0;

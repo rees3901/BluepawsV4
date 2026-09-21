@@ -4,7 +4,7 @@ import { once } from "node:events";
 import fs from "node:fs/promises";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { defaultDeviceSettings, defaultWrapperSettings } from "../lib/tlv-core.mjs";
+import { defaultDeviceSettings, defaultWrapperSettings, generateGatewayCredential } from "../lib/tlv-core.mjs";
 
 test("standalone HTTP tools work with an empty fleet and leave credentials and simulator previews unchanged", { timeout: 15000 }, async t => {
   const credentialFile = new URL("../../devices.json", import.meta.url);
@@ -57,6 +57,24 @@ test("standalone HTTP tools work with an empty fleet and leave credentials and s
   assert.equal(parsed.decoded.authentication.valid, true);
   assert.equal(parsed.settings.destinationId, 65535);
   assert.deepEqual(await call("/api/credentials"), credentialsBefore);
+  const loraWrapper = { ...defaultWrapperSettings(), transport: "lora_hub", gatewayGuid16: "0020" };
+  const missingGateway = await call("/api/send-one", {
+    device: simulatorInput.device,
+    wrapper: loraWrapper,
+    endpoint: "http://127.0.0.1:1",
+    timeout_seconds: 1,
+  }, 400);
+  assert.match(missingGateway.error, /gateway 0020 is not loaded/);
+  const gateway = generateGatewayCredential("0020", "Test relay");
+  await call("/api/credentials/import", { content: JSON.stringify({ ...bundle, gateways: [gateway] }), save: false });
+  assert.equal((await call("/api/credentials/gateway-token?gateway_guid16=0020")).bearer_token, gateway.bearer_token);
+  const updatedToken = "b".repeat(48);
+  const updatedCredentials = await call("/api/credentials/gateway-token", {
+    gateway_guid16: "0020",
+    bearer_token: updatedToken,
+  });
+  assert.match(updatedCredentials.bundle.gateways[0].bearer_preview, /^bbbb/);
+  assert.equal((await call("/api/credentials/gateway-token?gateway_guid16=0020")).bearer_token, updatedToken);
   assert.deepEqual(await call("/api/build", simulatorInput), simulatorBefore);
   const fileAfter = await fs.readFile(credentialFile).catch(error => {
     if (error.code === "ENOENT") return null;
