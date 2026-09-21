@@ -183,6 +183,14 @@ cancelled. A later matching acknowledgement clears that warning. Concurrent
 newer settings supersede the older request. No collar one-hour/ten-minute queue
 semantics are used for this always-on hub setting.
 
+The ESP32-P4 persists requested values first, applies the Bluetooth preference
+through the BLE worker, and advances `applied_revision` only after that worker
+reports a settled state. It then schedules an immediate `hub_status` report
+instead of waiting for the normal heartbeat. A reboot or transient radio failure
+therefore retries an unacknowledged revision rather than allowing the dashboard
+to claim success prematurely. Gateway controls remain separate from the collar
+TLV command queue.
+
 Local commands go directly to the hub (existing optional PIN boundary) and await
 `ble_settled`, with an eight-second confirmation window and request timeouts.
 Other local browsers see the updated preference on their next local poll.

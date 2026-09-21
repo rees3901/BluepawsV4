@@ -38,6 +38,10 @@ struct Status {
     uint32_t failed_self_reports = 0;
     uint32_t last_self_report_http_status = 0;
     uint32_t last_self_report_uptime_ms = 0;
+    uint64_t applied_settings_revision = 0;
+    bool bluetooth_enabled = true;
+    hub::ReportingProfile reporting_profile = hub::ReportingProfile::Normal;
+    uint8_t control_poll_seconds = 5;
     hub::CommunicationsMode requested_mode = hub::CommunicationsMode::Home;
     hub::CommunicationsMode effective_mode = hub::CommunicationsMode::Home;
     ModeReason mode_reason = ModeReason::ManualSelection;
@@ -46,6 +50,16 @@ struct Status {
     bool wifi_station_connected = false;
     int16_t wifi_rssi_dbm = -127;
     char wifi_ssid[33]{};
+};
+
+struct ControlUpdate {
+    uint64_t revision = 0;
+    bool bluetooth_enabled = true;
+    hub::ReportingProfile reporting_profile = hub::ReportingProfile::Normal;
+    char display_name[hub::kHubDisplayNameBytes]{};
+    char home_emoji[hub::kHubEmojiBytes]{};
+    char portable_emoji[hub::kHubEmojiBytes]{};
+    char marker_colour[hub::kHubMarkerColourBytes]{};
 };
 
 constexpr std::size_t kMaximumWifiScanResults = 12;
@@ -86,6 +100,12 @@ WifiScanSnapshot wifiScanSnapshot();
 // Called only by the LVGL/main task. Cloud work never mutates UI state from
 // its networking task, avoiding cross-thread LVGL and CatStore access.
 std::size_t drain(CatStore &store);
+// Transfers a newer cloud preference revision to the main task. The main task
+// persists and applies it, then acknowledges only after the BLE worker settles.
+bool takeControlUpdate(ControlUpdate &update);
+void acknowledgeControlUpdate(uint64_t revision,
+                              bool bluetooth_enabled,
+                              hub::ReportingProfile reporting_profile);
 Status status();
 const char *modeReasonName(ModeReason reason);
 

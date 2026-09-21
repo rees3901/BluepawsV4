@@ -301,6 +301,8 @@ struct UiState {
     uint8_t settings_tab_index = 0;
     bluepaws::hub::WifiNetwork settings_wifi_previous{};
     bluepaws::hub::Settings settings = bluepaws::hub::defaultSettings();
+    uint64_t pending_cloud_control_revision = 0;
+    bool pending_cloud_control_valid = false;
     bluepaws::hub::CommunicationsMode pending_communications_mode =
         bluepaws::hub::CommunicationsMode::Home;
     bluepaws::qr::ParsedPayload pending_qr{};
@@ -746,6 +748,35 @@ void update_ui(UiState &ui)
         lv_async_call(rebuild_current_page, &ui);
     }
     const size_t cloud_updates = bluepaws::cloud::drain(ui.cats);
+    bluepaws::cloud::ControlUpdate cloud_control{};
+    while (bluepaws::cloud::takeControlUpdate(cloud_control)) {
+        if (cloud_control.revision <= ui.settings.cloud_settings_revision) continue;
+        bluepaws::hub::Settings proposed = ui.settings;
+        proposed.bluetooth_enabled = cloud_control.bluetooth_enabled;
+        proposed.reporting_profile = cloud_control.reporting_profile;
+        std::memcpy(proposed.display_name, cloud_control.display_name,
+                    sizeof(proposed.display_name));
+        std::memcpy(proposed.home_emoji, cloud_control.home_emoji,
+                    sizeof(proposed.home_emoji));
+        std::memcpy(proposed.portable_emoji, cloud_control.portable_emoji,
+                    sizeof(proposed.portable_emoji));
+        std::memcpy(proposed.marker_colour, cloud_control.marker_colour,
+                    sizeof(proposed.marker_colour));
+        // Keep the previous acknowledged revision until the radio worker has
+        // actually reached the requested state. A reboot therefore retries
+        // rather than falsely confirming a half-applied cloud command.
+        proposed.cloud_settings_revision = ui.settings.cloud_settings_revision;
+        if (bluepaws::settings_store::save(proposed)) {
+            ui.settings = proposed;
+            ui.pending_cloud_control_revision = cloud_control.revision;
+            ui.pending_cloud_control_valid = true;
+            ESP_LOGI(kTag, "Cloud hub settings revision %llu queued for application",
+                     static_cast<unsigned long long>(cloud_control.revision));
+        } else {
+            ESP_LOGE(kTag, "Cloud hub settings revision %llu could not be persisted",
+                     static_cast<unsigned long long>(cloud_control.revision));
+        }
+    }
     refresh_wifi_picker(ui);
     if (!ui.cloud_enabled) {
         ui.simulator.update(now_ms, ui.cats);
@@ -773,12 +804,28 @@ void update_ui(UiState &ui)
                      web_requested_bluetooth ? "On" : "Off");
         }
     }
-    const bluepaws::cloud::Status cloud_status = bluepaws::cloud::status();
+    bluepaws::cloud::Status cloud_status = bluepaws::cloud::status();
     refresh_wifi_connection_verification(ui, cloud_status);
     update_settings_wifi_summary(ui, cloud_status);
     bluepaws::bluetooth::apply(ui.settings.bluetooth_enabled, cloud_status.effective_mode);
+    const bluepaws::bluetooth::Status bluetooth_status = bluepaws::bluetooth::status();
+    if (ui.pending_cloud_control_valid && bluetooth_status.settled) {
+        ui.settings.cloud_settings_revision = ui.pending_cloud_control_revision;
+        if (bluepaws::settings_store::save(ui.settings)) {
+            bluepaws::cloud::acknowledgeControlUpdate(
+                ui.pending_cloud_control_revision,
+                ui.settings.bluetooth_enabled,
+                ui.settings.reporting_profile);
+            ui.pending_cloud_control_valid = false;
+            // Publish the newly acknowledged revision to the local snapshot in
+            // this UI tick instead of making local clients wait for the next one.
+            cloud_status = bluepaws::cloud::status();
+        } else {
+            ui.settings.cloud_settings_revision = cloud_status.applied_settings_revision;
+        }
+    }
     bluepaws::web::updateSnapshot(ui.cats, cloud_status, ui.settings,
-                                  bluepaws::bluetooth::status());
+                                  bluetooth_status);
     if (ui.overview_mode_dropdown != nullptr &&
         ui.overview_mode_confirmation != nullptr &&
         lv_obj_has_flag(ui.overview_mode_confirmation, LV_OBJ_FLAG_HIDDEN)) {

@@ -188,6 +188,15 @@ void settingsRemainSafeAndOrdered() {
     assert(std::strcmp(settings.access_point_ssid, "BluePaws.local_IP:192.168.4.1") == 0);
     assert(settings.communications_mode == bluepaws::hub::CommunicationsMode::Home);
     assert(settings.overview_timeout_seconds == 120);
+    assert(settings.reporting_profile == bluepaws::hub::ReportingProfile::Normal);
+    assert(bluepaws::hub::reportingIntervalMs(settings.reporting_profile) == 60000U);
+    assert(std::strcmp(bluepaws::hub::reportingProfileName(
+                           bluepaws::hub::ReportingProfile::PowerSave),
+                       "power_save") == 0);
+    assert(bluepaws::hub::reportingIntervalMs(
+               bluepaws::hub::ReportingProfile::PowerSave) == 180000U);
+    assert(bluepaws::hub::reportingIntervalMs(
+               bluepaws::hub::ReportingProfile::Active) == 30000U);
     std::strcpy(settings.access_point_ssid, "Old hotspot name");
     settings.overview_timeout_seconds = 2;
     settings.dim_timeout_seconds = 1;
@@ -195,6 +204,11 @@ void settingsRemainSafeAndOrdered() {
     settings.brightness_percent = 255;
     settings.dim_brightness_percent = 0;
     settings.communications_mode = static_cast<bluepaws::hub::CommunicationsMode>(99);
+    settings.reporting_profile = static_cast<bluepaws::hub::ReportingProfile>(99);
+    settings.display_name[0] = '\0';
+    settings.home_emoji[0] = '\0';
+    settings.portable_emoji[0] = '\0';
+    std::strcpy(settings.marker_colour, "invalid");
     bluepaws::hub::sanitize(settings);
     assert(std::strcmp(settings.access_point_ssid, "BluePaws.local_IP:192.168.4.1") == 0);
     assert(settings.overview_timeout_seconds == 15);
@@ -203,6 +217,11 @@ void settingsRemainSafeAndOrdered() {
     assert(settings.brightness_percent == 100);
     assert(settings.dim_brightness_percent == 1);
     assert(settings.communications_mode == bluepaws::hub::CommunicationsMode::Home);
+    assert(settings.reporting_profile == bluepaws::hub::ReportingProfile::Normal);
+    assert(std::strcmp(settings.display_name, "Home Hub") == 0);
+    assert(std::strcmp(settings.home_emoji, "Home") == 0);
+    assert(std::strcmp(settings.portable_emoji, "Hub") == 0);
+    assert(std::strcmp(settings.marker_colour, "#38bdf8") == 0);
     assert(bluepaws::hub::validSsid("Reesnet Guest"));
     assert(!bluepaws::hub::validSsid(""));
     assert(bluepaws::hub::validPassword("password"));
