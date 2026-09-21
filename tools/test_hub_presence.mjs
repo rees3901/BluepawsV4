@@ -5,21 +5,29 @@ import {parseHubPresence,handleHubPresence} from '../supabase/functions/ingest-p
 import {hubAvatar,hubMapDevice} from '../web/src/lib/hubPresence.ts';
 const payload={format:'hub_status',ingest_path:'hub_self',gateway_guid16:'0010',mode:'home',
   latitude:51.9,longitude:-2.2,fix_age_s:5,uptime_s:100,wifi_rssi_dbm:-40,
-  ble_enabled:true,ble_advertising:true,free_heap:150000,applied_revision:0};
+  ble_enabled:true,ble_advertising:true,free_heap:150000,applied_revision:0,
+  battery_percent:92,position_simulated:true,battery_simulated:true};
 test('hub report validates identity, position, bounds and separate transport',()=>{
   assert.equal(parseHubPresence(payload).p_gateway,16);
   assert.equal(parseHubPresence(payload).p_reporting_profile,'normal','legacy cadence remains honest');
   assert.equal(parseHubPresence(payload).p_control_poll_s,null);
+  assert.equal(parseHubPresence(payload).p_battery_percent,92);
+  assert.equal(parseHubPresence(payload).p_position_simulated,true);
+  assert.equal(parseHubPresence(payload).p_battery_simulated,true);
   for(const profile of ['normal','power_save','active']) {
     const parsed=parseHubPresence({...payload,reporting_profile:profile,control_poll_s:5});
     assert.equal(parsed.p_reporting_profile,profile); assert.equal(parsed.p_control_poll_s,5);
   }
-  assert.equal(parseHubPresence({...payload,latitude:null,longitude:null}).p_lat,null);
+  assert.equal(parseHubPresence({...payload,latitude:null,longitude:null,position_simulated:false}).p_lat,null);
   for(const change of [{gateway_guid16:'03E9'},{gateway_guid16:'0000'},{ingest_path:'lora_hub'},
     {latitude:NaN},{latitude:null},{longitude:181},{fix_age_s:-1},{free_heap:-1},
     {ble_enabled:'true'},{mode:'bad'},{applied_revision:Infinity},
     {reporting_profile:'lost_alert'},{reporting_profile:'debug'},{reporting_profile:null},
-    {control_poll_s:0},{control_poll_s:61},{control_poll_s:1.5}])
+    {control_poll_s:0},{control_poll_s:61},{control_poll_s:1.5},
+    {battery_percent:-1},{battery_percent:101},{battery_percent:1.5},
+    {position_simulated:'true'},{battery_simulated:'true'},
+    {latitude:null,longitude:null,position_simulated:true},
+    {battery_percent:null,battery_simulated:true}])
     assert.throws(()=>parseHubPresence({...payload,...change}));
 });
 function mock(credential,err=null) {
@@ -57,4 +65,8 @@ test('hub avatars follow mode and overrides, and never collide with collar IDs',
   assert.equal(hubMapDevice(h).id,-16);
   assert.equal(hubMapDevice(h).hasGps,false);
   assert.equal(hubMapDevice({...h,latitude:0,longitude:0}).hasGps,true);
+  const simulated=hubMapDevice({...h,latitude:51.9,longitude:-2.2,battery_percent:92,
+    position_simulated:true,battery_simulated:true});
+  assert.equal(simulated.batteryPercent,92);
+  assert.match(simulated.source,/Simulated test position/);
 });

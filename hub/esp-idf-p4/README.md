@@ -11,6 +11,13 @@ ESP32-C6 and reconciles gateway-authenticated Supabase state every five seconds.
 When no local gateway credential is provisioned it instead runs eight
 deterministic simulated cats through `bluepaws_core`, displaying their
 positions and telemetry in LVGL, and exposes touch-operated map controls.
+While the GNSS/power daughterboard is absent, the separately gated P4 hub
+testbed also self-reports a clearly labelled simulated position inside a
+five-metre radius of `51.905879, -2.239486` and a slowly changing simulated
+battery percentage. Mode, Wi-Fi RSSI, Bluetooth state, uptime, heap and collar
+observations remain live values. Set
+`HOME_HUB_TESTBED_SIMULATED_TELEMETRY` to `0` when the daughterboard adapter is
+connected; that removes both substitutes without changing cloud reporting.
 The board mounts the first FAT32 microSD partition through four-bit SDMMC
 without ever auto-formatting it. The testbed resolves visible XYZ tile IDs,
 reads their compact 256-pixel JPEG files and uses the ESP32-P4 hardware JPEG

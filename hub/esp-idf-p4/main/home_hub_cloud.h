@@ -34,6 +34,10 @@ struct Status {
     uint32_t failed_snapshots = 0;
     uint32_t last_http_status = 0;
     uint32_t last_sync_uptime_ms = 0;
+    uint32_t successful_self_reports = 0;
+    uint32_t failed_self_reports = 0;
+    uint32_t last_self_report_http_status = 0;
+    uint32_t last_self_report_uptime_ms = 0;
     hub::CommunicationsMode requested_mode = hub::CommunicationsMode::Home;
     hub::CommunicationsMode effective_mode = hub::CommunicationsMode::Home;
     ModeReason mode_reason = ModeReason::ManualSelection;

@@ -10,11 +10,23 @@
 #define HOME_HUB_WIFI_PASSWORD ""
 #endif
 #define HOME_HUB_GATEWAY_GUID "0020"
+#define HOME_HUB_INGEST_URL \
+    "https://ykcdaonkvwemedotdpdr.supabase.co/functions/v1/ingest-position"
 #define HOME_HUB_SNAPSHOT_URL \
     "https://ykcdaonkvwemedotdpdr.supabase.co/functions/v1/hub-snapshot" \
     "?gateway_guid16=" HOME_HUB_GATEWAY_GUID "&limit=1"
 #define HOME_HUB_SYNC_INTERVAL_MS 5000
 #define HOME_HUB_SYNC_MAX_BACKOFF_MS 60000
 #define HOME_HUB_WIFI_RECOVERY_MS 30000
+
+// Temporary daughterboard substitutes. Keep this switch explicit so the
+// simulated position/battery disappear in one change when real telemetry is
+// connected. Mode, Wi-Fi, Bluetooth, uptime and heap are never simulated.
+#define HOME_HUB_TESTBED_SIMULATED_TELEMETRY 1
+#define HOME_HUB_TESTBED_LATITUDE 51.905879
+#define HOME_HUB_TESTBED_LONGITUDE -2.239486
+#define HOME_HUB_TESTBED_RADIUS_METRES 5.0
+#define HOME_HUB_SELF_REPORT_INTERVAL_MS 60000
+#define HOME_HUB_REPORTING_PROFILE "normal"
 
 #endif

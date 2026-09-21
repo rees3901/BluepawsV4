@@ -42,7 +42,9 @@ dashboard likewise routes hub data through its existing `updateDevice`,
 Hub cards show their communications mode, Wi-Fi signal **bars and Wi-Fi badge**,
 last-contact stopwatch, coordinates, GPS fix age/time and Home beacon state. The
 same battery graphic shows **No data** until actual hub battery reporting is
-implemented; it must not display zero volts or an invented percentage. Collar-only
+implemented. The temporary P4 daughterboard testbed is the sole exception: it
+may show an explicitly labelled **Simulated testbed** percentage, carried with
+`battery_simulated: true`; it must never be presented as measured. Collar-only
 command receive indicator and collar commands are omitted. Hub **Cmd** selects
 its independent reporting profile; it never sends a collar command to itself.
 Bluetooth preference and editable names retain the hub-specific persistence path.
@@ -79,10 +81,18 @@ change is needed. Preserve existing hub journals/config when updating assets.
 
 ## Position integrity
 
-Only the hub's own GNSS may supply its location. No collar position is used as a
-substitute or distance origin. Until first fix the card remains visible but has
-no map marker. Later no-fix cloud reports preserve the last location and **its
-original fix age**, separately from last contact. No GPS coordinates are invented.
+Only the hub's own GNSS may supply its production location. No collar position
+is used as a substitute or distance origin. Until first fix the card remains
+visible but has no map marker. Later no-fix cloud reports preserve the last
+location and **its original fix age**, separately from last contact.
+
+The temporary P4 daughterboard testbed is deliberately separate from production
+GNSS: `HOME_HUB_TESTBED_SIMULATED_TELEMETRY` generates one deterministic point
+per minute within five metres of `51.905879, -2.239486`, plus a slow 88-96%
+battery wave. Reports and local status carry `position_simulated: true` and
+`battery_simulated: true`, and the web UI labels both. Mode, Wi-Fi RSSI,
+Bluetooth state, uptime, heap and any received collar traffic remain genuine.
+Set the switch to `0` as soon as the daughterboard supplies real telemetry.
 
 Tracker V2 uses UC6580 at 115200 baud, MCU RX33/TX34, reset35, Vext3 HIGH.
 These match the known-working legacy receiver's hardware setup and the
@@ -105,6 +115,9 @@ a collar token/HMAC. This is a distinct JSON branch, not a TLV format change.
   "latitude": null,
   "longitude": null,
   "fix_age_s": null,
+  "battery_percent": null,
+  "position_simulated": false,
+  "battery_simulated": false,
   "uptime_s": 60,
   "wifi_rssi_dbm": -45,
   "ble_enabled": true,
@@ -118,7 +131,10 @@ a collar token/HMAC. This is a distinct JSON branch, not a TLV format change.
 ```
 
 Valid modes: home, portable, off_grid. Coordinates must be a valid pair or both
-null. When present, fix_age_s is an integer 0–604800. RSSI can be null.
+null. When present, fix_age_s is an integer 0–604800. RSSI can be null. Battery
+is null or an integer 0-100. A simulation flag may be true only when its
+corresponding value is present; consumers must visibly identify those values as
+testbed data.
 Gateway identity is four hex digits, nonzero and a multiple of 16.
 The handler hashes the bearer, scopes it to that enabled gateway and resolves
 Family from the database. Browser roles cannot write telemetry or call ingestion RPCs.
