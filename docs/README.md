@@ -26,6 +26,7 @@ owner, update that document instead of adding a parallel note.
 | How do collar commands route and expire? | `protocol/COLLAR_DOWNLINK_COMMANDS.md` | Covers LTE-direct, Home Hub delivery, command dictionary, expiry, ACKs and security notes. |
 | What are the agreed collar power profiles? | `standards/POWER_PROFILES.md` | Human-readable standard. Verify compiled values in `../shared/lib/BluepawsProtocol/bp_config.h`. |
 | How does the collar behave at runtime? | `firmware/collar/COLLAR_RUNTIME_DECISIONS.md` | Runtime flow, BLE home behaviour, boot reports, persistence, button behaviour and Lost Alert behaviour. |
+| Which Walter/GM02SP vendor facts guide hardware, GNSS, LTE and power decisions? | `firmware/collar/WALTER_GM02SP_UPSTREAM_REFERENCE.md` | Source-linked QuickSpot guide; distinguishes Walter board facts from bare-modem assumptions and links the BluePaws testbed. |
 | How does the Home Hub behave in Home, Portable or Off-Grid use? | `firmware/home-hub/HOME_HUB_RUNTIME_DECISIONS.md` and `firmware/home-hub/HOME_HUB_OFFGRID_ARCHITECTURE.md` | Runtime roles and off-grid/local behaviour. |
 | How does the hub report itself to the cloud? | `firmware/home-hub/HUB_SELF_PRESENCE.md` | Hub self-presence, hub reporting profiles, contact overdue rules and collar receive indicator behaviour. |
 | How is TLV ingestion deployed and tested? | `operations/TLV_INGESTION_RUNBOOK.md` | Local verification, migrations, provisioning, Edge Function deployment and simulator checks. |
