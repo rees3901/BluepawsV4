@@ -1,0 +1,13 @@
+(unit MM)
+
+(package "ST4SI3M004600HFW"
+    (type UNDEF)
+    (uver 2)
+    (cuser "SamacSys")
+    (uuser "SamacSys")
+    (utime 2026-04-03-04:00:34)
+    (mountForm default
+        (footprintRef "SON127P600X500X100-9N")
+        (spec "System")
+    )
+)

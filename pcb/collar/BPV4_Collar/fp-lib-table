@@ -13,6 +13,7 @@
 	(lib (name "LIB_B3U-1000P") (type "KiCad") (uri "C:/Users/reesPC/Desktop/Bluepaws V4/pcb/collar/LIB_B3U-1000P") (options "") (descr ""))
 	(lib (name "KiCad") (type "KiCad") (uri "C:/Users/reesPC/Desktop/Bluepaws V4/pcb/collar/LIB_SM03B-SRSS-TB_LF__SN_") (options "") (descr ""))
 	(lib (name "LIB_DMG2305UX-13") (type "KiCad") (uri "C:/Users/reesPC/Desktop/Bluepaws V4/pcb/collar/LIB_DMG2305UX-13") (options "") (descr ""))
-	(lib (name "Collar_Buzzer") (type "KiCad") (uri "C:/Users/reesPC/Desktop/Bluepaws V4/pcb/collar/LIB_CPT-1117-83-SMT-TR/CPT-1117-83-SMT-TR/KiCad") (options "") (descr ""))
 	(lib (name "MAX17048G_T10") (type "KiCad") (uri "C:/Users/reesPC/Desktop/Bluepaws V4/pcb/collar/MAX17048G_T10") (options "") (descr ""))
+	(lib (name "CPT-7502-65-SMT-TR") (type "KiCad") (uri "C:/Users/reesPC/Desktop/Bluepaws V4/pcb/collar/CPT-7502-65-SMT-TR") (options "") (descr ""))
+	(lib (name "LIB_ST4SI3M004600HFW") (type "KiCad") (uri "C:/Users/reesPC/Desktop/Bluepaws V4/pcb/collar/LIB_ST4SI3M004600HFW") (options "") (descr ""))
 )

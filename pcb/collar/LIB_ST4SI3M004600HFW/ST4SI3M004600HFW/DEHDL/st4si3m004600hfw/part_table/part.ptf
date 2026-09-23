@@ -1,0 +1,11 @@
+FILE_TYPE = MULTI_PHYS_TABLE;
+
+PART 'ST4SI3M004600HFW'
+CLASS = IC
+{========================================================================================}
+:"MANUFACTURER_NAME", "MANUFACTURER_PART_NUMBER"= "PART_NUMBER", "JEDEC_TYPE", "PACK_TYPE", "MOUSER_PART_NUMBER", "MOUSER_PRICE/STOCK", "ARROW_PART_NUMBER", "ARROW_PRICE/STOCK", "DESCRIPTION", "DATASHEET", "HEIGHT";
+{========================================================================================}
+ "STMicroelectronics", "ST4SI3M004600HFW" (!) = "", "SON127P600X500X100-9N", "Small Outline No-lead", "", "", "ST4SI3M004600HFW", "https://www.arrow.com/en/products/st4si3m004600hfw/stmicroelectronics.html?utm_currency=USD&region=nac", "GSMA eSIM for IoT system on chip solution for IoT environment", "https://estore.st.com/en/st4si3m004600hfw-cpn.html", "1 mm"
+END_PART
+
+END.
