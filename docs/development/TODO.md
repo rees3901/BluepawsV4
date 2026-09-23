@@ -240,6 +240,11 @@ The original power-saving design was: wake, scan for the BLE home beacon, and if
 
 ## 8. LTE-M / NB-IoT / Cellular
 
+For the cellular, GNSS, power and GM02SP hardware work in sections 8, 9, 12 and
+13, consult the [Walter/GM02SP upstream reference](../firmware/collar/WALTER_GM02SP_UPSTREAM_REFERENCE.md)
+and its linked vendor sources. Walter board limits are not automatically bare
+GM02SP or production collar limits.
+
 - [x] ~~GM02SP cellular/GNSS firmware integration scaffolding exists in collar firmware.~~
 - [x] ~~Cellular ratio/profile configuration exists.~~
 - [ ] Complete and hardware-test the production GM02SP HTTPS ingestion path.
