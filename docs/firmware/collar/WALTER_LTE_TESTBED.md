@@ -1,5 +1,9 @@
 # Walter LTE/GNSS testbed
 
+For board-level power, antennas, modem interfaces and the vendor API, see the
+[Walter/GM02SP upstream reference](WALTER_GM02SP_UPSTREAM_REFERENCE.md). This
+document describes BluePaws testbed behaviour and its own USB console.
+
 ## Purpose and separation
 
 Prepare an independent ESP32-S3 + Sequans GM02SP collar testbed while keeping the
@@ -461,6 +465,15 @@ uncertainty, satellite-entry count and count with CN0 at least30. `GNSS CN0` lin
 log individual satellite IDs and signal strengths. Entries are not claimed to
 be satellites used in the navigation solution. Raw serial logs contain location
 data and should remain private.
+
+The vendor enum defines `status=0` as **READY**. A READY event can still fail
+BluePaws validation: its timestamp must be plausible, no later than the seeded
+host UTC and under 60 seconds old; coordinates must be finite/in range; the
+satellite count and estimated confidence must meet the code's bounds. The 50 m
+settling target is only an early-stop criterion, not the general fix validity
+threshold. If `status=0` appears with `usable=0`, compare the `GNSS SAMPLE` UTC
+with `status`'s host UTC and inspect each validation rule; the summary alone
+does not identify which rule failed. See the [upstream GNSS reference](WALTER_GM02SP_UPSTREAM_REFERENCE.md#gnss-acquisition-time-and-accuracy).
 
 ## Home-hub distance display
 
