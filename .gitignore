@@ -28,3 +28,5 @@ tools/protomaps-style/node_modules/
 
 # Local Supabase CLI link and runtime state.
 supabase/.temp/
+
+/pcb/collar/BPV4_Collar/.history/
