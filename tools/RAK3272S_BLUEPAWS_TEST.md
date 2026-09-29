@@ -18,6 +18,7 @@ lower than the normal BluePaws operating-profile power.
 ./tools/rak3272s_bluepaws_test.ps1 -Action Configure
 ./tools/rak3272s_bluepaws_test.ps1 -Action Status
 ./tools/rak3272s_bluepaws_test.ps1 -Action Send
+./tools/rak3272s_bluepaws_test.ps1 -Action Heartbeat
 ./tools/rak3272s_bluepaws_test.ps1 -Action Listen -ListenSeconds 15
 ```
 
@@ -28,6 +29,10 @@ is deliberately **not authenticated** and is not a collar command. The T190
 sniffer should display `structure=valid auth=unchecked`, `source=FFFD`,
 `destination=0000`, and its raw bytes in a `[RX] Hex:` line. The RAK should
 report `+EVT:TXP2P DONE`.
+
+`Heartbeat` sends a fresh diagnostic frame immediately and then every 60
+seconds while the PC process is running. Stop it with Ctrl+C in the terminal.
+The RAK firmware does not schedule these transmissions by itself.
 
 The current RAK RUI3 AT interface does not expose a P2P CRC setting. Its actual
 PHY CRC compatibility must be confirmed by the T190 receiving the test packet;

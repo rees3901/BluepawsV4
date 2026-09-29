@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('Status', 'Configure', 'Send', 'Listen')]
+    [ValidateSet('Status', 'Configure', 'Send', 'Heartbeat', 'Listen')]
     [string]$Action = 'Status',
     [string]$Port = 'COM13',
     [string]$PayloadHex = '',
@@ -80,7 +80,7 @@ try {
         )) { $null = Invoke-AT $serial $command }
     }
 
-    if ($Action -in @('Configure', 'Status', 'Send', 'Listen')) {
+    if ($Action -in @('Configure', 'Status', 'Send', 'Heartbeat', 'Listen')) {
         foreach ($command in $expected.Keys) {
             $reply = Invoke-AT $serial $command
             if ($reply -notmatch [regex]::Escape($expected[$command])) {
@@ -89,23 +89,26 @@ try {
         }
     }
 
-    if ($Action -eq 'Send') {
-        for ($i = 1; $i -le $Count; $i++) {
+    if ($Action -in @('Send', 'Heartbeat')) {
+        $i = 0
+        while ($Action -eq 'Heartbeat' -or $i -lt $Count) {
+            $i++
             $testHex = if ($PayloadHex) { $PayloadHex.ToUpperInvariant() } else { New-TestPayload }
             if ($testHex -notmatch '^(?:[0-9A-F]{2}){1,64}$') { throw 'PayloadHex must be 1 to 64 bytes of hexadecimal data.' }
-            Write-Host "Payload: $testHex"
+            Write-Host ("{0:u} Payload: {1}" -f [DateTime]::UtcNow, $testHex)
             $command = 'AT+PSEND=' + $testHex
             $serial.Write($command + "`r`n")
             $reply = Read-Until $serial '\+EVT:TXP2P DONE|AT_[A-Z_]+|\+EVT:TXP2P ERROR' 15000
-            Write-Output ("TX $i/$Count -> " + $(if ($reply) { $reply -replace "`r?`n", ' | ' } else { '<no response>' }))
+            Write-Host ("TX $i -> " + $(if ($reply) { $reply -replace "`r?`n", ' | ' } else { '<no response>' }))
             if ($reply -notmatch '\+EVT:TXP2P DONE') { throw 'Transmit did not complete.' }
-            if ($i -lt $Count) { Start-Sleep -Seconds 3 }
+            if ($Action -eq 'Heartbeat') { Start-Sleep -Seconds 60 }
+            elseif ($i -lt $Count) { Start-Sleep -Seconds 3 }
         }
     }
 
     if ($Action -eq 'Listen') {
         $null = Invoke-AT $serial ('AT+PRECV=' + ($ListenSeconds * 1000))
-        $reply = Read-Until $serial '\+EVT:RXP2P|\+EVT:RX TIMEOUT' (($ListenSeconds + 2) * 1000)
+        $reply = Read-Until $serial '\+EVT:RXP2P' (($ListenSeconds + 2) * 1000)
         Write-Output ('RX -> ' + $(if ($reply) { $reply -replace "`r?`n", ' | ' } else { '<no packet during window>' }))
     }
 } finally {
