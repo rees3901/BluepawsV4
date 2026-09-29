@@ -15,11 +15,11 @@ supported by the RAK P2P command, for this indoor bench test; it is deliberately
 lower than the normal BluePaws operating-profile power.
 
 ```powershell
-./tools/rak3272s_bluepaws_test.ps1 -Action Configure
-./tools/rak3272s_bluepaws_test.ps1 -Action Status
-./tools/rak3272s_bluepaws_test.ps1 -Action Send
-./tools/rak3272s_bluepaws_test.ps1 -Action Heartbeat
-./tools/rak3272s_bluepaws_test.ps1 -Action Listen -ListenSeconds 15
+./diagnostics/rak3272s-bluepaws-test/rak3272s_bluepaws_test.ps1 -Action Configure
+./diagnostics/rak3272s-bluepaws-test/rak3272s_bluepaws_test.ps1 -Action Status
+./diagnostics/rak3272s-bluepaws-test/rak3272s_bluepaws_test.ps1 -Action Send
+./diagnostics/rak3272s-bluepaws-test/rak3272s_bluepaws_test.ps1 -Action Heartbeat
+./diagnostics/rak3272s-bluepaws-test/rak3272s_bluepaws_test.ps1 -Action Listen -ListenSeconds 15
 ```
 
 The default test payload is a 40-byte BluePaws TLV v1.2 frame with a fresh
@@ -29,6 +29,10 @@ is deliberately **not authenticated** and is not a collar command. The T190
 sniffer should display `structure=valid auth=unchecked`, `source=FFFD`,
 `destination=0000`, and its raw bytes in a `[RX] Hex:` line. The RAK should
 report `+EVT:TXP2P DONE`.
+
+For the receiving board's firmware and serial output, see the
+[T190 radio monitor](../t190-radio-monitor/README.md) and its
+[operating notes](../../docs/diagnostics/T190_RADIO_MONITOR.md).
 
 `Heartbeat` sends a fresh diagnostic frame immediately and then every 60
 seconds while the PC process is running. Stop it with Ctrl+C in the terminal.

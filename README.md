@@ -65,7 +65,8 @@ BluepawsV4/
 │   ├── maps/                         # Offline map-pack inputs and guidance
 │   └── tests/esp-idf-p4/             # Host tests for the P4 core
 ├── diagnostics/
-│   └── t190-radio-monitor/           # Passive LoRa/TLV receiver (formerly sniffer)
+│   ├── t190-radio-monitor/           # Passive LoRa/TLV receiver (formerly sniffer)
+│   └── rak3272s-bluepaws-test/       # UART2/P2P bench test and TLV heartbeat
 ├── tools/
 │   ├── mock-server.js                # Node.js mock hub for local GUI dev
 │   ├── vps_position_simulator.py     # Legacy JSON HTTPS simulator
