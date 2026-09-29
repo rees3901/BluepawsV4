@@ -12,3 +12,5 @@ pio run -e sniffer
 
 Protocol and operating notes are in
 [`docs/diagnostics/T190_RADIO_MONITOR.md`](../../docs/diagnostics/T190_RADIO_MONITOR.md).
+The [RAK3272S BluePaws bench test](../rak3272s-bluepaws-test/README.md) can
+transmit a low-power TLV frame every minute for checking this receiver.

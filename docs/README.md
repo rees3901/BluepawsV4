@@ -5,7 +5,7 @@ Documentation is grouped by subject rather than by when it was written:
 - `protocol/`: canonical TLV specifications and collar downlink commands.
 - `firmware/collar/`: collar behaviour, hardware testbeds, and bench records.
 - `firmware/home-hub/`: Home Hub architecture, behaviour, and testbed notes.
-- `diagnostics/`: passive receivers and diagnostic firmware notes.
+- `diagnostics/`: radio bench senders, passive receivers and diagnostic firmware notes.
 - `operations/`: deployment runbooks and production-readiness checks.
 - `development/`: environment strategy, decisions, and the active backlog.
 - `standards/`: agreed implementation standards that should be checked before changing behaviour.
@@ -35,6 +35,7 @@ owner, update that document instead of adding a parallel note.
 | What remains to build or decide? | `development/TODO.md` | Active backlog and open elaboration candidates. |
 | What is the current visual/brand standard? | `branding/BLUE_PAWS_BRAND_GUIDE.md` | Colours, typography, logo usage, UI themes and CSS tokens. |
 | How do we inspect live LoRa/TLV traffic? | `diagnostics/T190_RADIO_MONITOR.md` | Passive T190 sniffer build and usage notes. |
+| How do we send a low-power LoRa/TLV bench heartbeat? | `../diagnostics/rak3272s-bluepaws-test/README.md` | RAK3272S UART2 setup, configuration and T190-compatible diagnostic frames. |
 
 ## Tidy-Up Rules
 
