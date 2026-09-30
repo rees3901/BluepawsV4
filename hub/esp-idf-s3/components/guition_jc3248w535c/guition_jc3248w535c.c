@@ -21,6 +21,8 @@
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
 #include "esp_vfs_fat.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "sdmmc_cmd.h"
 
 #include <string.h>
@@ -34,7 +36,14 @@
 #define LCD_DATA3_GPIO 39
 #define LCD_BACKLIGHT_GPIO 1
 #define LCD_PIXEL_CLOCK_HZ (40 * 1000 * 1000)
-#define LCD_DRAW_BUFFER_PIXELS (GUITION_JC3248W535C_LANDSCAPE_WIDTH * 40)
+#define LCD_FRAME_PIXELS                                                   \
+    (GUITION_JC3248W535C_LANDSCAPE_WIDTH *                               \
+     GUITION_JC3248W535C_LANDSCAPE_HEIGHT)
+#define LCD_TRANSFER_STRIPS 10
+#define LCD_TRANSFER_WIDTH                                                \
+    (GUITION_JC3248W535C_LANDSCAPE_WIDTH / LCD_TRANSFER_STRIPS)
+#define LCD_TRANSFER_PIXELS                                               \
+    (GUITION_JC3248W535C_NATIVE_WIDTH * LCD_TRANSFER_WIDTH)
 
 #define TOUCH_I2C_PORT I2C_NUM_0
 #define TOUCH_SDA_GPIO 4
@@ -90,71 +99,72 @@ static const axs15231b_lcd_init_cmd_t jc3248w535c_init_cmds[] = {
 };
 static esp_lcd_panel_io_handle_t lcd_panel_io;
 static esp_lcd_panel_handle_t lcd_panel;
-static uint16_t *lcd_rotation_buffer;
-static esp_err_t (*lcd_draw_bitmap_original)(esp_lcd_panel_t *panel,
-                                             int x_start, int y_start,
-                                             int x_end, int y_end,
-                                             const void *color_data);
+static uint16_t *lcd_transfer_buffer;
+static SemaphoreHandle_t lcd_transfer_done;
 
-/* esp_lcd_axs15231b 2.1.0 skips RASET for QSPI partial updates. LVGL does not
-   guarantee sequential top-to-bottom dirty rectangles, so the controller
-   otherwise writes strips into stale rows and produces repeated columns/noise.
-   Set the row window explicitly before delegating to the component driver. */
-static esp_err_t lcd_draw_bitmap_with_row_window(esp_lcd_panel_t *panel,
-                                                  int x_start, int y_start,
-                                                  int x_end, int y_end,
-                                                  const void *color_data)
+static bool lcd_transfer_done_callback(esp_lcd_panel_io_handle_t panel_io,
+                                       esp_lcd_panel_io_event_data_t *event,
+                                       void *user_context)
 {
-    const uint8_t row_window[] = {
-        (uint8_t)((y_start >> 8) & 0xff),
-        (uint8_t)(y_start & 0xff),
-        (uint8_t)(((y_end - 1) >> 8) & 0xff),
-        (uint8_t)((y_end - 1) & 0xff),
-    };
-    const int qspi_raset_command = (0x02 << 24) | (0x2b << 8);
-    ESP_RETURN_ON_ERROR(
-        esp_lcd_panel_io_tx_param(lcd_panel_io, qspi_raset_command,
-                                  row_window, sizeof(row_window)),
-        TAG, "AXS15231B row window");
-    return lcd_draw_bitmap_original(panel, x_start, y_start, x_end, y_end,
-                                    color_data);
+    (void)panel_io;
+    (void)event;
+    (void)user_context;
+    BaseType_t task_woken = pdFALSE;
+    xSemaphoreGiveFromISR(lcd_transfer_done, &task_woken);
+    return task_woken == pdTRUE;
 }
 
-/* GUITION's working BSP does not use MADCTL rotation on this panel. Convert
-   each LVGL landscape dirty rectangle into the controller's native portrait
-   memory layout, using a bounded DMA buffer. LVGL submits one flush at a time,
-   and esp_lvgl_port signals completion from the panel IO callback before this
-   buffer can be reused. */
+/* The vendor BSP performs full-frame software rotation in ten sequential
+   strips. This is significant: the AXS15231B QSPI driver starts RAMWR only
+   when native y is zero and uses RAMWRC for later strips, while omitting
+   RASET. Arbitrary LVGL dirty rectangles therefore corrupt the frame. */
 static void lcd_landscape_flush(lv_display_t *display, const lv_area_t *area,
                                 uint8_t *color_map)
 {
-    const int width = lv_area_get_width(area);
-    const int height = lv_area_get_height(area);
     const uint16_t *source = (const uint16_t *)color_map;
+    if (area->x1 != 0 || area->y1 != 0 ||
+        area->x2 != GUITION_JC3248W535C_LANDSCAPE_WIDTH - 1 ||
+        area->y2 != GUITION_JC3248W535C_LANDSCAPE_HEIGHT - 1) {
+        ESP_LOGE(TAG, "Rejected non-full LCD flush: (%d,%d)-(%d,%d)",
+                 area->x1, area->y1, area->x2, area->y2);
+        lv_display_flush_ready(display);
+        return;
+    }
 
-    for (int y = 0; y < height; ++y) {
-        for (int x = 0; x < width; ++x) {
-            const uint16_t pixel = source[y * width + x];
-            /* The panel expects big-endian RGB565 on the wire. */
-            lcd_rotation_buffer[x * height + (height - y - 1)] =
-                (uint16_t)((pixel << 8) | (pixel >> 8));
+    while (xSemaphoreTake(lcd_transfer_done, 0) == pdTRUE) {
+    }
+
+    for (int strip = 0; strip < LCD_TRANSFER_STRIPS; ++strip) {
+        const int logical_x_start = strip * LCD_TRANSFER_WIDTH;
+        for (int y = 0; y < GUITION_JC3248W535C_LANDSCAPE_HEIGHT; ++y) {
+            for (int x = 0; x < LCD_TRANSFER_WIDTH; ++x) {
+                const uint16_t pixel = source[
+                    y * GUITION_JC3248W535C_LANDSCAPE_WIDTH +
+                    logical_x_start + x];
+                lcd_transfer_buffer[
+                    x * GUITION_JC3248W535C_NATIVE_WIDTH +
+                    (GUITION_JC3248W535C_NATIVE_WIDTH - y - 1)] =
+                    (uint16_t)((pixel << 8) | (pixel >> 8));
+            }
+        }
+
+        const esp_err_t result = esp_lcd_panel_draw_bitmap(
+            lcd_panel, 0, logical_x_start,
+            GUITION_JC3248W535C_NATIVE_WIDTH,
+            logical_x_start + LCD_TRANSFER_WIDTH, lcd_transfer_buffer);
+        if (result != ESP_OK) {
+            ESP_LOGE(TAG, "LCD strip %d failed: %s", strip,
+                     esp_err_to_name(result));
+            lv_display_flush_ready(display);
+            return;
+        }
+        if (xSemaphoreTake(lcd_transfer_done, pdMS_TO_TICKS(1000)) != pdTRUE) {
+            ESP_LOGE(TAG, "LCD strip %d transfer timed out", strip);
+            lv_display_flush_ready(display);
+            return;
         }
     }
-
-    const int physical_x_start =
-        GUITION_JC3248W535C_NATIVE_WIDTH - area->y2 - 1;
-    const int physical_x_end =
-        GUITION_JC3248W535C_NATIVE_WIDTH - area->y1;
-    const int physical_y_start = area->x1;
-    const int physical_y_end = area->x2 + 1;
-
-    esp_err_t result = esp_lcd_panel_draw_bitmap(
-        lcd_panel, physical_x_start, physical_y_start,
-        physical_x_end, physical_y_end, lcd_rotation_buffer);
-    if (result != ESP_OK) {
-        ESP_LOGE(TAG, "LCD flush failed: %s", esp_err_to_name(result));
-        lv_display_flush_ready(display);
-    }
+    lv_display_flush_ready(display);
 }
 
 static esp_err_t backlight_init(void)
@@ -234,8 +244,6 @@ static esp_err_t panel_new(esp_lcd_panel_handle_t *panel,
         TAG, "AXS15231B panel");
     lcd_panel_io = *panel_io;
     lcd_panel = *panel;
-    lcd_draw_bitmap_original = (*panel)->draw_bitmap;
-    (*panel)->draw_bitmap = lcd_draw_bitmap_with_row_window;
     ESP_RETURN_ON_ERROR(esp_lcd_panel_reset(*panel), TAG, "panel reset");
     ESP_RETURN_ON_ERROR(esp_lcd_panel_init(*panel), TAG, "panel init");
     /* esp_lcd_axs15231b 2.1.0 retains the driver's legacy `off` parameter
@@ -259,9 +267,9 @@ static void touchpad_read(lv_indev_t *indev, lv_indev_data_t *data)
         if (count > 0) {
             /* LVGL is rotated 90 degrees clockwise in software. Convert the
                controller's native portrait coordinates into landscape. */
-            data->point.x =
-                GUITION_JC3248W535C_NATIVE_HEIGHT - 1 - contacts[0].y;
-            data->point.y = contacts[0].x;
+            data->point.x = contacts[0].y;
+            data->point.y =
+                GUITION_JC3248W535C_NATIVE_WIDTH - 1 - contacts[0].x;
             data->state = LV_INDEV_STATE_PRESSED;
             return;
         }
@@ -341,8 +349,8 @@ lv_display_t *guition_jc3248w535c_display_start(void)
     const lvgl_port_display_cfg_t display_config = {
         .io_handle = panel_io,
         .panel_handle = panel,
-        .buffer_size = LCD_DRAW_BUFFER_PIXELS,
-        .double_buffer = true,
+        .buffer_size = LCD_FRAME_PIXELS,
+        .double_buffer = false,
         .hres = GUITION_JC3248W535C_LANDSCAPE_WIDTH,
         .vres = GUITION_JC3248W535C_LANDSCAPE_HEIGHT,
         .monochrome = false,
@@ -353,23 +361,32 @@ lv_display_t *guition_jc3248w535c_display_start(void)
         },
         .color_format = LV_COLOR_FORMAT_RGB565,
         .flags = {
-            /* Rotation is performed by lcd_landscape_flush so the panel stays
-               in its vendor-tested native portrait addressing mode. */
-            .buff_dma = true,
-            .buff_spiram = false,
+            /* Keep the complete LVGL frame in PSRAM, matching the vendor BSP.
+               lcd_landscape_flush rotates bounded strips into DMA memory. */
+            .buff_dma = false,
+            .buff_spiram = true,
             .sw_rotate = false,
             .swap_bytes = false,
-            .full_refresh = false,
+            .full_refresh = true,
             .direct_mode = false,
         },
     };
     lv_display_t *display = lvgl_port_add_disp(&display_config);
     if (display == NULL) return NULL;
 
-    lcd_rotation_buffer = heap_caps_malloc(
-        LCD_DRAW_BUFFER_PIXELS * sizeof(uint16_t), MALLOC_CAP_DMA);
-    if (lcd_rotation_buffer == NULL) {
-        ESP_LOGE(TAG, "Unable to allocate LCD rotation DMA buffer");
+    lcd_transfer_buffer = heap_caps_malloc(
+        LCD_TRANSFER_PIXELS * sizeof(uint16_t), MALLOC_CAP_DMA);
+    lcd_transfer_done = xSemaphoreCreateBinary();
+    if (lcd_transfer_buffer == NULL || lcd_transfer_done == NULL) {
+        ESP_LOGE(TAG, "Unable to allocate LCD transfer resources");
+        return NULL;
+    }
+    const esp_lcd_panel_io_callbacks_t callbacks = {
+        .on_color_trans_done = lcd_transfer_done_callback,
+    };
+    if (esp_lcd_panel_io_register_event_callbacks(panel_io, &callbacks,
+                                                   display) != ESP_OK) {
+        ESP_LOGE(TAG, "Unable to register LCD completion callback");
         return NULL;
     }
     lv_display_set_flush_cb(display, lcd_landscape_flush);

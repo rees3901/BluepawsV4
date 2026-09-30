@@ -18,6 +18,13 @@ Vendor and hardware-reference configuration used by this target:
 - touch: AXS15231B I2C address 0x3b, SDA 4, SCL 8
 - microSD: one-bit SDMMC, CLK 12, CMD 11, D0 13
 
+The LVGL 9 adapter deliberately follows the vendor LVGL 8 display pipeline:
+LVGL renders a complete 480 x 320 RGB565 frame in PSRAM, then the adapter
+software-rotates it into ten DMA-capable native-portrait strips. Those strips
+are sent sequentially from native row zero so the AXS15231B QSPI driver uses
+one `RAMWR` followed by `RAMWRC` continuations. Partial dirty-rectangle writes
+are not used because this panel driver omits row-window programming.
+
 The first milestone is intentionally a hardware-safe port foundation: display,
 touch, dimming, SD detection and the portable BluePaws cat store/simulator. It
 provides the compact overview interaction on real hardware before native S3
