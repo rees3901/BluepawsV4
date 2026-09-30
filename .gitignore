@@ -21,6 +21,10 @@ hub/esp-idf-p4/build/
 hub/esp-idf-p4/managed_components/
 hub/esp-idf-p4/sdkconfig
 hub/esp-idf-p4/sdkconfig.old
+hub/esp-idf-s3/build/
+hub/esp-idf-s3/managed_components/
+hub/esp-idf-s3/sdkconfig
+hub/esp-idf-s3/sdkconfig.old
 
 # Large local source archives and rendered Home Hub map packs.
 hub/maps/work/
