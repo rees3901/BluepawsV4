@@ -5,6 +5,7 @@ Documentation is grouped by subject rather than by when it was written:
 - `protocol/`: canonical TLV specifications and collar downlink commands.
 - `firmware/collar/`: collar behaviour, hardware testbeds, and bench records.
 - `firmware/home-hub/`: Home Hub architecture, behaviour, and testbed notes.
+- `hardware/collar/`: approved collar hardware architecture and PCB decisions.
 - `diagnostics/`: radio bench senders, passive receivers and diagnostic firmware notes.
 - `operations/`: deployment runbooks and production-readiness checks.
 - `development/`: environment strategy, decisions, and the active backlog.
@@ -27,6 +28,7 @@ owner, update that document instead of adding a parallel note.
 | What are the agreed collar power profiles? | `standards/POWER_PROFILES.md` | Human-readable standard. Verify compiled values in `../shared/lib/BluepawsProtocol/bp_config.h`. |
 | How does the collar behave at runtime? | `firmware/collar/COLLAR_RUNTIME_DECISIONS.md` | Runtime flow, BLE home behaviour, boot reports, persistence, button behaviour and Lost Alert behaviour. |
 | Which Walter/GM02SP vendor facts guide hardware, GNSS, LTE and power decisions? | `firmware/collar/WALTER_GM02SP_UPSTREAM_REFERENCE.md` | Source-linked QuickSpot guide; distinguishes Walter board facts from bare-modem assumptions and links the BluePaws testbed. |
+| What is the forward collar power architecture? | `hardware/collar/NPM1300_POWER_ARCHITECTURE.md` | nPM1300 replacement for BQ24074, TPS62840 and MAX17048; target rails, constraints and validation gates. |
 | How does the Home Hub behave in Home, Portable or Off-Grid use? | `firmware/home-hub/HOME_HUB_RUNTIME_DECISIONS.md` and `firmware/home-hub/HOME_HUB_OFFGRID_ARCHITECTURE.md` | Runtime roles and off-grid/local behaviour. |
 | How does the hub report itself to the cloud? | `firmware/home-hub/HUB_SELF_PRESENCE.md` | Hub self-presence, hub reporting profiles, contact overdue rules and collar receive indicator behaviour. |
 | How is TLV ingestion deployed and tested? | `operations/TLV_INGESTION_RUNBOOK.md` | Local verification, migrations, provisioning, Edge Function deployment and simulator checks. |

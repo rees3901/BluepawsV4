@@ -7,6 +7,11 @@ For GM02SP, GNSS/LTE antenna, and modem power decisions, start with the
 Its Walter board specifications must be checked against the bare GM02SP and the
 production collar schematic before being used as PCB requirements.
 
+The approved forward power design is the
+[nPM1300 collar power architecture](../docs/hardware/collar/NPM1300_POWER_ARCHITECTURE.md).
+It replaces the BQ24074, TPS62840 and MAX17048 architecture still present in the
+current KiCad schematic; follow its verification gates during migration.
+
 - `collar/` — BluePaws V4 collar main board, second board, evaluation layouts,
   plots, reports, symbols, footprints, 3D models, and retained vendor source
   packages.
