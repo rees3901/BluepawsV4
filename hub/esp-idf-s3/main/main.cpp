@@ -1046,7 +1046,7 @@ void create_ui(const guition_jc3248w535c_sd_info_t &sd)
     lv_obj_set_pos(title, 8, 8);
     network_label = make_label(header, "Starting local services", 0x7DDDE8,
                                &lv_font_montserrat_14);
-    lv_obj_set_pos(network_label, 8, 33);
+    lv_obj_set_pos(network_label, 8, 34);
     lv_obj_set_width(network_label, 414);
     lv_label_set_long_mode(network_label, LV_LABEL_LONG_DOT);
 
@@ -1054,21 +1054,21 @@ void create_ui(const guition_jc3248w535c_sd_info_t &sd)
     lv_dropdown_set_options(mode_dropdown, "Home\nPortable\nOff-Grid");
     lv_dropdown_set_selected(mode_dropdown,
         static_cast<uint32_t>(settings.communications_mode));
-    lv_obj_set_pos(mode_dropdown, 111, 5);
-    lv_obj_set_size(mode_dropdown, 112, 38);
+    lv_obj_set_pos(mode_dropdown, 150, 3);
+    lv_obj_set_size(mode_dropdown, 112, 30);
     lv_obj_set_style_bg_color(mode_dropdown, lv_color_hex(0x17475B), 0);
     lv_obj_set_style_text_color(mode_dropdown, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_text_font(mode_dropdown, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_pad_all(mode_dropdown, 7, 0);
+    lv_obj_set_style_pad_all(mode_dropdown, 4, 0);
     lv_obj_add_event_cb(mode_dropdown, mode_changed, LV_EVENT_VALUE_CHANGED, nullptr);
     wifi_status_label = make_label(header, LV_SYMBOL_WIFI, 0x82929E,
                                    &lv_font_montserrat_18);
-    lv_obj_set_pos(wifi_status_label, 238, 12);
+    lv_obj_set_pos(wifi_status_label, 280, 12);
     bluetooth_status_label = make_label(header, LV_SYMBOL_BLUETOOTH "x",
                                         0xED6C61, &lv_font_montserrat_18);
-    lv_obj_set_pos(bluetooth_status_label, 274, 12);
+    lv_obj_set_pos(bluetooth_status_label, 315, 12);
     clock_label = make_label(header, "--:--", 0xFFFFFF, &lv_font_montserrat_14);
-    lv_obj_set_pos(clock_label, 328, 15);
+    lv_obj_set_pos(clock_label, 357, 15);
     make_control(header, LV_SYMBOL_SETTINGS, 431, 5, 43, 40, settings_opened);
 
     map_view = lv_obj_create(screen);
