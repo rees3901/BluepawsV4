@@ -25,11 +25,30 @@ are sent sequentially from native row zero so the AXS15231B QSPI driver uses
 one `RAMWR` followed by `RAMWRC` continuations. Partial dirty-rectangle writes
 are not used because this panel driver omits row-window programming.
 
-The first milestone is intentionally a hardware-safe port foundation: display,
-touch, dimming, SD detection and the portable BluePaws cat store/simulator. It
-provides the compact overview interaction on real hardware before native S3
-Wi-Fi/BLE, cloud sync and the local dashboard are enabled. The P4-only MIPI-CSI
+The S3 target now reuses the hardware-independent Home Hub services from the P4
+firmware:
+
+- persistent NVS settings and Home / Portable / Off-Grid mode selection
+- native S3 Wi-Fi with primary/secondary network fallback and Off-Grid AP
+- the offline web dashboard, HTTP APIs and `http://bluepaws.local/` mDNS
+- native NimBLE Home beaconing and the user-requested five-second BLE scan
+- Supabase reporting, collar snapshot sync and generic command acknowledgement
+- simulated hub GNSS/battery telemetry until the radio/GNSS daughterboard exists
+
+The mode safety policy is shared with the P4: `BLUEPAWS_HOME` advertising is
+allowed only in Home mode. Portable and Off-Grid explicitly stop advertising;
+Off-Grid BLE discovery remains off until the user requests a short scan.
+
+The compact native UI currently provides mode control, service state and collar
+cards. The complete offline dashboard is served from the same SPIFFS assets as
+the P4, while road-map tiles are read from the SD card. Native map rendering and
+the full native settings workflow remain later UI work. The P4-only MIPI-CSI
 camera and hardware JPEG decoder have no equivalent on this board.
+
+Cloud synchronization is compiled in but requires an untracked
+`main/home_hub_secrets.h` based on `main/home_hub_secrets.example.h`. Without a
+provisioned bearer token the local Wi-Fi, AP, dashboard, mDNS, BLE and simulator
+continue to operate, but the hub does not report to Supabase.
 
 Build and flash with ESP-IDF 5.5.4:
 

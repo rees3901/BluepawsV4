@@ -28,6 +28,15 @@ CONFIG_FATFS_API_ENCODING_UTF_8=y
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
 
+# Native ESP32-S3 Wi-Fi/BLE. Unlike the P4 target, no ESP-Hosted coprocessor is
+# involved; NimBLE talks directly to the S3 controller.
+CONFIG_BT_ENABLED=y
+CONFIG_BT_CONTROLLER_ENABLED=y
+CONFIG_BT_BLUEDROID_ENABLED=n
+CONFIG_BT_NIMBLE_ENABLED=y
+CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
+CONFIG_LWIP_MAX_SOCKETS=16
+
 # LVGL 9 baseline shared with the P4 build. RGB565 bytes are swapped by the
 # board adapter before they are sent to the AXS15231B panel.
 CONFIG_LV_USE_CLIB_MALLOC=y

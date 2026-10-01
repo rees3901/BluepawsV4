@@ -7,3 +7,7 @@ set(EXTRA_COMPONENT_DIRS
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(bluepaws_home_hub_s3)
+
+# Package the same offline-first dashboard used by the P4. The HTTP server and
+# API implementation are shared; only the LCD/touch BSP differs.
+spiffs_create_partition_image(storage ../platformio/data FLASH_IN_PROJECT)

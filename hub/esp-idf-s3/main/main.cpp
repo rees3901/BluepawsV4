@@ -2,6 +2,12 @@
 
 #include "bluepaws/cat_simulator.h"
 #include "bluepaws/cat_store.h"
+#include "bluepaws/hub_settings.h"
+#include "home_hub_bluetooth.h"
+#include "home_hub_cloud.h"
+#include "home_hub_config.h"
+#include "home_hub_settings_store.h"
+#include "home_hub_web.h"
 
 #include "esp_log.h"
 #include "esp_heap_caps.h"
@@ -12,6 +18,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdio>
+#include <cstring>
 
 namespace {
 
@@ -24,13 +31,17 @@ constexpr std::array<uint32_t, bluepaws::kMaximumCats> kMarkerColours{
 
 bluepaws::CatStore store;
 bluepaws::CatSimulator simulator{kHome};
+bluepaws::hub::Settings settings = bluepaws::hub::defaultSettings();
+bool cloud_authorized = false;
+uint64_t pending_control_revision = 0;
+bool pending_control = false;
 lv_obj_t *summary_label;
 lv_obj_t *mode_button_label;
 lv_obj_t *sd_label;
+lv_obj_t *network_label;
 std::array<lv_obj_t *, 3> cat_name_labels{};
 std::array<lv_obj_t *, 3> cat_detail_labels{};
 std::array<lv_obj_t *, 3> cat_badges{};
-int mode_index = 0;
 
 lv_obj_t *make_label(lv_obj_t *parent, const char *text, uint32_t colour,
                      const lv_font_t *font)
@@ -58,7 +69,69 @@ lv_obj_t *make_panel(lv_obj_t *parent, uint32_t colour, int radius)
 void update_cards()
 {
     const uint32_t now_ms = static_cast<uint32_t>(esp_timer_get_time() / 1000ULL);
-    simulator.update(now_ms, store);
+    const std::size_t cloud_updates = bluepaws::cloud::drain(store);
+    if (!cloud_authorized && cloud_updates == 0) simulator.update(now_ms, store);
+
+    bluepaws::cloud::ControlUpdate control{};
+    while (bluepaws::cloud::takeControlUpdate(control)) {
+        if (control.revision <= settings.cloud_settings_revision) continue;
+        bluepaws::hub::Settings proposed = settings;
+        proposed.bluetooth_enabled = control.bluetooth_enabled;
+        proposed.reporting_profile = control.reporting_profile;
+        std::memcpy(proposed.display_name, control.display_name,
+                    sizeof(proposed.display_name));
+        std::memcpy(proposed.home_emoji, control.home_emoji,
+                    sizeof(proposed.home_emoji));
+        std::memcpy(proposed.portable_emoji, control.portable_emoji,
+                    sizeof(proposed.portable_emoji));
+        std::memcpy(proposed.marker_colour, control.marker_colour,
+                    sizeof(proposed.marker_colour));
+        if (bluepaws::settings_store::save(proposed)) {
+            settings = proposed;
+            pending_control_revision = control.revision;
+            pending_control = true;
+        }
+    }
+
+    bluepaws::hub::CommunicationsMode requested_mode{};
+    if (bluepaws::web::takeRequestedMode(requested_mode)) {
+        settings.communications_mode = requested_mode;
+        if (bluepaws::settings_store::save(settings)) {
+            bluepaws::cloud::applyNetworkSettings(settings);
+        }
+    }
+    bool requested_bluetooth = false;
+    if (bluepaws::web::takeRequestedBluetooth(requested_bluetooth)) {
+        settings.bluetooth_enabled = requested_bluetooth;
+        bluepaws::settings_store::save(settings);
+    }
+
+    bluepaws::cloud::Status cloud = bluepaws::cloud::status();
+    bluepaws::bluetooth::apply(settings.bluetooth_enabled, cloud.effective_mode);
+    const bluepaws::bluetooth::Status bluetooth = bluepaws::bluetooth::status();
+    if (pending_control && bluetooth.settled) {
+        settings.cloud_settings_revision = pending_control_revision;
+        if (bluepaws::settings_store::save(settings)) {
+            bluepaws::cloud::acknowledgeControlUpdate(
+                pending_control_revision, settings.bluetooth_enabled,
+                settings.reporting_profile);
+            pending_control = false;
+            cloud = bluepaws::cloud::status();
+        }
+    }
+    bluepaws::web::updateSnapshot(store, cloud, settings, bluetooth);
+    lv_label_set_text(mode_button_label,
+                      bluepaws::hub::communicationsModeName(cloud.effective_mode));
+    if (network_label != nullptr) {
+        const char *link = cloud.wifi_station_connected ? cloud.wifi_ssid
+            : (cloud.effective_mode == bluepaws::hub::CommunicationsMode::OffGrid
+                ? "BluePaws local AP" : "Wi-Fi connecting");
+        lv_label_set_text_fmt(network_label, "%s  |  Wi-Fi %s  |  BT %s",
+                              cloud_authorized ? "Cloud enabled" : "Local mode",
+                              link,
+                              bluetooth.advertising ? "Home beacon"
+                              : (bluetooth.scanning ? "Listening" : "Off"));
+    }
     for (std::size_t index = 0; index < cat_name_labels.size(); ++index) {
         const bluepaws::CatRecord *cat = store.at(index);
         if (cat == nullptr) continue;
@@ -73,9 +146,10 @@ void update_cards()
         lv_obj_set_style_bg_color(cat_badges[index],
                                   lv_color_hex(kMarkerColours[index]), 0);
     }
-    lv_label_set_text_fmt(summary_label, "%u/%u collars recent  |  Test data",
+    lv_label_set_text_fmt(summary_label, "%u/%u collars available  |  %s",
                           static_cast<unsigned>(store.size()),
-                          static_cast<unsigned>(bluepaws::kMaximumCats));
+                          static_cast<unsigned>(bluepaws::kMaximumCats),
+                          cloud_updates > 0 ? "Cloud refreshed" : "Local state");
 }
 
 void refresh_timer(lv_timer_t *)
@@ -85,9 +159,20 @@ void refresh_timer(lv_timer_t *)
 
 void mode_clicked(lv_event_t *)
 {
-    static constexpr const char *modes[] = {"Home Hub", "Portable", "Off-Grid"};
-    mode_index = (mode_index + 1) % 3;
-    lv_label_set_text(mode_button_label, modes[mode_index]);
+    const uint8_t next = (static_cast<uint8_t>(settings.communications_mode) + 1U) % 3U;
+    const auto previous = settings.communications_mode;
+    settings.communications_mode = static_cast<bluepaws::hub::CommunicationsMode>(next);
+    if (!bluepaws::settings_store::save(settings) ||
+        !bluepaws::cloud::applyNetworkSettings(settings)) {
+        settings.communications_mode = previous;
+        bluepaws::settings_store::save(settings);
+        return;
+    }
+    bluepaws::bluetooth::apply(settings.bluetooth_enabled,
+                               settings.communications_mode);
+    lv_label_set_text(mode_button_label,
+                      bluepaws::hub::communicationsModeName(
+                          settings.communications_mode));
 }
 
 void create_ui(const guition_jc3248w535c_sd_info_t &sd)
@@ -102,9 +187,11 @@ void create_ui(const guition_jc3248w535c_sd_info_t &sd)
     lv_obj_set_size(header, 480, 58);
     make_label(header, "BluePaws", 0xFFFFFF, &lv_font_montserrat_22);
     lv_obj_align(lv_obj_get_child(header, 0), LV_ALIGN_LEFT_MID, 12, -8);
-    lv_obj_t *sub = make_label(header, "Compact Home Hub  |  S3 port", 0x7DDDE8,
+    network_label = make_label(header, "Starting Wi-Fi and local services", 0x7DDDE8,
                                &lv_font_montserrat_14);
-    lv_obj_align(sub, LV_ALIGN_LEFT_MID, 12, 15);
+    lv_obj_set_width(network_label, 325);
+    lv_label_set_long_mode(network_label, LV_LABEL_LONG_DOT);
+    lv_obj_align(network_label, LV_ALIGN_LEFT_MID, 12, 15);
 
     lv_obj_t *mode_button = lv_button_create(header);
     lv_obj_set_size(mode_button, 118, 38);
@@ -112,7 +199,9 @@ void create_ui(const guition_jc3248w535c_sd_info_t &sd)
     lv_obj_set_style_bg_color(mode_button, lv_color_hex(0x087F91), 0);
     lv_obj_set_style_radius(mode_button, 10, 0);
     lv_obj_add_event_cb(mode_button, mode_clicked, LV_EVENT_CLICKED, nullptr);
-    mode_button_label = make_label(mode_button, "Home Hub", 0xFFFFFF,
+    mode_button_label = make_label(
+        mode_button, bluepaws::hub::communicationsModeName(
+                         settings.communications_mode), 0xFFFFFF,
                                    &lv_font_montserrat_14);
     lv_obj_center(mode_button_label);
 
@@ -125,23 +214,23 @@ void create_ui(const guition_jc3248w535c_sd_info_t &sd)
     lv_obj_set_size(safe, 239, 48);
     lv_obj_set_style_border_color(safe, lv_color_hex(0x24D7C4), 0);
     lv_obj_set_style_border_width(safe, 2, 0);
-    lv_obj_t *safe_text = make_label(safe, LV_SYMBOL_OK " Port foundation ready",
+    lv_obj_t *safe_text = make_label(safe, LV_SYMBOL_OK " Home Hub services active",
                                      0x6FFFE7, &lv_font_montserrat_18);
     lv_obj_center(safe_text);
 
-    make_label(overview, "Reusable P4 features", 0xFFFFFF, &lv_font_montserrat_18);
+    make_label(overview, "S3 Home Hub runtime", 0xFFFFFF, &lv_font_montserrat_18);
     lv_obj_set_pos(lv_obj_get_child(overview, 1), 12, 70);
     lv_obj_t *features = make_label(
         overview,
-        LV_SYMBOL_OK " Cat state + freshness\n"
-        LV_SYMBOL_OK " Mode policy + map maths\n"
-        LV_SYMBOL_OK " Touch + dimming\n"
-        LV_SYMBOL_OK " SD map-pack access",
+        LV_SYMBOL_OK " Wi-Fi + automatic fallback\n"
+        LV_SYMBOL_OK " Cloud + command polling\n"
+        LV_SYMBOL_OK " Local web + mDNS\n"
+        LV_SYMBOL_OK " Native BLE mode policy",
         0xB8D4E2, &lv_font_montserrat_14);
     lv_obj_set_style_text_line_space(features, 9, 0);
     lv_obj_set_pos(features, 14, 102);
 
-    summary_label = make_label(overview, "8/8 collars recent  |  Test data",
+    summary_label = make_label(overview, "Loading collar state",
                                0x61F6E5, &lv_font_montserrat_14);
     lv_obj_align(summary_label, LV_ALIGN_BOTTOM_MID, 0, -26);
     sd_label = make_label(overview, sd.mounted ? "SD ready" : "SD not inserted",
@@ -202,7 +291,22 @@ extern "C" void app_main(void)
         ESP_LOGW(kTag, "Continuing without SD: %s", esp_err_to_name(sd_result));
     }
 
+    std::strncpy(settings.primary.ssid, HOME_HUB_WIFI_SSID,
+                 sizeof(settings.primary.ssid) - 1);
+    std::strncpy(settings.primary.password, HOME_HUB_WIFI_PASSWORD,
+                 sizeof(settings.primary.password) - 1);
+    bluepaws::settings_store::load(settings);
+    guition_jc3248w535c_backlight_set(settings.brightness_percent);
+
     simulator.reset(kHome, static_cast<uint32_t>(esp_timer_get_time() / 1000ULL));
+    cloud_authorized = bluepaws::cloud::start(settings);
+    if (!bluepaws::bluetooth::start(settings.bluetooth_enabled,
+                                    settings.communications_mode)) {
+        ESP_LOGE(kTag, "Bluetooth control failed to start");
+    }
+    if (!bluepaws::web::start()) {
+        ESP_LOGE(kTag, "Local dashboard failed to start");
+    }
     if (lvgl_port_lock(0)) {
         create_ui(sd);
         lvgl_port_unlock();
