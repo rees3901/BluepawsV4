@@ -48,5 +48,8 @@ CONFIG_LV_DRAW_SW_DRAW_UNIT_CNT=1
 CONFIG_LV_FONT_MONTSERRAT_14=y
 CONFIG_LV_FONT_MONTSERRAT_18=y
 CONFIG_LV_FONT_MONTSERRAT_22=y
+# Use the tiny JPEG decoder one tile at a time into fixed RGB565 PSRAM
+# descriptors. LVGL's file decoder reopens multiple SD JPEGs during redraw.
+CONFIG_LV_USE_TJPGD=y
 # Keep LVGL's example sources out of this firmware target.
 # CONFIG_LV_BUILD_EXAMPLES is not set
