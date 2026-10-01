@@ -22,7 +22,7 @@ import { CUSTOMER_POWER_PROFILES, powerProfileLabel, type CustomerPowerProfile }
 import { deviceCardOrderStorageKey, deviceCardPinStorageKey, moveDeviceToHoverTarget, orderDeviceIds, pinDeviceFirst } from "@/lib/deviceCardOrder";
 import { buildCurrentDeviceReport, deviceReportsToCsv, loadDeviceReports, type DeviceReport } from "@/lib/deviceReports";
 import { loadDeviceAppearances, revokeAvatarUrls } from "@/lib/deviceAppearances";
-import { nextExpandedDeviceCards } from "@/lib/expandedCards";
+import { initialiseExpandedDeviceCards, nextExpandedDeviceCards } from "@/lib/expandedCards";
 import { followedDeviceAfterAction } from "@/lib/followState";
 import { createRealtimeTelemetrySource, loadDeviceTrail } from "@/lib/realtimeTelemetry";
 import { createClient } from "@/lib/supabase/client";
@@ -82,6 +82,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [darkMode, setDarkMode] = useState(true);
   const [expandedIds, setExpandedIds] = useState<number[]>([]);
+  const [initialisedCardIds, setInitialisedCardIds] = useState<number[]>([]);
   const [followedId, setFollowedId] = useState<number | null>(null);
   const [trailIds, setTrailIds] = useState<Set<number>>(() => new Set());
   const [trailHistory, setTrailHistory] = useState<Record<number, TrailPoint[]>>({});
@@ -129,6 +130,12 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
       lon: hub.longitude, fixAt: hub.fix_at } : null };
   })], [devices, mapHubs, hubs]);
   const orderedDeviceIds = useMemo(() => orderDeviceIds(mapDevices.map(device => device.id), cardOrder, pinnedDeviceId), [cardOrder, mapDevices, pinnedDeviceId]);
+
+  // Hubs and pets can arrive separately; apply defaults before displaying each new card.
+  if (mapDevices.some(device => !initialisedCardIds.includes(device.id))) {
+    setExpandedIds(current => initialiseExpandedDeviceCards(current, initialisedCardIds, mapDevices));
+    setInitialisedCardIds(current => [...new Set([...current, ...mapDevices.map(device => device.id)])]);
+  }
 
   const handlePowerProfileCommand = useCallback(async (profile: CustomerPowerProfile) => {
     if (!commandDevice || commandSending) return;
@@ -550,6 +557,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
     setLogs([]);
     sequences.current.clear();
     setExpandedIds([]);
+    setInitialisedCardIds([]);
     setFollowedId(null);
     setTrailIds(new Set());
     setTrailHistory({});
