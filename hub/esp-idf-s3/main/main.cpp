@@ -21,6 +21,7 @@
 #include <array>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 #include <sys/stat.h>
 
 namespace {
@@ -47,8 +48,16 @@ bool drawer_open = true;
 uint64_t pending_control_revision = 0;
 bool pending_control = false;
 
-lv_obj_t *mode_button_label = nullptr;
+lv_obj_t *header = nullptr;
+lv_obj_t *mode_dropdown = nullptr;
 lv_obj_t *network_label = nullptr;
+lv_obj_t *wifi_status_label = nullptr;
+lv_obj_t *bluetooth_status_label = nullptr;
+lv_obj_t *clock_label = nullptr;
+lv_obj_t *mode_confirmation = nullptr;
+lv_obj_t *mode_confirmation_title = nullptr;
+lv_obj_t *mode_confirmation_body = nullptr;
+bluepaws::hub::CommunicationsMode pending_mode = bluepaws::hub::CommunicationsMode::Home;
 lv_obj_t *map_view = nullptr;
 lv_obj_t *drawer = nullptr;
 lv_obj_t *hamburger = nullptr;
@@ -66,7 +75,35 @@ struct TileSlot {
 };
 std::array<TileSlot, kTileSlots> tile_slots{};
 std::array<lv_obj_t *, bluepaws::kMaximumCats> markers{};
-std::array<lv_obj_t *, 3> drawer_rows{};
+lv_obj_t *drawer_list = nullptr;
+std::array<lv_obj_t *, bluepaws::kMaximumCats> drawer_rows{};
+lv_point_t map_press_start{};
+lv_point_t last_map_tap{};
+uint32_t last_map_tap_ms = 0;
+bool map_press_active = false;
+bool map_press_moved = false;
+bool map_press_multitouch = false;
+lv_obj_t *settings_overlay = nullptr;
+lv_obj_t *settings_body = nullptr;
+lv_obj_t *settings_status = nullptr;
+lv_obj_t *scan_dropdown = nullptr;
+lv_obj_t *editor_overlay = nullptr;
+lv_obj_t *editor_input = nullptr;
+lv_obj_t *editor_visibility = nullptr;
+lv_obj_t *editor_title = nullptr;
+lv_obj_t *editor_error = nullptr;
+lv_obj_t *brightness_value = nullptr;
+lv_obj_t *info_label = nullptr;
+std::array<lv_obj_t *, 5> settings_tabs{};
+std::array<lv_obj_t *, bluepaws::kMaximumCats> settings_cat_labels{};
+uint8_t settings_tab = 0;
+uint8_t editing_field = 0;
+char pending_scan_ssid[33]{};
+bool pending_scan_primary = true;
+uint32_t scan_generation = 0;
+bluepaws::cloud::WifiScanSnapshot scan_snapshot{};
+
+void refresh_settings_status(const bluepaws::cloud::Status &cloud);
 
 lv_obj_t *make_label(lv_obj_t *parent, const char *text, uint32_t colour,
                      const lv_font_t *font)
@@ -291,7 +328,92 @@ void set_drawer(bool open)
 }
 
 void drawer_toggle(lv_event_t *) { set_drawer(!drawer_open); }
-void map_tapped(lv_event_t *) { if (drawer_open) set_drawer(false); }
+
+int32_t point_distance_squared(const lv_point_t &a, const lv_point_t &b)
+{
+    const int32_t dx = a.x - b.x;
+    const int32_t dy = a.y - b.y;
+    return dx * dx + dy * dy;
+}
+
+void map_pressed(lv_event_t *)
+{
+    lv_indev_t *indev = lv_indev_active();
+    if (indev == nullptr) return;
+    lv_indev_get_point(indev, &map_press_start);
+    map_press_active = true;
+    map_press_moved = false;
+    map_press_multitouch = guition_jc3248w535c_touch_count() > 1;
+}
+
+void map_pressing(lv_event_t *)
+{
+    if (!map_press_active) return;
+    const int8_t pinch_steps = guition_jc3248w535c_take_pinch_steps();
+    if (pinch_steps != 0) {
+        const int zoom = std::clamp(static_cast<int>(viewport.zoom()) +
+                                    pinch_steps, 5, 17);
+        viewport.setZoom(static_cast<uint8_t>(zoom));
+        refresh_tiles();
+        refresh_markers();
+        map_press_multitouch = true;
+    }
+    if (guition_jc3248w535c_touch_count() > 1) {
+        map_press_multitouch = true;
+        last_map_tap_ms = 0;
+        return;
+    }
+    lv_indev_t *indev = lv_indev_active();
+    if (indev == nullptr) return;
+    lv_point_t point{};
+    lv_indev_get_point(indev, &point);
+    if (point_distance_squared(point, map_press_start) > 100) {
+        map_press_moved = true;
+        last_map_tap_ms = 0;
+    }
+    lv_point_t vector{};
+    lv_indev_get_vect(indev, &vector);
+    if (vector.x == 0 && vector.y == 0) return;
+    viewport.panBy(vector.x, vector.y);
+    refresh_tiles();
+    refresh_markers();
+}
+
+void map_released(lv_event_t *)
+{
+    if (!map_press_active) return;
+    map_press_active = false;
+    lv_indev_t *indev = lv_indev_active();
+    if (indev == nullptr) return;
+    lv_point_t point{};
+    lv_indev_get_point(indev, &point);
+    if (map_press_moved || map_press_multitouch ||
+        point_distance_squared(point, map_press_start) > 100) {
+        last_map_tap_ms = 0;
+        return;
+    }
+    if (drawer_open) {
+        set_drawer(false);
+        last_map_tap_ms = 0;
+        return;
+    }
+    const uint32_t now = lv_tick_get();
+    if (last_map_tap_ms != 0 && now - last_map_tap_ms < 360 &&
+        point_distance_squared(point, last_map_tap) < 900) {
+        last_map_tap_ms = 0;
+        const bluepaws::map::ScreenPoint local{
+            static_cast<double>(point.x),
+            static_cast<double>(point.y - kHeaderHeight),
+        };
+        viewport.centerAndZoom(local,
+            std::min<uint8_t>(17, viewport.zoom() + 1));
+        refresh_tiles();
+        refresh_markers();
+        return;
+    }
+    last_map_tap = point;
+    last_map_tap_ms = now;
+}
 
 void zoom_in(lv_event_t *)
 {
@@ -329,19 +451,62 @@ void home_clicked(lv_event_t *)
     refresh_markers();
 }
 
-void mode_clicked(lv_event_t *)
+const char *mode_consequence(bluepaws::hub::CommunicationsMode mode)
 {
-    const uint8_t next = (static_cast<uint8_t>(settings.communications_mode) + 1U) % 3U;
+    switch (mode) {
+    case bluepaws::hub::CommunicationsMode::Home:
+        return "Try home Wi-Fi first, then portable Wi-Fi. If both fail, start the local hotspot. The Home BLE beacon is allowed only while actually at home.";
+    case bluepaws::hub::CommunicationsMode::Portable:
+        return "Use the saved portable Wi-Fi. If unavailable, fall back to the local hotspot. The Home BLE beacon stays off.";
+    case bluepaws::hub::CommunicationsMode::OffGrid:
+        return "Stop joining Wi-Fi networks and start the local hotspot. Home BLE advertising stays off; scanning is on request only.";
+    }
+    return "Apply this hub mode?";
+}
+
+bool apply_mode(bluepaws::hub::CommunicationsMode mode)
+{
     const auto previous = settings.communications_mode;
-    settings.communications_mode = static_cast<bluepaws::hub::CommunicationsMode>(next);
+    settings.communications_mode = mode;
     if (!bluepaws::settings_store::save(settings) ||
         !bluepaws::cloud::applyNetworkSettings(settings)) {
         settings.communications_mode = previous;
         bluepaws::settings_store::save(settings);
-        return;
+        return false;
     }
     bluepaws::bluetooth::apply(settings.bluetooth_enabled,
                                settings.communications_mode);
+    return true;
+}
+
+void mode_cancelled(lv_event_t *)
+{
+    lv_obj_add_flag(mode_confirmation, LV_OBJ_FLAG_HIDDEN);
+}
+
+void mode_accepted(lv_event_t *)
+{
+    lv_obj_add_flag(mode_confirmation, LV_OBJ_FLAG_HIDDEN);
+    if (!apply_mode(pending_mode)) {
+        ESP_LOGE(kTag, "Could not apply requested hub mode");
+    }
+    lv_dropdown_set_selected(mode_dropdown,
+        static_cast<uint32_t>(bluepaws::cloud::status().effective_mode));
+}
+
+void mode_changed(lv_event_t *)
+{
+    const uint32_t selected = lv_dropdown_get_selected(mode_dropdown);
+    if (selected > 2) return;
+    pending_mode = static_cast<bluepaws::hub::CommunicationsMode>(selected);
+    lv_dropdown_set_selected(mode_dropdown,
+        static_cast<uint32_t>(bluepaws::cloud::status().effective_mode));
+    if (pending_mode == settings.communications_mode) return;
+    lv_label_set_text_fmt(mode_confirmation_title, "Switch to %s?",
+        bluepaws::hub::communicationsModeName(pending_mode));
+    lv_label_set_text(mode_confirmation_body, mode_consequence(pending_mode));
+    lv_obj_remove_flag(mode_confirmation, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(mode_confirmation);
 }
 
 void update_runtime()
@@ -394,15 +559,46 @@ void update_runtime()
         }
     }
     bluepaws::web::updateSnapshot(store, cloud, settings, bluetooth);
+    refresh_settings_status(cloud);
 
-    lv_label_set_text(mode_button_label,
-                      bluepaws::hub::communicationsModeName(cloud.effective_mode));
+    if (mode_confirmation == nullptr ||
+        lv_obj_has_flag(mode_confirmation, LV_OBJ_FLAG_HIDDEN)) {
+        lv_dropdown_set_selected(mode_dropdown,
+            static_cast<uint32_t>(cloud.effective_mode));
+    }
+    const uint32_t mode_colour =
+        cloud.effective_mode == bluepaws::hub::CommunicationsMode::OffGrid
+            ? 0x563516
+            : (cloud.effective_mode == bluepaws::hub::CommunicationsMode::Portable
+                ? 0x17433A : 0x122638);
+    lv_obj_set_style_bg_color(header, lv_color_hex(mode_colour), 0);
     const char *link = cloud.wifi_station_connected ? cloud.wifi_ssid
         : (cloud.effective_mode == bluepaws::hub::CommunicationsMode::OffGrid
             ? "Local AP" : "Connecting");
-    lv_label_set_text_fmt(network_label, "Wi-Fi %s  |  BT %s", link,
-                          bluetooth.advertising ? "Home"
-                          : (bluetooth.scanning ? "Scan" : "Off"));
+    lv_label_set_text_fmt(network_label, "%s%s", link,
+        cloud.wifi_station_connected ? " connected" : "");
+    lv_label_set_text(wifi_status_label, LV_SYMBOL_WIFI);
+    lv_obj_set_style_text_color(wifi_status_label,
+        lv_color_hex(cloud.wifi_station_connected
+            ? (cloud.wifi_rssi_dbm >= -67 ? 0x4AE2B7
+               : cloud.wifi_rssi_dbm >= -80 ? 0xF1C45A : 0xED6C61)
+            : (cloud.effective_mode == bluepaws::hub::CommunicationsMode::OffGrid
+                ? 0x4AE2B7 : 0x82929E)), 0);
+    lv_label_set_text(bluetooth_status_label,
+        bluetooth.advertising || bluetooth.scanning
+            ? LV_SYMBOL_BLUETOOTH : LV_SYMBOL_BLUETOOTH "x");
+    lv_obj_set_style_text_color(bluetooth_status_label,
+        lv_color_hex(bluetooth.advertising || bluetooth.scanning
+            ? 0x4AE2B7 : 0xED6C61), 0);
+    if (cloud.time_synchronized) {
+        const std::time_t now = std::time(nullptr);
+        std::tm local{};
+        localtime_r(&now, &local);
+        lv_label_set_text_fmt(clock_label, "%02d:%02d", local.tm_hour,
+                              local.tm_min);
+    } else {
+        lv_label_set_text(clock_label, "--:--");
+    }
 
     unsigned recent = 0;
     for (std::size_t i = 0; i < store.size(); ++i) {
@@ -438,6 +634,403 @@ void update_runtime()
 
 void refresh_timer(lv_timer_t *) { update_runtime(); }
 
+void show_settings_tab(uint8_t tab);
+
+void settings_closed(lv_event_t *)
+{
+    if (settings_overlay != nullptr)
+        lv_obj_add_flag(settings_overlay, LV_OBJ_FLAG_HIDDEN);
+}
+
+void settings_tab_clicked(lv_event_t *event)
+{
+    show_settings_tab(static_cast<uint8_t>(
+        reinterpret_cast<uintptr_t>(lv_event_get_user_data(event))));
+}
+
+void editor_closed(lv_event_t *)
+{
+    pending_scan_ssid[0] = '\0';
+    if (editor_overlay != nullptr)
+        lv_obj_add_flag(editor_overlay, LV_OBJ_FLAG_HIDDEN);
+}
+
+void editor_visibility_clicked(lv_event_t *)
+{
+    const bool hidden = lv_textarea_get_password_mode(editor_input);
+    lv_textarea_set_password_mode(editor_input, !hidden);
+    lv_label_set_text(lv_obj_get_child(editor_visibility, 0),
+        hidden ? LV_SYMBOL_EYE_OPEN : LV_SYMBOL_EYE_CLOSE);
+}
+
+void editor_saved(lv_event_t *)
+{
+    const char *value = lv_textarea_get_text(editor_input);
+    const bool password = (editing_field & 1U) != 0;
+    if (password ? !bluepaws::hub::validPassword(value)
+                 : (value[0] != '\0' && !bluepaws::hub::validSsid(value))) {
+        lv_label_set_text(editor_error, password
+            ? "Password: blank or 8-63 characters"
+            : "Wi-Fi name must be 32 characters or fewer");
+        return;
+    }
+    bluepaws::hub::Settings proposed = settings;
+    bluepaws::hub::WifiNetwork &network = editing_field < 2
+        ? proposed.primary : proposed.secondary;
+    if (password && pending_scan_ssid[0] != '\0' &&
+        (editing_field < 2) == pending_scan_primary) {
+        if (std::strcmp(network.ssid, pending_scan_ssid) != 0)
+            network.password[0] = '\0';
+        std::snprintf(network.ssid, sizeof(network.ssid), "%s", pending_scan_ssid);
+    }
+    char *destination = password ? network.password : network.ssid;
+    const size_t capacity = password ? sizeof(network.password)
+                                     : sizeof(network.ssid);
+    std::snprintf(destination, capacity, "%s", value);
+    if (!password && value[0] == '\0') network.password[0] = '\0';
+    if (!bluepaws::settings_store::save(proposed) ||
+        !bluepaws::cloud::applyNetworkSettings(proposed)) {
+        bluepaws::settings_store::save(settings);
+        lv_label_set_text(editor_error, "Could not save or apply Wi-Fi settings");
+        return;
+    }
+    settings = proposed;
+    editor_closed(nullptr);
+    show_settings_tab(0);
+}
+
+void open_editor(uint8_t field)
+{
+    editing_field = field;
+    const bool password = (field & 1U) != 0;
+    const bool primary = field < 2;
+    const bluepaws::hub::WifiNetwork &network = primary
+        ? settings.primary : settings.secondary;
+    const char *value = password ? network.password : network.ssid;
+    if (editor_overlay == nullptr) {
+        editor_overlay = make_panel(lv_screen_active(), 0x0B1C2A, 0);
+        lv_obj_set_size(editor_overlay, 480, 320);
+        lv_obj_add_flag(editor_overlay, LV_OBJ_FLAG_FLOATING);
+        editor_title = make_label(editor_overlay, "Wi-Fi", 0xFFFFFF,
+                                   &lv_font_montserrat_18);
+        lv_obj_set_pos(editor_title, 10, 9);
+        make_control(editor_overlay, "Cancel", 276, 4, 90, 38, editor_closed);
+        make_control(editor_overlay, "Save", 374, 4, 96, 38, editor_saved);
+        editor_input = lv_textarea_create(editor_overlay);
+        lv_obj_set_pos(editor_input, 10, 50);
+        lv_obj_set_size(editor_input, 410, 43);
+        lv_textarea_set_one_line(editor_input, true);
+        lv_textarea_set_max_length(editor_input, 64);
+        editor_visibility = make_control(editor_overlay,
+            LV_SYMBOL_EYE_CLOSE, 427, 51, 43, 41, editor_visibility_clicked);
+        editor_error = make_label(editor_overlay, "", 0xF1C45A,
+                                   &lv_font_montserrat_14);
+        lv_obj_set_pos(editor_error, 10, 96);
+        lv_obj_t *keyboard = lv_keyboard_create(editor_overlay);
+        lv_obj_set_pos(keyboard, 7, 122);
+        lv_obj_set_size(keyboard, 466, 191);
+        lv_keyboard_set_textarea(keyboard, editor_input);
+    }
+    lv_label_set_text(editor_title, primary
+        ? (password ? "Home Wi-Fi password" : "Home Wi-Fi name")
+        : (password ? "Portable Wi-Fi password" : "Portable Wi-Fi name"));
+    lv_textarea_set_text(editor_input, value);
+    lv_textarea_set_max_length(editor_input, password ? 64 : 32);
+    lv_textarea_set_password_mode(editor_input, password);
+    if (password) lv_obj_remove_flag(editor_visibility, LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(editor_visibility, LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_text(lv_obj_get_child(editor_visibility, 0), LV_SYMBOL_EYE_CLOSE);
+    lv_label_set_text(editor_error, "");
+    lv_obj_remove_flag(editor_overlay, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(editor_overlay);
+}
+
+void wifi_field_clicked(lv_event_t *event)
+{
+    open_editor(static_cast<uint8_t>(
+        reinterpret_cast<uintptr_t>(lv_event_get_user_data(event))));
+}
+
+void wifi_scan_clicked(lv_event_t *)
+{
+    if (bluepaws::cloud::requestWifiScan()) {
+        lv_label_set_text(settings_status, "Scanning nearby Wi-Fi...");
+    } else {
+        lv_label_set_text(settings_status, "Wi-Fi scan unavailable right now");
+    }
+}
+
+void wifi_use_clicked(lv_event_t *event)
+{
+    if (scan_dropdown == nullptr || scan_snapshot.count == 0) return;
+    const uint32_t choice = lv_dropdown_get_selected(scan_dropdown);
+    if (choice >= scan_snapshot.count) return;
+    const bool primary = reinterpret_cast<uintptr_t>(
+        lv_event_get_user_data(event)) == 0;
+    const auto &selected = scan_snapshot.results[choice];
+    if (selected.secured) {
+        std::snprintf(pending_scan_ssid, sizeof(pending_scan_ssid), "%s",
+                      selected.ssid);
+        pending_scan_primary = primary;
+        open_editor(primary ? 1 : 3);
+        return;
+    }
+    bluepaws::hub::Settings proposed = settings;
+    bluepaws::hub::WifiNetwork &network = primary
+        ? proposed.primary : proposed.secondary;
+    if (std::strcmp(network.ssid, selected.ssid) != 0) network.password[0] = '\0';
+    std::snprintf(network.ssid, sizeof(network.ssid), "%s", selected.ssid);
+    if (!bluepaws::settings_store::save(proposed) ||
+        !bluepaws::cloud::applyNetworkSettings(proposed)) {
+        bluepaws::settings_store::save(settings);
+        lv_label_set_text(settings_status, "Could not apply selected Wi-Fi");
+        return;
+    }
+    settings = proposed;
+    show_settings_tab(0);
+}
+
+void brightness_changed(lv_event_t *event)
+{
+    auto *slider = static_cast<lv_obj_t *>(lv_event_get_target(event));
+    const int value = lv_slider_get_value(slider);
+    guition_jc3248w535c_backlight_set(value);
+    if (brightness_value != nullptr)
+        lv_label_set_text_fmt(brightness_value, "%d%%", value);
+    if (lv_event_get_code(event) == LV_EVENT_RELEASED) {
+        settings.brightness_percent = static_cast<uint8_t>(value);
+        bluepaws::settings_store::save(settings);
+    }
+}
+
+void bluetooth_clicked(lv_event_t *)
+{
+    settings.bluetooth_enabled = !settings.bluetooth_enabled;
+    if (!bluepaws::settings_store::save(settings)) {
+        settings.bluetooth_enabled = !settings.bluetooth_enabled;
+        return;
+    }
+    bluepaws::bluetooth::apply(settings.bluetooth_enabled,
+                               bluepaws::cloud::status().effective_mode);
+    show_settings_tab(1);
+}
+
+void reporting_changed(lv_event_t *event)
+{
+    auto *dropdown = static_cast<lv_obj_t *>(lv_event_get_target(event));
+    settings.reporting_profile = static_cast<bluepaws::hub::ReportingProfile>(
+        std::min<uint32_t>(2, lv_dropdown_get_selected(dropdown)));
+    bluepaws::settings_store::save(settings);
+}
+
+void show_settings_tab(uint8_t tab)
+{
+    if (settings_body == nullptr || tab > 4) return;
+    settings_tab = tab;
+    settings_status = nullptr;
+    scan_dropdown = nullptr;
+    brightness_value = nullptr;
+    info_label = nullptr;
+    settings_cat_labels.fill(nullptr);
+    lv_obj_clean(settings_body);
+    for (std::size_t i = 0; i < settings_tabs.size(); ++i) {
+        if (settings_tabs[i] != nullptr)
+            lv_obj_set_style_bg_color(settings_tabs[i],
+                lv_color_hex(i == tab ? 0x157FA2 : 0x183248), 0);
+    }
+    if (tab == 0) {
+        scan_generation = 0;
+        settings_status = make_label(settings_body, "Checking Wi-Fi...",
+                                      0x9CDBE8, &lv_font_montserrat_14);
+        lv_obj_set_pos(settings_status, 7, 5);
+        lv_obj_set_width(settings_status, 440);
+        make_control(settings_body, "Scan", 7, 36, 88, 40, wifi_scan_clicked);
+        scan_dropdown = lv_dropdown_create(settings_body);
+        lv_dropdown_set_options(scan_dropdown, "No scan results");
+        lv_obj_set_pos(scan_dropdown, 105, 36);
+        lv_obj_set_size(scan_dropdown, 341, 40);
+        make_control(settings_body, "Use for home", 7, 84, 214, 40,
+                     wifi_use_clicked);
+        lv_obj_t *portable = make_control(settings_body, "Use for portable",
+                                           231, 84, 215, 40, wifi_use_clicked);
+        lv_obj_remove_event_cb(portable, wifi_use_clicked);
+        lv_obj_add_event_cb(portable, wifi_use_clicked, LV_EVENT_CLICKED,
+                             reinterpret_cast<void *>(1));
+        const char *titles[] = {
+            "Home Wi-Fi name", "Home password", "Portable Wi-Fi name",
+            "Portable password"};
+        for (uint8_t i = 0; i < 4; ++i) {
+            lv_obj_t *button = make_control(settings_body, titles[i], 7,
+                133 + i * 49, 439, 43, wifi_field_clicked);
+            lv_obj_remove_event_cb(button, wifi_field_clicked);
+            lv_obj_add_event_cb(button, wifi_field_clicked, LV_EVENT_CLICKED,
+                reinterpret_cast<void *>(static_cast<uintptr_t>(i)));
+        }
+        refresh_settings_status(bluepaws::cloud::status());
+    } else if (tab == 1) {
+        auto *title = make_label(settings_body, "Hub controls", 0xFFFFFF,
+                                 &lv_font_montserrat_18);
+        lv_obj_set_pos(title, 8, 6);
+        auto *mode = make_label(settings_body,
+            "Choose Home, Portable or Off-Grid from the top bar.",
+            0xA9D6E1, &lv_font_montserrat_14);
+        lv_obj_set_pos(mode, 8, 36);
+        lv_obj_t *button = make_control(settings_body,
+            settings.bluetooth_enabled ? "Bluetooth: On" : "Bluetooth: Off",
+            8, 74, 439, 44, bluetooth_clicked);
+        (void)button;
+        auto *profile = make_label(settings_body, "Reporting profile",
+                                    0xFFFFFF, &lv_font_montserrat_14);
+        lv_obj_set_pos(profile, 8, 132);
+        auto *dropdown = lv_dropdown_create(settings_body);
+        lv_dropdown_set_options(dropdown, "Power save\nNormal\nActive");
+        lv_dropdown_set_selected(dropdown,
+            static_cast<uint32_t>(settings.reporting_profile));
+        lv_obj_set_pos(dropdown, 8, 157);
+        lv_obj_set_size(dropdown, 439, 42);
+        lv_obj_add_event_cb(dropdown, reporting_changed,
+                            LV_EVENT_VALUE_CHANGED, nullptr);
+    } else if (tab == 2) {
+        auto *title = make_label(settings_body, "Screen brightness", 0xFFFFFF,
+                                 &lv_font_montserrat_18);
+        lv_obj_set_pos(title, 8, 10);
+        auto *slider = lv_slider_create(settings_body);
+        lv_obj_set_pos(slider, 22, 69);
+        lv_obj_set_size(slider, 342, 24);
+        lv_slider_set_range(slider, 10, 100);
+        lv_slider_set_value(slider, settings.brightness_percent, LV_ANIM_OFF);
+        lv_obj_add_event_cb(slider, brightness_changed,
+                            LV_EVENT_VALUE_CHANGED, nullptr);
+        lv_obj_add_event_cb(slider, brightness_changed,
+                            LV_EVENT_RELEASED, nullptr);
+        brightness_value = make_label(settings_body, "", 0x9CDBE8,
+                                      &lv_font_montserrat_18);
+        lv_obj_set_pos(brightness_value, 386, 64);
+        lv_label_set_text_fmt(brightness_value, "%u%%",
+                              settings.brightness_percent);
+        auto *note = make_label(settings_body,
+            "Brightness is saved on release. Battery level is unavailable on this board.",
+            0x9CDBE8, &lv_font_montserrat_14);
+        lv_obj_set_pos(note, 8, 125);
+        lv_obj_set_width(note, 438);
+        lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
+    } else if (tab == 3) {
+        for (std::size_t i = 0; i < settings_cat_labels.size(); ++i) {
+            settings_cat_labels[i] = make_label(settings_body, "",
+                0xFFFFFF, &lv_font_montserrat_14);
+            lv_obj_set_pos(settings_cat_labels[i], 10,
+                7 + static_cast<int>(i) * 35);
+            lv_obj_set_width(settings_cat_labels[i], 430);
+        }
+        refresh_settings_status(bluepaws::cloud::status());
+    } else {
+        info_label = make_label(settings_body, "", 0xB5DAE4,
+                                 &lv_font_montserrat_14);
+        lv_obj_set_pos(info_label, 9, 8);
+        lv_obj_set_width(info_label, 438);
+        lv_label_set_long_mode(info_label, LV_LABEL_LONG_WRAP);
+        refresh_settings_status(bluepaws::cloud::status());
+    }
+}
+
+void refresh_settings_status(const bluepaws::cloud::Status &cloud)
+{
+    if (settings_overlay == nullptr ||
+        lv_obj_has_flag(settings_overlay, LV_OBJ_FLAG_HIDDEN)) return;
+    if (settings_tab == 0 && settings_status != nullptr) {
+        const auto snapshot = bluepaws::cloud::wifiScanSnapshot();
+        if (snapshot.state == bluepaws::cloud::WifiScanState::Scanning) {
+            lv_label_set_text(settings_status, "Scanning nearby Wi-Fi...");
+        } else {
+            lv_label_set_text_fmt(settings_status, "%s%s%s",
+                cloud.wifi_station_connected ? "Connected: " : "Current: ",
+                cloud.wifi_station_connected ? cloud.wifi_ssid
+                    : (cloud.effective_mode == bluepaws::hub::CommunicationsMode::OffGrid
+                        ? "local hotspot" : "searching"),
+                cloud.wifi_station_connected ? "  (verified)" : "");
+        }
+        if (scan_dropdown != nullptr && snapshot.generation != scan_generation &&
+            snapshot.state == bluepaws::cloud::WifiScanState::Ready) {
+            scan_generation = snapshot.generation;
+            scan_snapshot = snapshot;
+            char options[600]{};
+            size_t offset = 0;
+            for (size_t i = 0; i < snapshot.count; ++i) {
+                const int written = std::snprintf(options + offset,
+                    sizeof(options) - offset, "%s%s%s", i ? "\n" : "",
+                    snapshot.results[i].ssid,
+                    snapshot.results[i].secured ? " *" : "");
+                if (written < 0 || static_cast<size_t>(written) >=
+                    sizeof(options) - offset) break;
+                offset += static_cast<size_t>(written);
+            }
+            lv_dropdown_set_options(scan_dropdown,
+                snapshot.count ? options : "No networks found");
+        }
+    }
+    if (settings_tab == 3) {
+        const uint32_t now_ms = static_cast<uint32_t>(esp_timer_get_time() / 1000ULL);
+        for (size_t i = 0; i < settings_cat_labels.size(); ++i) {
+            if (settings_cat_labels[i] == nullptr) continue;
+            const auto *cat = store.at(i);
+            if (cat == nullptr) {
+                lv_label_set_text(settings_cat_labels[i], "");
+                continue;
+            }
+            lv_label_set_text_fmt(settings_cat_labels[i],
+                "%u. %s   %u%%   %lus ago", static_cast<unsigned>(i + 1),
+                cat->name, cat->latest.battery_percent,
+                static_cast<unsigned long>((now_ms - cat->latest.received_at_ms) / 1000U));
+        }
+    }
+    if (settings_tab == 4 && info_label != nullptr) {
+        lv_label_set_text_fmt(info_label,
+            "ESP32-S3 Home Hub\nMode: %s\nWi-Fi: %s\nCloud: %s (%lu snapshots)\nSD map: %s\nFree PSRAM: %lu KiB",
+            bluepaws::hub::communicationsModeName(cloud.effective_mode),
+            cloud.wifi_station_connected ? cloud.wifi_ssid : "not connected",
+            cloud.state == bluepaws::cloud::ConnectionState::Online
+                ? "online" : "offline",
+            static_cast<unsigned long>(cloud.successful_snapshots),
+            tile_pack_available() ? "ready" : "unavailable",
+            static_cast<unsigned long>(
+                heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024U));
+    }
+}
+
+void settings_opened(lv_event_t *)
+{
+    if (settings_overlay == nullptr) {
+        settings_overlay = make_panel(lv_screen_active(), 0x0B1C2A, 0);
+        lv_obj_set_size(settings_overlay, 480, 320);
+        lv_obj_add_flag(settings_overlay, LV_OBJ_FLAG_FLOATING);
+        auto *title = make_label(settings_overlay, "Home Hub settings", 0xFFFFFF,
+                                 &lv_font_montserrat_18);
+        lv_obj_set_pos(title, 10, 7);
+        make_control(settings_overlay, LV_SYMBOL_CLOSE, 431, 3, 43, 38,
+                     settings_closed);
+        const char *tabs[] = {"Wi-Fi", "Hub", "Display", "Cats", "Info"};
+        for (std::size_t i = 0; i < settings_tabs.size(); ++i) {
+            settings_tabs[i] = make_control(settings_overlay, tabs[i],
+                6 + static_cast<int>(i) * 94, 43, 90, 34,
+                settings_tab_clicked);
+            lv_obj_remove_event_cb(settings_tabs[i], settings_tab_clicked);
+            lv_obj_add_event_cb(settings_tabs[i], settings_tab_clicked,
+                LV_EVENT_CLICKED,
+                reinterpret_cast<void *>(static_cast<uintptr_t>(i)));
+        }
+        settings_body = lv_obj_create(settings_overlay);
+        lv_obj_set_pos(settings_body, 6, 83);
+        lv_obj_set_size(settings_body, 468, 231);
+        lv_obj_set_style_bg_color(settings_body, lv_color_hex(0x122638), 0);
+        lv_obj_set_style_border_color(settings_body, lv_color_hex(0x28516E), 0);
+        lv_obj_set_style_pad_all(settings_body, 0, 0);
+        lv_obj_set_scroll_dir(settings_body, LV_DIR_VER);
+    }
+    lv_obj_remove_flag(settings_overlay, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(settings_overlay);
+    show_settings_tab(settings_tab);
+}
+
 void create_ui(const guition_jc3248w535c_sd_info_t &sd)
 {
     sd_mounted = sd.mounted;
@@ -446,27 +1039,37 @@ void create_ui(const guition_jc3248w535c_sd_info_t &sd)
     lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
     lv_obj_clear_flag(screen, LV_OBJ_FLAG_SCROLLABLE);
 
-    lv_obj_t *header = make_panel(screen, 0x122638, 0);
+    header = make_panel(screen, 0x122638, 0);
     lv_obj_set_pos(header, 0, 0);
     lv_obj_set_size(header, 480, kHeaderHeight);
     lv_obj_t *title = make_label(header, "Home Hub", 0xFFFFFF, &lv_font_montserrat_18);
-    lv_obj_set_pos(title, 10, 5);
+    lv_obj_set_pos(title, 8, 8);
     network_label = make_label(header, "Starting local services", 0x7DDDE8,
                                &lv_font_montserrat_14);
-    lv_obj_set_pos(network_label, 10, 30);
-    lv_obj_set_width(network_label, 330);
+    lv_obj_set_pos(network_label, 8, 33);
+    lv_obj_set_width(network_label, 414);
     lv_label_set_long_mode(network_label, LV_LABEL_LONG_DOT);
 
-    lv_obj_t *mode_button = lv_button_create(header);
-    lv_obj_set_pos(mode_button, 358, 8);
-    lv_obj_set_size(mode_button, 112, 38);
-    lv_obj_set_style_bg_color(mode_button, lv_color_hex(0x087F91), 0);
-    lv_obj_set_style_radius(mode_button, 9, 0);
-    lv_obj_add_event_cb(mode_button, mode_clicked, LV_EVENT_CLICKED, nullptr);
-    mode_button_label = make_label(mode_button,
-        bluepaws::hub::communicationsModeName(settings.communications_mode),
-        0xFFFFFF, &lv_font_montserrat_14);
-    lv_obj_center(mode_button_label);
+    mode_dropdown = lv_dropdown_create(header);
+    lv_dropdown_set_options(mode_dropdown, "Home\nPortable\nOff-Grid");
+    lv_dropdown_set_selected(mode_dropdown,
+        static_cast<uint32_t>(settings.communications_mode));
+    lv_obj_set_pos(mode_dropdown, 111, 5);
+    lv_obj_set_size(mode_dropdown, 112, 38);
+    lv_obj_set_style_bg_color(mode_dropdown, lv_color_hex(0x17475B), 0);
+    lv_obj_set_style_text_color(mode_dropdown, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_font(mode_dropdown, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_pad_all(mode_dropdown, 7, 0);
+    lv_obj_add_event_cb(mode_dropdown, mode_changed, LV_EVENT_VALUE_CHANGED, nullptr);
+    wifi_status_label = make_label(header, LV_SYMBOL_WIFI, 0x82929E,
+                                   &lv_font_montserrat_18);
+    lv_obj_set_pos(wifi_status_label, 238, 12);
+    bluetooth_status_label = make_label(header, LV_SYMBOL_BLUETOOTH "x",
+                                        0xED6C61, &lv_font_montserrat_18);
+    lv_obj_set_pos(bluetooth_status_label, 274, 12);
+    clock_label = make_label(header, "--:--", 0xFFFFFF, &lv_font_montserrat_14);
+    lv_obj_set_pos(clock_label, 328, 15);
+    make_control(header, LV_SYMBOL_SETTINGS, 431, 5, 43, 40, settings_opened);
 
     map_view = lv_obj_create(screen);
     lv_obj_set_pos(map_view, 0, kHeaderHeight);
@@ -477,7 +1080,9 @@ void create_ui(const guition_jc3248w535c_sd_info_t &sd)
     lv_obj_set_style_pad_all(map_view, 0, 0);
     lv_obj_clear_flag(map_view, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(map_view, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(map_view, map_tapped, LV_EVENT_CLICKED, nullptr);
+    lv_obj_add_event_cb(map_view, map_pressed, LV_EVENT_PRESSED, nullptr);
+    lv_obj_add_event_cb(map_view, map_pressing, LV_EVENT_PRESSING, nullptr);
+    lv_obj_add_event_cb(map_view, map_released, LV_EVENT_RELEASED, nullptr);
 
     for (lv_obj_t *&image : tile_images) {
         image = lv_image_create(map_view);
@@ -523,16 +1128,44 @@ void create_ui(const guition_jc3248w535c_sd_info_t &sd)
                                &lv_font_montserrat_14);
     lv_obj_set_pos(summary_label, 10, 51);
 
+    drawer_list = lv_obj_create(drawer);
+    lv_obj_set_pos(drawer_list, 7, 78);
+    lv_obj_set_size(drawer_list, 174, 184);
+    lv_obj_set_style_bg_opa(drawer_list, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(drawer_list, 0, 0);
+    lv_obj_set_style_pad_all(drawer_list, 0, 0);
+    lv_obj_set_scroll_dir(drawer_list, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(drawer_list, LV_SCROLLBAR_MODE_ACTIVE);
     for (std::size_t i = 0; i < drawer_rows.size(); ++i) {
-        drawer_rows[i] = make_panel(drawer, 0x102A40, 8);
-        lv_obj_set_pos(drawer_rows[i], 8, 78 + static_cast<int>(i) * 60);
-        lv_obj_set_size(drawer_rows[i], 172, 54);
+        drawer_rows[i] = make_panel(drawer_list, 0x102A40, 8);
+        lv_obj_set_pos(drawer_rows[i], 1, static_cast<int>(i) * 60);
+        lv_obj_set_size(drawer_rows[i], 168, 54);
         lv_obj_set_style_border_color(drawer_rows[i], lv_color_hex(kMarkerColours[i]), 0);
         lv_obj_t *text = make_label(drawer_rows[i], "", 0xFFFFFF,
                                     &lv_font_montserrat_14);
         lv_obj_set_pos(text, 9, 5);
         lv_obj_set_style_text_line_space(text, 4, 0);
     }
+
+    mode_confirmation = make_panel(screen, 0x000000, 0);
+    lv_obj_set_size(mode_confirmation, 480, 320);
+    lv_obj_set_style_bg_opa(mode_confirmation, LV_OPA_70, 0);
+    lv_obj_add_flag(mode_confirmation, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(mode_confirmation, LV_OBJ_FLAG_FLOATING);
+    lv_obj_t *dialog = make_panel(mode_confirmation, 0x122638, 12);
+    lv_obj_set_pos(dialog, 35, 54);
+    lv_obj_set_size(dialog, 410, 210);
+    mode_confirmation_title = make_label(dialog, "Switch hub mode?", 0xFFFFFF,
+                                          &lv_font_montserrat_18);
+    lv_obj_set_pos(mode_confirmation_title, 14, 14);
+    mode_confirmation_body = make_label(dialog, "", 0xB8CAD4,
+                                         &lv_font_montserrat_14);
+    lv_obj_set_pos(mode_confirmation_body, 14, 52);
+    lv_obj_set_width(mode_confirmation_body, 382);
+    lv_label_set_long_mode(mode_confirmation_body, LV_LABEL_LONG_WRAP);
+    make_control(dialog, "Cancel", 118, 158, 126, 42, mode_cancelled);
+    make_control(dialog, "OK", 258, 158, 126, 42, mode_accepted);
+    lv_obj_add_flag(mode_confirmation, LV_OBJ_FLAG_HIDDEN);
 
     set_drawer(true);
     refresh_tiles();

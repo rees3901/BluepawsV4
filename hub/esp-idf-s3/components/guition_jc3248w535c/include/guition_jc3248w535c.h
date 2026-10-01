@@ -38,6 +38,9 @@ esp_err_t guition_jc3248w535c_backlight_set(int brightness_percent);
 /** Most recently sampled touch-contact count. */
 uint8_t guition_jc3248w535c_touch_count(void);
 
+/** Consume one or more two-finger map zoom steps reported by the touch panel. */
+int8_t guition_jc3248w535c_take_pinch_steps(void);
+
 /** Mount the board's one-bit SDMMC slot without formatting on failure. */
 esp_err_t guition_jc3248w535c_sd_mount(guition_jc3248w535c_sd_info_t *info);
 

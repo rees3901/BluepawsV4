@@ -39,11 +39,16 @@ The mode safety policy is shared with the P4: `BLUEPAWS_HOME` advertising is
 allowed only in Home mode. Portable and Off-Grid explicitly stop advertising;
 Off-Grid BLE discovery remains off until the user requests a short scan.
 
-The compact native UI currently provides mode control, service state and collar
-cards. The complete offline dashboard is served from the same SPIFFS assets as
-the P4, while road-map tiles are read from the SD card. Native map rendering and
-the full native settings workflow remain later UI work. The P4-only MIPI-CSI
-camera and hardware JPEG decoder have no equivalent on this board.
+The compact native UI now boots to the SD-card road map with an eight-collar
+scrolling drawer, touch pan/zoom, a mode-confirmation dialog, live Wi-Fi and BLE
+status, and a settings overlay. The settings tabs cover Wi-Fi scanning and
+manual credentials, hub controls, display brightness, collar summaries and
+diagnostics. The offline web dashboard remains available from the same SPIFFS
+assets as the P4. A battery percentage is deliberately omitted from the native
+header because this board target has no validated battery-voltage measurement.
+The P4-only MIPI-CSI camera, QR reader and hardware JPEG decoder have no
+equivalent configured on this board. Audio and screen rotation controls are
+also omitted until their hardware paths are validated.
 
 Cloud synchronization is compiled in but requires an untracked
 `main/home_hub_secrets.h` based on `main/home_hub_secrets.example.h`. Without a
@@ -56,8 +61,13 @@ Build and flash with ESP-IDF 5.5.4:
 cd hub/esp-idf-s3
 idf.py set-target esp32s3
 idf.py build
-idf.py -p COM11 flash monitor
+idf.py -p COM11 app-flash
 ```
 
 If automatic download mode does not engage, hold **BOOT**, tap **RESET**, then
 release **BOOT** before running the flash command.
+
+On this board, opening the native USB serial port for a monitor can reset it
+into download mode. After flashing, release it into normal boot by briefly
+asserting then releasing RTS with DTR low (or power-cycle the board without
+holding BOOT). Avoid leaving a serial monitor open while checking the display.

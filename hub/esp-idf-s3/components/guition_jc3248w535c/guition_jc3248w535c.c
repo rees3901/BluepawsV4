@@ -60,6 +60,9 @@
 static const char *TAG = "jc3248w535c";
 static esp_lcd_touch_handle_t touch;
 static volatile uint8_t touch_contact_count;
+static volatile int8_t pending_pinch_steps;
+static bool pinch_tracking;
+static uint64_t pinch_reference_squared;
 static sdmmc_card_t *sd_card;
 /* Exact LCD power, gate and gamma profile shipped for the JC3248W535C.
    The generic AXS15231B defaults target a different panel geometry. */
@@ -205,6 +208,42 @@ uint8_t guition_jc3248w535c_touch_count(void)
     return touch_contact_count;
 }
 
+int8_t guition_jc3248w535c_take_pinch_steps(void)
+{
+    const int8_t steps = pending_pinch_steps;
+    pending_pinch_steps = 0;
+    return steps;
+}
+
+static void update_pinch(const esp_lcd_touch_point_data_t *contacts,
+                         uint8_t count)
+{
+    if (count < 2) {
+        pinch_tracking = false;
+        pinch_reference_squared = 0;
+        return;
+    }
+    const int32_t dx = (int32_t)contacts[0].x - (int32_t)contacts[1].x;
+    const int32_t dy = (int32_t)contacts[0].y - (int32_t)contacts[1].y;
+    const uint64_t distance = (uint64_t)((int64_t)dx * dx + (int64_t)dy * dy);
+    if (!pinch_tracking) {
+        if (distance >= 400) {
+            pinch_reference_squared = distance;
+            pinch_tracking = true;
+        }
+        return;
+    }
+    int8_t step = 0;
+    if (distance * 100 >= pinch_reference_squared * 144) step = 1;
+    else if (distance * 144 <= pinch_reference_squared * 100) step = -1;
+    if (step == 0) return;
+    int next = (int)pending_pinch_steps + step;
+    if (next > 4) next = 4;
+    if (next < -4) next = -4;
+    pending_pinch_steps = (int8_t)next;
+    pinch_reference_squared = distance;
+}
+
 static esp_err_t panel_new(esp_lcd_panel_handle_t *panel,
                            esp_lcd_panel_io_handle_t *panel_io)
 {
@@ -264,6 +303,7 @@ static void touchpad_read(lv_indev_t *indev, lv_indev_data_t *data)
         esp_lcd_touch_get_data(touch, contacts, &count,
                                CONFIG_ESP_LCD_TOUCH_MAX_POINTS) == ESP_OK) {
         touch_contact_count = count;
+        update_pinch(contacts, count);
         if (count > 0) {
             /* LVGL is rotated 90 degrees clockwise in software. Convert the
                controller's native portrait coordinates into landscape. */
@@ -275,6 +315,7 @@ static void touchpad_read(lv_indev_t *indev, lv_indev_data_t *data)
         }
     }
     touch_contact_count = 0;
+    update_pinch(contacts, 0);
     data->state = LV_INDEV_STATE_RELEASED;
 }
 
