@@ -113,6 +113,7 @@ export function AccountMenu({ email, familyName, familyRole, onSignOut }: Accoun
             <div><dt>Access</dt><dd>{familyRole === "owner" ? "Owner" : familyRole === "member" ? "Member" : "Signed in"}</dd></div>
           </dl>
           <Link href="/account">Account settings</Link>
+          <Link href="/install">Install BluePaws</Link>
           <button type="button" onClick={onSignOut}>Sign out</button>
         </div>
       )}

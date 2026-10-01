@@ -52,6 +52,11 @@ export async function proxy(request: NextRequest) {
     return response;
   }
 
+  // Installation metadata and instructions must not depend on an auth session.
+  if (request.nextUrl.pathname === "/manifest.webmanifest" || request.nextUrl.pathname === "/install") {
+    return NextResponse.next();
+  }
+
   return updateSession(request);
 }
 
