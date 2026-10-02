@@ -565,8 +565,9 @@ async function runScenario() {
       const item = schedule.filter((candidate) => candidate.reportIndex < count).sort((left, right) => left.dueAt - right.dueAt)[0];
       const waitMilliseconds = Math.max(0, item.dueAt - Date.now());
       if (waitMilliseconds > 0) {
-        $("run-status").textContent = `Waiting ${formatCadenceSeconds(waitMilliseconds / 1000)} for device ${item.deviceId}`;
-        await waitUntil(item.dueAt);
+        await waitUntil(item.dueAt, (remainingSeconds) => {
+          $("run-status").textContent = `Waiting ${formatCountdownSeconds(remainingSeconds)} for device ${item.deviceId}`;
+        });
       }
       if (state.stopRequested) break;
       {
@@ -631,10 +632,21 @@ async function runScenario() {
   }
 }
 
-async function waitUntil(timestamp) {
+async function waitUntil(timestamp, onTick = () => {}) {
+  let lastLabel = "";
   while (!state.stopRequested && Date.now() < timestamp) {
+    const remainingSeconds = Math.max(0, (timestamp - Date.now()) / 1000);
+    const label = formatCountdownSeconds(remainingSeconds);
+    if (label !== lastLabel) {
+      onTick(remainingSeconds);
+      lastLabel = label;
+    }
     await sleep(Math.min(250, timestamp - Date.now()));
   }
+}
+
+function formatCountdownSeconds(value) {
+  return formatCadenceSeconds(Math.ceil(Math.max(0, Number(value) || 0)));
 }
 
 async function applyRecipe(settings, recipeKey, cycle) {
