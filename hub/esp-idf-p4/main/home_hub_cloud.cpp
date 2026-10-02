@@ -1135,7 +1135,7 @@ void sync_task(void *) {
     set_state(ConnectionState::Starting);
     hub::Settings settings = network_settings();
     if (!start_wifi(settings)) {
-        ESP_LOGE(kTag, "ESP-Hosted Wi-Fi initialization failed");
+        ESP_LOGE(kTag, "Wi-Fi initialization failed");
         set_state(ConnectionState::Degraded);
         vTaskDelete(nullptr);
         return;

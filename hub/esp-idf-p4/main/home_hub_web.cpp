@@ -722,7 +722,7 @@ bool start_server_now()
     ok &= register_uri("/api/security*", HTTP_GET, unavailable_handler);
     ok &= register_uri("/api/security*", HTTP_POST, unavailable_handler);
     ok &= register_uri("/*", HTTP_GET, wildcard_handler);
-    ESP_LOGI(kTag, "P4 local dashboard listening on port 80 (%s)", ok ? "ready" : "partial");
+    ESP_LOGI(kTag, "Local dashboard listening on port 80 (%s)", ok ? "ready" : "partial");
     return ok;
 }
 
@@ -742,7 +742,7 @@ bool start()
             g_starting = false;
             vTaskDelete(nullptr);
         },
-        "p4_web_start", 6144, nullptr, 2, nullptr, 1);
+        "hub_web_start", 6144, nullptr, 2, nullptr, 1);
     if (created != pdPASS) {
         g_starting = false;
         ESP_LOGE(kTag, "Could not create local dashboard startup task");

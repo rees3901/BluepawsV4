@@ -1,8 +1,11 @@
 #include "home_hub_bluetooth.h"
+#include "sdkconfig.h"
 
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
 extern "C" {
 #include "esp_hosted_misc.h"
 }
+#endif
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -204,7 +207,7 @@ void on_sync()
         return;
     }
     g_synced = true;
-    ESP_LOGI(kTag, "NimBLE synchronized with ESP32-C6 controller");
+    ESP_LOGI(kTag, "NimBLE synchronized with Bluetooth controller");
 }
 
 void host_task(void *)
@@ -216,6 +219,7 @@ void host_task(void *)
 
 bool initialize_stack()
 {
+#if defined(CONFIG_IDF_TARGET_ESP32P4)
     const int64_t request_started_us = esp_timer_get_time();
     const esp_err_t controller_init = esp_hosted_bt_controller_init();
     const int64_t request_elapsed_ms =
@@ -242,6 +246,7 @@ bool initialize_stack()
                  "ESP32-C6 controller-init RPC unavailable (%s); using legacy HCI mode",
                  esp_err_to_name(controller_init));
     }
+#endif
     const esp_err_t nimble_init = nimble_port_init();
     if (nimble_init != ESP_OK) {
         ESP_LOGE(kTag, "NimBLE initialization failed: %s", esp_err_to_name(nimble_init));
@@ -262,8 +267,8 @@ bool initialize_stack()
 
 void control_task(void *)
 {
-    // Wi-Fi initializes the shared ESP-Hosted transport asynchronously. Retry
-    // quietly until that link is active instead of delaying app startup.
+    // On P4, Wi-Fi initializes the shared ESP-Hosted transport asynchronously;
+    // on native-radio targets this is normally ready on the first attempt.
     while (!initialize_stack()) vTaskDelay(pdMS_TO_TICKS(1000));
     while (true) {
         if (g_synced.load()) {
