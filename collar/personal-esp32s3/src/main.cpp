@@ -11,6 +11,7 @@
 #include <sys/time.h>
 #include "hardware.h"
 #include "personal_policy.h"
+#include "gnss_recovery.h"
 
 #ifdef PERSONAL_COMPILE_CHECK
 constexpr uint16_t PERSONAL_DEVICE_ID = 0xFFE1, PERSONAL_HUB_ID = 0xFFF0;
@@ -30,6 +31,7 @@ SPIClass radioSPI(HSPI);
 SX1262 radio = new Module(RADIO_NSS, RADIO_DIO1, RADIO_RST, RADIO_BUSY, radioSPI);
 HardwareSerial gnssSerial(1);
 TinyGPSPlus gps;
+personal::NmeaDiagnostics nmea;
 Preferences prefs;
 constexpr uint32_t STATE_MAGIC = 0x42505031;
 struct DurableState {
@@ -98,6 +100,7 @@ void enforceLostTimeout() {
 void startGps() {
     if (gpsRunning) return;
     gps = TinyGPSPlus();
+    nmea = personal::NmeaDiagnostics();
     digitalWrite(GNSS_WAKE, HIGH);
     delay(500);
     gnssSerial.begin(GNSS_BAUD, SERIAL_8N1, GNSS_RX, GNSS_TX);
@@ -122,7 +125,13 @@ void stopGps(uint16_t seconds) {
 }
 void pumpGps() {
     if (!gpsRunning) return;
-    while (gnssSerial.available()) gps.encode(char(gnssSerial.read()));
+    while (gnssSerial.available()) {
+        const char c = char(gnssSerial.read());
+        gps.encode(c); nmea.feed(c);
+        if (nmea.txtReady) {
+            Serial.printf("[NMEA TXT] %s\n", nmea.txt); nmea.txtReady=false;
+        }
+    }
     if (gps.date.isValid() && gps.time.isValid() && gps.date.age() < 2000 && gps.time.age() < 2000 &&
         gps.date.year() >= 2024 && gps.date.year() <= 2099 && gps.date.month() >= 1 && gps.date.month() <= 12 &&
         gps.date.day() >= 1 && gps.date.day() <= 31 && gps.time.hour() < 24 && gps.time.minute() < 60 && gps.time.second() < 60) {
@@ -139,31 +148,40 @@ bool usableFix() {
            gps.hdop.isValid() && gps.hdop.age() < 2000 && gps.hdop.hdop() <= 5.0;
 }
 void acquireGps(bool cold) {
-    startGps();
     const uint32_t begin = millis();
-    // L76K gets the V4 documented boot allowance; warm cycles use V4 timings.
-    const uint32_t timeout = cold ? 60000 : GPS_TTFF_WARM_TIMEOUT_S * 1000UL;
-    uint32_t stableSince = 0;
+    personal::GnssAttempt attempt(begin);
+    startGps();
+    // An old collar fix does not prove the receiver retained its ephemeris.
+    // Keep the same quality gate, allow recovery on every attempt, stop at 60s.
+    Serial.printf("[GNSS] attempt=%s limit=60s stable=10s; receiver start type unknown\n",
+                  cold ? "boot/first-fix" : "wake/recovery");
+    uint32_t diagnosticAt = begin, firstNmeaMs = UINT32_MAX, firstGoodMs = UINT32_MAX;
     freshFix = false;
-    while (millis() - begin < timeout + GPS_STABILISATION_S * 1000UL) {
+    while (!attempt.expired(millis())) {
         pumpGps();
-        if (usableFix()) {
-            if (!stableSince) stableSince = millis();
-            if (millis() - stableSince >= GPS_STABILISATION_S * 1000UL) {
+        const uint32_t now=millis();
+        if (nmea.valid && firstNmeaMs==UINT32_MAX) firstNmeaMs=now-begin;
+        const bool good=usableFix();
+        if (good && firstGoodMs==UINT32_MAX) firstGoodMs=now-begin;
+        if (now-diagnosticAt>=5000) {
+            diagnosticAt=now;
+            Serial.printf("[NMEA] t=%lus valid=%lu bad=%lu GGA=%lu quality=%d GSA=%lu type=%d RMC=%c GSV=%lu visible(last)=%d maxSNR=%d used=%lu HDOP=%.2f locAge=%lu good=%d\n",
+                (now-begin)/1000,nmea.valid,nmea.bad,nmea.gga,nmea.quality,nmea.gsa,nmea.fixType,
+                nmea.rmcStatus,nmea.gsv,nmea.visible,nmea.maxSnr,gps.satellites.value(),gps.hdop.hdop(),gps.location.age(),good);
+        }
+        if (attempt.accept(good,now)) {
                 retained.lat = int32_t(llround(gps.location.lat() * 1e7));
                 retained.lon = int32_t(llround(gps.location.lng() * 1e7));
                 retained.fixTime = utc();
                 retained.satellites = uint8_t(min(gps.satellites.value(), uint32_t(254)));
                 freshFix = true;
                 break;
-            }
-        } else {
-            stableSince = 0;
-            if (millis() - begin >= timeout) break;
         }
         delay(10);
     }
     gpsFailed = !freshFix;
+    Serial.printf("[GNSS] elapsed=%lums firstNMEA=%lums firstGood=%lums (4294967295=none)\n",
+        millis()-begin,firstNmeaMs,firstGoodMs);
     Serial.printf("[GNSS] %s; UTC %s; chars=%lu sats=%lu HDOP=%.2f\n",
         freshFix ? "fresh fix" : "no fresh fix", utc() ? "valid" : "unavailable",
         gps.charsProcessed(), gps.satellites.value(), gps.hdop.hdop());

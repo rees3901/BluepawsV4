@@ -129,7 +129,32 @@ Branch: `codex/personal-legacy-collars`; no merge or production deployment.
   accepted at 21:27:02 UTC with BLE still disabled. The v3 run metadata records this
   event; observation duration must not be confused with uninterrupted hub uptime.
 
-## Remaining qualification
+## GNSS recovery correction — 3 October 2026
+
+- COM4 showed repeated 15-second warm acquisition failures, including five used
+  satellites at HDOP 5.4. The historical collar fix caused subsequent attempts to
+  use the short warm timeout, regardless of receiver state or prior failures.
+- Every personal GPS attempt now has one 60-second total limit, including wake
+  and ten-second continuous stabilization. Fresh position, >=4 satellites and
+  HDOP <=5 remain required. Quality loss resets stabilization, never the deadline.
+  An exhausted deadline still reports failure without presenting stale data as valid.
+- New checksum-validated NMEA diagnostics expose GGA/GSA/RMC/GSV/TXT and elapsed
+  acquisition timing without dumping coordinates. They do not assert a receiver
+  cold/hot start or a failed backup battery. Firmware sends no cold-reset command.
+  The Seeed schematic includes an MS621FE backup cell on V_BCKP; its voltage and
+  retention have not been measured. GPIO standby does not switch the main supply.
+- Native tests passed recovery beyond 15 seconds, interrupted stabilization,
+  strict timeout including late fixes, timer rollover, NMEA checksums/empty fields
+  and diagnostics. The live build passed and COM4 flash write hash was verified.
+- First acquisition: usable fix after 16,381 ms; stabilized after 26,381 ms,
+  eight satellites, HDOP 3.2. Report 193 was accepted via LoRa hub at 22:10:46 UTC
+  as observation 7581, with `position_updated=true`.
+- Prior personal firmware is preserved as
+  `collar/personal-3001-before-GNSS-recovery.bin` in the private recovery bundle.
+  The previous observation was interrupted for this correction. New observation
+  files use `soak-v4-`; scheduled review points there. No completed soak is claimed.
+
+## Outstanding qualification
 
 - Full loss-of-power persistence, radio/network outage and reconnection tests.
 - Complete physical profile/button/find-beacon, Home/away and lost-timeout checks.

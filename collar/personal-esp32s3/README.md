@@ -26,12 +26,22 @@ not the legacy 868 MHz JSON protocol. This image cannot communicate with V3 hubs
 
 - HMAC-SHA256 authenticated V4 TLV v1.2 uplinks, addressed to one provisioned hub.
   Neither V3 JSON nor a device MAC-derived identity is transmitted.
-- Real GNSS only. First boot allows 60 seconds for acquisition plus stabilization;
-  warm acquisition and profile cadence use the V4 settings. Valid NMEA UTC sets
+- Real GNSS only. Every acquisition allows at most 60 seconds total, including
+  receiver wake and 10 seconds of continuous stabilization. A fresh location,
+  at least four satellites and HDOP <= 5 are required; quality loss restarts
+  stabilization without extending the deadline. Valid NMEA UTC sets
   the RTC; there is no fabricated build-time clock. No uplink is sent until UTC
   is available. Deep sleep retains the last fix and clock. Cold power loss requires
   time acquisition again. Until a first position exists, every wake attempts GNSS
   even when the Home beacon is present. Invalid/stale coordinates never carry GNSS_VALID.
+- Serial NMEA diagnostics summarize checksum-valid GGA quality, GSA fix type,
+  RMC validity, GSV visible satellites/maximum SNR and receiver TXT messages.
+  Coordinates are not dumped. GSV visibility is the latest message, not a total
+  across constellations. First-NMEA and first-good-fix timing are measured each
+  attempt. An old retained collar fix does not establish receiver hot/warm start.
+  NMEA does not establish backup-cell voltage or failure; check V_BCKP electrically
+  with main power removed if repeated slow starts persist. No cold-reset command
+  is sent. A timeout reports the true failure and retains the previous position.
 - BLE scans for the existing `BLUEPAWS_HOME` advertisement, with a -90 dBm gate.
   Two missed scans clear Home. The first miss still counts as a scheduled Home
   wake and sends any due check-in, with the fresh-beacon-seen flag cleared.
