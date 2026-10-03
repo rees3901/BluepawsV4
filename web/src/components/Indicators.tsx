@@ -12,10 +12,7 @@ export function GnssIndicator({ device }: { device: TelemetryDevice }) {
     : `Last GNSS fix: ${quality.label}. Reported accuracy: ${quality.level ? `${fix.accuracyM} m` : "unknown"}; ${fix.satellites} satellites; fix age at report: ${fix.fixAgeS} seconds. Report: ${fix.recordedAt}. Not a live satellite signal reading.`;
   return <details className="gnss-indicator" onClick={event => event.stopPropagation()}>
     <summary className="signal-indicator" title={description} aria-label={`${description}. Show GPS details`}>
-      <svg className="indicator-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <path d="m10 6 8 8-4 4-8-8zM3 4l4-3 4 4-4 4zM15 17l4-4 4 4-4 4zM8 16l-2 2M3 14a7 7 0 0 1 7 7M3 18a3 3 0 0 1 3 3" />
-      </svg>
-      <span className="gnss-name">GPS</span>
+      <span className="gnss-emoji" aria-hidden="true">🛰️</span>
       {[1, 2, 3, 4, 5].map(bar => <span aria-hidden="true" key={bar} className={`sig-bar${bar <= quality.level ? " filled" : ""}`} style={{ height: 4 + bar * 3, background: bar <= quality.level ? quality.color : undefined }} />)}
       <span className="sig-label">Sats: {device.hasGps && fix ? fix.satellites : "—"}</span>
     </summary>
