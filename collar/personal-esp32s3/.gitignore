@@ -1,0 +1,3 @@
+.secrets/
+.pio/
+__pycache__/
