@@ -1,9 +1,10 @@
 /* Web-only additions. The parity styling is imported unchanged from hub/platformio/data/style.css. */
 .gnss-indicator { position: relative; color: var(--text-secondary); }
+.card-indicators-row3 > .collar-awake { flex: 0 0 auto; min-width: 1.3em; font-size: 1.3em; }
 .gnss-indicator summary { cursor: pointer; list-style: none; min-height: 24px; }
 .gnss-indicator summary::-webkit-details-marker { display: none; }
 .gnss-indicator summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
-.gnss-emoji { font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif; font-size: 1.1rem; line-height: 1; margin-right: 3px; flex-shrink: 0; }
+.gnss-emoji { font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif; font-size: 0.88rem; line-height: 1; margin-right: 3px; flex-shrink: 0; }
 .gnss-detail { display: block; max-width: 250px; padding: 8px; background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius); font-size: 0.7rem; line-height: 1.5; overflow-wrap: anywhere; }
 button, input, select {
   font: inherit;
