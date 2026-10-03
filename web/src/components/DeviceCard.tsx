@@ -1,6 +1,6 @@
 /* eslint-disable @next/next/no-img-element -- Tiny pre-sized emoji artwork is intentionally served directly from the picker CDN. */
 import type { ReactNode } from "react";
-import { BatteryIndicator, BleProximity, BluetoothBeaconIndicator, HomeDistance, LastSeen, SignalIndicator, WifiIndicator } from "@/components/Indicators";
+import { BatteryIndicator, BleProximity, BluetoothBeaconIndicator, GnssIndicator, HomeDistance, LastSeen, SignalIndicator, WifiIndicator } from "@/components/Indicators";
 import { HUB_REPORTING, hubContactGrace } from "@/lib/hubReporting";
 import { emojiImageUrl } from "@/lib/emoji";
 import { formatMapCoordinates, googleMapsUrl } from "@/lib/mapLocation";
@@ -159,6 +159,7 @@ export function DeviceCard(props: DeviceCardProps) {
           <div className="card-indicators card-indicators-row3">
             {!isHub && <HomeDistance>{distance}</HomeDistance>}
             <LastSeen>{lastSeen}</LastSeen>
+            {!isHub && <GnssIndicator device={device} />}
           </div></>}
         </div>
         <span className="card-chevron">{expanded ? "▲" : "▼"}</span>

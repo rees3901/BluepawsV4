@@ -1,6 +1,8 @@
 import type { TelemetryDevice } from "@/types/telemetry";
 
 export interface PositionRow {
+  observation_id?: number | null;
+  gnss?: TelemetryDevice["gnss"];
   position_id: number;
   device_uid: number;
   household_id: string;
@@ -53,6 +55,7 @@ export function positionToTelemetryDevice(row: PositionRow): TelemetryDevice {
     lat: row.latitude,
     lon: row.longitude,
     hasGps: flags === null || (flags & 0x01) !== 0,
+    gnss: row.gnss ?? null,
     homeHub: Number.isInteger(row.home_hub_id) ? {
       id: row.home_hub_id!, lat: row.home_latitude ?? null,
       lon: row.home_longitude ?? null, fixAt: row.home_fix_at ?? null,
