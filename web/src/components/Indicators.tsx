@@ -8,7 +8,9 @@ export function GnssIndicator({ device }: { device: TelemetryDevice }) {
   const fix = device.gnss;
   const quality = gnssQuality(fix?.accuracyM, device.hasGps);
   const description = !device.hasGps ? "No GNSS fix available" : !fix
-    ? "Last GNSS fix: quality not reported"
+    ? device.entity === "hub"
+      ? `${device.source ?? "Last hub position"}. Satellite count and accuracy are not included in the hub report.`
+      : "Last GNSS fix: quality not reported"
     : `Last GNSS fix: ${quality.label}. Reported accuracy: ${quality.level ? `${fix.accuracyM} m` : "unknown"}; ${fix.satellites} satellites; fix age at report: ${fix.fixAgeS} seconds. Report: ${fix.recordedAt}. Not a live satellite signal reading.`;
   return <details className="gnss-indicator" onClick={event => event.stopPropagation()}>
     <summary className="signal-indicator" title={description} aria-label={`${description}. Show GPS details`}>
