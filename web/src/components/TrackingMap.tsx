@@ -200,34 +200,8 @@ export default function LeafletMap(props: ConfiguredMapRendererProps) {
     });
     new MeasureControl().addTo(map);
 
-    const CoordsControl = L.Control.extend({
-      options: { position: "bottomright" },
-      onAdd() {
-        const coordinates = L.DomUtil.create("div", "leaflet-cursor-coords");
-        coordinates.tabIndex = 0;
-        coordinates.setAttribute("role", "status");
-        coordinates.setAttribute("aria-label", "Map cursor coordinates. Hover or focus to reveal.");
-        const tab = L.DomUtil.create("span", "leaflet-cursor-coords-tab", coordinates);
-        tab.textContent = "⌖";
-        tab.setAttribute("aria-hidden", "true");
-        const value = L.DomUtil.create("span", "leaflet-cursor-coords-value", coordinates);
-        value.id = "cursorCoords";
-        value.textContent = "Move over map";
-        L.DomEvent.disableClickPropagation(coordinates);
-        L.DomEvent.disableScrollPropagation(coordinates);
-        return coordinates;
-      },
-    });
-    new CoordsControl().addTo(map);
     L.control.scale({ position: "bottomright", imperial: true, metric: true }).addTo(map);
 
-    map.on("mousemove", (event) => {
-      const element = document.getElementById("cursorCoords");
-      if (element) {
-        element.innerHTML = `${event.latlng.lat.toFixed(6)}, ${event.latlng.lng.toFixed(6)}<br>${toDms(event.latlng.lat, "N", "S")} ${toDms(event.latlng.lng, "E", "W")}`;
-        element.parentElement?.setAttribute("aria-label", `Map cursor coordinates: ${element.textContent ?? ""}`);
-      }
-    });
     map.on("click", (event) => {
       if (!measuring) return;
       addMeasurementPoint(event.latlng);
@@ -561,15 +535,6 @@ function cancelMarkerAnimation(animations: Map<number, number>, deviceId: number
 
 function easeOutCubic(value: number) {
   return 1 - (1 - value) ** 3;
-}
-
-function toDms(value: number, positive: string, negative: string) {
-  const direction = value >= 0 ? positive : negative;
-  const absolute = Math.abs(value);
-  const degrees = Math.floor(absolute);
-  const minutes = Math.floor((absolute - degrees) * 60);
-  const seconds = ((absolute - degrees) * 60 - minutes) * 60;
-  return `${degrees}°${String(minutes).padStart(2, "0")}'${seconds.toFixed(1).padStart(4, "0")}"${direction}`;
 }
 
 function formatDistance(metres: number) {
