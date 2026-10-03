@@ -18,6 +18,7 @@ export interface TelemetryDevice {
   lat: number;
   lon: number;
   hasGps: boolean;
+  gnss?: { accuracyM: number; satellites: number; fixAgeS: number; recordedAt: string } | null;
   homeHub?: { id: number; lat: number | null; lon: number | null; fixAt: string | null } | null;
   batt: number;
   batteryPercent?: number | null;

@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/client";
+import { withGnssQuality } from "@/lib/gnssTelemetry";
 import { familyRealtimeTopic, nextFamilyAccessVersion } from "@/lib/familyRealtime";
 import {
   applyPresenceToTelemetryDevice,
@@ -13,7 +14,7 @@ import type { TelemetryDevice, TelemetrySource, TrailPoint } from "@/types/telem
 
 const INITIAL_FALLBACK_DELAY_MS = 30_000;
 const MAX_FALLBACK_DELAY_MS = 120_000;
-const POSITION_COLUMNS = "position_id,device_uid,household_id,message_id,latitude,longitude,battery,battery_mv,status_code,power_profile_code,flags,tx_reason,ingest_path,link_type,link_rssi_dbm,link_snr_db,source,recorded_at,received_at,schema_version,home_hub_id,home_latitude,home_longitude,home_fix_at";
+const POSITION_COLUMNS = "observation_id,position_id,device_uid,household_id,message_id,latitude,longitude,battery,battery_mv,status_code,power_profile_code,flags,tx_reason,ingest_path,link_type,link_rssi_dbm,link_snr_db,source,recorded_at,received_at,schema_version,home_hub_id,home_latitude,home_longitude,home_fix_at";
 const PRESENCE_COLUMNS = "device_id,household_id,display_name,last_seen_at,last_seen_status_code,last_seen_power_profile_code,last_seen_tx_reason,last_seen_battery_mv";
 
 export function createRealtimeTelemetrySource(
@@ -76,9 +77,11 @@ export function createRealtimeTelemetrySource(
           statusListener?.("degraded", presenceResult.error.message);
         }
 
-        const incoming: PositionRow[] = Array.isArray(positionResult.data)
+        const positionRows: PositionRow[] = Array.isArray(positionResult.data)
           ? (positionResult.data as unknown[]).filter((row): row is PositionRow => isPositionRow(row))
           : [];
+        const incoming = await withGnssQuality(supabase, householdId, positionRows);
+        if (!active) return;
         const presenceRows: DevicePresenceRow[] = Array.isArray(presenceResult.data)
           ? (presenceResult.data as unknown[]).filter((row): row is DevicePresenceRow => isDevicePresenceRow(row))
           : [];

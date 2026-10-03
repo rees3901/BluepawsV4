@@ -1,6 +1,27 @@
 import type { ReactNode } from "react";
 import { transportPresentation } from "@/lib/transportPath";
 import type { IngestPath } from "@/types/telemetry";
+import type { TelemetryDevice } from "@/types/telemetry";
+import { gnssQuality } from "@/lib/gnssQuality";
+
+export function GnssIndicator({ device }: { device: TelemetryDevice }) {
+  const fix = device.gnss;
+  const quality = gnssQuality(fix?.accuracyM, device.hasGps);
+  const description = !device.hasGps ? "No GNSS fix available" : !fix
+    ? "Last GNSS fix: quality not reported"
+    : `Last GNSS fix: ${quality.label}. Reported accuracy: ${quality.level ? `${fix.accuracyM} m` : "unknown"}; ${fix.satellites} satellites; fix age at report: ${fix.fixAgeS} seconds. Report: ${fix.recordedAt}. Not a live satellite signal reading.`;
+  return <details className="gnss-indicator" onClick={event => event.stopPropagation()}>
+    <summary className="signal-indicator" title={description} aria-label={`${description}. Show GPS details`}>
+      <svg className="indicator-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="m10 6 8 8-4 4-8-8zM3 4l4-3 4 4-4 4zM15 17l4-4 4 4-4 4zM8 16l-2 2M3 14a7 7 0 0 1 7 7M3 18a3 3 0 0 1 3 3" />
+      </svg>
+      <span className="gnss-name">GPS</span>
+      {[1, 2, 3, 4, 5].map(bar => <span aria-hidden="true" key={bar} className={`sig-bar${bar <= quality.level ? " filled" : ""}`} style={{ height: 4 + bar * 3, background: bar <= quality.level ? quality.color : undefined }} />)}
+      <span className="sig-label">Sats: {device.hasGps && fix ? fix.satellites : "—"}</span>
+    </summary>
+    <span className="gnss-detail">{description}</span>
+  </details>;
+}
 
 export function signalQuality(rssi: number, snr: number) {
   const rssiScore = rssi > -80 ? 4 : rssi > -100 ? 3 : rssi > -110 ? 2 : rssi > -120 ? 1 : 0;
@@ -52,12 +73,11 @@ export function SignalIndicator({ rssi, snr, ingestPath }: { rssi: number | null
 
   const signal = signalQuality(rssi, snr);
   return (
-    <span className="signal-indicator" title={`${transport.label}; RSSI: ${rssi} dBm / SNR: ${snr} dB — ${signal.label}`}>
+    <span className="signal-indicator" role="img" aria-label={`${transport.label}: ${signal.label}, ${signal.level} of 5 bars`} title={`${transport.label}; RSSI: ${rssi} dBm / SNR: ${snr} dB — ${signal.label}`}>
       <AntennaIcon />
       {[1, 2, 3, 4, 5].map((bar) => (
         <span key={bar} className={`sig-bar${bar <= signal.level ? " filled" : ""}`} style={{ height: 4 + bar * 3, background: bar <= signal.level ? signal.color : undefined }} />
       ))}
-      <span className="sig-label" style={{ color: signal.color }}>{signal.label}</span>
       <TransportBadge ingestPath={ingestPath} />
     </span>
   );
@@ -70,10 +90,10 @@ export function WifiIndicator({ rssi, contactLost = false }: { rssi: number | nu
   const level = rssi === null ? 0 : rssi >= -50 ? 5 : rssi >= -60 ? 4 : rssi >= -70 ? 3 : rssi >= -80 ? 2 : 1;
   const label = contactLost ? "No contact" : ["No Wi-Fi", "Very poor", "Poor", "Average", "Good", "Excellent"][level];
   const color = ["#607d8b", "#ef4444", "#f97316", "#f59e0b", "#84cc16", "#22c55e"][level];
-  return <span className="signal-indicator" title={contactLost ? "Hub report overdue; current Wi-Fi connection is unknown" : `Wi-Fi ${rssi === null ? "not connected" : `${rssi} dBm`} — ${label}`}>
+  return <span className="signal-indicator" role="img" aria-label={`Wi-Fi: ${label}, ${level} of 5 bars`} title={contactLost ? "Hub report overdue; current Wi-Fi connection is unknown" : `Wi-Fi ${rssi === null ? "not connected" : `${rssi} dBm`} — ${label}`}>
     <AntennaIcon />
     {[1,2,3,4,5].map(bar => <span key={bar} className={`sig-bar${bar <= level ? " filled" : ""}`} style={{height:4+bar*3, backgroundColor:bar <= level ? color : undefined}} />)}
-    <span className="sig-label" style={{color}}>{label}</span>
+    {level === 0 && <span className="sig-label" style={{color}}>{label}</span>}
     <WifiTransportBadge />
   </span>;
 }
