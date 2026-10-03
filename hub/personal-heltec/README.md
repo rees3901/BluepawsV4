@@ -1,8 +1,35 @@
 # Personal Heltec Wireless Tracker V2 hub
 
-This standalone build compiles `../platformio/src` and packages
-`../platformio/data` unchanged from canonical main. There is no OLED/native UI.
-The only additions are a pinned build configuration and local private overrides.
+This standalone build compiles the canonical hub services from `../platformio/src`
+and packages `../platformio/data` unchanged. A personal-only adapter adds a local
+display without changing canonical sources, protocol contracts, or browser routes.
+
+## Display and user button
+
+Wireless Tracker V2 has a 160x80 ST7735 colour TFT (often described as an OLED).
+Tap USER to advance through eight pages; hold it for 800 ms to return home:
+
+1. Hub identity, mode, Wi-Fi, last cloud success, Home beacon and LoRa status.
+2. Network name, IP addresses, cloud failures, uptime and free heap.
+3. Collar 3001: state/profile, last reception, signal, GPS age, cloud result, command.
+4. Collar 3002, with the same fields.
+5. Collar 3003, with the same fields.
+6. Collar 3004, with the same fields.
+7. Hub's own GPS position and fix age.
+8. Radio settings and relay, command and storage queue depths.
+
+Pages refresh once per second and only changed rows are redrawn. No reports means
+"No reports received"; records loaded from storage are explicitly labelled stored.
+Radio reception and cloud acceptance are separate indicators. Battery measurement
+is not implemented on this board and is labelled unmeasured. The display stays on.
+
+USER is GPIO0, also the boot strap: use it after normal startup, and do not hold it
+while resetting unless you intend to enter the ROM bootloader. RESET is not a page
+button. Navigation never changes radio, Wi-Fi, BLE or collar settings.
+
+The display uses FSPI (SCK41, MOSI42, CS38, DC40, reset39, backlight21); LoRa keeps
+its existing HSPI bus. Shared Vext/GNSS power on GPIO3 remains owned by canonical
+firmware. UI reads take short state snapshots and release locks before drawing.
 
 Run from the repository root:
 
@@ -19,7 +46,9 @@ BLE, relay and command behaviour comes from canonical firmware.
 
 Before flashing, back up the physical hub's complete 8 MB flash and save SHA256.
 The initial personal hub is COM17, ESP32-S3 MAC `44:1b:f6:f8:ec:bc`.
-Monitor at 115200. Flash both firmware and filesystem. Old saved settings can
+Monitor at 115200. For the initial identity transition, flash both firmware and
+filesystem. For routine updates, including the display upgrade, upload firmware
+only to preserve settings, credentials and the user's BLE selection. Old saved settings can
 override compiled credentials, so use the fresh bundled filesystem after backup.
 This deliberately replaces the old local settings/cache on this personal hub;
 the backup preserves them for rollback. No server-side historical data is erased.

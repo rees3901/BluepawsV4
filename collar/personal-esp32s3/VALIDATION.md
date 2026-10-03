@@ -102,7 +102,34 @@ Branch: `codex/personal-legacy-collars`; no merge or production deployment.
   began at 21:17 UTC; its private files use the `soak-v2-` prefix. The transition
   fix still needs a complete Home-to-away regression cycle during qualification.
 
-## Not yet established
+## Personal hub display upgrade — 3 October 2026
+
+- User requested an on-device UI after initial browser-only rollout. The personal
+  adapter adds eight ST7735 pages and USER-button navigation while compiling
+  canonical hub services and protocol utilities unchanged. No canonical hub file
+  or browser asset was edited. Display FSPI is separate from LoRa HSPI.
+- Native button tests passed for bounce, tap, hold, no repeat/release action after
+  hold, and millisecond timer rollover. Pinned PlatformIO build passed: static RAM
+  74,988 bytes (22.9%); firmware 1,687,861 bytes (50.5% of application partition).
+- Firmware uploaded to COM17 with verified write hash. Filesystem and NVS were
+  preserved; live hub presence at 21:26:27 UTC confirms BLE remains disabled.
+  The previous personal hub image is preserved as
+  `hub/personal-0030-before-display.bin` in the private recovery bundle.
+- With the display firmware running, collar 3001 woke on schedule and transmitted
+  report 130. Hub received it at 21:26:37 UTC, acknowledged it, and the live backend
+  accepted observation 7559 at 21:26:39 UTC (HTTP 201). This wake had no fresh GNSS
+  fix, so `position_updated=false` and the previous real position remains in place.
+- The v2 observation was deliberately interrupted for the hub firmware update.
+  Replacement logs and metadata use `soak-v3-`; the scheduled review now points to
+  that run. Neither interrupted run counts as a completed 24-hour soak.
+- User confirmed the display and both USER button actions work. They also reported
+  accidentally pressing RESET. The observed restart at approximately 21:26:46 UTC
+  is therefore an intentional hardware action, not an unexplained crash. Serial
+  confirms display initialization and Wi-Fi reconnection; live hub presence was
+  accepted at 21:27:02 UTC with BLE still disabled. The v3 run metadata records this
+  event; observation duration must not be confused with uninterrupted hub uptime.
+
+## Remaining qualification
 
 - Full loss-of-power persistence, radio/network outage and reconnection tests.
 - Complete physical profile/button/find-beacon, Home/away and lost-timeout checks.
