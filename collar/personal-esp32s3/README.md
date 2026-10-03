@@ -33,7 +33,9 @@ not the legacy 868 MHz JSON protocol. This image cannot communicate with V3 hubs
   time acquisition again. Until a first position exists, every wake attempts GNSS
   even when the Home beacon is present. Invalid/stale coordinates never carry GNSS_VALID.
 - BLE scans for the existing `BLUEPAWS_HOME` advertisement, with a -90 dBm gate.
-  Two missed scans clear Home. Optional `PERSONAL_HOME_BLE_ADDRESS` restricts it
+  Two missed scans clear Home. The first miss still counts as a scheduled Home
+  wake and sends any due check-in, with the fresh-beacon-seen flag cleared.
+  Optional `PERSONAL_HOME_BLE_ADDRESS` restricts it
   to the personal hub's observed BLE address; the canonical beacon has no hub ID.
 - Normal, PowerSave, Active and Lost Alert use V4 timings. Home check-ins and GNSS
   refreshes follow their profile ratios. Debug is rejected on this live target.

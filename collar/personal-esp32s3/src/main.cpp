@@ -380,12 +380,14 @@ void loop() {
     const uint32_t cycleStart = millis();
     freshFix = false; gpsFailed = false;
     const bool seen = state.profile == PROFILE_LOST ? false : scanHome();
-    if (seen) ++retained.homeCycles;
+    // Count scheduled Home wakes, including the first missed-beacon scan.
+    // Hysteresis retains Home for that scan; it must not suppress the check-in.
+    if (retained.home) ++retained.homeCycles;
     const auto* profile = bp_profile_config(bp_profile_t(state.profile));
     const bool lost = state.profile == PROFILE_LOST;
     // Home suppression is safe only after at least one real position exists.
     const bool gnssDue = bootReport || buttonReport || !utc() || !retained.fixTime || !retained.home || lost ||
-        (seen && retained.homeCycles % profile->home_gnss_refresh_ratio == 0);
+        (retained.home && retained.homeCycles % profile->home_gnss_refresh_ratio == 0);
     if (lost) advertiseFind();
     if (gnssDue) acquireGps(bootReport || !retained.fixTime);
     if (state.profile == PROFILE_LOST && !state.lostUntil && utc()) {
@@ -394,11 +396,11 @@ void loop() {
         saveState();
     }
     const bool reportDue = bootReport || buttonReport || lost || gnssDue ||
-        (seen && retained.homeCycles % profile->wake_checkin_ratio == 0);
+        (retained.home && retained.homeCycles % profile->wake_checkin_ratio == 0);
     // No build-time or invented timestamps: wait for GNSS time on first boot.
     if (reportDue && utc()) {
         const uint8_t reason = bootReport ? TX_BOOT : buttonReport ? TX_INTERRUPT :
-            seen && !gnssDue ? TX_WAKE_CHECKIN : TX_TELEMETRY;
+            retained.home && !gnssDue ? TX_WAKE_CHECKIN : TX_TELEMETRY;
         reportLength = buildPacket(report, reason, seen);
         transmit(report, reportLength);
         receiveWindow(seen);

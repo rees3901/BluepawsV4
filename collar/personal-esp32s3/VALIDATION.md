@@ -88,6 +88,13 @@ Branch: `codex/personal-legacy-collars`; no merge or production deployment.
   `soak-run.json` and eventual summary). A follow-up review is scheduled for
   4 October. This is an in-progress USB-powered continuity observation, not a
   passed soak or battery-life measurement. Keep the PC awake and devices powered.
+- That initial observation caught a real cadence defect: after the user disabled
+  the hub beacon, the collar woke at 21:09:13 UTC, logged `seen=0 home=1 missed=1`,
+  and returned to 600-second sleep without reporting. Wake-up itself succeeded.
+  The initial soak is marked interrupted, not passed. Personal firmware now bases
+  Home cadence on retained Home state (including the first missed scan), rather
+  than requiring a fresh beacon detection. It still clears the fresh-beacon flag
+  and switches Away after the second miss. Canonical sources remain unchanged.
 
 ## Not yet established
 
