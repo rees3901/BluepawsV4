@@ -95,6 +95,12 @@ Branch: `codex/personal-legacy-collars`; no merge or production deployment.
   Home cadence on retained Home state (including the first missed scan), rather
   than requiring a fresh beacon detection. It still clears the fresh-beacon flag
   and switches Away after the second miss. Canonical sources remain unchanged.
+- Correction `f728ca1` built and flashed successfully, with write hashes verified.
+  With the hub beacon still disabled, report 129 acquired a real fix at 21:16:07
+  UTC and reached the backend at 21:16:10.596 UTC (`position_updated=true`,
+  Normal profile, Away status, GNSS-valid flag). A replacement 24-hour observation
+  began at 21:17 UTC; its private files use the `soak-v2-` prefix. The transition
+  fix still needs a complete Home-to-away regression cycle during qualification.
 
 ## Not yet established
 
