@@ -149,6 +149,14 @@ Branch: `codex/personal-legacy-collars`; no merge or production deployment.
 - First acquisition: usable fix after 16,381 ms; stabilized after 26,381 ms,
   eight satellites, HDOP 3.2. Report 193 was accepted via LoRa hub at 22:10:46 UTC
   as observation 7581, with `position_updated=true`.
+- Next timer wake after standby: usable after 14,582 ms and stabilized after
+  24,584 ms, eight satellites and HDOP 3.0. Report 194 was accepted at 22:12:36
+  UTC as observation 7582 with `position_updated=true`; backend latest position
+  confirms Active and GNSS-valid. The receiver reported `ANTENNA OK`; diagnostic
+  NMEA checksum errors were zero. Initial GGA quality 0/GSA type 1 progressed to
+  GGA quality 1/GSA type 3. Latest RMC was V while the combined GGA fix was valid;
+  individual talker reports are diagnostic, not a new acceptance rule.
+  Acquisition timings do not establish receiver reset type or backup-cell health.
 - Prior personal firmware is preserved as
   `collar/personal-3001-before-GNSS-recovery.bin` in the private recovery bundle.
   The previous observation was interrupted for this correction. New observation
