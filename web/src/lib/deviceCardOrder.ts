@@ -58,3 +58,31 @@ function placePinnedDeviceFirst(deviceIds: number[], pinnedDeviceId: number | nu
   if (pinnedDeviceId === null || !deviceIds.includes(pinnedDeviceId)) return deviceIds;
   return [pinnedDeviceId, ...deviceIds.filter((deviceId) => deviceId !== pinnedDeviceId)];
 }
+export type CardSortField = "manual" | "name" | "lastSeen" | "distance";
+export type CardSortDirection = "asc" | "desc";
+const naturalNames = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
+
+export function sortDeviceIds(
+  manualOrder: number[],
+  values: Map<number, { name: string; lastSeen: number | null; distance: number | null }>,
+  field: CardSortField,
+  direction: CardSortDirection,
+  pinnedId: number | null,
+) {
+  if (field === "manual") return manualOrder;
+  const sign = direction === "asc" ? 1 : -1;
+  return [...manualOrder].sort((a, b) => {
+    if (a === b) return 0;
+    if (a === pinnedId) return -1;
+    if (b === pinnedId) return 1;
+    const left = values.get(a), right = values.get(b);
+    if (!left || !right) return 0;
+    if (field === "name") return sign * naturalNames.compare(left.name, right.name);
+    const x = left[field], y = right[field];
+    // Missing positions/timestamps stay last in either direction; never pretend zero distance.
+    const xMissing = x === null || !Number.isFinite(x), yMissing = y === null || !Number.isFinite(y);
+    if (xMissing || yMissing) return Number(xMissing) - Number(yMissing);
+    return sign * (x! - y!);
+  });
+}
+

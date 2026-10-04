@@ -707,6 +707,11 @@ button#statusBanner {
   font-variant-numeric: tabular-nums;
 }
 .panel-collar-summary strong { color: var(--text-primary); }
+.panel-sort-controls { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-left: auto; font-size: 0.75rem; color: var(--text-secondary); }
+.panel-sort-controls select, .panel-sort-controls button { min-height: 32px; padding: 4px 8px; color: var(--text-primary); background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; }
+.panel-sort-controls button { min-width: 32px; cursor: pointer; }
+.panel-sort-controls button:disabled { opacity: 0.4; cursor: default; }
+.panel-sort-controls :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 @media (max-width: 768px) {
   #panelHeader {

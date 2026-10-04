@@ -20,7 +20,7 @@ import { useHubPhotos } from "@/lib/useHubPhotos";
 import { saveHubAppearance } from "@/lib/hubAppearances";
 import { commandMessage } from "@/lib/collarFeedback";
 import { CUSTOMER_POWER_PROFILES, powerProfileLabel, type CustomerPowerProfile } from "@/lib/powerProfiles";
-import { deviceCardOrderChanged, deviceCardOrderStorageKey, deviceCardPinStorageKey, moveDeviceToHoverTarget, orderDeviceIds, pinDeviceFirst } from "@/lib/deviceCardOrder";
+import { deviceCardOrderChanged, deviceCardOrderStorageKey, deviceCardPinStorageKey, moveDeviceToHoverTarget, orderDeviceIds, pinDeviceFirst, sortDeviceIds, type CardSortField, type CardSortDirection } from "@/lib/deviceCardOrder";
 import { buildCurrentDeviceReport, deviceReportsToCsv, loadDeviceReports, type DeviceReport } from "@/lib/deviceReports";
 import { loadDeviceAppearances, revokeAvatarUrls } from "@/lib/deviceAppearances";
 import { initialiseExpandedDeviceCards, nextExpandedDeviceCards } from "@/lib/expandedCards";
@@ -100,6 +100,8 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
   const [customAvatars, setCustomAvatars] = useState<Record<number, DeviceAvatar>>({});
   const [avatarDevice, setAvatarDevice] = useState<TelemetryDevice | null>(null);
   const [cardOrder, setCardOrder] = useState<number[]>([]);
+  const [cardSort, setCardSort] = useState<CardSortField>("manual");
+  const [sortDirection, setSortDirection] = useState<CardSortDirection>("asc");
   const [pinnedDeviceId, setPinnedDeviceId] = useState<number | null>(null);
   const [cardOrderLoadedKey, setCardOrderLoadedKey] = useState<string | null>(null);
   const [draggingDeviceId, setDraggingDeviceId] = useState<number | null>(null);
@@ -132,7 +134,12 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
     return { ...device, homeHub: hub ? { id: hub.gateway_guid16, lat: hub.latitude,
       lon: hub.longitude, fixAt: hub.fix_at } : null };
   })], [devices, mapHubs, hubs]);
-  const orderedDeviceIds = useMemo(() => orderDeviceIds(mapDevices.map(device => device.id), cardOrder, pinnedDeviceId), [cardOrder, mapDevices, pinnedDeviceId]);
+  const orderedDeviceIds = useMemo(() => sortDeviceIds(
+    orderDeviceIds(mapDevices.map(device => device.id), cardOrder, pinnedDeviceId),
+    new Map(mapDevices.map(device => [device.id, {name: device.name,
+      lastSeen: device.lastUpdate > 0 ? device.lastUpdate : null, distance: homeDistanceMetres(device)}])),
+    cardSort, sortDirection, pinnedDeviceId,
+  ), [cardOrder, mapDevices, pinnedDeviceId, cardSort, sortDirection]);
 
   // Hubs and pets can arrive separately; apply defaults before displaying each new card.
   if (mapDevices.some(device => !initialisedCardIds.includes(device.id))) {
@@ -328,15 +335,25 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
         const savedPin = localStorage.getItem(cardPinKey);
         const parsedPin = savedPin === null ? Number.NaN : Number(savedPin);
         setPinnedDeviceId(Number.isInteger(parsedPin) ? parsedPin : null);
+        const savedSort = JSON.parse(localStorage.getItem(`${cardOrderKey}:sort`) ?? "null");
+        setCardSort(["manual", "name", "lastSeen", "distance"].includes(savedSort?.field) ? savedSort.field : "manual");
+        setSortDirection(savedSort?.direction === "desc" ? "desc" : "asc");
       } catch {
         setCardOrder([]);
         setPinnedDeviceId(null);
+        setCardSort("manual");
+        setSortDirection("asc");
       }
       setCardOrderLoadedKey(cardOrderKey);
     }, 0);
 
     return () => window.clearTimeout(loadTimer);
   }, [cardOrderKey, cardPinKey]);
+
+  useEffect(() => {
+    if (cardOrderLoadedKey !== cardOrderKey) return;
+    try { localStorage.setItem(`${cardOrderKey}:sort`, JSON.stringify({field: cardSort, direction: sortDirection})); } catch { /* Optional browser preference. */ }
+  }, [cardOrderKey, cardOrderLoadedKey, cardSort, sortDirection]);
 
   useEffect(() => {
     if (cardOrderLoadedKey !== cardOrderKey) return;
@@ -510,9 +527,12 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
   }, []);
 
   const handleCardDragStart = useCallback((deviceId: number) => {
+    // Dragging resumes manual ordering from exactly what the user currently sees.
+    setCardOrder(orderedDeviceIds);
+    setCardSort("manual");
     lastDragTargetRef.current = null;
     setDraggingDeviceId(deviceId);
-  }, []);
+  }, [orderedDeviceIds]);
 
   const handleCardDragOver = useCallback((targetId: number) => {
     if (draggingDeviceId === null || draggingDeviceId === targetId || lastDragTargetRef.current === targetId) return;
@@ -743,6 +763,19 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
             <span>Collars: <strong>{collarCounts.total}</strong></span>
             <span>Live: <strong>{collarCounts.live}</strong></span>
             <span>Offline: <strong>{collarCounts.offline}</strong></span>
+          </div>
+          <div className="panel-sort-controls">
+            <label htmlFor="card-sort">Sort by</label>
+            <select id="card-sort" value={cardSort} onChange={event => setCardSort(event.target.value as CardSortField)}>
+              <option value="manual">Manual</option>
+              <option value="name">Name</option>
+              <option value="lastSeen">Last seen</option>
+              <option value="distance">Distance from hub</option>
+            </select>
+            <button type="button" disabled={cardSort === "manual"}
+              aria-label={`Sort ${sortDirection === "asc" ? "ascending" : "descending"}. Click to reverse`}
+              title={cardSort === "lastSeen" ? (sortDirection === "asc" ? "Oldest first" : "Newest first") : cardSort === "distance" ? (sortDirection === "asc" ? "Nearest first" : "Farthest first") : (sortDirection === "asc" ? "A–Z" : "Z–A")}
+              onClick={() => setSortDirection(current => current === "asc" ? "desc" : "asc")}>{sortDirection === "asc" ? "↑" : "↓"}</button>
           </div>
         </div>
         {tutorialMode && <div className="tutorial-mode-banner">TUTORIAL MODE — SIMULATED DATA</div>}
