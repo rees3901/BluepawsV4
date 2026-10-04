@@ -319,7 +319,9 @@ export default function LeafletMap(props: ConfiguredMapRendererProps) {
     const resizeTimer = window.setTimeout(() => {
       if (mapRef.current === map) map.invalidateSize();
     }, 340);
-    return () => window.clearTimeout(resizeTimer);
+    const observer = new ResizeObserver(() => map.invalidateSize({ pan: false }));
+    observer.observe(map.getContainer());
+    return () => { window.clearTimeout(resizeTimer); observer.disconnect(); };
   }, [sidebarOpen]);
 
   useEffect(() => {

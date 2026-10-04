@@ -8,10 +8,21 @@ import {
   COLLAR_SUBDUED_AFTER_SECONDS,
   collarCardFreshness,
   collarFreshnessClass,
+  collarSummary,
   isCollarOffline,
   isCollarOfflineAge,
 } from "./devicePresence.ts";
 import type { TelemetryDevice } from "../types/telemetry.ts";
+
+test("header counts collars only and uses the card offline boundary", () => {
+  const now = 20_000_000;
+  const device = (age: number, entity?: "hub") => ({lastUpdate: now - age * 1000, entity}) as TelemetryDevice;
+  assert.deepEqual(collarSummary([], now), {total: 0, live: 0, offline: 0});
+  assert.deepEqual(collarSummary([
+    device(5), device(60), device(COLLAR_OFFLINE_AFTER_SECONDS - 1),
+    device(COLLAR_OFFLINE_AFTER_SECONDS), device(90000), device(5, "hub"), device(90000, "hub"),
+  ], now), {total: 5, live: 3, offline: 2});
+});
 
 test("graduates collar presentation through each visual freshness stage", () => {
   assert.equal(collarCardFreshness(0, true), "active");

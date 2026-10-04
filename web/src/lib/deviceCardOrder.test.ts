@@ -1,6 +1,35 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { deviceCardOrderStorageKey, deviceCardPinStorageKey, moveDeviceBefore, moveDeviceToHoverTarget, orderDeviceIds, pinDeviceFirst } from "./deviceCardOrder.ts";
+import { deviceCardOrderChanged, deviceCardOrderStorageKey, deviceCardPinStorageKey, moveDeviceBefore, moveDeviceToHoverTarget, orderDeviceIds, pinDeviceFirst, sortDeviceIds } from "./deviceCardOrder.ts";
+
+test("sorts naturally, by last seen or distance; pinned card is always exempt", () => {
+  const order = [1, 2, 3, 4];
+  const values = new Map([
+    [1, {name: "Hub", lastSeen: 5, distance: null}],
+    [2, {name: "Cat 10", lastSeen: 10, distance: 100}],
+    [3, {name: "cat 2", lastSeen: 30, distance: 20}],
+    [4, {name: "Alpha", lastSeen: null, distance: null}],
+  ]);
+  assert.equal(sortDeviceIds(order, values, "manual", "desc", 1), order);
+  assert.deepEqual(sortDeviceIds(order, values, "name", "asc", 1), [1, 4, 3, 2]);
+  assert.deepEqual(sortDeviceIds(order, values, "name", "desc", 1), [1, 2, 3, 4]);
+  assert.deepEqual(sortDeviceIds(order, values, "lastSeen", "asc", 1), [1, 2, 3, 4]);
+  assert.deepEqual(sortDeviceIds(order, values, "lastSeen", "desc", 1), [1, 3, 2, 4]);
+  assert.deepEqual(sortDeviceIds(order, values, "distance", "asc", 1), [1, 3, 2, 4]);
+  assert.deepEqual(sortDeviceIds(order, values, "distance", "desc", 1), [1, 2, 3, 4]);
+  assert.deepEqual(sortDeviceIds(order, values, "name", "asc", null), [4, 3, 2, 1]);
+  assert.deepEqual(order, [1, 2, 3, 4], "sorting must not overwrite the saved manual order");
+});
+
+test("polling unchanged IDs never triggers a reorder animation", () => {
+  const ids = [-48, 3001, 3003];
+  const refreshed = orderDeviceIds([...ids], [...ids], -48);
+  assert.notEqual(refreshed, ids);
+  assert.equal(deviceCardOrderChanged(ids, refreshed), false);
+  assert.equal(deviceCardOrderChanged([], ids), false);
+  assert.equal(deviceCardOrderChanged(ids, [-48, 3003, 3001]), true);
+  assert.equal(deviceCardOrderChanged(ids, [-48, 3001]), true);
+});
 
 test("orders visible devices using saved preference and appends new devices", () => {
   assert.deepEqual(orderDeviceIds([1001, 1002, 1003, 1004], [1003, 1001, 9999]), [1003, 1001, 1002, 1004]);

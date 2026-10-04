@@ -167,9 +167,13 @@ export default function MapLibreMap(props: ConfiguredMapRendererProps) {
   }, [measuring, vectorSource]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => mapRef.current?.resize(), 340);
-    return () => window.clearTimeout(timer);
-  }, [sidebarOpen]);
+    const map = mapRef.current;
+    if (!map) return;
+    const timer = window.setTimeout(() => map.resize(), 340);
+    const observer = new ResizeObserver(() => map.resize());
+    observer.observe(map.getContainer());
+    return () => { window.clearTimeout(timer); observer.disconnect(); };
+  }, [sidebarOpen, vectorSource]);
 
   useEffect(() => {
     const map = mapRef.current;
