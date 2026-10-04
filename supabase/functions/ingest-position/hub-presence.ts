@@ -60,6 +60,21 @@ export function parseHubPresence(value: unknown) {
     throw new Error("invalid_battery_percent");
   if (positionSimulated && lat === null) throw new Error("invalid_position_simulated");
   if (batterySimulated && battery === null) throw new Error("invalid_battery_simulated");
+  // Optional on older firmware. Quality belongs to this position, never to a
+  // relayed collar or to a simulated testbed location.
+  const gnssValid = p.gnss_valid == null ? null : boolean("gnss_valid");
+  const satellites = p.sat_count == null ? null : integer("sat_count", 0, 255);
+  const positiveNumber = (k: string, max: number) => {
+    const n = p[k];
+    if (n == null) return null;
+    if (typeof n !== "number" || !Number.isFinite(n) || n <= 0 || n > max) throw new Error("invalid_" + k);
+    return n;
+  };
+  const accuracy = positiveNumber("acc_m", 65534);
+  const hdop = positiveNumber("hdop", 9999.99);
+  if ((gnssValid === true && (lat === null || positionSimulated))
+      || ((satellites !== null || accuracy !== null || hdop !== null) && gnssValid !== true))
+    throw new Error("invalid_gnss_quality");
   return {
     p_gateway: id, p_mode: String(p.mode), p_lat: lat, p_lon: lon,
     p_fix_age_s: lat === null ? null : integer("fix_age_s", 0, 604800),
@@ -73,6 +88,7 @@ export function parseHubPresence(value: unknown) {
     p_battery_percent: battery,
     p_position_simulated: positionSimulated,
     p_battery_simulated: batterySimulated,
+    p_gnss_valid: gnssValid, p_sat_count: satellites, p_acc_m: accuracy, p_hdop: hdop,
   };
 }
 

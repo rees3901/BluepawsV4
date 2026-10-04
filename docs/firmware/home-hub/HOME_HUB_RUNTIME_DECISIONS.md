@@ -68,6 +68,50 @@ The current Edge Function accepts `lora_gateway` and normalizes it to the backen
 
 `gateway_rx_time_unix` should use the hub's NTP-synced clock when available. During early boot, before NTP is ready, the hub may temporarily fall back to the collar packet timestamp so the wrapper remains well-formed.
 
+## Hub GNSS self-report (HTTPS JSON)
+
+The hub's own telemetry uses `format: "hub_status"`, `ingest_path: "hub_self"`
+and its gateway credential. It is separate from relayed collar TLV and receiver
+metadata. The existing JSON report now accepts these optional fields:
+
+| Field | Meaning |
+| --- | --- |
+| `gnss_valid` | Whether the supplied position is a real valid GNSS fix. Null/omitted means legacy/unknown, not a claim of current receiver lock. |
+| `sat_count` | Satellites **used** in that fix, 0–255; null when unavailable. |
+| `acc_m` | Receiver-reported horizontal accuracy in metres, greater than zero and at most 65534; null when unavailable. |
+| `hdop` | Dimensionless horizontal dilution of precision, greater than zero and at most 9999.99; null when unavailable. Never converted to metres. |
+
+Quality requires `gnss_valid: true`, real coordinates, and `fix_age_s` describing
+the **same** fix. Example GNSS portion of a report:
+
+```json
+{
+  "latitude": 51.9,
+  "longitude": -2.2,
+  "fix_age_s": 12,
+  "gnss_valid": true,
+  "sat_count": 8,
+  "acc_m": null,
+  "hdop": 1.2
+}
+```
+
+The PlatformIO hub captures GGA position, satellite count and HDOP together.
+RMC-only fixes remain supported, with unknown satellite/accuracy fields.
+Its NMEA parser does not supply accuracy in metres, so `acc_m` is null. The
+P4 simulated-position testbed sends `gnss_valid: false` and null quality; it
+must not manufacture satellite readings.
+
+The backend stores location, fix time, quality and simulation provenance as one
+snapshot. A no-position heartbeat retains that snapshot without refreshing its
+fix time. A new position replaces all quality fields (including unknowns);
+moving a hub to another Family clears the previous Family's snapshot.
+Existing firmware without these fields remains compatible. The shared GUI
+shows satellite count independently of accuracy bars, and HDOP in the details.
+
+Deployment order: apply `hub_gnss_json_quality`, deploy `ingest-position`, then
+deploy the GUI and flash the appropriate hub firmware. No collar TLV changes.
+
 ## Cloud command delivery
 
 The Home Hub must not need a collar IP address. Cloud commands are queued by
