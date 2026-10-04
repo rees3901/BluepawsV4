@@ -767,7 +767,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
           <div className="panel-sort-controls">
             <label htmlFor="card-sort">Sort by</label>
             <select id="card-sort" value={cardSort} onChange={event => setCardSort(event.target.value as CardSortField)}>
-              <option value="manual">Manual</option>
+              <option value="manual">Off</option>
               <option value="name">Name</option>
               <option value="lastSeen">Last seen</option>
               <option value="distance">Distance from hub</option>
