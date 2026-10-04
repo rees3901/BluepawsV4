@@ -11,12 +11,12 @@ export function GnssIndicator({ device }: { device: TelemetryDevice }) {
     ? device.entity === "hub"
       ? `${device.source ?? "Last hub position"}. Satellite count and accuracy are not included in the hub report.`
       : "Last GNSS fix: quality not reported"
-    : `Last GNSS fix: ${quality.label}. Reported accuracy: ${quality.level ? `${fix.accuracyM} m` : "unknown"}; ${fix.satellites} satellites; fix age at report: ${fix.fixAgeS} seconds. Report: ${fix.recordedAt}. Not a live satellite signal reading.`;
+    : `Last GNSS fix: ${quality.label}. Reported accuracy: ${quality.level ? `${fix.accuracyM} m` : "unknown"}; satellites: ${fix.satellites ?? "unknown"}${fix.hdop != null ? `; HDOP: ${fix.hdop} (not accuracy in metres)` : ""}; fix age at report: ${fix.fixAgeS} seconds. Report: ${fix.recordedAt}. Not a live satellite signal reading.`;
   return <details className="gnss-indicator" onClick={event => event.stopPropagation()}>
     <summary className="signal-indicator" title={description} aria-label={`${description}. Show GPS details`}>
       <span className="gnss-emoji" aria-hidden="true">🛰️</span>
       {[1, 2, 3, 4, 5].map(bar => <span aria-hidden="true" key={bar} className={`sig-bar${bar <= quality.level ? " filled" : ""}`} style={{ height: 4 + bar * 3, background: bar <= quality.level ? quality.color : undefined }} />)}
-      <span className="sig-label">Sats: {device.hasGps && fix ? fix.satellites : "—"}</span>
+      <span className="sig-label">Sats: {device.hasGps ? fix?.satellites ?? "—" : "—"}</span>
     </summary>
     <span className="gnss-detail">{description}</span>
   </details>;

@@ -9,6 +9,8 @@ struct HubSelf {
     double lat = 0, lon = 0;
     bool hasFix = false;
     uint32_t fixMs = 0;
+    int satCount = -1;
+    double hdop = 0;
     uint64_t revision = 0;
     char name[65] = "Home Hub";
     char homeEmoji[65] = "🏡";
@@ -59,12 +61,24 @@ static void hubGnssTask(void *) {
     Serial.println("[HUB GNSS] UC6580 UART1 RX33/TX34 @115200; awaiting real fix");
     for (;;) {
         // Bound UART work per scheduling slice.
-        for (unsigned n = 0; n < 1024 && uart.available(); ++n) gps.encode(uart.read());
-        if (gps.location.isUpdated() && gps.location.isValid() && gps.location.age() < 2000) {
+        for (unsigned n = 0; n < 1024 && uart.available(); ++n) {
+            if (!gps.encode(uart.read())) continue;
+            // Consume every complete sentence's update flags. GGA supplies the
+            // position and satellites used together; RMC must not mix in old quality.
+            const bool gga = gps.satellites.isUpdated();
+            const int sats = gga && gps.satellites.isValid() ? static_cast<int>(gps.satellites.value()) : -1;
+            const double hdop = gps.hdop.isUpdated() && gps.hdop.isValid() ? gps.hdop.hdop() : 0;
+            const bool locationUpdated = gps.location.isUpdated();
             double lat = gps.location.lat(), lon = gps.location.lng();
-            if (isfinite(lat) && isfinite(lon) && fabs(lat) <= 90 && fabs(lon) <= 180) {
+            if (locationUpdated && gps.location.isValid() && gps.location.age() < 2000
+                && isfinite(lat) && isfinite(lon) && fabs(lat) <= 90 && fabs(lon) <= 180) {
                 if (xSemaphoreTake(hubSelfMutex, pdMS_TO_TICKS(20))) {
-                    hubSelf.lat = lat; hubSelf.lon = lon; hubSelf.hasFix = true; hubSelf.fixMs = millis();
+                    // Prefer coherent GGA fixes; retain RMC-only receiver support.
+                    if (gga || !hubSelf.hasFix || millis() - hubSelf.fixMs >= 2000) {
+                        hubSelf.lat = lat; hubSelf.lon = lon; hubSelf.hasFix = true; hubSelf.fixMs = millis();
+                        hubSelf.satCount = gga && sats >= 0 && sats <= 255 ? sats : -1;
+                        hubSelf.hdop = gga && isfinite(hdop) && hdop > 0 && hdop <= 9999.99 ? hdop : 0;
+                    }
                     xSemaphoreGive(hubSelfMutex);
                 }
             }
@@ -112,8 +126,15 @@ static String hubPresenceJson(bool cloud) {
     doc["report_interval_s"]=hubReportingIntervalMs(s.reporting)/1000;
     doc["control_poll_s"]=5;
     uint32_t age=(millis()-s.fixMs)/1000;
+    doc["gnss_valid"] = s.hasFix && age<=604800;
+    doc["sat_count"] = nullptr;
+    doc["hdop"] = nullptr;
+    // NMEA GGA provides HDOP, not a measured horizontal accuracy in metres.
+    doc["acc_m"] = nullptr;
     if (s.hasFix && age<=604800) {
         doc["latitude"]=s.lat; doc["longitude"]=s.lon; doc["fix_age_s"]=age;
+        if (s.satCount >= 0) doc["sat_count"] = s.satCount;
+        if (s.hdop > 0) doc["hdop"] = s.hdop;
     } else { doc["latitude"]=nullptr; doc["longitude"]=nullptr; doc["fix_age_s"]=nullptr; }
     if (!cloud) {
         doc["ble_settled"]=hubBleSettled();

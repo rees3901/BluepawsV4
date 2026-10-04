@@ -830,6 +830,12 @@ bool post_hub_presence() {
         cJSON_AddNullToObject(json, "battery_percent");
     }
     cJSON_AddBoolToObject(json, "position_simulated", telemetry.position_simulated);
+    // The P4 testbed has no physical GNSS sample yet. Never invent fix quality
+    // for its configured fallback position.
+    cJSON_AddBoolToObject(json, "gnss_valid", false);
+    cJSON_AddNullToObject(json, "sat_count");
+    cJSON_AddNullToObject(json, "acc_m");
+    cJSON_AddNullToObject(json, "hdop");
     cJSON_AddBoolToObject(json, "battery_simulated", telemetry.battery_simulated);
     cJSON_AddNumberToObject(json, "uptime_s", now_ms / 1000U);
     cJSON_AddNumberToObject(json, "wifi_rssi_dbm", live.wifi_rssi_dbm);

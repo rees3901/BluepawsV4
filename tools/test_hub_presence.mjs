@@ -70,3 +70,58 @@ test('hub avatars follow mode and overrides, and never collide with collar IDs',
   assert.equal(simulated.batteryPercent,92);
   assert.match(simulated.source,/Simulated test position/);
 });
+
+test('hub GNSS JSON accepts partial quality and leaves legacy values unknown',()=>{
+  const real={...payload,position_simulated:false,gnss_valid:true,sat_count:8,acc_m:null,hdop:1.2};
+  const parsed=parseHubPresence(real);
+  assert.equal(parsed.p_gnss_valid,true);
+  assert.equal(parsed.p_sat_count,8);
+  assert.equal(parsed.p_acc_m,null,'HDOP must not be converted to metres');
+  assert.equal(parsed.p_hdop,1.2);
+  assert.equal(parseHubPresence({...real,acc_m:4.5}).p_acc_m,4.5);
+  assert.equal(parseHubPresence({...real,sat_count:0}).p_sat_count,0);
+  for (const field of ['p_gnss_valid','p_sat_count','p_acc_m','p_hdop'])
+    assert.equal(parseHubPresence(payload)[field],null);
+  assert.equal(parseHubPresence({...payload,gnss_valid:false}).p_gnss_valid,false);
+});
+
+test('hub GNSS rejects invalid types, bounds and quality without a real fix',()=>{
+  const real={...payload,position_simulated:false,gnss_valid:true,sat_count:8,acc_m:5,hdop:1.2};
+  for(const change of [{gnss_valid:'true'},{gnss_valid:false},{gnss_valid:null},
+    {sat_count:-1},{sat_count:256},{sat_count:1.5},{sat_count:'8'},
+    {acc_m:0},{acc_m:-1},{acc_m:65535},{acc_m:Infinity},{acc_m:NaN},{acc_m:'5'},
+    {hdop:0},{hdop:-1},{hdop:10000},{hdop:NaN},{hdop:'1.2'},
+    {latitude:null,longitude:null},{position_simulated:true}])
+    assert.throws(()=>parseHubPresence({...real,...change}));
+});
+
+test('hub map adapter keeps fix age separate from heartbeat age and nullable quality',()=>{
+  const hub={gateway_guid16:16,display_name:'Hub',mode:'home',latitude:51.9,longitude:-2.2,
+    received_at:'2026-10-04T12:05:00Z',fix_at:'2026-10-04T12:00:00Z',gnss_valid:true,
+    sat_count:8,acc_m:null,hdop:1.2};
+  const device=hubMapDevice(hub);
+  assert.equal(device.gnss.satellites,8);
+  assert.equal(device.gnss.accuracyM,null);
+  assert.equal(device.gnss.hdop,1.2);
+  assert.equal(device.gnss.fixAgeS,300);
+  assert.equal(hubMapDevice({...hub,received_at:'2026-10-04T12:06:00Z'}).gnss.fixAgeS,360);
+  assert.equal(hubMapDevice({...hub,sat_count:null}).gnss.satellites,null);
+  assert.equal(hubMapDevice({...hub,sat_count:0}).gnss.satellites,0);
+  for(const change of [{gnss_valid:undefined},{gnss_valid:false},{fix_at:null},
+    {position_simulated:true},{latitude:null,longitude:null}])
+    assert.equal(hubMapDevice({...hub,...change}).gnss,null);
+});
+
+test('authenticated hub handler passes quality unchanged to the existing RPC',async()=>{
+  const m=mock({gateway_guid16:16});
+  const original=m.db.rpc;
+  m.db.rpc=async(name,args)=>{
+    assert.equal(args.p_sat_count,8); assert.equal(args.p_acc_m,null);
+    assert.equal(args.p_hdop,1.2); assert.equal(args.p_gnss_valid,true);
+    return original(name,args);
+  };
+  const report={...payload,position_simulated:false,gnss_valid:true,sat_count:8,hdop:1.2};
+  assert.equal((await handleHubPresence(m.db,report,'synthetic-test-token','test')).status,200);
+  assert.equal((await handleHubPresence(m.db,{...report,position_simulated:true},'synthetic-test-token','test')).status,400);
+  assert.equal(m.calls.length,1);
+});
