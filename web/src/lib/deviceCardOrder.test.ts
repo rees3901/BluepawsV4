@@ -1,6 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { deviceCardOrderStorageKey, deviceCardPinStorageKey, moveDeviceBefore, moveDeviceToHoverTarget, orderDeviceIds, pinDeviceFirst } from "./deviceCardOrder.ts";
+import { deviceCardOrderChanged, deviceCardOrderStorageKey, deviceCardPinStorageKey, moveDeviceBefore, moveDeviceToHoverTarget, orderDeviceIds, pinDeviceFirst } from "./deviceCardOrder.ts";
+
+test("polling unchanged IDs never triggers a reorder animation", () => {
+  const ids = [-48, 3001, 3003];
+  const refreshed = orderDeviceIds([...ids], [...ids], -48);
+  assert.notEqual(refreshed, ids);
+  assert.equal(deviceCardOrderChanged(ids, refreshed), false);
+  assert.equal(deviceCardOrderChanged([], ids), false);
+  assert.equal(deviceCardOrderChanged(ids, [-48, 3003, 3001]), true);
+  assert.equal(deviceCardOrderChanged(ids, [-48, 3001]), true);
+});
 
 test("orders visible devices using saved preference and appends new devices", () => {
   assert.deepEqual(orderDeviceIds([1001, 1002, 1003, 1004], [1003, 1001, 9999]), [1003, 1001, 1002, 1004]);

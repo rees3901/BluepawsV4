@@ -44,3 +44,9 @@ export function isCollarOffline(device: TelemetryDevice, nowMs: number) {
   if (device.entity === "hub") return false;
   return isCollarOfflineAge(Math.max(0, Math.floor((nowMs - device.lastUpdate) / 1000)));
 }
+
+export function collarSummary(devices: TelemetryDevice[], nowMs: number) {
+  const collars = devices.filter(device => device.entity !== "hub");
+  const offline = collars.filter(device => isCollarOffline(device, nowMs)).length;
+  return { total: collars.length, live: collars.length - offline, offline };
+}

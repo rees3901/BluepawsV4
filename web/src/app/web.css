@@ -1,5 +1,23 @@
 /* Web-only additions. The parity styling is imported unchanged from hub/platformio/data/style.css. */
 .gnss-indicator { position: relative; color: var(--text-secondary); }
+/* Let the sidebar grow with the viewport instead of crushing expanded cards. */
+:root { --panel-width: min(calc(100vw - 64px), max(490px, min(32vw, 620px), var(--panel-content-width, 490px))); }
+.card-indicators-primary > .gnss-indicator { flex: 0 0 auto; max-width: 100%; }
+.card-indicators-row3 .card-lastseen-group { font-variant-numeric: tabular-nums; }
+@media (max-width: 768px) {
+  :root { --panel-width: min(490px, calc(100vw - 12px)); }
+  /* Keep the close/toggle reachable when the drawer fills a narrow screen. */
+  body.panel-open .hamburger-btn { left: auto; right: 18px; top: auto; bottom: 18px; }
+  /* On phones, give the unbroken telemetry line the full card width. */
+  #deviceCards .card-summary { display: grid; grid-template-columns: 20px auto minmax(0, 1fr) 10px; gap: 6px; padding: 8px; }
+  #deviceCards .card-identity { display: contents; }
+  #deviceCards .card-reorder-handle { grid-column: 1; grid-row: 1; }
+  #deviceCards .card-avatar-wrap { grid-column: 2; grid-row: 1; }
+  #deviceCards .card-name-row { grid-column: 3; grid-row: 1; }
+  #deviceCards .card-chevron { grid-column: 4; grid-row: 1; }
+  #deviceCards .card-indicators, #deviceCards .card-fault-row, #deviceCards .card-offline-summary { grid-column: 1 / -1; }
+  #deviceCards .card-indicators-primary { overflow-x: auto; max-width: 100%; }
+}
 .card-indicators-row3 > .collar-awake { flex: 0 0 auto; min-width: 1.3em; font-size: 1.3em; }
 /* Match the radio bars' natural height; avoid an inline baseline/descender gap. */
 .gnss-indicator summary { display: flex; cursor: pointer; list-style: none; }
@@ -679,6 +697,16 @@ button#statusBanner {
   gap: 6px;
   margin-left: auto;
 }
+
+.panel-collar-summary {
+  display: flex;
+  flex: 0 0 100%;
+  gap: 16px;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+.panel-collar-summary strong { color: var(--text-primary); }
 
 @media (max-width: 768px) {
   #panelHeader {

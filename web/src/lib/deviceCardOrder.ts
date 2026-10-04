@@ -1,3 +1,8 @@
+// New telemetry objects are not a reorder. Only animate a changed sequence.
+export function deviceCardOrderChanged(previous: number[], next: number[]) {
+  return previous.length > 0 && (previous.length !== next.length || previous.some((id, index) => id !== next[index]));
+}
+
 export function deviceCardOrderStorageKey(userEmail: string | null, householdId: string | null) {
   return `bp_device_card_order:${userEmail ?? "anonymous"}:${householdId ?? "tutorial"}`;
 }
