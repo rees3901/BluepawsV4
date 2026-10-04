@@ -700,8 +700,10 @@ button#statusBanner {
 
 .panel-collar-summary {
   display: flex;
-  flex: 0 0 100%;
-  gap: 16px;
+  flex: 0 0 auto;
+  align-items: center;
+  min-height: 32px;
+  gap: 12px;
   color: var(--text-secondary);
   font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
@@ -716,7 +718,7 @@ button#statusBanner {
 @media (max-width: 768px) {
   #panelHeader {
     flex-wrap: wrap;
-    gap: 6px 0;
+    gap: 6px 12px;
     padding: 10px 12px;
   }
 
