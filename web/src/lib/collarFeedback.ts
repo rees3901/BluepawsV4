@@ -4,7 +4,7 @@ export interface CommandFeedback {
   id: string;
   device_id: number;
   command_type: string;
-  command_payload: { profile?: string };
+  command_payload: { profile?: string; action?: string };
   status: string;
   requested_at: string;
   expires_at: string;
@@ -39,7 +39,8 @@ export function commandMessage(command: CommandFeedback | null | undefined, now:
   if (!labels[status]) return null;
   const detail = command.command_type === "set_profile"
     ? `profile → ${PROFILE_LABELS[command.command_payload.profile ?? ""] ?? "Unknown"}`
-    : command.command_type.replaceAll("_", " ");
+    : command.command_type === "led_find" ? `LED → ${command.command_payload.action ?? "Unknown"}`
+      : command.command_type.replaceAll("_", " ");
   return { text: `${labels[status]}: ${detail}`, pending: status === "pending" || status === "sent", status };
 }
 

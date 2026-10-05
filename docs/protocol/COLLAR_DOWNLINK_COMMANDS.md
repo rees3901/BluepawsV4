@@ -201,3 +201,9 @@ the [search-party snapshot's public definer access](https://supabase.com/docs/gu
 [leaked-password protection](https://supabase.com/docs/guides/auth/password-security#password-strength-and-leaked-password-protection),
 and [RLS tables without client policies](https://supabase.com/docs/guides/database/database-linter?lint=0008_rls_enabled_no_policy).
 This change does not alter those features or open credential-table access.
+
+## LED Find extension
+
+The reusable `led_find` command and CONFIG LED tags are documented in
+[LED Find controls](../firmware/collar/LED_FIND_CONTROLS.md). Initial support is
+gated to the fitted 3001–3004 batch; compatible firmware is required.
