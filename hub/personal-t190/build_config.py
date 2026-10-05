@@ -76,5 +76,38 @@ ui = replace_once(ui, 'Needs a clear sky view', 'Collar GPS unaffected')
 ui = replace_once(ui, 'Hub fix age: %s', 'Configured home: %s')
 ui = replace_once(ui, 'GPS is hub\'s own position', 'Configured, not GNSS')
 ui = replace_once(ui, '[DISPLAY] V2 ST7735 160x80 on FSPI; USER GPIO0: tap next, hold home', '[DISPLAY] T190 ST7789 320x170 on FSPI; USER GPIO21: tap next, hold home')
+ui = replace_once(ui, 'uint32_t refreshed = 0;', '''uint32_t refreshed = 0;
+constexpr uint32_t DisplayIdleMs = 60000;
+uint32_t lastDisplayUse = 0;
+bool displayAwake = true;''')
+ui = replace_once(ui, '    digitalWrite(Backlight,HIGH);', '''    digitalWrite(Backlight,HIGH);
+    lastDisplayUse = millis();''')
+ui = replace_once(ui, '''    if (action!=ButtonAction::None) {
+        page=action==ButtonAction::Home?0:(page+1)%PageCount; redraw=true;
+        Serial.printf("[DISPLAY] page %u/%u\\n",page+1,PageCount);
+    }
+    if (!redraw && now-refreshed<1000) return;''', r'''    if (action!=ButtonAction::None) {
+        lastDisplayUse = now;
+        if (!displayAwake) {
+            // Consume the wake gesture: retain the selected page.
+            screen.enableDisplay(true);
+            digitalWrite(Backlight,HIGH);
+            displayAwake = true;
+            Serial.println("[DISPLAY] USER wake");
+        } else {
+            page=action==ButtonAction::Home?0:(page+1)%PageCount;
+            Serial.printf("[DISPLAY] page %u/%u\n",page+1,PageCount);
+        }
+        redraw = true;
+    }
+    if (displayAwake && uint32_t(now-lastDisplayUse)>=DisplayIdleMs) {
+        digitalWrite(Backlight,LOW);
+        screen.enableDisplay(false);
+        displayAwake = false;
+        Serial.println("[DISPLAY] idle blank after 60s; USER wakes");
+    }
+    // Display-only idle: radio, BLE, Wi-Fi and cloud tasks keep running.
+    if (!displayAwake) return;
+    if (!redraw && now-refreshed<1000) return;''')
 for name, text in [('t190_pins.h',pins),('t190_canonical.inc',canonical),('t190_presence.inc',presence),('t190_ui.inc',ui)]:
     (private/name).write_text(text,encoding="utf-8")

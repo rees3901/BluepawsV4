@@ -23,6 +23,12 @@ SX1262 runs on HSPI; ST7789 runs separately on FSPI. USER GPIO21 cycles the eigh
 status pages; hold USER to return home. The compact Tracker layout is retained.
 TFT power GPIO7 is active low. Never flash the Tracker V2 binary onto the T190.
 
+The screen and backlight blank after 60 seconds without USER interaction.
+The first USER tap (or hold) wakes the same page; subsequent taps cycle pages
+and a hold returns to HUB. Incoming packets do not extend the display timeout.
+Only the display is disabled: radio reception, BLE and cloud relay keep running.
+The timeout is `DisplayIdleMs` in the isolated build adapter; TFT power stays on.
+
 This device has 16MB flash. Preserve its complete original flash before upload.
 Flash application with `pio run -d hub/personal-t190 -e personal_t190 -t upload
 --upload-port COM22`; upload the existing browser filesystem with `-t uploadfs`.
@@ -48,3 +54,16 @@ prove command delivery or range. Production deployments remain outside this work
   but guest-network reachability from this PC is not confirmed.
 - Collar relay, command delivery, range and prolonged uptime need actual traffic
   validation. No production software or schema changes were made.
+
+### LED relay and display idle update
+
+The personal LED cloud relay adapter was flashed to COM22, followed by the
+60-second display idle update. Both uploads passed flash hash verification.
+SX1262 initialization, Wi-Fi connection and BLE home advertising were observed.
+Authenticated hub status was accepted with HTTP 200 after both updates.
+Serial confirmed the display idle transition 60 seconds after display startup;
+physical USER wake and visual blanking require the user's confirmation.
+The existing stored replay batch returns HTTP 400 and snapshot refresh returned
+HTTP 503; queued records were preserved. Fresh collar relay and the unreleased
+GUI LED command flow must not be treated as verified from these startup checks.
+The recovery bundle includes `personal-t190-idle-display-firmware.bin`.
