@@ -63,7 +63,13 @@ SX1262 initialization, Wi-Fi connection and BLE home advertising were observed.
 Authenticated hub status was accepted with HTTP 200 after both updates.
 Serial confirmed the display idle transition 60 seconds after display startup.
 The user confirmed visual blanking, USER wake and subsequent page cycling work.
-The existing stored replay batch returns HTTP 400 and snapshot refresh returned
-HTTP 503; queued records were preserved. Fresh collar relay and the unreleased
+The existing stored replay batch returns HTTP 400 with `error=invalid_local_id`.
+The backend requires a positive integer journal ID for every item and rejects
+the whole batch before packet processing if one ID fails that check. The journal
+currently permits ID zero; its allocator can return zero on a mutex timeout.
+That is a possible source, not a confirmed identification of the affected record.
+The earlier snapshot HTTP 503 logged `gateway_lookup/PGRST303`; the next restart
+successfully cached ten Family appearances. Queued records were preserved.
+Fresh collar relay and the unreleased
 GUI LED command flow must not be treated as verified from these startup checks.
 The recovery bundle includes `personal-t190-idle-display-firmware.bin`.

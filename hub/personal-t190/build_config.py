@@ -17,6 +17,24 @@ import sys
 sys.path.insert(0, str(root))
 from led_cloud_patch import patch_led_cloud
 canonical = patch_led_cloud(canonical, private)
+canonical = replace_once(canonical,
+    '        Serial.printf("[REPLAY] Batch POST failed HTTP %d\\n", code);',
+    r'''        Serial.printf("[REPLAY] Batch POST failed HTTP %d\n", code);
+        // Only bounded symbolic error codes; never dump wrappers or credentials.
+        JsonDocument failure;
+        if (deserializeJson(failure, response) == DeserializationError::Ok) {
+            for (const char* field : {"error", "code"}) {
+                const char* value = failure[field] | "";
+                char safe[49] = {};
+                unsigned n = 0;
+                while (value[n] && n < sizeof(safe)-1) {
+                    const char c = value[n];
+                    if (!((c>='a' && c<='z') || (c>='0' && c<='9') || c=='_')) break;
+                    safe[n++] = c;
+                }
+                Serial.printf("[REPLAY] %s=%s\n", field, safe);
+            }
+        }''')
 pins = (root / "../../diagnostics/t190-radio-monitor/include/pins.h").read_text()
 pin_adapter = '#include "t190_pins.h"\n#define HUB_PINS_H\n'
 for name in ("NSS", "SCK", "MOSI", "MISO", "RST", "BUSY", "DIO1"):
