@@ -215,7 +215,8 @@ outdoor tracking. This file will be updated as actual hardware evidence arrives.
   threshold, held-button repeat suppression, release after hold, a press released
   before wake setup, long second press and timer rollover. LED tests passed all
   seven pulse boundaries and the 910ms finish, alongside existing Find timing.
-- Final live-credential firmware build passed. Physical awake/asleep gesture
-  checks and COM23 upload are pending; COM23 is currently absent during sleep.
+- Final live-credential firmware build passed. COM23 upload to collar 3004
+  succeeded with flash hashes verified. Physical awake/asleep gesture checks
+  remain pending; build and upload alone do not qualify those interactions.
 - Existing protocol, credentials, persistent state layout and production sources
   are unchanged. Private recovery image: `collar/3004-user-gestures-firmware.bin`.
