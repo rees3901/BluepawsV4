@@ -175,28 +175,23 @@ override can seed a fresh board above that number; its persisted counter then
 takes precedence. The default remains 1 for newly registered identities.
 Keep the failed board disconnected. Never copy another collar's credentials.
 
-## Optional JHE20B bench finder
+## Optional external D1 LED
 
-Define `PERSONAL_JHE_BUZZER 1` only in the fitted collar's private build header.
-GPIO2 (XIAO D1) uses open-drain LOW to trigger and releases between beeps and
-before sleep. This does not make the GPIO 5V tolerant; direct-wire electrical
-compatibility has not been established. Other collars leave GPIO2 untouched.
+Define `PERSONAL_D1_LED 1` only in the fitted collar's private build header.
+Wire GPIO2 (XIAO D1) through a 330-ohm to 1-kohm resistor to the LED anode;
+connect the cathode to GND. GPIO HIGH lights it; LOW turns it off, including sleep.
+Other collars leave GPIO2 untouched. Remove the previous FPV finder entirely.
 
-An existing Find command with `BUZZER_CHIRP` produces one cycle of three 150ms
-pulses, separated by 80ms gaps. `BUZZER_OFF` stops/release the trigger. Other
-sound patterns are unsupported; no PWM or melodies are generated. The GUI's
-alert duration is not implemented by this bench adapter. Duplicate commands
-are re-ACKed without replay. GPIO48 LED behaviour is retained separately;
-the JHE20B's integrated LED coupling must be physically observed.
+The existing Find Alert Chirp command produces three 150ms flashes with 80ms
+gaps. OFF stops the output; other buzzer patterns are unsupported. No sound is
+generated. The GUI duration is not implemented. Duplicate commands re-ACK
+without replay. Enabled assemblies use D1 for Find feedback instead of GPIO48;
+other assemblies retain their previous GPIO48 Find behaviour.
 
-While awake, serial `buzzer chirp` runs the same single sequence without GNSS
-time; `buzzer off` releases it. Serial control is available during GNSS pumping
-and the command receive window, not during deep sleep or a blocking BLE scan.
-Pulse timing is non-blocking. The receive window remains open until a sequence
-already started completes. Sleep cancels any remaining trigger activity.
-Short USER-button wake also gives one immediate 150ms chirp, completed before
-the BLE scan/GNSS attempt. Existing two-second long press remains Lost/Active.
-Button gestures are still handled at wake, not continuously throughout awake work.
+A short USER-button wake gives one immediate 150ms flash before BLE/GNSS work,
+preserving the wake/requested-report behaviour and the two-second Lost/Active
+long press. Button gestures remain wake-time actions, not continuous awake input.
 
-The finder has independent power-loss behaviour and its own battery. USB-only
-5V bench operation does not qualify LiPo-only operation or safe animal use.
+While awake, serial `led flash` tests three flashes without GNSS time and `led off`
+stops them. Timed flashes do not add delays to GPS/command handling. The receive
+window completes a sequence already started; entering sleep cancels any remainder.

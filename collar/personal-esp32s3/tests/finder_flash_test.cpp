@@ -1,7 +1,7 @@
 #include <assert.h>
-#include "finder_chirp.h"
+#include "finder_flash.h"
 int main() {
-    personal::FinderChirp f;
+    personal::FinderFlash f;
     assert(!f.tick(0));
     f.start(100);
     assert(f.tick(100)); assert(f.tick(249)); assert(!f.tick(250));

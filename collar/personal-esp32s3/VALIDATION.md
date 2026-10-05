@@ -184,3 +184,20 @@ outdoor tracking. This file will be updated as actual hardware evidence arrives.
   USER-button feedback and live GUI command delivery remain unconfirmed.
 - Three-chirp support uses the existing Find command, with duplicate suppression
   retained. No melody or alert-duration support is claimed. Personal branch only.
+
+## External D1 LED replacement — collar 3004, 5 October 2026
+
+- Removed the FPV finder adapter. The private 3004 build opts into an active-high
+  GPIO2/D1 LED, idle LOW and held LOW during sleep. Credentials and NVS unchanged.
+- Short USER wake retains its requested report and gives one 150ms flash.
+  Find Alert Chirp maps to three 150ms flashes separated by 80ms gaps; OFF cancels.
+  D1-enabled builds use D1 instead of GPIO48 for Find feedback.
+- Native timing tests passed for pulse boundaries, single flash, cancellation,
+  invalid count and timer rollover. Live firmware build passed. First COM23
+  upload verified flash hashes, and the serial bench trace confirms a three-flash
+  sequence was queued and completed. This trace does not prove visible LED output
+  or live GUI command delivery; those physical checks remain pending.
+- The final GPIO48 suppression adjustment built successfully; its first upload
+  attempt found COM23 absent after deep sleep. Final upload requires a wake/reset.
+- Previous firmware is preserved in the private recovery bundle as
+  `collar/3004-before-d1-led-firmware.bin`. No production release is involved.

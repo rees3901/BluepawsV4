@@ -2,8 +2,8 @@
 #include <stdint.h>
 
 namespace personal {
-// Active finder supplies its own tone: only timed trigger pulses are generated.
-class FinderChirp {
+// Active-high external LED feedback: one or three bounded flashes.
+class FinderFlash {
 public:
     void start(uint32_t now, uint8_t count = 3) {
         active_ = count > 0 && count <= 3; started_ = now;

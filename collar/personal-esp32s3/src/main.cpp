@@ -12,7 +12,7 @@
 #include "hardware.h"
 #include "personal_policy.h"
 #include "gnss_recovery.h"
-#include "finder_chirp.h"
+#include "finder_flash.h"
 
 #ifdef PERSONAL_COMPILE_CHECK
 constexpr uint16_t PERSONAL_DEVICE_ID = 0xFFE1, PERSONAL_HUB_ID = 0xFFF0;
@@ -26,8 +26,8 @@ static_assert(sizeof(PERSONAL_HMAC_KEY) == 32, "HMAC key must be 32 bytes");
 #ifndef PERSONAL_HOME_BLE_ADDRESS
 #define PERSONAL_HOME_BLE_ADDRESS ""
 #endif
-#ifndef PERSONAL_JHE_BUZZER
-#define PERSONAL_JHE_BUZZER 0
+#ifndef PERSONAL_D1_LED
+#define PERSONAL_D1_LED 0
 #endif
 
 namespace {
@@ -63,32 +63,32 @@ bool bleReady = false, bootReport = true, buttonReport = false;
 uint32_t lostStartedMs = 0;
 uint8_t report[BP_MAX_PACKET_SIZE];
 uint8_t reportLength = 0;
-personal::FinderChirp finder;
+personal::FinderFlash finder;
 constexpr int FINDER_PIN = 2; // XIAO D1, opt-in for this specific assembly.
 void startFinder(uint8_t pattern, uint8_t count = 3) {
-#if PERSONAL_JHE_BUZZER
+#if PERSONAL_D1_LED
     if (pattern == BUZZER_OFF) {
-        finder.stop(); digitalWrite(FINDER_PIN, HIGH);
-        Serial.println("[FINDER] released/off");
+        finder.stop(); digitalWrite(FINDER_PIN, LOW);
+        Serial.println("[FINDER LED] off");
     } else if (pattern == BUZZER_CHIRP) {
         finder.start(millis(), count);
-        Serial.printf("[FINDER] %u chirp(s) queued; one cycle only\n", count);
-    } else Serial.println("[FINDER] unsupported pattern; only OFF/CHIRP supported");
+        Serial.printf("[FINDER LED] %u flash(es) queued; one cycle only\n", count);
+    } else Serial.println("[FINDER LED] unsupported pattern; only OFF/CHIRP supported");
 #endif
 }
 void tickFinder() {
-#if PERSONAL_JHE_BUZZER
+#if PERSONAL_D1_LED
     const bool wasActive = finder.active();
-    digitalWrite(FINDER_PIN, finder.tick(millis()) ? LOW : HIGH);
-    if (wasActive && !finder.active()) Serial.println("[FINDER] chirps complete; released");
+    digitalWrite(FINDER_PIN, finder.tick(millis()) ? HIGH : LOW);
+    if (wasActive && !finder.active()) Serial.println("[FINDER LED] flashes complete; off");
     // Local bench control works without satellite UTC; not a remote protocol.
     static char input[24]; static uint8_t used = 0;
     while (Serial.available()) {
         const char c = char(Serial.read());
         if (c == '\n' || c == '\r') {
             input[used] = 0;
-            if (!strcmp(input,"buzzer chirp")) startFinder(BUZZER_CHIRP);
-            else if (!strcmp(input,"buzzer off")) startFinder(BUZZER_OFF);
+            if (!strcmp(input,"led flash")) startFinder(BUZZER_CHIRP);
+            else if (!strcmp(input,"led off")) startFinder(BUZZER_OFF);
             used = 0;
         } else if (used < sizeof(input)-1) input[used++] = c;
         else used = 0;
@@ -349,10 +349,12 @@ void receiveWindow(bool homeSeen) {
             const uint8_t len = buildPacket(ack, TX_ACK, homeSeen, pkt_msg_seq(incoming));
             transmit(ack, len);
             if (reason == TX_INTERRUPT && action == personal::CommandResult::Apply) {
-                startFinder(BUZZER_OFF); // Release any previous chirp before legacy LED delays.
+                startFinder(BUZZER_OFF); // Stop any previous flash before legacy LED delays.
                 uint8_t flashes = 5;
                 pkt_tlv_get_u8(incoming, TLV_LED_FLASH, &flashes);
+#if !PERSONAL_D1_LED
                 flashFind(flashes);
+#endif
                 uint8_t pattern = BUZZER_CHIRP;
                 pkt_tlv_get_u8(incoming, TLV_BUZZER_PATTERN, &pattern);
                 startFinder(pattern);
@@ -368,8 +370,8 @@ void receiveWindow(bool homeSeen) {
 }
 void sleepFor(uint16_t seconds) {
     finder.stop();
-#if PERSONAL_JHE_BUZZER
-    digitalWrite(FINDER_PIN, HIGH); // Open-drain release, not a driven high level.
+#if PERSONAL_D1_LED
+    digitalWrite(FINDER_PIN, LOW); // External LED off throughout sleep.
     gpio_hold_en(gpio_num_t(FINDER_PIN));
 #endif
     stopGps(seconds);
@@ -401,11 +403,11 @@ void setup() {
     uint8_t keyBits = 0; for (uint8_t b : PERSONAL_HMAC_KEY) keyBits |= b;
     if (!keyBits) fatal("[AUTH] Missing HMAC key");
     gpio_deep_sleep_hold_dis();
-#if PERSONAL_JHE_BUZZER
+#if PERSONAL_D1_LED
     gpio_hold_dis(gpio_num_t(FINDER_PIN));
-    digitalWrite(FINDER_PIN, HIGH);
-    pinMode(FINDER_PIN, OUTPUT_OPEN_DRAIN);
-    Serial.println("[FINDER] JHE20B D1/GPIO2 open-drain; idle released");
+    digitalWrite(FINDER_PIN, LOW);
+    pinMode(FINDER_PIN, OUTPUT);
+    Serial.println("[FINDER LED] D1/GPIO2 active-high; idle off");
 #endif
     gpio_hold_dis(gpio_num_t(GNSS_WAKE)); gpio_hold_dis(gpio_num_t(GNSS_TX));
     rtc_gpio_deinit(gpio_num_t(USER_BUTTON));
