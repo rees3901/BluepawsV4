@@ -12,5 +12,9 @@ int main() {
     assert(f.tick(0x20u)); assert(!f.tick(uint32_t(0xfffffff0u+610u)));
     f.start(10); f.stop(); assert(!f.tick(11));
     f.start(100,1); assert(f.tick(249)); assert(!f.tick(250)); assert(!f.active());
+    f.start(100,7);
+    for (unsigned i=0;i<7;++i) { assert(f.tick(100+i*140)); assert(f.tick(169+i*140)); if(i<6) assert(!f.tick(170+i*140)); }
+    assert(!f.tick(1010)); assert(!f.active());
+    f.start(100,8); assert(!f.active());
     f.start(100,0); assert(!f.active());
 }

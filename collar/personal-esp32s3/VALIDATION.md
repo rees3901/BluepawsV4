@@ -201,3 +201,21 @@ outdoor tracking. This file will be updated as actual hardware evidence arrives.
   attempt found COM23 absent after deep sleep. Final upload requires a wake/reset.
 - Previous firmware is preserved in the private recovery bundle as
   `collar/3004-before-d1-led-firmware.bin`. No production release is involved.
+
+## Continuous USER gestures — 5 October 2026
+
+- Single press now gives seven rapid D1 flashes in 910ms without requesting a
+  report. Double press (350ms window) requests GPS/report; a three-second hold
+  toggles Lost/Active and requests a report. No debug-mode toggle.
+- Background input sampling queues gestures during awake library calls. BLE
+  scanning now runs asynchronously while the main loop services feedback.
+  Button-triggered sleep wakes classify the gesture before starting radio/GNSS;
+  single presses resume the remaining scheduled sleep when RTC UTC is available.
+- Native tests passed bounce filtering, single/double separation, three-second
+  threshold, held-button repeat suppression, release after hold, a press released
+  before wake setup, long second press and timer rollover. LED tests passed all
+  seven pulse boundaries and the 910ms finish, alongside existing Find timing.
+- Final live-credential firmware build passed. Physical awake/asleep gesture
+  checks and COM23 upload are pending; COM23 is currently absent during sleep.
+- Existing protocol, credentials, persistent state layout and production sources
+  are unchanged. Private recovery image: `collar/3004-user-gestures-firmware.bin`.

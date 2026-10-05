@@ -13,6 +13,10 @@
 #include "personal_policy.h"
 #include "gnss_recovery.h"
 #include "finder_flash.h"
+#include "user_gestures.h"
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <freertos/queue.h>
 
 #ifdef PERSONAL_COMPILE_CHECK
 constexpr uint16_t PERSONAL_DEVICE_ID = 0xFFE1, PERSONAL_HUB_ID = 0xFFF0;
@@ -57,6 +61,7 @@ struct RetainedState {
     bool home = false;
 } ;
 RTC_DATA_ATTR RetainedState retained;
+RTC_DATA_ATTR uint32_t scheduledWakeUtc = 0;
 volatile bool radioEvent = false;
 bool radioReady = false, gpsRunning = false, freshFix = false, gpsFailed = false;
 bool bleReady = false, bootReport = true, buttonReport = false;
@@ -64,6 +69,20 @@ uint32_t lostStartedMs = 0;
 uint8_t report[BP_MAX_PACKET_SIZE];
 uint8_t reportLength = 0;
 personal::FinderFlash finder;
+QueueHandle_t buttonEvents = nullptr;
+volatile bool gestureBusy = false;
+uint32_t buttonRequests = 0;
+void pollButton(void* arg) {
+    personal::UserGestures gestures;
+    gestures.begin(bool(uintptr_t(arg)), millis());
+    for (;;) {
+        auto event = gestures.tick(digitalRead(USER_BUTTON) == LOW, millis());
+        if (event != personal::Gesture::None) xQueueSend(buttonEvents, &event, portMAX_DELAY);
+        gestureBusy = gestures.busy();
+        vTaskDelay(pdMS_TO_TICKS(5));
+    }
+}
+void serviceButton();
 constexpr int FINDER_PIN = 2; // XIAO D1, opt-in for this specific assembly.
 void startFinder(uint8_t pattern, uint8_t count = 3) {
 #if PERSONAL_D1_LED
@@ -131,6 +150,22 @@ void applyProfile(uint8_t profile) {
     retained.homeCycles = 0;
     if (radioReady) radio.setOutputPower(bp_profile_config(bp_profile_t(profile))->tx_power_dBm);
 }
+void serviceButton() {
+    personal::Gesture event;
+    while (buttonEvents && xQueueReceive(buttonEvents, &event, 0) == pdTRUE) {
+        if (event == personal::Gesture::Single) {
+            Serial.println("[BUTTON] single: seven rapid flashes only");
+            startFinder(BUZZER_CHIRP, 7);
+        } else {
+            if (event == personal::Gesture::Long) {
+                applyProfile(state.profile == PROFILE_LOST ? PROFILE_ACTIVE : PROFILE_LOST);
+                saveState();
+                Serial.printf("[BUTTON] 3s hold: %s\n", bp_profile_name(bp_profile_t(state.profile)));
+            } else Serial.println("[BUTTON] double: requested GPS/report");
+            buttonReport = true; ++buttonRequests;
+        }
+    }
+}
 void enforceLostTimeout() {
     if (state.profile != PROFILE_LOST) return;
     if ((state.lostUntil && utc() >= state.lostUntil) || millis() - lostStartedMs >= LOST_MODE_MAX_DURATION_S * 1000UL) {
@@ -143,7 +178,8 @@ void startGps() {
     gps = TinyGPSPlus();
     nmea = personal::NmeaDiagnostics();
     digitalWrite(GNSS_WAKE, HIGH);
-    delay(500);
+    const uint32_t powering = millis();
+    while (millis() - powering < 500) { serviceButton(); tickFinder(); delay(5); }
     gnssSerial.begin(GNSS_BAUD, SERIAL_8N1, GNSS_RX, GNSS_TX);
     gpsRunning = true;
 }
@@ -165,7 +201,7 @@ void stopGps(uint16_t seconds) {
     digitalWrite(GNSS_WAKE, LOW);
 }
 void pumpGps() {
-    tickFinder();
+    serviceButton(); tickFinder();
     if (!gpsRunning) return;
     while (gnssSerial.available()) {
         const char c = char(gnssSerial.read());
@@ -240,7 +276,13 @@ bool scanHome() {
     scan->setActiveScan(true);
     scan->setInterval(160);
     scan->setWindow(80);
-    auto results = scan->start(BLE_SCAN_DURATION_S, false);
+    // Async BLE scan keeps gestures and LED timing serviced during discovery.
+    scan->start(BLE_SCAN_DURATION_S, [](BLEScanResults) {}, false);
+    const uint32_t scanStarted = millis();
+    while (millis() - scanStarted < BLE_SCAN_DURATION_S * 1000UL + 100) {
+        pumpGps(); delay(5);
+    }
+    auto results = scan->getResults();
     bool seen = false;
     for (int i = 0; i < results.getCount(); ++i) {
         auto device = results.getDevice(i);
@@ -369,6 +411,11 @@ void receiveWindow(bool homeSeen) {
     Serial.printf("[RECEIPT] %s\n", acknowledged ? "hub received" : "not received; no cellular fallback");
 }
 void sleepFor(uint16_t seconds) {
+    // Finish a pending gesture/feedback before sleep; never swallow a report request.
+    do { serviceButton(); tickFinder(); delay(5); }
+    while (gestureBusy || finder.active() || uxQueueMessagesWaiting(buttonEvents));
+    if (buttonReport) return;
+    scheduledWakeUtc = utc() ? utc() + seconds : 0;
     finder.stop();
 #if PERSONAL_D1_LED
     digitalWrite(FINDER_PIN, LOW); // External LED off throughout sleep.
@@ -383,12 +430,10 @@ void sleepFor(uint16_t seconds) {
     gpio_hold_en(gpio_num_t(GNSS_TX));
     gpio_deep_sleep_hold_en();
     esp_sleep_enable_timer_wakeup(uint64_t(seconds) * 1000000ULL);
-    // A held button must not cause an endless deep-sleep reset loop.
-    if (digitalRead(USER_BUTTON) == HIGH) {
-        rtc_gpio_pullup_en(gpio_num_t(USER_BUTTON));
-        rtc_gpio_pulldown_dis(gpio_num_t(USER_BUTTON));
-        esp_sleep_enable_ext0_wakeup(gpio_num_t(USER_BUTTON), 0);
-    }
+    // Held gestures finish above. Always arm wake to catch a press at the sleep boundary.
+    rtc_gpio_pullup_en(gpio_num_t(USER_BUTTON));
+    rtc_gpio_pulldown_dis(gpio_num_t(USER_BUTTON));
+    esp_sleep_enable_ext0_wakeup(gpio_num_t(USER_BUTTON), 0);
     Serial.printf("[SLEEP] %us\n", seconds);
     Serial.flush();
     esp_deep_sleep_start();
@@ -417,7 +462,7 @@ void setup() {
     const bool deepWake = wake == ESP_SLEEP_WAKEUP_TIMER || wake == ESP_SLEEP_WAKEUP_EXT0;
     if (!deepWake || retained.magic != STATE_MAGIC) retained = RetainedState{};
     bootReport = !deepWake;
-    buttonReport = wake == ESP_SLEEP_WAKEUP_EXT0;
+    buttonReport = false;
     if (!prefs.begin("bp-personal", false)) fatal("[STATE] Cannot open NVS");
     const size_t stored = prefs.getBytesLength("state");
     if (stored) {
@@ -430,21 +475,26 @@ void setup() {
         applyProfile(LOST_MODE_FALLBACK); saveState();
     }
     lostStartedMs = millis();
-    bool longButton = false;
-    if (digitalRead(USER_BUTTON) == LOW) {
-        const uint32_t pressed = millis();
-        while (digitalRead(USER_BUTTON) == LOW && millis() - pressed < 2000) delay(10);
-        if (millis() - pressed >= 2000) {
-            longButton = true;
-            applyProfile(state.profile == PROFILE_LOST ? PROFILE_ACTIVE : PROFILE_LOST);
-            saveState();
+    buttonEvents = xQueueCreate(8, sizeof(personal::Gesture));
+    if (!buttonEvents) fatal("[BUTTON] queue allocation failed");
+    const bool buttonWake = wake == ESP_SLEEP_WAKEUP_EXT0;
+    gestureBusy = buttonWake || digitalRead(USER_BUTTON) == LOW;
+    if (xTaskCreate(pollButton, "user-button", 2048,
+        reinterpret_cast<void*>(uintptr_t(gestureBusy)), 1, nullptr) != pdPASS)
+        fatal("[BUTTON] task allocation failed");
+    if (buttonWake) {
+        // A single tap only gives feedback and resumes the scheduled sleep.
+        do { serviceButton(); tickFinder(); delay(5); }
+        while (gestureBusy || finder.active() || uxQueueMessagesWaiting(buttonEvents));
+        if (!buttonReport) {
+            const uint32_t now = utc();
+            if (!scheduledWakeUtc || !now || scheduledWakeUtc > now) {
+                const uint16_t remaining = scheduledWakeUtc && now
+                    ? uint16_t(min(scheduledWakeUtc - now, uint32_t(65535)))
+                    : bp_profile_config(bp_profile_t(state.profile))->sleep_interval_s;
+                sleepFor(remaining);
+            }
         }
-        buttonReport = true;
-    }
-    if (buttonReport && !longButton) {
-        startFinder(BUZZER_CHIRP, 1);
-        // Complete the immediate feedback before the blocking BLE scan starts.
-        while (finder.active()) { tickFinder(); delay(5); }
     }
     Serial.printf("[PERSONAL] collar=%u hub=%04X profile=%s; real GNSS, LoRa only\n",
         PERSONAL_DEVICE_ID, PERSONAL_HUB_ID, bp_profile_name(bp_profile_t(state.profile)));
@@ -460,7 +510,7 @@ void setup() {
 }
 
 void loop() {
-    enforceLostTimeout();
+    serviceButton(); enforceLostTimeout();
     const uint32_t cycleStart = millis();
     freshFix = false; gpsFailed = false;
     const bool seen = state.profile == PROFILE_LOST ? false : scanHome();
@@ -482,6 +532,7 @@ void loop() {
     const bool reportDue = bootReport || buttonReport || lost || gnssDue ||
         (retained.home && retained.homeCycles % profile->wake_checkin_ratio == 0);
     // No build-time or invented timestamps: wait for GNSS time on first boot.
+    const uint32_t servicedRequests = buttonRequests;
     if (reportDue && utc()) {
         const uint8_t reason = bootReport ? TX_BOOT : buttonReport ? TX_INTERRUPT :
             retained.home && !gnssDue ? TX_WAKE_CHECKIN : TX_TELEMETRY;
@@ -490,14 +541,17 @@ void loop() {
         receiveWindow(seen);
         bootReport = false;
     } else if (!utc()) Serial.println("[TIME] Report suppressed until GNSS UTC is available");
-    buttonReport = false;
+    serviceButton();
+    buttonReport = buttonRequests != servicedRequests;
+    if (buttonReport) return;
     enforceLostTimeout();
     profile = bp_profile_config(bp_profile_t(state.profile));
-    if (state.profile != PROFILE_LOST) sleepFor(profile->sleep_interval_s);
+    if (state.profile != PROFILE_LOST) { sleepFor(profile->sleep_interval_s); return; }
     advertiseFind();
     // Lost mode keeps GNSS running, with bounded reporting and a two-hour exit.
     while (millis() - cycleStart < LOST_MODE_CYCLE_INTERVAL_S * 1000UL) {
         pumpGps(); enforceLostTimeout();
+        if (buttonReport || state.profile != PROFILE_LOST) break;
         digitalWrite(USER_LED, (millis() % 2000) < 100 ? HIGH : LOW);
         delay(20);
     }

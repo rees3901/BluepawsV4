@@ -188,9 +188,20 @@ generated. The GUI duration is not implemented. Duplicate commands re-ACK
 without replay. Enabled assemblies use D1 for Find feedback instead of GPIO48;
 other assemblies retain their previous GPIO48 Find behaviour.
 
-A short USER-button wake gives one immediate 150ms flash before BLE/GNSS work,
-preserving the wake/requested-report behaviour and the two-second Lost/Active
-long press. Button gestures remain wake-time actions, not continuous awake input.
+USER gestures work both awake and when waking from sleep:
+
+- Single short press: seven rapid D1 flashes (70ms on/70ms off, 910ms total).
+  It does not request GPS or telemetry. From sleep it resumes the remaining
+  scheduled sleep when retained UTC is available.
+- Double press: second tap within 350ms after the first release requests the
+  GPS/report process. Existing GPS quality gates and the 60-second limit apply.
+- Hold three seconds: toggle Lost/Active, persist the profile and request a report.
+  Holding longer does not repeat the toggle; release is required for another action.
+
+Inputs are debounced for 30ms. A background sampler captures gestures during
+blocking radio/library calls; the main loop applies queued actions at its next
+service point. BLE scanning is asynchronous so feedback remains serviced.
+Single feedback waits for the double-tap window to close. Debug mode is not toggled.
 
 While awake, serial `led flash` tests three flashes without GNSS time and `led off`
 stops them. Timed flashes do not add delays to GPS/command handling. The receive
