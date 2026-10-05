@@ -174,3 +174,29 @@ and check the highest live report number. A private `PERSONAL_SEQUENCE_START`
 override can seed a fresh board above that number; its persisted counter then
 takes precedence. The default remains 1 for newly registered identities.
 Keep the failed board disconnected. Never copy another collar's credentials.
+
+## Optional JHE20B bench finder
+
+Define `PERSONAL_JHE_BUZZER 1` only in the fitted collar's private build header.
+GPIO2 (XIAO D1) uses open-drain LOW to trigger and releases between beeps and
+before sleep. This does not make the GPIO 5V tolerant; direct-wire electrical
+compatibility has not been established. Other collars leave GPIO2 untouched.
+
+An existing Find command with `BUZZER_CHIRP` produces one cycle of three 150ms
+pulses, separated by 80ms gaps. `BUZZER_OFF` stops/release the trigger. Other
+sound patterns are unsupported; no PWM or melodies are generated. The GUI's
+alert duration is not implemented by this bench adapter. Duplicate commands
+are re-ACKed without replay. GPIO48 LED behaviour is retained separately;
+the JHE20B's integrated LED coupling must be physically observed.
+
+While awake, serial `buzzer chirp` runs the same single sequence without GNSS
+time; `buzzer off` releases it. Serial control is available during GNSS pumping
+and the command receive window, not during deep sleep or a blocking BLE scan.
+Pulse timing is non-blocking. The receive window remains open until a sequence
+already started completes. Sleep cancels any remaining trigger activity.
+Short USER-button wake also gives one immediate 150ms chirp, completed before
+the BLE scan/GNSS attempt. Existing two-second long press remains Lost/Active.
+Button gestures are still handled at wake, not continuously throughout awake work.
+
+The finder has independent power-loss behaviour and its own battery. USB-only
+5V bench operation does not qualify LiPo-only operation or safe animal use.

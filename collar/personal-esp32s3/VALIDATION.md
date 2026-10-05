@@ -171,3 +171,16 @@ Branch: `codex/personal-legacy-collars`; no merge or production deployment.
 
 Do not equate successful builds, registration or hub presence with validated
 outdoor tracking. This file will be updated as actual hardware evidence arrives.
+
+## JHE20B bench adapter — collar 3004, 5 October 2026
+
+- D1/GPIO2 opt-in enabled only in the private 3004 build. Existing credentials,
+  identity and NVS retained; pre-change firmware/NVS flash region backed up.
+- Native timing tests passed for three chirps, one 150ms button chirp, idle,
+  cancellation, invalid count and millis rollover. Live firmware build passed;
+  COM23 flash hash verified.
+- One serial bench request was sent after upload, but the first 28-second capture
+  returned no startup or finder logs. Audible output, integrated LED behaviour,
+  USER-button feedback and live GUI command delivery remain unconfirmed.
+- Three-chirp support uses the existing Find command, with duplicate suppression
+  retained. No melody or alert-duration support is claimed. Personal branch only.

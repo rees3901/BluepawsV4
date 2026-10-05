@@ -12,6 +12,7 @@
 #include "hardware.h"
 #include "personal_policy.h"
 #include "gnss_recovery.h"
+#include "finder_chirp.h"
 
 #ifdef PERSONAL_COMPILE_CHECK
 constexpr uint16_t PERSONAL_DEVICE_ID = 0xFFE1, PERSONAL_HUB_ID = 0xFFF0;
@@ -24,6 +25,9 @@ static_assert(PERSONAL_HUB_ID > 0 && PERSONAL_HUB_ID < 0xFFFF && !(PERSONAL_HUB_
 static_assert(sizeof(PERSONAL_HMAC_KEY) == 32, "HMAC key must be 32 bytes");
 #ifndef PERSONAL_HOME_BLE_ADDRESS
 #define PERSONAL_HOME_BLE_ADDRESS ""
+#endif
+#ifndef PERSONAL_JHE_BUZZER
+#define PERSONAL_JHE_BUZZER 0
 #endif
 
 namespace {
@@ -59,6 +63,38 @@ bool bleReady = false, bootReport = true, buttonReport = false;
 uint32_t lostStartedMs = 0;
 uint8_t report[BP_MAX_PACKET_SIZE];
 uint8_t reportLength = 0;
+personal::FinderChirp finder;
+constexpr int FINDER_PIN = 2; // XIAO D1, opt-in for this specific assembly.
+void startFinder(uint8_t pattern, uint8_t count = 3) {
+#if PERSONAL_JHE_BUZZER
+    if (pattern == BUZZER_OFF) {
+        finder.stop(); digitalWrite(FINDER_PIN, HIGH);
+        Serial.println("[FINDER] released/off");
+    } else if (pattern == BUZZER_CHIRP) {
+        finder.start(millis(), count);
+        Serial.printf("[FINDER] %u chirp(s) queued; one cycle only\n", count);
+    } else Serial.println("[FINDER] unsupported pattern; only OFF/CHIRP supported");
+#endif
+}
+void tickFinder() {
+#if PERSONAL_JHE_BUZZER
+    const bool wasActive = finder.active();
+    digitalWrite(FINDER_PIN, finder.tick(millis()) ? LOW : HIGH);
+    if (wasActive && !finder.active()) Serial.println("[FINDER] chirps complete; released");
+    // Local bench control works without satellite UTC; not a remote protocol.
+    static char input[24]; static uint8_t used = 0;
+    while (Serial.available()) {
+        const char c = char(Serial.read());
+        if (c == '\n' || c == '\r') {
+            input[used] = 0;
+            if (!strcmp(input,"buzzer chirp")) startFinder(BUZZER_CHIRP);
+            else if (!strcmp(input,"buzzer off")) startFinder(BUZZER_OFF);
+            used = 0;
+        } else if (used < sizeof(input)-1) input[used++] = c;
+        else used = 0;
+    }
+#endif
+}
 void IRAM_ATTR onRadio() { radioEvent = true; }
 
 uint32_t utc() {
@@ -129,6 +165,7 @@ void stopGps(uint16_t seconds) {
     digitalWrite(GNSS_WAKE, LOW);
 }
 void pumpGps() {
+    tickFinder();
     if (!gpsRunning) return;
     while (gnssSerial.available()) {
         const char c = char(gnssSerial.read());
@@ -275,7 +312,7 @@ void receiveWindow(bool homeSeen) {
     const uint32_t started = millis();
     bool acknowledged = false, retried = false;
     armReceive();
-    while (millis() - started < CMD_LISTEN_WINDOW_MS) {
+    while (millis() - started < CMD_LISTEN_WINDOW_MS || finder.active()) {
         pumpGps(); enforceLostTimeout();
         if (radioEvent) {
             radioEvent = false;
@@ -312,9 +349,13 @@ void receiveWindow(bool homeSeen) {
             const uint8_t len = buildPacket(ack, TX_ACK, homeSeen, pkt_msg_seq(incoming));
             transmit(ack, len);
             if (reason == TX_INTERRUPT && action == personal::CommandResult::Apply) {
+                startFinder(BUZZER_OFF); // Release any previous chirp before legacy LED delays.
                 uint8_t flashes = 5;
                 pkt_tlv_get_u8(incoming, TLV_LED_FLASH, &flashes);
-                flashFind(flashes); // No buzzer fitted: do not drive an unverified pin.
+                flashFind(flashes);
+                uint8_t pattern = BUZZER_CHIRP;
+                pkt_tlv_get_u8(incoming, TLV_BUZZER_PATTERN, &pattern);
+                startFinder(pattern);
             }
         }
         if (!acknowledged && !retried && millis() - started >= UPLINK_ACK_WAIT_MS) {
@@ -326,6 +367,11 @@ void receiveWindow(bool homeSeen) {
     Serial.printf("[RECEIPT] %s\n", acknowledged ? "hub received" : "not received; no cellular fallback");
 }
 void sleepFor(uint16_t seconds) {
+    finder.stop();
+#if PERSONAL_JHE_BUZZER
+    digitalWrite(FINDER_PIN, HIGH); // Open-drain release, not a driven high level.
+    gpio_hold_en(gpio_num_t(FINDER_PIN));
+#endif
     stopGps(seconds);
     if (radioReady) radio.sleep(false);
     if (bleReady) BLEDevice::deinit(false);
@@ -355,6 +401,12 @@ void setup() {
     uint8_t keyBits = 0; for (uint8_t b : PERSONAL_HMAC_KEY) keyBits |= b;
     if (!keyBits) fatal("[AUTH] Missing HMAC key");
     gpio_deep_sleep_hold_dis();
+#if PERSONAL_JHE_BUZZER
+    gpio_hold_dis(gpio_num_t(FINDER_PIN));
+    digitalWrite(FINDER_PIN, HIGH);
+    pinMode(FINDER_PIN, OUTPUT_OPEN_DRAIN);
+    Serial.println("[FINDER] JHE20B D1/GPIO2 open-drain; idle released");
+#endif
     gpio_hold_dis(gpio_num_t(GNSS_WAKE)); gpio_hold_dis(gpio_num_t(GNSS_TX));
     rtc_gpio_deinit(gpio_num_t(USER_BUTTON));
     pinMode(USER_BUTTON, INPUT_PULLUP); pinMode(USER_LED, OUTPUT);
@@ -376,14 +428,21 @@ void setup() {
         applyProfile(LOST_MODE_FALLBACK); saveState();
     }
     lostStartedMs = millis();
+    bool longButton = false;
     if (digitalRead(USER_BUTTON) == LOW) {
         const uint32_t pressed = millis();
         while (digitalRead(USER_BUTTON) == LOW && millis() - pressed < 2000) delay(10);
         if (millis() - pressed >= 2000) {
+            longButton = true;
             applyProfile(state.profile == PROFILE_LOST ? PROFILE_ACTIVE : PROFILE_LOST);
             saveState();
         }
         buttonReport = true;
+    }
+    if (buttonReport && !longButton) {
+        startFinder(BUZZER_CHIRP, 1);
+        // Complete the immediate feedback before the blocking BLE scan starts.
+        while (finder.active()) { tickFinder(); delay(5); }
     }
     Serial.printf("[PERSONAL] collar=%u hub=%04X profile=%s; real GNSS, LoRa only\n",
         PERSONAL_DEVICE_ID, PERSONAL_HUB_ID, bp_profile_name(bp_profile_t(state.profile)));
