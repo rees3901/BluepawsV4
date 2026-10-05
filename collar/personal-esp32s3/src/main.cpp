@@ -568,8 +568,9 @@ void loop() {
         state.lostUntil = utc() + (spent < LOST_MODE_MAX_DURATION_S ? LOST_MODE_MAX_DURATION_S - spent : 0);
         saveState();
     }
-    const bool reportDue = bootReport || buttonReport || lost || gnssDue ||
-        (retained.home && retained.homeCycles % profile->wake_checkin_ratio == 0);
+    // Personal collars check in on every scheduled Home wake in every profile.
+    // Keep the canonical profile table unchanged; Power Save still sleeps 30m.
+    const bool reportDue = bootReport || buttonReport || lost || gnssDue || retained.home;
     // No build-time or invented timestamps: wait for GNSS time on first boot.
     const uint32_t servicedRequests = buttonRequests;
     if (reportDue && utc()) {

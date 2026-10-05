@@ -47,7 +47,13 @@ not the legacy 868 MHz JSON protocol. This image cannot communicate with V3 hubs
   wake and sends any due check-in, with the fresh-beacon-seen flag cleared.
   Optional `PERSONAL_HOME_BLE_ADDRESS` restricts it
   to the personal hub's observed BLE address; the canonical beacon has no hub ID.
-- Normal, PowerSave, Active and Lost Alert use V4 timings. Home check-ins and GNSS
+- All personal profiles send a Home check-in on every scheduled reporting wake,
+  including Power Save. Sleep intervals remain Normal 10 minutes, Power Save
+  30 minutes and Active 1 minute; periodic Home GNSS refresh is unchanged.
+  LED-only timer wakes and single-button feedback retain their no-report behavior.
+  This personal policy overrides the shared Power Save check-in ratio without
+  changing canonical V4 profile configuration.
+- Normal, PowerSave, Active and Lost Alert use V4 timings. Home GNSS
   refreshes follow their profile ratios. Debug is rejected on this live target.
 - Each telemetry send opens a 15-second receipt/command window. A missing receipt
   triggers one retry of identical bytes. A receipt does not close the window.
