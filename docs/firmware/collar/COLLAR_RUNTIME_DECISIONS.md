@@ -61,7 +61,7 @@ Current spoof origin:
 
 | Profile | Intended use | Wake interval | Home LoRa check-in | Home GNSS sanity refresh | Scheduled LTE heartbeat | Failed LoRa cycles before LTE |
 |---|---:|---:|---:|---:|---:|---:|
-| `POWER_SAVE` | Manual battery saving, low battery, or future “mostly home” automation | 30 min | Every 2 BLE-home wakes | Every 10 BLE-home wakes | Every 3 hours | 3 |
+| `POWER_SAVE` | Manual battery saving, low battery, or future “mostly home” automation | 30 min | Every BLE-home wake | Every 10 BLE-home wakes | Every 3 hours | 3 |
 | `NORMAL` | Default everyday collar behaviour | 10 min | Every BLE-home wake | Every 10 BLE-home wakes | Every 1 hour | 3 |
 | `ACTIVE` | Higher-frequency monitoring, not an emergency mode | 60 sec | Every BLE-home wake | Every 10 BLE-home wakes | Every 10 min | 2 |
 | `DEBUG` | Development-only noisy bench-test mode | 30 sec | Every BLE-home wake | Every BLE-home wake | Every 30 sec | 1 |
@@ -99,7 +99,7 @@ stateDiagram-v2
   MissedHomeOne --> Sleep: one miss only, do not mark away
   MissedHomeOne --> AwayPath: second consecutive miss
 
-  HomePath --> WakeCheckinDue: profile home check-in cadence due
+  HomePath --> WakeCheckinDue: every scheduled home wake, all profiles
   WakeCheckinDue --> SendWakeCheckin: tx_reason = WAKE_CHECKIN + HOME_BEACON_SEEN
   SendWakeCheckin --> CommandWindow: 15s LoRa ACK/command RX
 
@@ -155,7 +155,9 @@ BLE Home detection is primarily a power-saving and state-confidence mechanism.
 When the collar sees the trusted Home Hub BLE beacon:
 
 1. It increments the consecutive BLE-home wake counter.
-2. It sends a lightweight LoRa wake check-in according to the current profile.
+2. It sends a lightweight LoRa wake check-in on every scheduled home wake,
+   including Power Save. Profiles change the sleep interval, not whether a
+   scheduled home wake checks in.
 3. It opens the 15-second LoRa receipt-ACK and command receive window.
 4. It avoids routine GNSS/LTE on most wakes.
 5. It occasionally performs a GNSS sanity refresh according to the current profile.

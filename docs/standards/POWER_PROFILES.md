@@ -40,7 +40,7 @@ Codes 5-15 are reserved.
 
 | Profile | Home LoRa check-in | Home GNSS sanity refresh | Failed LoRa cycles before LTE | LED flashes | LED beacon | Continuous GNSS |
 |---|---:|---:|---:|---:|---|---|
-| `POWER_SAVE` | Every 2 BLE-home wakes | Every 10 BLE-home wakes | 3 | 3 | No | No |
+| `POWER_SAVE` | Every BLE-home wake | Every 10 BLE-home wakes | 3 | 3 | No | No |
 | `NORMAL` | Every BLE-home wake | Every 10 BLE-home wakes | 3 | 5 | No | No |
 | `ACTIVE` | Every BLE-home wake | Every 10 BLE-home wakes | 2 | 5 | No | No |
 | `LOST_ALERT` | Emergency path, not normal home cadence | Every cycle where practical | 1 | 10 | Yes | Yes |
@@ -48,6 +48,10 @@ Codes 5-15 are reserved.
 
 ## Behaviour rules
 
+- Every profile using the BLE-home path sends a LoRa presence check-in on every
+  scheduled home wake, then opens the command receive window. Power Save retains
+  its 30-minute sleep interval; it does not skip alternate home check-ins.
+  Lost Alert bypasses the home gate and reports on its emergency cycle.
 - `NORMAL` is the fallback profile when a requested profile is unknown or invalid.
 - `DEBUG` is a real TLV profile code but must remain development-only. It must not
   be exposed as a normal customer control.
