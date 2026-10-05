@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MAP_LAYER_PICKER_NAMES, type MapLayerPickerName } from "@/lib/mapLayers";
 import { EMPTY_MAP_CENTER, EMPTY_MAP_ZOOM } from "@/lib/mapViewport";
 import type { MapRendererName, MapRendererProps, MapViewport, VectorSourceName } from "@/components/mapRenderer";
@@ -12,6 +12,7 @@ const MapStylePreview = dynamic(() => import("@/components/MapStylePreview"), { 
 const STORAGE_KEY = "bluepaws-map-renderer";
 const RASTER_KEY = "bluepaws-raster-layer";
 const VECTOR_KEY = "bluepaws-vector-source";
+const PICKER_IDLE_MS = 30_000;
 
 export default function MapContainer(props: MapRendererProps) {
   const [renderer, setRenderer] = useState<MapRendererName>(() => {
@@ -26,7 +27,44 @@ export default function MapContainer(props: MapRendererProps) {
   const [vectorSource] = useState<VectorSourceName>(() =>
     typeof window !== "undefined" && window.localStorage.getItem(VECTOR_KEY) === "pmtiles" ? "pmtiles" : "online");
   const [pickerOpen, setPickerOpen] = useState(false);
+  const pickerRef = useRef<HTMLDivElement>(null);
   const [viewport, setViewport] = useState<MapViewport>({ latitude: EMPTY_MAP_CENTER[0], longitude: EMPTY_MAP_CENTER[1], zoom: EMPTY_MAP_ZOOM });
+
+  useEffect(() => {
+    const picker = pickerRef.current;
+    if (!pickerOpen || !picker) return;
+    let timer: number | undefined;
+    let hovered = window.matchMedia("(hover: hover)").matches && picker.matches(":hover");
+    const clearTimer = () => window.clearTimeout(timer);
+    const restartTimer = () => {
+      clearTimer();
+      if (!hovered) timer = window.setTimeout(() => setPickerOpen(false), PICKER_IDLE_MS);
+    };
+    const enter = (event: PointerEvent) => {
+      if (event.pointerType === "touch") return;
+      hovered = true;
+      clearTimer();
+    };
+    const leave = () => { hovered = false; restartTimer(); };
+    const keyboard = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setPickerOpen(false);
+      else restartTimer();
+    };
+    picker.addEventListener("pointerenter", enter);
+    picker.addEventListener("pointerleave", leave);
+    picker.addEventListener("pointerdown", restartTimer);
+    picker.addEventListener("focusin", restartTimer);
+    picker.addEventListener("keydown", keyboard);
+    restartTimer();
+    return () => {
+      clearTimer();
+      picker.removeEventListener("pointerenter", enter);
+      picker.removeEventListener("pointerleave", leave);
+      picker.removeEventListener("pointerdown", restartTimer);
+      picker.removeEventListener("focusin", restartTimer);
+      picker.removeEventListener("keydown", keyboard);
+    };
+  }, [pickerOpen]);
 
   const chooseRenderer = (next: MapRendererName) => {
     setRenderer(next);
@@ -47,7 +85,7 @@ export default function MapContainer(props: MapRendererProps) {
       {renderer === "leaflet"
         ? <LeafletMap {...props} rasterLayer={rasterLayer} vectorSource={vectorSource} onViewportChange={setViewport} />
         : <MapLibreMap {...props} rasterLayer={rasterLayer} vectorSource={vectorSource} onViewportChange={setViewport} />}
-      <div className={`map-style-picker${pickerOpen ? " open" : ""}`} data-tour="map-layers">
+      <div ref={pickerRef} className={`map-style-picker${pickerOpen ? " open" : ""}`} data-tour="map-layers">
         <button type="button" className="map-style-preview" aria-label="Choose map style" aria-expanded={pickerOpen} onClick={() => setPickerOpen(open => !open)}>
           <MapStylePreview layer={previewLayer} viewport={viewport} />
           <span>{RASTER_LABELS[previewLayer]} overview · {selectedStyle}</span>
