@@ -61,8 +61,8 @@ The personal LED cloud relay adapter was flashed to COM22, followed by the
 60-second display idle update. Both uploads passed flash hash verification.
 SX1262 initialization, Wi-Fi connection and BLE home advertising were observed.
 Authenticated hub status was accepted with HTTP 200 after both updates.
-Serial confirmed the display idle transition 60 seconds after display startup;
-physical USER wake and visual blanking require the user's confirmation.
+Serial confirmed the display idle transition 60 seconds after display startup.
+The user confirmed visual blanking, USER wake and subsequent page cycling work.
 The existing stored replay batch returns HTTP 400 and snapshot refresh returned
 HTTP 503; queued records were preserved. Fresh collar relay and the unreleased
 GUI LED command flow must not be treated as verified from these startup checks.
