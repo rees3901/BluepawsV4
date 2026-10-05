@@ -3,6 +3,7 @@
 #include <bp_config.h>
 #include <bp_hmac_sha256.h>
 #include <stddef.h>
+#include "led_schedule.h"
 
 namespace personal {
 constexpr uint32_t COMMAND_CACHE_SECONDS = 900;
@@ -33,16 +34,28 @@ inline bool addressed(const uint8_t* p, size_t n, uint16_t collar, uint16_t hub)
 // Timestamped commands can be age checked; zero timestamps rely on hub expiry.
 // Address checking is NOT cryptographic authentication.
 inline CommandResult command(const uint8_t* p, size_t n, uint16_t collar, uint16_t hub,
-                             uint32_t now, const CommandRecord* cache, size_t count) {
+                             uint32_t now, const CommandRecord* cache, size_t count, bool ledSupport = false) {
     if (!addressed(p, n, collar, hub) || !pkt_msg_seq(p)) return CommandResult::Reject;
     const auto reason = pkt_tx_reason(p);
     if (reason != TX_CONFIG && reason != TX_PING && reason != TX_INTERRUPT) return CommandResult::Reject;
     uint8_t profile = PROFILE_UNKNOWN;
     if (reason == TX_CONFIG) {
         const uint8_t* value; uint8_t len;
-        if (!pkt_tlv_find(p, TLV_PROFILE, &value, &len) || len != 1) return CommandResult::Reject;
-        profile = value[0];
-        if (profile > PROFILE_LOST) return CommandResult::Reject; // debug is not a live profile
+        uint8_t ledAction = 255;
+        if (pkt_tlv_find(p, LedActionTlv, &value, &len)) {
+            if (len != 1 || value[0] > 2) return CommandResult::Reject;
+            ledAction = value[0];
+            if (!ledSupport) return CommandResult::Reject; // Never ACK an unsupported output.
+            uint16_t duration = 0, interval = 0;
+            if (!pkt_tlv_find(p, LedDurationTlv, &value, &len) || len != 2 || !pkt_tlv_get_u16(p, LedDurationTlv, &duration)) return CommandResult::Reject;
+            if (!pkt_tlv_find(p, LedIntervalTlv, &value, &len) || len != 2 || !pkt_tlv_get_u16(p, LedIntervalTlv, &interval)) return CommandResult::Reject;
+            if (interval != 60 || (ledAction == 1 && (!now || duration < 60 || duration > 3600)) || (ledAction != 1 && duration)) return CommandResult::Reject;
+            if (pkt_tlv_find(p, TLV_PROFILE, &value, &len)) return CommandResult::Reject;
+        } else {
+            if (!pkt_tlv_find(p, TLV_PROFILE, &value, &len) || len != 1) return CommandResult::Reject;
+            profile = value[0];
+            if (profile > PROFILE_LOST) return CommandResult::Reject; // debug is not a live profile
+        }
     }
     const uint32_t sent = pkt_time_unix(p);
     if (sent && (!now || sent > now + 30 || now > sent + 600)) return CommandResult::Reject;

@@ -14,6 +14,7 @@
 #include "gnss_recovery.h"
 #include "finder_flash.h"
 #include "user_gestures.h"
+#include "led_schedule.h"
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <freertos/queue.h>
@@ -62,6 +63,7 @@ struct RetainedState {
 } ;
 RTC_DATA_ATTR RetainedState retained;
 RTC_DATA_ATTR uint32_t scheduledWakeUtc = 0;
+RTC_DATA_ATTR personal::LedSchedule ledSchedule;
 volatile bool radioEvent = false;
 bool radioReady = false, gpsRunning = false, freshFix = false, gpsFailed = false;
 bool bleReady = false, bootReport = true, buttonReport = false;
@@ -83,6 +85,7 @@ void pollButton(void* arg) {
     }
 }
 void serviceButton();
+void serviceLedSchedule();
 constexpr int FINDER_PIN = 2; // XIAO D1, opt-in for this specific assembly.
 void startFinder(uint8_t pattern, uint8_t count = 3) {
 #if PERSONAL_D1_LED
@@ -127,6 +130,7 @@ void fatal(const char* message) {
 }
 void saveState() {
     if (prefs.putBytes("state", &state, sizeof(state)) != sizeof(state)) fatal("[STATE] Save failed; stopped");
+    if (prefs.putBytes("led", &ledSchedule, sizeof(ledSchedule)) != sizeof(ledSchedule)) fatal("[LED] Save failed; stopped");
 }
 #ifndef PERSONAL_SEQUENCE_START
 #define PERSONAL_SEQUENCE_START 1
@@ -144,6 +148,7 @@ uint16_t nextSequence() {
     return uint16_t(retained.nextSequence++);
 }
 void applyProfile(uint8_t profile) {
+    if (profile == PROFILE_LOST && state.profile != PROFILE_LOST) ledSchedule.enterLost();
     state.profile = profile;
     state.lostUntil = profile == PROFILE_LOST && utc() ? utc() + LOST_MODE_MAX_DURATION_S : 0;
     lostStartedMs = millis();
@@ -165,6 +170,14 @@ void serviceButton() {
             buttonReport = true; ++buttonRequests;
         }
     }
+}
+void serviceLedSchedule() {
+#if PERSONAL_D1_LED
+    if (ledSchedule.due(utc(), state.profile == PROFILE_LOST)) {
+        startFinder(BUZZER_CHIRP, 7);
+        Serial.println("[LED SCHEDULE] seven flashes; next cycle in 60s");
+    }
+#endif
 }
 void enforceLostTimeout() {
     if (state.profile != PROFILE_LOST) return;
@@ -201,7 +214,7 @@ void stopGps(uint16_t seconds) {
     digitalWrite(GNSS_WAKE, LOW);
 }
 void pumpGps() {
-    serviceButton(); tickFinder();
+    serviceButton(); serviceLedSchedule(); tickFinder();
     if (!gpsRunning) return;
     while (gnssSerial.available()) {
         const char c = char(gnssSerial.read());
@@ -369,13 +382,25 @@ void receiveWindow(bool homeSeen) {
                 continue; // Remain listening for the separate cloud command.
             }
             const auto action = personal::command(incoming, size, PERSONAL_DEVICE_ID, PERSONAL_HUB_ID,
-                                                    utc(), state.commands, 16);
+                                                    utc(), state.commands, 16, PERSONAL_D1_LED);
             if (action == personal::CommandResult::Reject) continue;
             const uint8_t reason = pkt_tx_reason(incoming);
+            bool immediateLedFlash = false;
             Serial.printf("[COMMAND] seq=%u reason=%u %s\n", pkt_msg_seq(incoming), reason,
                 action == personal::CommandResult::Apply ? "applying" : "duplicate; re-ACK");
             if (action == personal::CommandResult::Apply) {
-                if (reason == TX_CONFIG) {
+                uint8_t ledAction = 255;
+                const bool ledCommand = reason == TX_CONFIG && pkt_tlv_get_u8(incoming, personal::LedActionTlv, &ledAction);
+                if (ledCommand && ledSchedule.accept(pkt_msg_seq(incoming))) {
+                    uint16_t duration = 0, interval = 60;
+                    pkt_tlv_get_u16(incoming, personal::LedDurationTlv, &duration);
+                    pkt_tlv_get_u16(incoming, personal::LedIntervalTlv, &interval);
+                    if (ledAction == 0) immediateLedFlash = true;
+                    else if (ledAction == 1) ledSchedule.repeat(utc(), duration, interval);
+                    else { ledSchedule.stop(); startFinder(BUZZER_OFF); }
+                    if (prefs.putBytes("led", &ledSchedule, sizeof(ledSchedule)) != sizeof(ledSchedule)) fatal("[LED] persistence failed");
+                    Serial.printf("[LED COMMAND] action=%u duration=%us interval=%us\n", ledAction, duration, interval);
+                } else if (reason == TX_CONFIG && !ledCommand) {
                     uint8_t profile; pkt_tlv_get_u8(incoming, TLV_PROFILE, &profile);
                     applyProfile(profile);
                 }
@@ -390,6 +415,7 @@ void receiveWindow(bool homeSeen) {
             uint8_t ack[BP_MAX_PACKET_SIZE];
             const uint8_t len = buildPacket(ack, TX_ACK, homeSeen, pkt_msg_seq(incoming));
             transmit(ack, len);
+            if (immediateLedFlash) startFinder(BUZZER_CHIRP, 7);
             if (reason == TX_INTERRUPT && action == personal::CommandResult::Apply) {
                 startFinder(BUZZER_OFF); // Stop any previous flash before legacy LED delays.
                 uint8_t flashes = 5;
@@ -410,12 +436,17 @@ void receiveWindow(bool homeSeen) {
     }
     Serial.printf("[RECEIPT] %s\n", acknowledged ? "hub received" : "not received; no cellular fallback");
 }
-void sleepFor(uint16_t seconds) {
+void sleepFor(uint16_t seconds, bool preserveCadence = false) {
     // Finish a pending gesture/feedback before sleep; never swallow a report request.
     do { serviceButton(); tickFinder(); delay(5); }
     while (gestureBusy || finder.active() || uxQueueMessagesWaiting(buttonEvents));
     if (buttonReport) return;
-    scheduledWakeUtc = utc() ? utc() + seconds : 0;
+    const uint32_t now = utc();
+    if (!preserveCadence) scheduledWakeUtc = now ? now + seconds : 0;
+#if PERSONAL_D1_LED
+    const uint32_t ledWake = ledSchedule.wake(now, state.profile == PROFILE_LOST);
+    if (ledWake) seconds = uint16_t(min(uint32_t(seconds), ledWake - now));
+#endif
     finder.stop();
 #if PERSONAL_D1_LED
     digitalWrite(FINDER_PIN, LOW); // External LED off throughout sleep.
@@ -470,6 +501,8 @@ void setup() {
             state.magic != STATE_MAGIC || state.owner != PERSONAL_DEVICE_ID || state.profile > PROFILE_LOST)
             fatal("[STATE] Invalid or different-device state; explicit reprovision required");
     }
+    if (!deepWake && prefs.getBytesLength("led") == sizeof(ledSchedule))
+        prefs.getBytes("led", &ledSchedule, sizeof(ledSchedule));
     // After power loss, an unknown clock cannot safely extend a lost-mode timer.
     if (state.profile == PROFILE_LOST && (!utc() || !state.lostUntil || utc() >= state.lostUntil)) {
         applyProfile(LOST_MODE_FALLBACK); saveState();
@@ -492,9 +525,15 @@ void setup() {
                 const uint16_t remaining = scheduledWakeUtc && now
                     ? uint16_t(min(scheduledWakeUtc - now, uint32_t(65535)))
                     : bp_profile_config(bp_profile_t(state.profile))->sleep_interval_s;
-                sleepFor(remaining);
+                sleepFor(remaining, true);
             }
         }
+    }
+    if (wake == ESP_SLEEP_WAKEUP_TIMER && scheduledWakeUtc && utc() && utc() < scheduledWakeUtc) {
+        serviceLedSchedule();
+        while (finder.active()) { serviceButton(); tickFinder(); delay(5); }
+        if (!buttonReport && utc() < scheduledWakeUtc)
+            sleepFor(uint16_t(min(scheduledWakeUtc - utc(), uint32_t(65535))), true);
     }
     Serial.printf("[PERSONAL] collar=%u hub=%04X profile=%s; real GNSS, LoRa only\n",
         PERSONAL_DEVICE_ID, PERSONAL_HUB_ID, bp_profile_name(bp_profile_t(state.profile)));

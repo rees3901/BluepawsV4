@@ -206,3 +206,22 @@ Single feedback waits for the double-tap window to close. Debug mode is not togg
 While awake, serial `led flash` tests three flashes without GNSS time and `led off`
 stops them. Timed flashes do not add delays to GPS/command handling. The receive
 window completes a sequence already started; entering sleep cancels any remainder.
+
+## Cloud LED schedule extension
+
+The separately reviewed web/backend/hub LED feature uses CONFIG tags FA (action),
+FB (duration, u16 seconds), FC (interval, u16 seconds). Flash now gives seven
+rapid D1 flashes. Repeat defaults to ten minutes at a fixed minute interval;
+Stop cancels it and suppresses automatic Lost flashes until Lost is re-entered.
+The collar owns the timeout; leaving the browser does not stop the cycle.
+Automatic Lost feedback also uses seven flashes per minute.
+
+LED-only timer wakes preserve the telemetry deadline rather than requesting GPS
+on each minute wake. Persisted UTC deadlines and sequence ordering prevent a
+retry/reset from extending a repeat. Unfitted outputs reject the command.
+Only 3004 has the new image installed so far. Other collars require individual
+builds with PERSONAL_D1_LED enabled and their own existing credentials.
+
+GUI commands still need a check-in for delivery; Stop/Flash now are not an
+unsolicited wake. The web release and queue migration are separate from this
+personal branch and remain pending review. Live end-to-end validation is pending.

@@ -220,3 +220,17 @@ outdoor tracking. This file will be updated as actual hardware evidence arrives.
   remain pending; build and upload alone do not qualify those interactions.
 - Existing protocol, credentials, persistent state layout and production sources
   are unchanged. Private recovery image: `collar/3004-user-gestures-firmware.bin`.
+
+## LED schedule support — 5 October 2026
+
+- User confirmed the external D1 LED physically flashes on 3004.
+- Added minute repeat, bounded UTC deadline, Stop/Lost suppression, persisted
+  LED sequence ordering and LED-only wakes preserving the telemetry deadline.
+- Native schedule/packet tests passed minute cadence, expiry, suppression,
+  sequence rollover/stale rejection, addressing, no-clock rejection, unsupported
+  hardware and duplicates. Collar and personal T190 relay builds passed.
+- COM23 schedule firmware upload verified hashes. The later startup-state-load
+  ordering correction still requires the final upload. Matching T190 firmware
+  is built; COM22 is not currently present. Backend migration and live GUI release
+  are pending review, so no real GUI-to-radio-to-LED success is claimed.
+- Recovery image: collar/3004-led-schedule-firmware.bin in the private bundle.

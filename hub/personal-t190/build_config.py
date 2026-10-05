@@ -13,6 +13,10 @@ def replace_once(text, old, new):
     return text.replace(old, new, 1)
 
 canonical = (root / "../platformio/src/main.cpp").read_text(encoding="utf-8")
+import sys
+sys.path.insert(0, str(root))
+from led_cloud_patch import patch_led_cloud
+canonical = patch_led_cloud(canonical, private)
 pins = (root / "../../diagnostics/t190-radio-monitor/include/pins.h").read_text()
 pin_adapter = '#include "t190_pins.h"\n#define HUB_PINS_H\n'
 for name in ("NSS", "SCK", "MOSI", "MISO", "RST", "BUSY", "DIO1"):
