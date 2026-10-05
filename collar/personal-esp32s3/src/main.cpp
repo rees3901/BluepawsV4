@@ -73,10 +73,15 @@ void fatal(const char* message) {
 void saveState() {
     if (prefs.putBytes("state", &state, sizeof(state)) != sizeof(state)) fatal("[STATE] Save failed; stopped");
 }
+#ifndef PERSONAL_SEQUENCE_START
+#define PERSONAL_SEQUENCE_START 1
+#endif
+static_assert(PERSONAL_SEQUENCE_START > 0 && PERSONAL_SEQUENCE_START <= 65535,
+              "Replacement sequence must fit the existing packet contract");
 uint16_t nextSequence() {
     // Reserve blocks before use: a cold reset skips the unused block, never reuses it.
     if (retained.nextSequence >= retained.sequenceEnd) {
-        uint32_t start = prefs.getUInt("seqEnd", 1);
+        uint32_t start = prefs.getUInt("seqEnd", PERSONAL_SEQUENCE_START);
         retained.nextSequence = start;
         retained.sequenceEnd = start + 64;
         if (prefs.putUInt("seqEnd", retained.sequenceEnd) != sizeof(uint32_t)) fatal("[STATE] Sequence reservation failed");

@@ -166,3 +166,11 @@ Do not run another serial monitor/uploader on those ports simultaneously. Keep
 the collar powered continuously; repeated USB resets invalidate a sleep/soak run.
 The logger reopens native USB when the collar wakes from deep sleep. Its summary
 counts serial-unavailable events separately; those are not automatically crashes.
+
+## Replacement hardware with an existing identity
+
+Before reusing an identity on a new board, preserve both boards' recovery images
+and check the highest live report number. A private `PERSONAL_SEQUENCE_START`
+override can seed a fresh board above that number; its persisted counter then
+takes precedence. The default remains 1 for newly registered identities.
+Keep the failed board disconnected. Never copy another collar's credentials.
