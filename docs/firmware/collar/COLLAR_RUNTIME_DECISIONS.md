@@ -61,7 +61,7 @@ Current spoof origin:
 
 | Profile | Intended use | Wake interval | Home LoRa check-in | Home GNSS sanity refresh | Scheduled LTE heartbeat | Failed LoRa cycles before LTE |
 |---|---:|---:|---:|---:|---:|---:|
-| `POWER_SAVE` | Manual battery saving, low battery, or future “mostly home” automation | 30 min | Every 2 BLE-home wakes | Every 10 BLE-home wakes | Every 3 hours | 3 |
+| `POWER_SAVE` | Manual battery saving, low battery, or future “mostly home” automation | 30 min | Every BLE-home wake | Every 10 BLE-home wakes | Every 3 hours | 3 |
 | `NORMAL` | Default everyday collar behaviour | 10 min | Every BLE-home wake | Every 10 BLE-home wakes | Every 1 hour | 3 |
 | `ACTIVE` | Higher-frequency monitoring, not an emergency mode | 60 sec | Every BLE-home wake | Every 10 BLE-home wakes | Every 10 min | 2 |
 | `DEBUG` | Development-only noisy bench-test mode | 30 sec | Every BLE-home wake | Every BLE-home wake | Every 30 sec | 1 |
@@ -76,32 +76,36 @@ Current spoof origin:
 ```mermaid
 stateDiagram-v2
   [*] --> LoadPersistedConfig
-  LoadPersistedConfig --> BootReport
+  LoadPersistedConfig --> BootPresence
+  BootPresence --> BootPresenceWindow: WAKE_CHECKIN before BLE/GNSS
+  BootPresenceWindow --> BootReport: 30s receipt/command window
   BootReport --> BootBleScan: scan Home beacon
   BootBleScan --> BootGnss: try GNSS up to 60s, even if Home seen
   BootGnss --> SendBoot: tx_reason = BOOT
-  SendBoot --> CommandWindow: 15s LoRa ACK/command RX
+  SendBoot --> CommandWindow: 30s LoRa ACK/command RX
   SendBoot --> BootLtePost: same TLV via LTE HTTPS wrapper
   BootLtePost --> Sleep
 
   Sleep --> ButtonShort: user short press
-  ButtonShort --> ForcedReport: tx_reason = INTERRUPT
+  ButtonShort --> UserPresence: WAKE_CHECKIN before BLE/GNSS
+  UserPresence --> ForcedReport: after presence RX and bounded GPS, INTERRUPT
   ForcedReport --> CommandWindow
 
   Sleep --> ButtonLong: user long press
   ButtonLong --> LostAlert: toggle LOST_ALERT
 
   Sleep --> Wake: RTC/profile interval
-  Wake --> BLEHomeScan: scan for Home Hub beacon
+  Wake --> EarlyPresence: WAKE_CHECKIN, no GPS
+  EarlyPresence --> EarlyCommandWindow: 30s receipt/command RX
+  EarlyCommandWindow --> BLEHomeScan: scan for Home Hub beacon
 
   BLEHomeScan --> HomePath: BLE home beacon seen
   BLEHomeScan --> MissedHomeOne: first missed beacon
   MissedHomeOne --> Sleep: one miss only, do not mark away
   MissedHomeOne --> AwayPath: second consecutive miss
 
-  HomePath --> WakeCheckinDue: profile home check-in cadence due
-  WakeCheckinDue --> SendWakeCheckin: tx_reason = WAKE_CHECKIN + HOME_BEACON_SEEN
-  SendWakeCheckin --> CommandWindow: 15s LoRa ACK/command RX
+  HomePath --> ConfirmHome: WAKE_CHECKIN + HOME_BEACON_SEEN
+  ConfirmHome --> CommandWindow: 30s receipt/command RX
 
   HomePath --> HomeGnssDue: every N BLE-home wakes
   HomeGnssDue --> AcquireGnss: sanity refresh
@@ -112,10 +116,9 @@ stateDiagram-v2
   HomePath --> LteHeartbeatDue: time-based LTE heartbeat
   LteHeartbeatDue --> CellularSend: send same TLV via HTTPS wrapper
 
-  AwayPath --> AwakeLookingCheckin: optional lightweight awake/looking packet
-  AwakeLookingCheckin --> AcquireGnss
+  AwayPath --> AcquireGnss: early presence already sent
   AcquireGnss --> LoRaTelemetry: normal telemetry when GNSS usable
-  LoRaTelemetry --> CommandWindow: 15s LoRa receipt ACK/commands
+  LoRaTelemetry --> CommandWindow: 30s LoRa receipt ACK/commands
   CommandWindow --> CellularFallback: if ACK missing or heartbeat due
   CellularFallback --> Sleep
   CommandWindow --> Sleep
@@ -132,11 +135,13 @@ stateDiagram-v2
 On every cold boot, reboot, watchdog recovery or firmware restart, the collar must:
 
 1. Load persisted collar configuration before choosing its operating behaviour.
-2. Attempt a BLE Home scan.
-3. Attempt GNSS acquisition for up to 60 seconds, even if the BLE Home beacon is seen.
-4. Send a LoRa TLV report with `tx_reason = BOOT`.
-5. Open the normal 15-second receipt-ACK and command receive window.
-6. Queue the same boot TLV for LTE direct-to-cloud POST.
+2. Send a lightweight WAKE_CHECKIN before BLE/GNSS and open the 30-second command
+   window. This packet does not claim a position or fresh home-beacon detection.
+3. Attempt a BLE Home scan.
+4. Attempt GNSS acquisition for up to 60 seconds, even if the BLE Home beacon is seen.
+5. Send a LoRa TLV report with `tx_reason = BOOT`.
+6. Open the normal 30-second receipt-ACK and command receive window.
+7. Queue the same boot TLV for LTE direct-to-cloud POST.
 
 If GNSS succeeds, the boot report includes valid coordinates. If GNSS fails, the boot report remains valid and useful: set stale/error indicators, include diagnostics, and let the backend update presence/last-seen without moving or erasing the last known map position.
 
@@ -155,8 +160,9 @@ BLE Home detection is primarily a power-saving and state-confidence mechanism.
 When the collar sees the trusted Home Hub BLE beacon:
 
 1. It increments the consecutive BLE-home wake counter.
-2. It sends a lightweight LoRa wake check-in according to the current profile.
-3. It opens the 15-second LoRa receipt-ACK and command receive window.
+2. It sends a confirmed-home WAKE_CHECKIN with HOME_BEACON_SEEN after the
+   scan, separately from the provisional early wake presence. Presence is sent on every wake regardless of the home result.
+3. It opens the 30-second LoRa receipt-ACK and command receive window.
 4. It avoids routine GNSS/LTE on most wakes.
 5. It occasionally performs a GNSS sanity refresh according to the current profile.
 6. It performs LTE heartbeat by elapsed time, not by BLE-home wake count.

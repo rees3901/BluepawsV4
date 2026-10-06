@@ -251,7 +251,7 @@ TLV 0x20         = collar uplink msg_seq_id
 
 This confirms only collar-to-hub radio receipt. It does not claim that the
 journal write or cloud upload succeeded. A pending command remains a second,
-independent hub transmission. The collar keeps its receiver open for 15 seconds
+independent hub transmission. The collar keeps its receiver open for 30 seconds
 so it can receive the receipt ACK and then a command.
 
 If no matching receipt arrives within two seconds, the collar waits a short
@@ -315,6 +315,17 @@ TX reasons remain:
 | 5 | `ALERT` |
 | 6 | `CONFIG` |
 | 7 | `WAKE_CHECKIN` |
+
+`WAKE_CHECKIN` is the lightweight wake presence report, sent before BLE/GNSS
+work. It is identified by TX reason 7, not an additional flag or TLV. It omits
+GNSS_VALID, STALE_FIX and GPS error flags; fix age is 65535 and satellite count
+255. HOME_BEACON_SEEN is set only after an actual current beacon detection.
+An early packet can retain the previous home state without claiming a new scan.
+For this no-position presence packet, time_unix 0 explicitly means collar UTC
+is unavailable. It must not be substituted with build time or a guessed fix time.
+Server receipt updates presence independently of the last valid map position.
+The hub must have real receive time to advertise a live command window; offline
+replay must not create a fresh awake indication.
 
 ## 14. TLV section
 

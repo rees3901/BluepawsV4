@@ -160,8 +160,7 @@ before acting, and never disturb the hub/1001 network to manufacture a failure.
 | Lost | 30 s | Every 3 cycles | Home gating bypassed | Every cycle |
 
 The first `start` cycle forces a BOOT LTE report; `send` forces one INTERRUPT
-report. Both count as a cycle. PowerSave home check-ins occur every second home
-cycle; other profiles check in every home cycle. Home heartbeats are timed from
+report. Both count as a cycle. All profiles check in every home cycle. Home heartbeats are timed from
 the last LTE **attempt**, regardless of acceptance. These values come from
 `bp_config.h`, not a second copied policy table. Acquisition/registration time is
 additional to the wait, so this is not an exact wall-clock transmission schedule.
@@ -365,7 +364,7 @@ and actual cloud acceptance remain hardware commissioning checks.
 ### LTE command window
 
 After a matching upload receipt, Walter keeps LTE available for at least
-`CMD_LISTEN_WINDOW_MS` (10 seconds). It handles a command in that receipt and
+`CMD_LISTEN_WINDOW_MS` (30 seconds). It handles a command in that receipt and
 polls the same HTTPS endpoint with `format=device_commands`,
 `ingest_path=cellular_direct`, and its numeric `device_id`. The existing device
 bearer authenticates each poll; no Supabase user/service key is put on the board.
@@ -646,3 +645,7 @@ transport/display path, not5m accuracy or on-device receipt-body handling.
 The later21:04-21:18 UTC bench run verified on-device receipts and cloud profile
 ACKs, including a command queued during the LTE window. See the dated bench
 record for that superseding result; the user also withdrew the strict5m target.
+
+The early LoRa wake-presence implementation is in `collar/src/main.cpp`. This
+Walter LTE testbed still uses a LoRa stub and is not evidence of physical LoRa
+wake-presence delivery; its modem acquisition/upload workflow is unchanged.

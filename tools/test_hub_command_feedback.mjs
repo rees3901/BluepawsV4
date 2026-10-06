@@ -15,10 +15,11 @@ const code = `
 #include <atomic>
 #include <vector>
 #include "bp_protocol.h"
-${readFileSync('shared/lib/BluepawsProtocol/bp_config.h','utf8').match(/enum bp_buzzer_pattern_t[^]*?};/)[0]}
+#include "bp_config.h"
+${readFileSync("hub/platformio/include/led_find_command.h","utf8").replace("#pragma once", "")}
 ${struct('cmd_entry_t')}
 ${struct('pending_cmd_t')}
-constexpr int MAX_PENDING_CMDS=16, CMD_MAX_RETRIES=3, CMD_ACK_TIMEOUT_MS=10000, CMD_LISTEN_WINDOW_MS=15000;
+constexpr int MAX_PENDING_CMDS=16;
 constexpr uint32_t LOCAL_COMMAND_TTL_MS=600000, COMMAND_FEEDBACK_TTL_MS=900000;
 constexpr int GATEWAY_GUID16=16, pdTRUE=1;
 #define pdMS_TO_TICKS(n) (n)
@@ -43,7 +44,7 @@ ${fn('queuePendingCommandForDevice')}
 ${fn('checkPendingAcks')}
 ${fn('sendCommandFind')}
 uint16_t mode(uint16_t target,bp_profile_t profile,uint16_t seq=0,uint32_t age=0) {
- return sendCommandFind(target,PKT_CMD_MODE,profile,0,(bp_buzzer_pattern_t)0,seq,age);
+ return sendCommandFind(target,PKT_CMD_MODE,profile,0,(bp_buzzer_pattern_t)0,seq,age,255,0,60);
 }
 void ack(uint16_t collar,uint16_t seq) {
  uint8_t buf[BP_MAX_PACKET_SIZE];
@@ -53,6 +54,8 @@ void ack(uint16_t collar,uint16_t seq) {
 int main() {
  auto seq=mode(1001,PROFILE_ACTIVE); assert(seq);
  auto first=queued.back(); assert(commandStillPending(first));
+ queuePendingCommandForDevice(1001);
+ assert(commandRxOpportunityUntil == clockMs + 29500);
  assert(pkt_device_id(first.buf)==16 && pkt_destination_id(first.buf)==1001);
  noteCommandSent(first);
  ack(1002,seq); assert(commandStillPending(first));
