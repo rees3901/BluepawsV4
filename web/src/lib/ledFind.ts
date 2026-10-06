@@ -1,6 +1,10 @@
 export type LedFindAction = "flash" | "repeat" | "stop";
 export type LedFindPayload = { action: "flash" | "stop" } | { action: "repeat"; duration_s: number; interval_s: number };
 export const LED_INTERVALS = [10, 30, 60, 120, 300, 600] as const;
+// Use reported firmware profile, never an unacknowledged profile request.
+export function ledIntervalsForProfile(profile?: string) {
+  return LED_INTERVALS.filter(seconds => seconds >= 60 || profile === "Emergency Lost");
+}
 export const LED_DURATIONS = [10, 30, 60, 300, 600, 900, 1800, 3600, 7200, 14400] as const;
 export function ledTimeLabel(seconds: number) {
   const value = seconds < 60 ? seconds : seconds < 3600 ? seconds / 60 : seconds / 3600;

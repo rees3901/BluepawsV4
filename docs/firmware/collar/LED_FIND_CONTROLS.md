@@ -6,6 +6,16 @@ is seven 70ms flashes with 70ms gaps (about one second). Repeat defaults to once
 per minute for ten minutes. Intervals are 10/30 seconds and 1/2/5/10 minutes;
 durations are 10/30 seconds, 1/5/10/15/30 minutes, and 1/2/4 hours.
 
+The dashboard offers 10/30-second repeats and Flash now only when the latest
+reported power profile is Emergency Lost, which keeps the compatible collar awake.
+Other profiles offer intervals of at least one minute. A pending Lost request
+does not unlock fast repeats. If the reported profile changes while the dialog
+is open, an unavailable interval falls back to 60 seconds before sending.
+Delivery still waits for a listening window; this GUI restriction does not change
+the existing command protocol or invalidate previously queued commands.
+Personal firmware provides one D1 flash on hardware wake and another on a matched
+hub receipt. That receipt confirms radio delivery, not cloud acceptance.
+
 This is a reusable V4 command, initially gated to the fitted personal batch
 3001–3004 in the UI and guarded queue. Other devices remain disabled until
 compatible firmware/capability discovery is available. Only 3004 has received

@@ -1,6 +1,13 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import { LED_INTERVALS, LED_DURATIONS, ledFindPayload, ledTimeLabel, supportsLedFind } from "./ledFind.ts";
+import { LED_INTERVALS, LED_DURATIONS, ledIntervalsForProfile, ledFindPayload, ledTimeLabel, supportsLedFind } from "./ledFind.ts";
+
+test("fast LED cycles require the reported Emergency Lost profile", () => {
+  for (const profile of [undefined, "Normal", "PowerSave", "Active", "Debug", "Lost", "unknown"]) {
+    assert.deepEqual(ledIntervalsForProfile(profile), [60, 120, 300, 600]);
+  }
+  assert.deepEqual(ledIntervalsForProfile("Emergency Lost"), [10, 30, 60, 120, 300, 600]);
+});
 
 test("every offered LED interval and duration produces a valid payload", () => {
   for (const interval of LED_INTERVALS) for (const duration of LED_DURATIONS) {
