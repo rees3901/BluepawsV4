@@ -194,6 +194,11 @@ Keep the failed board disconnected. Never copy another collar's credentials.
 
 ## Optional external D1 LED
 
+Status feedback is four flashes on each hardware wake and four on the first
+matched hub receipt in each receive window. Each flash is 70ms on, starting
+200ms apart (670ms total). A hub receipt confirms radio delivery, not GPS or
+cloud acceptance. Button and Find cycles retain their seven-flash pattern.
+
 Define `PERSONAL_D1_LED 1` only in the fitted collar's private build header.
 Wire GPIO2 (XIAO D1) through a 330-ohm to 1-kohm resistor to the LED anode;
 connect the cathode to GND. GPIO HIGH lights it; LOW turns it off, including sleep.

@@ -7,8 +7,8 @@ class FinderFlash {
 public:
     void start(uint32_t now, uint8_t count = 3) {
         active_ = count > 0 && count <= 7; started_ = now;
-        period_ = count == 7 ? 140 : 230;
-        pulse_ = count == 7 ? 70 : 150;
+        period_ = count == 4 ? 200 : count == 7 ? 140 : 230;
+        pulse_ = (count == 4 || count == 7) ? 70 : 150;
         duration_ = active_ ? uint16_t((count - 1) * period_ + pulse_) : 0;
     }
     void stop() { active_ = false; }

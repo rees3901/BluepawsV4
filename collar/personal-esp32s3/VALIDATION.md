@@ -343,3 +343,14 @@ outdoor tracking. This file will be updated as actual hardware evidence arrives.
 - Recovery image: collar/3004-wake-led-feedback-firmware.bin, SHA256
   3AA86E40FA8FE00E4954D6DAAEBD2D5920F9C0234D66F9DB76D18ACFA9BD3BBF.
 - GUI restrictions are isolated in PR 261; personal branch remains unmerged.
+
+## Four-flash status signature — 6 October 2026
+
+- Wake and matched hub-receipt status feedback now use four 70ms pulses whose
+  starts are 200ms apart (670ms burst). Seven-flash button/Find cycles are unchanged.
+- Native flash timing tests passed, including pulse gaps, completion and retained
+  seven-flash behaviour. Personal firmware build passed.
+- Flashed Simba 3004 on COM23 (MAC e0:72:a1:f8:f2:48), all upload hashes verified.
+  Existing credentials and D1 enable remain intact; other collars are not updated.
+- Recovery image: collar/3004-four-status-flashes-firmware.bin, SHA256
+  4075A8387B45FF570014F9BD93FE4F8D8CB94904E0AFB7B1F515F18188833DD0.
