@@ -354,3 +354,14 @@ outdoor tracking. This file will be updated as actual hardware evidence arrives.
   Existing credentials and D1 enable remain intact; other collars are not updated.
 - Recovery image: collar/3004-four-status-flashes-firmware.bin, SHA256
   4075A8387B45FF570014F9BD93FE4F8D8CB94904E0AFB7B1F515F18188833DD0.
+
+## Macy 3003 four-flash firmware refresh — 6 October 2026
+
+- Built source c8a066b with Macy's existing private 3003 configuration and D1 LED
+  enabled. Flashed COM19, MAC d8:3b:da:73:ef:18; all upload hashes verified.
+- Post-flash serial confirmed hub receipt and trusted home BLE (seen=1, home=1).
+  GNSS acquisition started; no fresh position is claimed from this short check.
+- Includes early wake presence, 30-second command windows, four-flash wake/receipt
+  status signals and existing seven-flash button/Find behaviour.
+- Recovery image: collar/3003-four-status-flashes-firmware.bin, SHA256
+  257147E3ED1B8119B2A034597C6889DD9BD2573BF7AEE3902892250D6B21AAF8.
