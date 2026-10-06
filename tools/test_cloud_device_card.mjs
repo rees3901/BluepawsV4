@@ -17,7 +17,7 @@ const React = require('react');
 const {renderToStaticMarkup} = require('react-dom/server');
 const source=readFileSync(new URL('../web/src/components/DeviceCard.tsx',import.meta.url),'utf8');
 const output=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText;
-const icons=Object.fromEntries(['BatteryIndicator','BleProximity','HomeDistance','LastSeen','SignalIndicator'].map(name=>[name,({children})=>React.createElement('span',null,children)]));
+const icons=Object.fromEntries(['BatteryIndicator','BleProximity','GnssIndicator','HomeDistance','LastSeen','SignalIndicator'].map(name=>[name,({children})=>React.createElement('span',null,children)]));
 const context=vm.createContext({exports:{},require(name){
   if(name==='@/components/Indicators')return icons;
   if(name==='@/lib/hubControlFeedback')return hubControlFeedback;
@@ -40,6 +40,11 @@ test('Lost Alert is not a fault in the cloud card',()=>{
 });
 test('fresh presence flags clear old position faults; real faults remain visible',()=>{
   assert.doesNotMatch(render({device:{...device,error:'Module'},reportedFlags:0}),/class="error-badge"/);
+  const gpsFault=render({device:{...device,status:'Error',error:'Module'},reportedFlags:0xc0});
+  assert.match(gpsFault,/Reported fault — stale GPS/);
+  assert.doesNotMatch(gpsFault,/card-status status-error/);
+  assert.doesNotMatch(render({device:{...device,status:'Error'},reportedFlags:0}),/card-status status-error|class="error-badge"/);
+  assert.match(render({device:{...device,status:'Error'}}),/Reported fault — cause unspecified/);
   assert.match(render({reportedFlags:128}),/Reported fault/);
   assert.doesNotMatch(render({awakeSeconds:0}),/💡/);
   assert.match(render({awakeSeconds:0}),/💤/);
@@ -59,8 +64,8 @@ test('cloud fault badge stays compact and uses only diagnostics belonging to the
   for(const expanded of [false,true]) {
     const html=render({expanded,reportedFlags:0xc4,reportedFaultReport:{flags:0xc4,txReason:4,resetReason:2}});
     assert.match(html,/class="card-fault-row"/);
-    assert.match(html,/>Reported fault — stale GPS \+1<\/span>/);
-    assert.match(html,/title="Reported fault — stale GPS; low battery/);
+    assert.match(html,/>Reported fault — stale GPS<\/span>/);
+    assert.match(html,/title="Reported fault — stale GPS/);
     assert.match(html,/aria-label="Reported fault/);
   }
   const oldPosition={...device,error:'Module',faultReport:{flags:0xc0,txReason:0}};
@@ -73,7 +78,7 @@ test('cloud fault badge stays compact and uses only diagnostics belonging to the
 
 test('simulator binary TLV decodes through the ingestion parser into the rendered fault summary',async()=>{
   const credential=generateDeviceCredential(1001);
-  for(const [flags,txReason,label] of [[0xc4,4,'stale GPS +1'],[0x80,0,'GPS fix unavailable'],[0x88,7,'cause unspecified'],[0x85,0,'low battery']]) {
+  for(const [flags,txReason,label] of [[0xc4,4,'stale GPS'],[0x80,0,'GPS fix unavailable'],[0x88,7,'cause unspecified'],[0x85,0,'cause unspecified']]) {
     const built=buildDiagnosticPacket({...defaultDeviceSettings(1001),flags,txReason,includeTlvs:true},credential);
     const packet=parseTlvPacket(built.packet);
     const reports=await collarFault.loadFaultReports([{device_id:1001,observation_id:42,flags:packet.flags}],async()=>({error:null,

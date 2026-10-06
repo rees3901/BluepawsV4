@@ -5,6 +5,7 @@ import dynamic from "next/dynamic";
 import { homeDistanceMetres, formatHomeDistance } from "@/lib/mapLocation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { BatteryIndicator, HomeDistance, LastSeen, SignalIndicator } from "@/components/Indicators";
+import { collarFault } from "@/lib/collarFault";
 import { defaultDeviceAvatar } from "@/lib/defaultDeviceAvatar";
 import { emojiImageUrl } from "@/lib/emoji";
 import { COLLAR_RECEIVE_WINDOW_SECONDS, collarCardFreshness, collarFreshnessClass } from "@/lib/devicePresence";
@@ -237,6 +238,7 @@ function SearchPartyDeviceRow({ device, avatar, now, followed, trailVisible, onA
   const profileClass = `profile-${profileLower.replace("save", "").replaceAll(" ", "-")}`;
   const profileLabel = profileLower === "powersave" ? "💤 PowerSave" : profileLower === "debug" ? "🧪 Debug" : device.profile;
   const distance = formatHomeDistance(homeDistanceMetres(device));
+  const fault = isHub || offline ? null : collarFault(device.faultReport, device.error !== "None" || status.css === "status-error");
   const hubMode = device.hubMode === "portable" ? "Portable" : device.hubMode === "off_grid" ? "Off-Grid" : "Home";
 
   return (
@@ -257,10 +259,11 @@ function SearchPartyDeviceRow({ device, avatar, now, followed, trailVisible, onA
           <div className="card-name-row">
             <span className="card-name">{device.name}</span>
             {offline ? <span className="card-status status-offline">Offline</span> : <>
-              <span className={`card-status ${isHub ? device.hubMode === "home" ? "status-home" : "status-out" : status.css}`}>{isHub ? device.hubMode === "home" ? "🏡" : "📱" : status.emoji} {isHub ? hubMode : status.label}</span>
+              {(isHub || status.css !== "status-error") && <span className={`card-status ${isHub ? device.hubMode === "home" ? "status-home" : "status-out" : status.css}`}>{isHub ? device.hubMode === "home" ? "🏡" : "📱" : status.emoji} {isHub ? hubMode : status.label}</span>}
               {!isHub && <span className={`card-profile ${profileClass}`}>{profileLabel}</span>}
             </>}
           </div>
+          {fault && <div className="card-fault-row"><span className="error-badge" title={fault.title} aria-label={fault.title}>{fault.label}</span></div>}
           {offline ? <div className="card-offline-summary">No reports for {formatLastSeen(ageSeconds)}</div> : isHub ? <div className="card-hub-guest-summary">Read-only hub bearing · updated {formatLastSeen(ageSeconds)} ago</div> : <><div className="card-indicators">
             <span className="card-indicator-group"><BatteryIndicator millivolts={device.batt} percent={device.batteryPercent} /></span>
             <span className="card-indicator-group"><SignalIndicator rssi={device.rssi} snr={device.snr} ingestPath={device.ingestPath} /></span>

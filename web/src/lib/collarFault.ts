@@ -16,7 +16,7 @@ export function collarFault(report?: CollarFaultReport | null, legacyFault = fal
   if (hasFlags) {
     if (flags & 0x40) reasons.push("stale GPS");
     else if (!(flags & 0x01) && [0, 3, 4, 5].includes(report?.txReason ?? -1)) reasons.push("GPS fix unavailable");
-    if (flags & 0x04) reasons.push("low battery");
+    // Battery warnings have their own indicator; do not repeat them here.
   }
   const detail = reasons.length ? reasons[0] + (reasons.length > 1 ? ` +${reasons.length - 1}` : "") : "cause unspecified";
   let title = reasons.length

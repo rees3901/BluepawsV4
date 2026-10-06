@@ -73,7 +73,7 @@ export function DeviceCard(props: DeviceCardProps) {
     ...(props.reportedFaultReport?.flags === props.reportedFlags ? props.reportedFaultReport : {}),
     flags: props.reportedFlags,
   };
-  const fault = isHub || offline ? null : collarFault(report, device.error !== "None");
+  const fault = isHub || offline ? null : collarFault(report, device.error !== "None" || status.css === "status-error");
 
   return (
     <article
@@ -145,7 +145,7 @@ export function DeviceCard(props: DeviceCardProps) {
           <div className="card-name-row">
             <span className="card-name">{device.name}</span>
             {offline ? <span className="card-status status-offline">Offline</span> : <>
-              <span className={`card-status ${status.css}`}>{status.emoji} {status.label}</span>
+              {(status.css !== "status-error") && <span className={`card-status ${status.css}`}>{status.emoji} {status.label}</span>}
               <span className={`card-profile ${profileClass}`}>{profileLabel}</span>
             </>}
           </div>
