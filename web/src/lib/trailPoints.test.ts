@@ -66,3 +66,8 @@ test("a fresh heartbeat does not renew the timestamp of a stale position", () =>
 test("a hub report without a GPS fix timestamp cannot create a breadcrumb", () => {
   assert.deepEqual(updateTrailPoints([], [], {...device,entity:'hub',positionRecordedAt:null}, now), []);
 });
+test("a future duplicate cannot replace a valid cached point", () => {
+  const initial = updateTrailPoints([], [], device, now);
+  const future = {...device, positionRecordedAt: new Date(now+60000).toISOString()};
+  assert.deepEqual(updateTrailPoints(initial, [], future, now), initial);
+});

@@ -18,7 +18,10 @@ export function updateTrailPoints(cached: TrailPoint[], history: TrailPoint[], d
     ? (device.time > 0 ? new Date(device.time * 1000).toISOString() : null)
     : device.positionRecordedAt;
   const current = recordedAt ? [{ lat: device.lat, lon: device.lon, recordedAt }] : [];
-  const merged = [...history, ...cached, ...current].sort((a, b) => Date.parse(a.recordedAt) - Date.parse(b.recordedAt));
+  const merged = [...history, ...cached, ...current].filter(point => {
+    const timestamp = Date.parse(point.recordedAt);
+    return Number.isFinite(timestamp) && timestamp <= now && now - timestamp <= TRAIL_MAX_AGE_MS;
+  }).sort((a, b) => Date.parse(a.recordedAt) - Date.parse(b.recordedAt));
   const points: TrailPoint[] = [];
   for (const point of merged) {
     const last = points.at(-1);
