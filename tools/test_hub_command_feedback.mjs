@@ -19,7 +19,7 @@ const code = `
 ${readFileSync("hub/platformio/include/led_find_command.h","utf8").replace("#pragma once", "")}
 ${struct('cmd_entry_t')}
 ${struct('pending_cmd_t')}
-constexpr int MAX_PENDING_CMDS=16, CMD_MAX_RETRIES=3, CMD_ACK_TIMEOUT_MS=10000;
+constexpr int MAX_PENDING_CMDS=16;
 constexpr uint32_t LOCAL_COMMAND_TTL_MS=600000, COMMAND_FEEDBACK_TTL_MS=900000;
 constexpr int GATEWAY_GUID16=16, pdTRUE=1;
 #define pdMS_TO_TICKS(n) (n)
