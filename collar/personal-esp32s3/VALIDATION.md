@@ -276,3 +276,15 @@ outdoor tracking. This file will be updated as actual hardware evidence arrives.
   in that attempt. Bootloader mode requested; live receipt, GUI liveness and
   LED-only wake verification remain pending. Existing credentials unchanged.
 - Canonical change is isolated in draft PR259; personal code is not included.
+
+## 30-second command receive window — 6 October 2026
+
+- Personal collar and T190 hub builds passed with the same 30000 ms timing
+  override. Shared production files on this personal branch remain unchanged.
+- Native collar policy checks passed. Canonical packet/retry tests and the real
+  hub command queue fixture passed, including its 29500 ms opportunity deadline
+  (500 ms delivery margin). ACK timeout and retry count remain unchanged.
+- Cold-start presence, every hardware wake, LED schedule and GPS workflows remain
+  as before; each receipt/command window now lasts at least 30 seconds.
+- No collar/hub USB port is present at validation time. These images have not
+  been flashed or bench-verified. The live GUI awake estimate remains shorter.

@@ -57,6 +57,6 @@ int main() {
     assert(personal::receipt(p, len, 3001, 48, 65432));
     assert(!personal::receipt(p, len, 3001, 48, 123));
     assert(personal::command(p, len, 3001, 48, 1100, cache, 16) == CommandResult::Reject);
-    assert(CMD_LISTEN_WINDOW_MS == 15000 && UPLINK_MAX_ATTEMPTS == 2);
+    assert(CMD_LISTEN_WINDOW_MS == 30000 && UPLINK_MAX_ATTEMPTS == 2);
     puts("PASS: packet bounds, routing, commands, durable duplicates, freshness and ACK separation");
 }

@@ -53,7 +53,7 @@ not the legacy 868 MHz JSON protocol. This image cannot communicate with V3 hubs
   home state; HOME_BEACON_SEEN stays clear until a new scan actually hears it.
   Zero packet time means UTC unavailable, not an invented GPS timestamp. Cloud
   receipt still updates last seen; the hub needs real time for its awake indicator.
-  A 15-second receipt/command window follows presence, then the normal workflow.
+  A 30-second receipt/command window follows presence, then the normal workflow.
   A full BOOT/user/GPS report follows when required and valid UTC is available.
   Home-only reporting wakes also confirm the scan with HOME_BEACON_SEEN; the
   initial presence is provisional and never claims a newly heard beacon.
@@ -66,7 +66,7 @@ not the legacy 868 MHz JSON protocol. This image cannot communicate with V3 hubs
   changing canonical V4 profile configuration.
 - Normal, PowerSave, Active and Lost Alert use V4 timings. Home GNSS
   refreshes follow their profile ratios. Debug is rejected on this live target.
-- Each telemetry send opens a 15-second receipt/command window. A missing receipt
+- Each telemetry send opens a 30-second receipt/command window. A missing receipt
   triggers one retry of identical bytes. A receipt does not close the window.
 - Profile, status/ping and LED-find commands are supported through the current hub
   wire contract. Status/ping ACKs current state; it does not implement the future
@@ -243,3 +243,9 @@ builds with PERSONAL_D1_LED enabled and their own existing credentials.
 GUI commands still need a check-in for delivery; Stop/Flash now are not an
 unsolicited wake. The web release and queue migration are separate from this
 personal branch and remain pending review. Live end-to-end validation is pending.
+
+The personal hub adapters share the same 30-second command timing override.
+Profile sleep intervals and the two-second receipt ACK retry remain unchanged.
+The deployed GUI currently shows a shorter conservative awake indication; this
+firmware update alone does not extend that indication. Longer RX windows add
+awake time, including on LED-only wakes.

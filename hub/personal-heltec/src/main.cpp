@@ -13,7 +13,7 @@
 #include <ArduinoJson.h>
 #include <TinyGPS++.h>
 #include <bp_protocol.h>
-#include <bp_config.h>
+#include "../../../collar/personal-esp32s3/include/personal_radio_timing.h"
 #include <bp_crypto.h>
 #define setup canonicalHubSetup
 #define loop canonicalHubLoop

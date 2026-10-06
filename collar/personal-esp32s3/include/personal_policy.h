@@ -1,6 +1,6 @@
 #pragma once
 #include <bp_protocol.h>
-#include <bp_config.h>
+#include "personal_radio_timing.h"
 #include <bp_hmac_sha256.h>
 #include <stddef.h>
 #include "led_schedule.h"

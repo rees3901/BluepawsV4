@@ -11,6 +11,6 @@
 #include <TinyGPS++.h>
 #include <Adafruit_ST7789.h>
 #include <bp_protocol.h>
-#include <bp_config.h>
+#include "../../../collar/personal-esp32s3/include/personal_radio_timing.h"
 #include <bp_crypto.h>
 #include "t190_ui.inc"
