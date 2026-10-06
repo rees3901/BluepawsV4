@@ -31,7 +31,7 @@ const code = String.raw`
 #include "bp_protocol.h"
 #include "bp_config.h"
 int main() {
-  static_assert(CMD_LISTEN_WINDOW_MS == 15000);
+  static_assert(CMD_LISTEN_WINDOW_MS == 30000);
   static_assert(UPLINK_ACK_WAIT_MS == 2000);
   static_assert(UPLINK_MAX_ATTEMPTS == 2);
   assert(bp_profile_config(PROFILE_POWERSAVE)->lora_failed_cycles_before_cellular == 3);
@@ -68,4 +68,4 @@ let result = spawnSync(compiler,
 assert.equal(result.status, 0, result.stderr);
 result = spawnSync(exe, [], { encoding: 'utf8' });
 assert.equal(result.status, 0, result.stdout + result.stderr);
-console.log('PASS: separate uplink ACK, 15s receive loop, identical retry and profile LTE thresholds');
+console.log('PASS: separate uplink ACK, 30s receive loop, identical retry and profile LTE thresholds');

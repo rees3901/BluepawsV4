@@ -364,7 +364,7 @@ and actual cloud acceptance remain hardware commissioning checks.
 ### LTE command window
 
 After a matching upload receipt, Walter keeps LTE available for at least
-`CMD_LISTEN_WINDOW_MS` (10 seconds). It handles a command in that receipt and
+`CMD_LISTEN_WINDOW_MS` (30 seconds). It handles a command in that receipt and
 polls the same HTTPS endpoint with `format=device_commands`,
 `ingest_path=cellular_direct`, and its numeric `device_id`. The existing device
 bearer authenticates each poll; no Supabase user/service key is put on the board.

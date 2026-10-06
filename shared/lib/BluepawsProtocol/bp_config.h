@@ -135,7 +135,7 @@ static inline const bp_profile_config_t *bp_profile_config(bp_profile_t p) {
 // ═══════════════════════════════════════════════
 // Command Listen Window
 // ═══════════════════════════════════════════════
-#define CMD_LISTEN_WINDOW_MS      15000
+#define CMD_LISTEN_WINDOW_MS      30000
 #define CMD_QUEUE_INTERVAL_MS     3000  // rate limit between outbound commands
 
 // Hub receipt ACK and collar uplink retry policy. A retry reuses the exact

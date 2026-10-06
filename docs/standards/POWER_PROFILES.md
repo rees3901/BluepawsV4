@@ -49,7 +49,7 @@ Codes 5-15 are reserved.
 ## Behaviour rules
 
 - Wake presence is independent of GPS acquisition: send TX_WAKE_CHECKIN before
-  BLE/GNSS work and open the normal receipt/command window. Then send the full
+  BLE/GNSS work and open the 30-second receipt/command window. Then send the full
   boot, user-request or GPS report when needed. A successful home scan sends a confirmed-home presence
   with HOME_BEACON_SEEN; the early presence is provisional. Personal LED-only and single-tap
   wakes also send presence and preserve the scheduled telemetry deadline.
@@ -110,3 +110,9 @@ Before implementing any profile-sensitive feature, check:
 - Does Lost Alert have a clear exit path and timeout?
 - Does no-GNSS wake-check-in behaviour preserve the last valid position?
 - Does any profile change update documentation and tests in the same change?
+
+The 30-second command window is elapsed awake time after each uplink, in addition
+to BLE/GNSS work and the profile sleep interval. Receipt ACK timing remains two
+seconds with at most two identical uplink attempts. The production GUI currently
+estimates a shorter receive opportunity; extending that indication requires a
+separate rollout that accounts for collars still running older firmware.

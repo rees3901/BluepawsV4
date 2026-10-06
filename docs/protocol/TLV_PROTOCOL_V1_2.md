@@ -251,7 +251,7 @@ TLV 0x20         = collar uplink msg_seq_id
 
 This confirms only collar-to-hub radio receipt. It does not claim that the
 journal write or cloud upload succeeded. A pending command remains a second,
-independent hub transmission. The collar keeps its receiver open for 15 seconds
+independent hub transmission. The collar keeps its receiver open for 30 seconds
 so it can receive the receipt ACK and then a command.
 
 If no matching receipt arrives within two seconds, the collar waits a short

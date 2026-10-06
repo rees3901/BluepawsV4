@@ -231,7 +231,7 @@ static void cellularTask(void *param);     // Notification-driven: wakes GM02SP 
 static bool     bleScanForHome();          // BLE scan for hub's home beacon
 static bool     gnssAcquireFix();          // Request GNSS fix via AT+SQNGNSS
 static bool     gnssAcquireFixWithTimeout(uint32_t timeoutS); // Bounded GNSS request
-static void     listenForCommands();       // Wait for receipt ACK and commands in the 15s RX window
+static void     listenForCommands();       // Wait for receipt ACK and commands in the 30s RX window
 static void     enterDeepSleep();          // Power down, sleep until next cycle
 static void     runLostMode();             // Emergency continuous operation loop
 
@@ -1404,7 +1404,7 @@ static void transmitPacket(uint8_t *buf, uint8_t len, bool suppressLed) {
 }
 
 // ═══════════════════════════════════════════════
-// Listen for Hub Receipt ACK and Commands (15s RX window)
+// Listen for Hub Receipt ACK and Commands (30s RX window)
 //
 // The hub ACK and any pending command are deliberately separate packets. The
 // collar therefore keeps receiving until the fixed deadline instead of exiting
