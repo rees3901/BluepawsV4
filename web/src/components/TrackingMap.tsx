@@ -10,7 +10,8 @@ import { MAP_LAYER_DEFINITIONS, type MapLayerName } from "@/lib/mapLayers";
 import { mapPopupHtml } from "@/lib/mapPopup";
 import { EMPTY_MAP_CENTER, EMPTY_MAP_ZOOM } from "@/lib/mapViewport";
 import { normalizeMarkerColor } from "@/lib/markerColor";
-import { appendTrailPoint, VISIBLE_TRAIL_POINT_LIMIT, type TrailLatLng } from "@/lib/trailPoints";
+import { updateTrailPoints, type TrailLatLng } from "@/lib/trailPoints";
+import type { TrailPoint } from "@/types/telemetry";
 import { locatedDevices, type ConfiguredMapRendererProps } from "@/components/mapRenderer";
 import {
   type DeviceAction,
@@ -29,7 +30,7 @@ export default function LeafletMap(props: ConfiguredMapRendererProps) {
   const markersRef = useRef(new Map<number, L.Marker>());
   const markerAnimationsRef = useRef(new Map<number, number>());
   const trailsRef = useRef(new Map<number, L.Polyline>());
-  const trailPointsRef = useRef(new Map<number, TrailLatLng[]>());
+  const trailPointsRef = useRef(new Map<number, TrailPoint[]>());
   const devicesRef = useRef(devices);
   const avatarsRef = useRef(avatars);
   const trailIdsRef = useRef(trailIds);
@@ -370,20 +371,21 @@ export default function LeafletMap(props: ConfiguredMapRendererProps) {
       if (marker.getPopup()) marker.setPopupContent(popupContent);
       else marker.bindPopup(popupContent, { className: "device-marker-popup", minWidth: 300, maxWidth: 380 });
 
-      const points = appendTrailPoint(trailPointsRef.current.get(device.id) ?? [], latLng);
+      const points = updateTrailPoints(trailPointsRef.current.get(device.id) ?? [], trailHistory[device.id] ?? [], device, presenceNow);
       trailPointsRef.current.set(device.id, points);
+      const coordinates: TrailLatLng[] = points.map(point => [point.lat, point.lon]);
       let trail = trailsRef.current.get(device.id);
       if (!trail) {
-        trail = L.polyline(points, { color: markerColor, weight: 2, opacity: 0.75, dashArray: "6,5" });
+        trail = L.polyline(coordinates, { color: markerColor, weight: 2, opacity: 0.75, dashArray: "6,5" });
         trailsRef.current.set(device.id, trail);
       } else {
-        trail.setLatLngs(points);
+        trail.setLatLngs(coordinates);
         trail.setStyle({ color: markerColor });
       }
       if (trailIdsRef.current.has(device.id) && !map.hasLayer(trail)) trail.addTo(map);
       if (!trailIdsRef.current.has(device.id) && map.hasLayer(trail)) map.removeLayer(trail);
     });
-  }, [avatars, devices, followedId, presenceNow, readOnly, trailIds]);
+  }, [avatars, devices, followedId, presenceNow, readOnly, trailHistory, trailIds]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -401,37 +403,6 @@ export default function LeafletMap(props: ConfiguredMapRendererProps) {
     const followed = devices.find((device) => device.id === followedId);
     if (followed && (followed.entity !== "hub" || followed.hasGps)) map.panTo([followed.lat, followed.lon]);
   }, [devices, followedId]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map) return;
-
-    Object.entries(trailHistory).forEach(([deviceIdValue, historicalPoints]) => {
-      const deviceId = Number(deviceIdValue);
-      const device = devicesRef.current.find((item) => item.id === deviceId);
-      const avatar = avatarsRef.current[deviceId];
-      if (!device || (device.entity === "hub" && !device.hasGps) || !avatar || historicalPoints.length === 0) return;
-
-      const points: TrailLatLng[] = historicalPoints
-        .slice(-VISIBLE_TRAIL_POINT_LIMIT)
-        .map((point) => [point.lat, point.lon]);
-      const lastPoint = historicalPoints.at(-1);
-      if (!lastPoint || lastPoint.lat !== device.lat || lastPoint.lon !== device.lon) {
-        points.push([device.lat, device.lon]);
-      }
-      const visiblePoints = points.slice(-VISIBLE_TRAIL_POINT_LIMIT);
-      trailPointsRef.current.set(deviceId, visiblePoints);
-
-      let trail = trailsRef.current.get(deviceId);
-      if (!trail) {
-        trail = L.polyline(visiblePoints, { color: avatar.color, weight: 2, opacity: 0.75, dashArray: "6,5" });
-        trailsRef.current.set(deviceId, trail);
-      } else {
-        trail.setLatLngs(visiblePoints);
-      }
-      if (trailIdsRef.current.has(deviceId) && !map.hasLayer(trail)) trail.addTo(map);
-    });
-  }, [trailHistory]);
 
   useEffect(() => {
     const map = mapRef.current;

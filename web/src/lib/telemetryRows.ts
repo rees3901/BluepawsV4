@@ -48,6 +48,7 @@ export function positionToTelemetryDevice(row: PositionRow): TelemetryDevice {
     name: `Device ${row.device_uid}`,
     seq: row.message_id,
     time: Math.floor(recordedAt / 1000),
+    positionRecordedAt: new Date(Math.min(recordedAt, Date.parse(row.received_at))).toISOString(),
     status: statusName(row.status_code),
     profile: profileName(row.power_profile_code),
     error: flags !== null && (flags & 0x80) !== 0 ? "Module" : "None",

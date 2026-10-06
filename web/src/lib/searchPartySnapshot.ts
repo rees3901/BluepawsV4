@@ -120,6 +120,7 @@ function parseHub(value: unknown, token?: string, supabaseUrl?: string): { devic
       id: -gatewayId, name: typeof hub.display_name === "string" && hub.display_name.trim() ? hub.display_name.trim() : "Home Hub",
       entity: "hub", hubMode: hub.mode, lat: latitude ?? 0, lon: longitude ?? 0, hasGps: latitude !== null,
       lastUpdate, seq: 0, time: Math.floor(lastUpdate / 1000), status: hub.mode === "home" ? "Home" : "Out",
+      positionRecordedAt: typeof hub.fix_at === "string" ? hub.fix_at : null,
       profile: "Normal", error: "None", batt: 0, rssi: null, snr: null, bleHome: false, ingestPath: null,
       source: typeof hub.fix_at === "string" && Number.isFinite(Date.parse(hub.fix_at)) ? `Hub GNSS · ${new Date(hub.fix_at).toLocaleString()}` : "No hub GPS fix yet",
     },
