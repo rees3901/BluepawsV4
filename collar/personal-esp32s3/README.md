@@ -47,10 +47,21 @@ not the legacy 868 MHz JSON protocol. This image cannot communicate with V3 hubs
   wake and sends any due check-in, with the fresh-beacon-seen flag cleared.
   Optional `PERSONAL_HOME_BLE_ADDRESS` restricts it
   to the personal hub's observed BLE address; the canonical beacon has no hub ID.
-- All personal profiles send a Home check-in on every scheduled reporting wake,
+- Every hardware wake sends a signed `WAKE_CHECKIN` presence packet before BLE
+  scanning or GNSS acquisition, including single-button and LED-only timer wakes.
+  It omits GPS, stale-fix and GPS-error flags and uses the previously retained
+  home state; HOME_BEACON_SEEN stays clear until a new scan actually hears it.
+  Zero packet time means UTC unavailable, not an invented GPS timestamp. Cloud
+  receipt still updates last seen; the hub needs real time for its awake indicator.
+  A 15-second receipt/command window follows presence, then the normal workflow.
+  A full BOOT/user/GPS report follows when required and valid UTC is available.
+  Home-only reporting wakes also confirm the scan with HOME_BEACON_SEEN; the
+  initial presence is provisional and never claims a newly heard beacon.
+- All personal profiles send presence on every scheduled reporting wake,
   including Power Save. Sleep intervals remain Normal 10 minutes, Power Save
   30 minutes and Active 1 minute; periodic Home GNSS refresh is unchanged.
-  LED-only timer wakes and single-button feedback retain their no-report behavior.
+  LED-only timer wakes and single-button feedback now send presence and listen
+  for commands, but still skip GPS and preserve the regular reporting deadline.
   This personal policy overrides the shared Power Save check-in ratio without
   changing canonical V4 profile configuration.
 - Normal, PowerSave, Active and Lost Alert use V4 timings. Home GNSS
@@ -197,6 +208,7 @@ other assemblies retain their previous GPIO48 Find behaviour.
 USER gestures work both awake and when waking from sleep:
 
 - Single short press: seven rapid D1 flashes (70ms on/70ms off, 910ms total).
+  From sleep, this also sends the universal wake presence and opens command RX.
   It does not request GPS or telemetry. From sleep it resumes the remaining
   scheduled sleep when retained UTC is available.
 - Double press: second tap within 350ms after the first release requests the

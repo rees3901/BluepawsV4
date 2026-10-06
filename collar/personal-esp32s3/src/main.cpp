@@ -70,6 +70,8 @@ bool bleReady = false, bootReport = true, buttonReport = false;
 uint32_t lostStartedMs = 0;
 uint8_t report[BP_MAX_PACKET_SIZE];
 uint8_t reportLength = 0;
+bool wakePresencePending = true;
+uint32_t presenceRequests = 0;
 personal::FinderFlash finder;
 QueueHandle_t buttonEvents = nullptr;
 volatile bool gestureBusy = false;
@@ -340,19 +342,21 @@ bool transmit(const uint8_t* bytes, uint8_t size) {
 }
 uint8_t buildPacket(uint8_t* p, uint8_t reason, bool homeSeen, uint16_t ack = 0) {
     const uint32_t now = utc();
+    const bool presenceOnly = reason == TX_WAKE_CHECKIN;
     const uint16_t age = personal::fixAge(now, retained.fixTime);
-    const bool valid = retained.fixTime && age <= GPS_STALE_THRESHOLD_S && !gpsFailed;
+    const bool valid = !presenceOnly && retained.fixTime && age <= GPS_STALE_THRESHOLD_S && !gpsFailed;
     uint8_t flags = homeSeen ? FLAG_HOME_BEACON_SEEN : 0;
     if (valid) flags |= FLAG_GNSS_VALID;
-    else if (retained.fixTime) flags |= FLAG_STALE_FIX;
-    if (gpsFailed) flags |= FLAG_ERROR_PRESENT;
-    uint8_t status = state.profile == PROFILE_LOST ? STATUS_LOST : retained.home ? STATUS_HOME : valid ? STATUS_OUT_AND_ABOUT : STATUS_ERROR;
+    else if (!presenceOnly && retained.fixTime) flags |= FLAG_STALE_FIX;
+    if (!presenceOnly && gpsFailed) flags |= FLAG_ERROR_PRESENT;
+    uint8_t status = state.profile == PROFILE_LOST ? STATUS_LOST : retained.home ? STATUS_HOME :
+        (valid || presenceOnly) ? STATUS_OUT_AND_ABOUT : STATUS_ERROR;
     pkt_init(p, PERSONAL_DEVICE_ID, PERSONAL_HUB_ID, nextSequence(), now, status, state.profile, flags, reason);
-    pkt_set_gps(p, retained.lat, retained.lon);
+    if (!presenceOnly) pkt_set_gps(p, retained.lat, retained.lon);
     // No battery divider/fuel gauge is established on this assembly. Zero is
     // an unmeasured value, NOT an invented voltage. HDOP is not accuracy in metres.
-    pkt_set_quality(p, 0, 0, age);
-    pkt_set_sat_count(p, retained.fixTime ? retained.satellites : 255);
+    pkt_set_quality(p, 0, 0, presenceOnly ? UINT16_MAX : age);
+    pkt_set_sat_count(p, !presenceOnly && retained.fixTime ? retained.satellites : 255);
     pkt_add_tlv_u16(p, TLV_FW_VER, 0x0100);
     if (reason == TX_ACK) pkt_add_tlv_u16(p, TLV_ACKED_MSG_SEQ_ID, ack);
     return personal::sign(p, PERSONAL_HMAC_KEY);
@@ -515,8 +519,27 @@ void setup() {
     if (xTaskCreate(pollButton, "user-button", 2048,
         reinterpret_cast<void*>(uintptr_t(gestureBusy)), 1, nullptr) != pdPASS)
         fatal("[BUTTON] task allocation failed");
+    Serial.printf("[PERSONAL] collar=%u hub=%04X profile=%s; real GNSS, LoRa only\n",
+        PERSONAL_DEVICE_ID, PERSONAL_HUB_ID, bp_profile_name(bp_profile_t(state.profile)));
+    radioSPI.begin(RADIO_SCK, RADIO_MISO, RADIO_MOSI, RADIO_NSS);
+    const int16_t result = radio.begin(LORA_FREQUENCY, LORA_BANDWIDTH, LORA_SPREADING,
+        LORA_CODING_RATE, LORA_SYNC_WORD, bp_profile_config(bp_profile_t(state.profile))->tx_power_dBm,
+        LORA_PREAMBLE_LEN);
+    radioReady = result == RADIOLIB_ERR_NONE;
+    Serial.printf("[RADIO] Init result=%d\n", result);
+    if (!radioReady) { Serial.printf("[RADIO] Init failed %d\n", result); sleepFor(60); }
+    if (radio.setCRC(LORA_CRC_ENABLED) != RADIOLIB_ERR_NONE) { radioReady = false; sleepFor(60); }
+    radio.setDio1Action(onRadio);
+    // Every hardware wake, including a button flicker or LED-only timer,
+    // announces presence before any return to sleep or BLE/GNSS acquisition.
+    reportLength = buildPacket(report, TX_WAKE_CHECKIN, false);
+    Serial.println("[WAKE] Presence before BLE/GNSS; previous home state, no position");
+    transmit(report, reportLength);
+    receiveWindow(false);
+    wakePresencePending = false;
+    presenceRequests = buttonRequests;
     if (buttonWake) {
-        // A single tap only gives feedback and resumes the scheduled sleep.
+        // After presence/command RX, a single tap resumes the scheduled sleep.
         do { serviceButton(); tickFinder(); delay(5); }
         while (gestureBusy || finder.active() || uxQueueMessagesWaiting(buttonEvents));
         if (!buttonReport) {
@@ -535,23 +558,23 @@ void setup() {
         if (!buttonReport && utc() < scheduledWakeUtc)
             sleepFor(uint16_t(min(scheduledWakeUtc - utc(), uint32_t(65535))), true);
     }
-    Serial.printf("[PERSONAL] collar=%u hub=%04X profile=%s; real GNSS, LoRa only\n",
-        PERSONAL_DEVICE_ID, PERSONAL_HUB_ID, bp_profile_name(bp_profile_t(state.profile)));
-    radioSPI.begin(RADIO_SCK, RADIO_MISO, RADIO_MOSI, RADIO_NSS);
-    const int16_t result = radio.begin(LORA_FREQUENCY, LORA_BANDWIDTH, LORA_SPREADING,
-        LORA_CODING_RATE, LORA_SYNC_WORD, bp_profile_config(bp_profile_t(state.profile))->tx_power_dBm,
-        LORA_PREAMBLE_LEN);
-    radioReady = result == RADIOLIB_ERR_NONE;
-    Serial.printf("[RADIO] Init result=%d\n", result);
-    if (!radioReady) { Serial.printf("[RADIO] Init failed %d\n", result); sleepFor(60); }
-    if (radio.setCRC(LORA_CRC_ENABLED) != RADIOLIB_ERR_NONE) { radioReady = false; sleepFor(60); }
-    radio.setDio1Action(onRadio);
+
 }
 
 void loop() {
     serviceButton(); enforceLostTimeout();
     const uint32_t cycleStart = millis();
     freshFix = false; gpsFailed = false;
+    if (wakePresencePending || (buttonReport && buttonRequests != presenceRequests)) {
+        // Presence precedes BLE/GNSS work. Timestamp zero explicitly means no
+        // collar UTC yet; server receipt still establishes liveness.
+        reportLength = buildPacket(report, TX_WAKE_CHECKIN, false);
+        Serial.println("[WAKE] Presence before BLE/GNSS; previous home state, no position");
+        transmit(report, reportLength);
+        receiveWindow(false);
+        wakePresencePending = false;
+        presenceRequests = buttonRequests;
+    }
     const bool seen = state.profile == PROFILE_LOST ? false : scanHome();
     // Count scheduled Home wakes, including the first missed-beacon scan.
     // Hysteresis retains Home for that scan; it must not suppress the check-in.
@@ -570,10 +593,11 @@ void loop() {
     }
     // Personal collars check in on every scheduled Home wake in every profile.
     // Keep the canonical profile table unchanged; Power Save still sleeps 30m.
+    // Confirm the current home scan separately from provisional wake presence.
     const bool reportDue = bootReport || buttonReport || lost || gnssDue || retained.home;
     // No build-time or invented timestamps: wait for GNSS time on first boot.
     const uint32_t servicedRequests = buttonRequests;
-    if (reportDue && utc()) {
+    if (reportDue && (utc() || (retained.home && !gnssDue))) {
         const uint8_t reason = bootReport ? TX_BOOT : buttonReport ? TX_INTERRUPT :
             retained.home && !gnssDue ? TX_WAKE_CHECKIN : TX_TELEMETRY;
         reportLength = buildPacket(report, reason, seen);

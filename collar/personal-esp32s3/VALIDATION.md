@@ -262,3 +262,17 @@ outdoor tracking. This file will be updated as actual hardware evidence arrives.
 - Variable LED Flash/Repeat/Stop support and every-home-wake check-in policy are
   included. Visible LED and cloud LED command execution still need confirmation.
 - Private recovery image: `collar/3003-pr256-variable-led-firmware.bin`.
+
+## Early presence on every wake — 6 October 2026
+
+- Personal ESP32-S3 and isolated canonical collar builds passed. Native tests
+  of the actual personal packet builder passed for no-UTC presence, all profiles,
+  cleared GNSS/fault flags, omitted coordinates and valid HMAC. LED schedule
+  tests passed. Wake presence is followed by the existing command window.
+- Includes LED-only timer and single-button hardware wakes. They still skip
+  GPS and preserve the normal reporting deadline. Home reporting wakes retain
+  a separate current-beacon confirmation; early presence uses previous state.
+- COM19 disappeared before the upload could open it. No new image was flashed
+  in that attempt. Bootloader mode requested; live receipt, GUI liveness and
+  LED-only wake verification remain pending. Existing credentials unchanged.
+- Canonical change is isolated in draft PR259; personal code is not included.
