@@ -325,3 +325,21 @@ outdoor tracking. This file will be updated as actual hardware evidence arrives.
   `.secrets/com23-antenna-reseat.jsonl`. Private image:
   `collar/3004-wake-presence-30s-firmware.bin`, SHA256
   `3982F444E877C144F7F555155C8D334D935C5B3BE10E3415259F61C7C77E8860`.
+
+## Wake and hub-receipt LED feedback — 6 October 2026
+
+- Added one D1 flash on hardware wake and one on the first matched hub receipt
+  for each receive window. Local radio TX success alone does not trigger receipt
+  feedback. Existing seven-flash button and repeat patterns remain intact.
+- Repeat diagnostic now prints the actual configured interval instead of a
+  hard-coded 60 seconds.
+- Personal collar build passed; flashed 3004 on COM23, MAC e0:72:a1:f8:f2:48,
+  with all upload hashes verified. Credentials and D1 enable remain unchanged.
+- Post-upload serial captured hub receipt, trusted home BLE and ANTENNA OK.
+  Visual timing of the two feedback flashes remains to be bench-confirmed.
+- Earlier replacement-antenna capture reported ANTENNA OK four times. Live LED
+  command sequence 15 was acknowledged at 12:57:04 UTC; serial confirmed a
+  seven-flash repeat cycle. This proves that command, not all repeat intervals.
+- Recovery image: collar/3004-wake-led-feedback-firmware.bin, SHA256
+  3AA86E40FA8FE00E4954D6DAAEBD2D5920F9C0234D66F9DB76D18ACFA9BD3BBF.
+- GUI restrictions are isolated in PR 261; personal branch remains unmerged.

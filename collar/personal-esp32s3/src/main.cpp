@@ -177,7 +177,7 @@ void serviceLedSchedule() {
 #if PERSONAL_D1_LED
     if (ledSchedule.due(utc(), state.profile == PROFILE_LOST)) {
         startFinder(BUZZER_CHIRP, 7);
-        Serial.println("[LED SCHEDULE] seven flashes; next cycle in 60s");
+        Serial.printf("[LED SCHEDULE] seven flashes; next cycle in %us\n", ledSchedule.until ? ledSchedule.intervalSeconds : 60);
     }
 #endif
 }
@@ -382,6 +382,7 @@ void receiveWindow(bool homeSeen) {
             armReceive();
             if (result != RADIOLIB_ERR_NONE) continue;
             if (personal::receipt(incoming, size, PERSONAL_DEVICE_ID, PERSONAL_HUB_ID, pkt_msg_seq(report))) {
+                if (!acknowledged) startFinder(BUZZER_CHIRP, 1); // Hub receipt, not merely local TX success.
                 acknowledged = true;
                 continue; // Remain listening for the separate cloud command.
             }
@@ -530,6 +531,7 @@ void setup() {
     if (!radioReady) { Serial.printf("[RADIO] Init failed %d\n", result); sleepFor(60); }
     if (radio.setCRC(LORA_CRC_ENABLED) != RADIOLIB_ERR_NONE) { radioReady = false; sleepFor(60); }
     radio.setDio1Action(onRadio);
+    startFinder(BUZZER_CHIRP, 1); // Visible feedback on every hardware wake.
     // Every hardware wake, including a button flicker or LED-only timer,
     // announces presence before any return to sleep or BLE/GNSS acquisition.
     reportLength = buildPacket(report, TX_WAKE_CHECKIN, false);
