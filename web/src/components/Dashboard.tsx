@@ -11,7 +11,7 @@ import { SearchPartyViewer } from "@/components/SearchPartyViewer";
 import { AccountMenu } from "@/components/AccountMenu";
 import { defaultDeviceAvatar } from "@/lib/defaultDeviceAvatar";
 import { collarSummary } from "@/lib/devicePresence";
-import { queuePowerProfileCommand } from "@/lib/deviceCommands";
+import { queuePowerProfileCommand, queueLedFindCommand } from "@/lib/deviceCommands";
 import { useCollarFeedback } from "@/lib/useCollarFeedback";
 import { useHubPresence } from "@/lib/useHubPresence";
 import { hubAvatar, hubMapDevice, type HubPresence } from "@/lib/hubPresence";
@@ -54,6 +54,8 @@ const TUTORIAL_PROMPT_STORAGE_KEY = "bp_tutorial_prompt_seen";
 const SEARCH_PARTY_PREVIEW_STORAGE_KEY = "bp_search_party_preview";
 const FAMILY_HYDRATION_RETRY_DELAYS_MS = [750, 1_500, 3_000, 6_000, 10_000];
 
+import { FindModal } from "@/components/FindModal";
+
 interface SelectedDevice {
   id: number;
   name: string;
@@ -92,6 +94,8 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [commandDevice, setCommandDevice] = useState<SelectedDevice | null>(null);
   const [commandSending, setCommandSending] = useState(false);
+  const [findSending, setFindSending] = useState(false);
+  const [findError, setFindError] = useState<string | null>(null);
   const [findDevice, setFindDevice] = useState<SelectedDevice | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [mapNotice, setMapNotice] = useState<string | null>(null);
@@ -859,7 +863,18 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
         <TutorialWelcomeCard onStart={startTutorialFromPrompt} onDismiss={dismissTutorialPrompt} />
       )}
       {commandDevice && <CommandModal device={commandDevice} sending={commandSending} onClose={() => { if (!commandSending) setCommandDevice(null); }} onSend={handlePowerProfileCommand} />}
-      {findDevice && <FindModal device={findDevice} onClose={() => setFindDevice(null)} onSend={() => { setFindDevice(null); setToast(tutorialMode ? "Tutorial Find Alert previewed" : "Find Alert sending is not connected yet"); }} />}
+      {findDevice && <FindModal device={findDevice} sending={findSending} error={findError}
+        onClose={() => { setFindDevice(null); setFindError(null); }} onSend={async (action, seconds, interval) => {
+          if (findSending) return;
+          if (tutorialMode) { setToast("Tutorial LED command previewed"); setFindDevice(null); return; }
+          setFindSending(true); setFindError(null);
+          try {
+            await queueLedFindCommand(findDevice.id, action, seconds, interval);
+            refreshFeedback(); setFindDevice(null);
+            setToast(action === "stop" ? "Stop LED cycle queued · awaiting collar ACK" : "LED command queued · awaiting collar ACK");
+          } catch (error) { setFindError(error instanceof Error ? error.message : "Unable to queue LED command"); }
+          finally { setFindSending(false); }
+        }} />}
       {reportDevice && (
         <DeviceReportModal
           deviceName={reportDevice.name}
@@ -994,6 +1009,7 @@ function CommandModal({ device, sending, onClose, onSend }: { device: SelectedDe
   );
 }
 
+/* Retained buzzer UI for a future hardware-capability implementation; hidden for now.
 function FindModal({ device, onClose, onSend }: { device: SelectedDevice; onClose: () => void; onSend: () => void }) {
   const [buzzer, setBuzzer] = useState(true);
   const [led, setLed] = useState(true);
@@ -1012,6 +1028,8 @@ function FindModal({ device, onClose, onSend }: { device: SelectedDevice; onClos
     </div>
   );
 }
+
+*/
 
 function Toggle({ label, checked, disabled = false, onChange }: { label: string; checked: boolean; disabled?: boolean; onChange: (checked: boolean) => void }) {
   return <div className="form-group"><div className="toggle-row"><label>{label}</label><label className={`toggle-switch${disabled ? " disabled" : ""}`}><input type="checkbox" aria-label={label} checked={checked} disabled={disabled} onChange={(event) => onChange(event.target.checked)} /><span className="toggle-slider" /></label></div></div>;

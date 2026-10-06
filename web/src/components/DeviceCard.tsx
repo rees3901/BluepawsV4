@@ -204,7 +204,7 @@ export function ActionButtons({ followed, trailVisible, onAction, collarControls
       <button className="btn-action btn-jump" disabled={!hasGps} onClick={() => onAction("jump")} title="Jump to location">↗ Jump To</button>
       <button className={`btn-action btn-follow${followed ? " active" : ""}`} onClick={() => onAction("follow")} title="Auto-follow on map">● {followed ? "Following" : "Follow"}</button>
       <button className={`btn-action btn-trail${trailVisible ? " active" : ""}`} onClick={() => onAction("trail")} title="Toggle breadcrumb trail">⌁ Trail</button>
-      {collarControls && <><button className="btn-action btn-find" onClick={() => onAction("find")} title="Find Alert — trigger buzzer + LED">♟ Find Alert</button>
+      {collarControls && <><button className="btn-action btn-find" onClick={() => onAction("find")} title="Find Alert — flash collar LED">♟ Find Alert</button>
       <button className="btn-action btn-cmd" onClick={() => onAction("command")} title="Command & Control">⌘ Cmd</button></>}
       {extra}
     </div>

@@ -53,7 +53,7 @@ const TOUR_STEPS: TourStep[] = [
     description: "When a tile is expanded, the most useful actions are gathered together in one convenient row. These let you move around the map, review a journey or prepare a collar action without hunting through another menu.",
     items: [
       "Jump To centres the pet once, while Follow keeps the map centred as fresh positions arrive.",
-      "Trail draws the pet's recent movement; Find Alert is where you can ask the collar to use its buzzer and light.",
+      "Trail draws the pet's recent movement; Find Alert is where you can ask the collar to flash its light.",
       "Cmd opens the available power-profile choices and other supported collar commands.",
     ],
   },
