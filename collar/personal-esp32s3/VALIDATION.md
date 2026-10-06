@@ -306,3 +306,22 @@ outdoor tracking. This file will be updated as actual hardware evidence arrives.
   `2293E623CD04518606ABD64B8F9A3DF1D14A4370845D91592F6FE827C331AF9E`.
 - The T190 30-second companion image is built but has not been flashed in this
   test; hub relay diagnostics remain a separate follow-up.
+
+## Collar 3004 wake-presence update — 6 October 2026
+
+- Built latest personal source `3de4f8d` using 3004 existing credentials with
+  D1 LED enabled. COM23 ESP32-S3 MAC matched its replacement-board record.
+  Application upload and all written regions passed hash verification.
+- Cold-start capture confirmed hub radio receipt and Home BLE detection. GNSS
+  supplied checksum-valid NMEA but reported ANTENNA OPEN, no fresh fix or UTC;
+  full telemetry was suppressed and Active sleep was 60 seconds. User confirmed
+  the GPS coax had come loose and is reseating it; repair verification pending.
+- Next timer wake captured sequence 770, 44-byte presence before BLE/GNSS and
+  a hub receipt at the end of exactly 30 seconds of receive time. Active profile
+  persisted. Home BLE was heard again. This wake still reported ANTENNA OPEN.
+- Cloud latest observation remained sequence 741 from 09:52 UTC during the
+  initial check. Do not equate radio acknowledgement with cloud acceptance.
+- Captures: `.secrets/com23-30s-presence.jsonl` and
+  `.secrets/com23-antenna-reseat.jsonl`. Private image:
+  `collar/3004-wake-presence-30s-firmware.bin`, SHA256
+  `3982F444E877C144F7F555155C8D334D935C5B3BE10E3415259F61C7C77E8860`.
