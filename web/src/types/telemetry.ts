@@ -11,6 +11,8 @@ export interface TelemetryDevice {
   name: string;
   seq: number;
   time: number;
+  // Position age is independent of newer wake/check-in presence.
+  positionRecordedAt?: string | null;
   status: CollarStatus;
   profile: PowerProfile;
   error: TelemetryError;

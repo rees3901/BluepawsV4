@@ -20,6 +20,7 @@ export function hubAvatar(hub: HubPresence, photoUrl?: string): DeviceAvatar {
 export function hubMapDevice(hub: HubPresence): TelemetryDevice {
   return { id: -hub.gateway_guid16, name: hub.display_name, entity: "hub", hubMode: hub.mode,
     hubReportingProfile: hub.reporting_profile,
+    positionRecordedAt: hub.fix_at,
     lat: hub.latitude ?? 0, lon: hub.longitude ?? 0, hasGps: hub.latitude !== null && hub.longitude !== null,
     lastUpdate: Date.parse(hub.received_at), seq: 0, time: 0, status: hub.mode === "home" ? "Home" : "Out",
     profile: "Normal", error: "None", batt: 0, batteryPercent: hub.battery_percent ?? null,

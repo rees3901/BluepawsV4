@@ -9,7 +9,7 @@ import {
   type DevicePresenceRow,
   type PositionRow,
 } from "@/lib/telemetryRows";
-import { VISIBLE_TRAIL_POINT_LIMIT } from "@/lib/trailPoints";
+import { TRAIL_MAX_AGE_MS, VISIBLE_TRAIL_POINT_LIMIT } from "@/lib/trailPoints";
 import type { TelemetryDevice, TelemetrySource, TrailPoint } from "@/types/telemetry";
 
 const INITIAL_FALLBACK_DELAY_MS = 30_000;
@@ -225,7 +225,7 @@ export function createRealtimeTelemetrySource(
 
 export async function loadDeviceTrail(deviceId: number): Promise<TrailPoint[]> {
   const supabase = createClient();
-  const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const since = new Date(Date.now() - TRAIL_MAX_AGE_MS).toISOString();
   const { data, error } = await supabase
     .from("positions")
     .select("latitude,longitude,recorded_at,message_id")

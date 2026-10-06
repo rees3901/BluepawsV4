@@ -12,9 +12,9 @@ import { contextMenuHtml, copyTextToClipboard, temporaryPinPopupHtml } from "@/l
 import { EMPTY_MAP_CENTER, EMPTY_MAP_ZOOM } from "@/lib/mapViewport";
 import { normalizeMarkerColor } from "@/lib/markerColor";
 import { mapPopupHtml } from "@/lib/mapPopup";
-import { VISIBLE_TRAIL_POINT_LIMIT } from "@/lib/trailPoints";
+import { updateTrailPoints } from "@/lib/trailPoints";
 import { locatedDevices, type ConfiguredMapRendererProps } from "@/components/mapRenderer";
-import type { DeviceAvatar, TelemetryDevice } from "@/types/telemetry";
+import type { DeviceAvatar, TelemetryDevice, TrailPoint } from "@/types/telemetry";
 
 const JUMP_TO_ZOOM = 17;
 const TRAILS_SOURCE = "bluepaws-trails";
@@ -31,6 +31,7 @@ export default function MapLibreMap(props: ConfiguredMapRendererProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibre | null>(null);
   const markersRef = useRef(new Map<number, maplibregl.Marker>());
+  const trailPointsRef = useRef(new Map<number, TrailPoint[]>());
   const measurementPointsRef = useRef<[number, number][]>([]);
   const measurementPopupRef = useRef<maplibregl.Popup | null>(null);
   const devicePopupRef = useRef<maplibregl.Popup | null>(null);
@@ -207,7 +208,7 @@ export default function MapLibreMap(props: ConfiguredMapRendererProps) {
           updateMarkerElement(marker.getElement(), device.name, avatar, normalizeMarkerColor(avatar.color), device.status, freshness);
         }
       }
-      syncTrails(map, visible, avatars, trailIds, trailHistory);
+      syncTrails(map, visible, avatars, trailIds, trailHistory, trailPointsRef.current, presenceNow);
     };
     if (map.loaded()) sync();
     else map.once("load", sync);
@@ -397,11 +398,14 @@ function openPopup(map: MapLibre, marker: maplibregl.Marker, deviceId: number, p
   });
 }
 
-function syncTrails(map: MapLibre, devices: TelemetryDevice[], avatars: Record<number, DeviceAvatar>, trailIds: Set<number>, history: ConfiguredMapRendererProps["trailHistory"]) {
+function syncTrails(map: MapLibre, devices: TelemetryDevice[], avatars: Record<number, DeviceAvatar>, trailIds: Set<number>, history: ConfiguredMapRendererProps["trailHistory"], cache: Map<number, TrailPoint[]>, now: number) {
+  const deviceIds = new Set(devices.map(device => device.id));
+  for (const id of cache.keys()) if (!deviceIds.has(id)) cache.delete(id);
+  for (const device of devices) cache.set(device.id, updateTrailPoints(cache.get(device.id) ?? [], history[device.id] ?? [], device, now));
   const features = devices.filter(device => trailIds.has(device.id)).map(device => ({
     type: "Feature" as const,
     properties: { color: normalizeMarkerColor(avatars[device.id]?.color) },
-    geometry: { type: "LineString" as const, coordinates: [...(history[device.id] ?? []).slice(-VISIBLE_TRAIL_POINT_LIMIT).map(point => [point.lon, point.lat]), [device.lon, device.lat]] },
+    geometry: { type: "LineString" as const, coordinates: (cache.get(device.id) ?? []).map(point => [point.lon, point.lat]) },
   })).filter(feature => feature.geometry.coordinates.length > 1);
   const data = { type: "FeatureCollection" as const, features };
   const source = map.getSource(TRAILS_SOURCE) as GeoJSONSource | undefined;
