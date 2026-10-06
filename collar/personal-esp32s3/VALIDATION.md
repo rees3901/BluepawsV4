@@ -288,3 +288,21 @@ outdoor tracking. This file will be updated as actual hardware evidence arrives.
   as before; each receipt/command window now lasts at least 30 seconds.
 - No collar/hub USB port is present at validation time. These images have not
   been flashed or bench-verified. The live GUI awake estimate remains shorter.
+
+## Collar 3003 wake-presence flash — 6 October 2026
+
+- Flashed revision `aac0daf` on COM19; ESP32-S3 MAC matched collar 3003 and
+  all uploaded flash regions passed hash verification. Existing credentials
+  and D1 LED configuration preserved.
+- Serial capture started after the initial TX. It recorded a hub receipt, then
+  a successful Home BLE scan, followed by the bounded GNSS attempt. NMEA was
+  checksum-valid and reported ANTENNA OK, but yielded no usable fix/UTC. Full
+  telemetry was suppressed and the collar slept for 1800 seconds.
+- Live backend latest observation remained message 513 from the earlier button
+  test during this check. Radio acknowledgement is confirmed; new cloud
+  acceptance, Last seen refresh and GUI awake indication are not confirmed.
+- Capture: `.secrets/com19-30s-presence.jsonl`. Private recovery image:
+  `collar/3003-wake-presence-30s-firmware.bin`, SHA256
+  `2293E623CD04518606ABD64B8F9A3DF1D14A4370845D91592F6FE827C331AF9E`.
+- The T190 30-second companion image is built but has not been flashed in this
+  test; hub relay diagnostics remain a separate follow-up.
