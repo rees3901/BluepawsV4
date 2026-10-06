@@ -20,10 +20,11 @@ test('cloud receive window subtracts latency and cannot restart for a cached rep
 
 test('fault reasons use explicit same-report flags, not radio quality or reset guesses', () => {
   assert.equal(collarFault({flags:0xc1,txReason:0})?.label,'Reported fault — stale GPS');
-  assert.equal(collarFault({flags:0x85,txReason:0})?.label,'Reported fault — low battery');
+  assert.equal(collarFault({flags:0x85,txReason:0})?.label,'Reported fault — cause unspecified');
   assert.equal(collarFault({flags:0x80,txReason:0})?.label,'Reported fault — GPS fix unavailable');
-  assert.equal(collarFault({flags:0xc4,txReason:4})?.label,'Reported fault — stale GPS +1');
-  assert.match(collarFault({flags:0xc4,txReason:4})!.title,/stale GPS; low battery/);
+  assert.equal(collarFault({flags:0xc4,txReason:4})?.label,'Reported fault — stale GPS');
+  assert.match(collarFault({flags:0xc4,txReason:4})!.title,/stale GPS/);
+  assert.doesNotMatch(collarFault({flags:0xc4,txReason:4})!.title,/low battery/);
   for (const txReason of [1,2,6,7,undefined,null]) {
     assert.equal(collarFault({flags:0x88,txReason})?.label,'Reported fault — cause unspecified');
   }
