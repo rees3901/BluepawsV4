@@ -12,6 +12,16 @@ int main() {
     s.stop(); assert(!s.due(900,true)); assert(!s.wake(900,true));
     s.enterLost(); assert(s.due(1000,true));
     assert(s.accept(65534)); assert(!s.accept(65534)); assert(s.accept(1)); assert(!s.accept(65533));
+    assert(!s.repeat(100,9,60)); assert(!s.repeat(100,14401,60));
+    assert(!s.repeat(100,600,9)); assert(!s.repeat(100,600,601));
+    assert(s.repeat(2000,14400,10)); assert(s.due(2000,false));
+    assert(!s.due(2009,false)); assert(s.due(2010,false));
+    auto restored = s; assert(restored.intervalSeconds==10);
+    assert(restored.wake(2011,false)==2020); assert(!restored.due(16400,false));
+    assert(s.repeat(2000,14400,600)); assert(s.due(2000,false));
+    assert(!s.due(2599,false)); assert(s.due(2600,false));
+    s.stop(); s.enterLost(); assert(s.due(3000,true));
+    assert(!s.due(3059,true)); assert(s.due(3060,true));
     uint8_t p[BP_MAX_PACKET_SIZE]; personal::CommandRecord cache[1]{};
     pkt_init(p,48,3004,1,0,STATUS_HOME,PROFILE_NORMAL,0,TX_CONFIG);
     pkt_add_tlv_u8(p,personal::LedActionTlv,1);

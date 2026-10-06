@@ -49,7 +49,7 @@ inline CommandResult command(const uint8_t* p, size_t n, uint16_t collar, uint16
             uint16_t duration = 0, interval = 0;
             if (!pkt_tlv_find(p, LedDurationTlv, &value, &len) || len != 2 || !pkt_tlv_get_u16(p, LedDurationTlv, &duration)) return CommandResult::Reject;
             if (!pkt_tlv_find(p, LedIntervalTlv, &value, &len) || len != 2 || !pkt_tlv_get_u16(p, LedIntervalTlv, &interval)) return CommandResult::Reject;
-            if (interval != 60 || (ledAction == 1 && (!now || duration < 60 || duration > 3600)) || (ledAction != 1 && duration)) return CommandResult::Reject;
+            if ((ledAction == 1 && (!now || duration < 10 || duration > 14400 || interval < 10 || interval > 600)) || (ledAction != 1 && (duration || interval != 60))) return CommandResult::Reject;
             if (pkt_tlv_find(p, TLV_PROFILE, &value, &len)) return CommandResult::Reject;
         } else {
             if (!pkt_tlv_find(p, TLV_PROFILE, &value, &len) || len != 1) return CommandResult::Reject;
