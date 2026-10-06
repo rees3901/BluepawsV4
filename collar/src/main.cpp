@@ -246,7 +246,7 @@ static void     sendBootReport(bool atHome, bool haveFix);    // Cold/reboot boo
 static void     sendModeAck(uint32_t cmdMsgSeq, uint16_t destinationId);        // ACK a mode change command
 static void     sendStatusResponse(uint32_t cmdMsgSeq, uint16_t destinationId); // Respond to status query
 static void     sendLostModeAlert();       // Alert: lost mode 2hr timeout expired
-static void     sendWakeCheckin();         // Home wake check-in (no GNSS, no routine LTE)
+static void     sendWakeCheckin(bool atHome, bool beaconSeen); // Presence before BLE/GNSS
 static void     transmitPacket(uint8_t *buf, uint8_t len, bool suppressLed = false);  // Raw TLV LoRa TX
 static uint8_t  finalizeAuthenticatedPacket(uint8_t *buf); // Append/sign TLV v1.2 HMAC tag
 
@@ -501,6 +501,8 @@ static void cycleTask(void *param) {
                           bootResetReason, bp_profile_name(currentProfile));
             peripheralsWake();
 
+            sendWakeCheckin(homeCycleCount > 0, false);
+            listenForCommands();
             bool atHome = bleScanForHome();
             if (atHome) {
                 homeCycleCount++;
@@ -529,6 +531,8 @@ static void cycleTask(void *param) {
             Serial.printf("\n[USER] Forced report cycle | profile=%s\n", bp_profile_name(currentProfile));
             peripheralsWake();
 
+            sendWakeCheckin(homeCycleCount > 0, false);
+            listenForCommands();
             bool atHome = bleScanForHome();
             if (atHome) {
                 homeCycleCount++;
@@ -565,22 +569,18 @@ static void cycleTask(void *param) {
         // ── Wake peripherals for this cycle ──
         peripheralsWake();
 
+        // Presence is independent of home detection and GNSS acquisition.
+        sendWakeCheckin(homeCycleCount > 0, false);
+        listenForCommands();
         // ── Phase 1: BLE scan for home beacon ──
         bool atHome = bleScanForHome();
 
         if (atHome) {
             homeCycleCount++;
 
-            // Home wake check-in: BLE detection is the cause, but the packet
-            // builder explicitly sets WAKE_CHECKIN and HOME_BEACON_SEEN.
-            // This path skips GNSS and routine LTE, then listens for commands.
-            uint8_t checkinRatio = currentConfig->wake_checkin_ratio;
-            if (checkinRatio > 0 && (homeCycleCount % checkinRatio == 0)) {
-                Serial.printf("[CYCLE] Home (x%d). WAKE_CHECKIN (ratio 1:%d).\n",
-                              homeCycleCount, checkinRatio);
-                sendWakeCheckin();
-                listenForCommands();
-            }
+            // Confirm the current beacon separately from provisional wake presence.
+            sendWakeCheckin(true, true);
+            listenForCommands();
 
             uint8_t homeGnssRatio = currentConfig->home_gnss_refresh_ratio;
             if (homeGnssRatio > 0 && (homeCycleCount % homeGnssRatio == 0)) {
@@ -656,6 +656,8 @@ static void runLostMode() {
 
     // Ensure everything is awake
     peripheralsWake();
+    sendWakeCheckin(false, false);
+    listenForCommands();
     gnssEnable();  // GNSS stays on for entire lost mode
 
     uint32_t lastTxTime = 0;
@@ -1255,23 +1257,24 @@ static void sendBootReport(bool atHome, bool haveFix) {
 }
 
 // ═══════════════════════════════════════════════
-// Send Home Wake Check-In (no GNSS, no routine LTE)
+// Send Wake Presence (no GNSS, no routine LTE)
 //
-// Lightweight presence packet sent when the collar detects the BLE home beacon.
-// The packet explicitly sets tx_reason=WAKE_CHECKIN and HOME_BEACON_SEEN; the
-// packet builder does not infer those fields from each other.
+// Lightweight presence before acquisition or after confirmed home detection.
+// HOME_BEACON_SEEN is set only after a current scan; early presence
+// carries provisional previous home state.
 // ═══════════════════════════════════════════════
-static void sendWakeCheckin() {
+static void sendWakeCheckin(bool atHome, bool beaconSeen) {
     messageSeq++;
 
     uint8_t buf[BP_MAX_PACKET_SIZE];
-    uint8_t flags = FLAG_HOME_BEACON_SEEN;
-    if (lastError != BP_ERROR_NONE) flags |= FLAG_ERROR_PRESENT;
+    // No GPS/fault flags: this says awake, not that a fix was acquired.
+    uint8_t flags = beaconSeen ? FLAG_HOME_BEACON_SEEN : 0;
 
     pkt_init(buf, MY_DEVICE_ID, MY_HOME_HUB_ID, (uint16_t)(messageSeq & 0xFFFF), 0,
-             STATUS_HOME, currentProfile, flags, TX_WAKE_CHECKIN);
+             currentProfile == PROFILE_LOST ? STATUS_LOST : atHome ? STATUS_HOME : STATUS_OUT_AND_ABOUT,
+             currentProfile, flags, TX_WAKE_CHECKIN);
 
-    uint16_t batt_mV = 3700;  // TODO: Read actual battery voltage via ADC
+    uint16_t batt_mV = 0;  // No established measurement on this testbed.
     pkt_set_quality(buf, batt_mV, 0, 65535);
     pkt_set_sat_count(buf, 255);
 

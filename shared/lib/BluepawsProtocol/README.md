@@ -62,3 +62,8 @@ If this library still contains legacy constants or packet helpers, update the im
 `tx_reason = BOOT` and `tx_reason = WAKE_CHECKIN` use the v1.2 addressed header. Do not add new header flag meanings for boot diagnostics. Use TLVs such as `firmware_version`, `reset_reason`, and `uptime_s`.
 
 No-GNSS boot and wake-check-in packets are valid presence/diagnostic reports. Cloud ingestion should update last-seen/presence while preserving the last known valid coordinates.
+
+Send `WAKE_CHECKIN` before waiting for BLE/GNSS, then send a full report when
+required. Early presence omits GPS/stale/error flags and does not assert a new
+HOME_BEACON_SEEN scan. Packet time zero represents unavailable UTC only for this
+no-position report; backend receipt remains the liveness authority.

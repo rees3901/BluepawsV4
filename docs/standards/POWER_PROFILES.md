@@ -40,7 +40,7 @@ Codes 5-15 are reserved.
 
 | Profile | Home LoRa check-in | Home GNSS sanity refresh | Failed LoRa cycles before LTE | LED flashes | LED beacon | Continuous GNSS |
 |---|---:|---:|---:|---:|---|---|
-| `POWER_SAVE` | Every 2 BLE-home wakes | Every 10 BLE-home wakes | 3 | 3 | No | No |
+| `POWER_SAVE` | Every BLE-home wake | Every 10 BLE-home wakes | 3 | 3 | No | No |
 | `NORMAL` | Every BLE-home wake | Every 10 BLE-home wakes | 3 | 5 | No | No |
 | `ACTIVE` | Every BLE-home wake | Every 10 BLE-home wakes | 2 | 5 | No | No |
 | `LOST_ALERT` | Emergency path, not normal home cadence | Every cycle where practical | 1 | 10 | Yes | Yes |
@@ -48,6 +48,13 @@ Codes 5-15 are reserved.
 
 ## Behaviour rules
 
+- Wake presence is independent of GPS acquisition: send TX_WAKE_CHECKIN before
+  BLE/GNSS work and open the normal receipt/command window. Then send the full
+  boot, user-request or GPS report when needed. A successful home scan sends a confirmed-home presence
+  with HOME_BEACON_SEEN; the early presence is provisional. Personal LED-only and single-tap
+  wakes also send presence and preserve the scheduled telemetry deadline.
+- No-position wake presence omits GPS validity/stale/error flags; absent UTC is
+  encoded as zero. Last seen uses receipt provenance, not the last GPS fix time.
 - `NORMAL` is the fallback profile when a requested profile is unknown or invalid.
 - `DEBUG` is a real TLV profile code but must remain development-only. It must not
   be exposed as a normal customer control.

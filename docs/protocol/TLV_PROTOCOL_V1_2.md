@@ -316,6 +316,17 @@ TX reasons remain:
 | 6 | `CONFIG` |
 | 7 | `WAKE_CHECKIN` |
 
+`WAKE_CHECKIN` is the lightweight wake presence report, sent before BLE/GNSS
+work. It is identified by TX reason 7, not an additional flag or TLV. It omits
+GNSS_VALID, STALE_FIX and GPS error flags; fix age is 65535 and satellite count
+255. HOME_BEACON_SEEN is set only after an actual current beacon detection.
+An early packet can retain the previous home state without claiming a new scan.
+For this no-position presence packet, time_unix 0 explicitly means collar UTC
+is unavailable. It must not be substituted with build time or a guessed fix time.
+Server receipt updates presence independently of the last valid map position.
+The hub must have real receive time to advertise a live command window; offline
+replay must not create a fresh awake indication.
+
 ## 14. TLV section
 
 TLV encoding remains:
