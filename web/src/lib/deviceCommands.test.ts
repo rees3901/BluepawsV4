@@ -17,6 +17,6 @@ test("LED Find has bounded durations and distinct flash/repeat/stop actions", ()
  assert.deepEqual(ledFindPayload("flash"),{action:"flash"});
  assert.deepEqual(ledFindPayload("stop"),{action:"stop"});
  assert.deepEqual(ledFindPayload("repeat"),{action:"repeat",duration_s:600,interval_s:60});
- for(const value of [0,61,1.5,NaN]) assert.throws(()=>ledFindPayload("repeat",value));
+ for(const value of [0,14401,1.5,NaN]) assert.throws(()=>ledFindPayload("repeat",value));
  assert(supportsLedFind(3004)); assert(!supportsLedFind(1001)); assert(!supportsLedFind(3005));
 });

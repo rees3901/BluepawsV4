@@ -127,11 +127,17 @@ try {
   assert.equal((await db.query('select status from device_commands where id=$1',[repeat.id])).rows[0].status,'cancelled');
   await denied(queue(outsider,{device:3004,type:'led_find',payload:{action:'flash'}}),/Family membership required/);
   await denied(queue(owner,{device:1001,type:'led_find',payload:{action:'flash'}}),/fitted personal/,'22023');
-  for (const payload of [{},{action:'repeat'},{action:'repeat',duration_s:59,interval_s:60},
-    {action:'repeat',duration_s:3601,interval_s:60},{action:'repeat',duration_s:60.5,interval_s:60},
-    {action:'repeat',duration_s:'600',interval_s:60},{action:'repeat',duration_s:600,interval_s:10},
+  for (const payload of [{},{action:'repeat'},{action:'repeat',duration_s:9,interval_s:60},
+    {action:'repeat',duration_s:14401,interval_s:60},{action:'repeat',duration_s:60.5,interval_s:60},
+    {action:'repeat',duration_s:'600',interval_s:60},{action:'repeat',duration_s:600,interval_s:9},
+    {action:'repeat',duration_s:600,interval_s:601},{action:'repeat',duration_s:600,interval_s:10.5},
+    {action:'repeat',duration_s:600,interval_s:'60'},{action:'repeat',duration_s:600,interval_s:null},
     {action:'flash',duration_s:600},{action:'stop',extra:1},{action:'melody'}])
     await denied(queue(owner,{device:3004,type:'led_find',payload}),/LED Find|Repeat|Flash\/stop/,'22023');
   assert.equal((await db.query('select status from device_commands where id=$1',[stop.id])).rows[0].status,'pending');
+  for (const duration_s of [10,14400]) for (const interval_s of [10,600]) {
+    const result = (await queue(owner,{device:3004,type:'led_find',payload:{action:'repeat',duration_s,interval_s}})).rows[0];
+    assert.deepEqual(result.command_payload,{action:'repeat',duration_s,interval_s});
+  }
   console.log('PASS: LED Find duration, interval, supersession, batch gate and Family permissions');
 } finally { await db.close(); }

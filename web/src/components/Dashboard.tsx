@@ -864,12 +864,12 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
       )}
       {commandDevice && <CommandModal device={commandDevice} sending={commandSending} onClose={() => { if (!commandSending) setCommandDevice(null); }} onSend={handlePowerProfileCommand} />}
       {findDevice && <FindModal device={findDevice} sending={findSending} error={findError}
-        onClose={() => { setFindDevice(null); setFindError(null); }} onSend={async (action, minutes) => {
+        onClose={() => { setFindDevice(null); setFindError(null); }} onSend={async (action, seconds, interval) => {
           if (findSending) return;
           if (tutorialMode) { setToast("Tutorial LED command previewed"); setFindDevice(null); return; }
           setFindSending(true); setFindError(null);
           try {
-            await queueLedFindCommand(findDevice.id, action, minutes);
+            await queueLedFindCommand(findDevice.id, action, seconds, interval);
             refreshFeedback(); setFindDevice(null);
             setToast(action === "stop" ? "Stop LED cycle queued · awaiting collar ACK" : "LED command queued · awaiting collar ACK");
           } catch (error) { setFindError(error instanceof Error ? error.message : "Unable to queue LED command"); }

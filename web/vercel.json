@@ -1,9 +1,4 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "framework": "nextjs",
-  "git": {
-    "deploymentEnabled": {
-      "codex/led-find-controls": false
-    }
-  }
+  "framework": "nextjs"
 }

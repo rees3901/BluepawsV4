@@ -23,9 +23,11 @@ begin
  if command_payload ->> 'action' = 'repeat' then
   if jsonb_typeof(command_payload->'duration_s') is distinct from 'number'
     or (command_payload->>'duration_s') !~ '^[0-9]+$'
-    or (command_payload->>'duration_s')::numeric not between 60 and 3600
-    or command_payload->'interval_s' is distinct from '60'::jsonb then
-   raise exception using errcode='22023', message='Repeat requires 60..3600 seconds and a 60-second interval';
+    or (command_payload->>'duration_s')::numeric not between 10 and 14400
+    or jsonb_typeof(command_payload->'interval_s') is distinct from 'number'
+    or (command_payload->>'interval_s') !~ '^[0-9]+$'
+    or (command_payload->>'interval_s')::numeric not between 10 and 600 then
+   raise exception using errcode='22023', message='Repeat requires 10..14400 seconds and a 10..600-second interval';
   end if;
  elsif command_payload <> jsonb_build_object('action',command_payload->>'action') then
   raise exception using errcode='22023', message='Flash/stop only accept action';

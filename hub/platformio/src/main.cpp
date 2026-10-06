@@ -3367,7 +3367,7 @@ static bool queueCloudCommandResponse(const String &response, uint16_t expectedD
             strcmp(action,"repeat") == 0 ? LED_REPEAT : strcmp(action,"stop") == 0 ? LED_STOP : 255;
         uint16_t duration = command["payload"]["duration_s"] | 0;
         uint16_t interval = command["payload"]["interval_s"] | 60;
-        if (ledAction == 255 || (ledAction == LED_REPEAT && (duration < 60 || duration > 3600 || interval != 60))) return false;
+        if (ledAction == 255 || (ledAction == LED_REPEAT && (duration < 10 || duration > 14400 || interval < 10 || interval > 600))) return false;
         // CONFIG without PROFILE: older firmware rejects without a misleading Find ACK.
         if (!sendCommandFind(expectedDeviceId, PKT_CMD_MODE, PROFILE_UNKNOWN, 0, BUZZER_OFF,
                              sequence, LOCAL_COMMAND_TTL_MS - remaining, ledAction, duration, interval)) return false;

@@ -2,8 +2,9 @@
 
 The dashboard hides the former buzzer controls without removing their source.
 The LED dialog offers Flash now, Start repeating, and Stop LED cycle. Each cycle
-is seven 70ms flashes with 70ms gaps (910ms total). Repeat defaults to once per
-minute for ten minutes, selectable from 1, 5, 10, 15, 30 or 60 minutes.
+is seven 70ms flashes with 70ms gaps (about one second). Repeat defaults to once
+per minute for ten minutes. Intervals are 10/30 seconds and 1/2/5/10 minutes;
+durations are 10/30 seconds, 1/5/10/15/30 minutes, and 1/2/4 hours.
 
 This is a reusable V4 command, initially gated to the fitted personal batch
 3001–3004 in the UI and guarded queue. Other devices remain disabled until
@@ -20,7 +21,7 @@ the new collar image so far. Do not infer firmware support from the device ID.
 {"action":"stop"}
 ```
 
-Repeat accepts integral durations 60–3600 seconds; interval is fixed at 60.
+Repeat accepts integral durations 10–14400 seconds and intervals 10–600 seconds.
 The existing Family owner/member permissions apply. A new LED request supersedes
 pending/sent LED requests. Invalid requests cannot cancel existing commands.
 The browser explicitly requests ten-minute command expiry. Delivery waits for a
@@ -48,7 +49,7 @@ unchanged; the shared protocol source is not modified by this implementation.
 | --- | --- | --- |
 | `0xFA` LED action | u8 | 0=flash, 1=repeat, 2=stop |
 | `0xFB` LED duration | little-endian u16 | repeat seconds; 0 for flash/stop |
-| `0xFC` LED interval | little-endian u16 | 60 seconds |
+| `0xFC` LED interval | little-endian u16 | repeat interval 10–600 seconds; 60 for flash/stop |
 
 Older collar firmware rejects CONFIG without PROFILE and does not ACK it.
 The compatible collar validates all three fields and rejects mixed LED/profile
@@ -59,8 +60,12 @@ those documented in `COLLAR_DOWNLINK_COMMANDS.md`.
 
 The public feature branch is based on updated main and contains web, queue
 migration, hub relay and documentation only. Personal collar/T190 adapters stay
-on `codex/personal-legacy-collars`; do not merge that branch. Preview deployment
-is disabled for `codex/led-find-controls`.
+on `codex/personal-legacy-collars`; do not merge that branch.
+
+The variable-interval firmware extends the earlier minute-only image. Existing
+saved LED schedules with the previous structure size are discarded on cold boot;
+send a fresh repeat command after updating. Devices need updated collar and hub
+firmware before using intervals other than 60 seconds or durations above one hour.
 
 Release order: compatible collar/hub firmware, reviewed queue migration, then
 web release. No Edge Function change is needed: the existing envelope forwards
