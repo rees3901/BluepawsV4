@@ -234,3 +234,18 @@ outdoor tracking. This file will be updated as actual hardware evidence arrives.
   is built; COM22 is not currently present. Backend migration and live GUI release
   are pending review, so no real GUI-to-radio-to-LED success is claimed.
 - Recovery image: collar/3004-led-schedule-firmware.bin in the private bundle.
+
+## PR256 variable LED controls — 6 October 2026
+
+- Built personal firmware revision `09a421b` with collar 3004's existing private
+  credentials, hub 0030 and D1 LED enabled. Confirmed replacement board MAC before
+  flashing COM23; application upload passed hash verification.
+- Native LED schedule tests passed, including variable intervals 10–600 seconds
+  and repeat durations 10–14400 seconds. The startup-state-load correction and
+  every-scheduled-home-wake policy are included in this image.
+- Startup heard the home BLE beacon. GNSS emitted checksum-valid NMEA but no fix
+  and no UTC during the bounded 60-second attempt. The boot report was suppressed
+  and a 60-second retry scheduled. This is not evidence of cloud command delivery.
+- Obtain real satellite UTC, then verify GUI Flash/Repeat/Stop, visible LED and
+  matching command ACK. The hub also needs variable-interval relay firmware.
+- Private recovery image: `collar/3004-pr256-variable-led-firmware.bin`.
