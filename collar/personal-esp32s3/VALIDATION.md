@@ -249,3 +249,16 @@ outdoor tracking. This file will be updated as actual hardware evidence arrives.
 - Obtain real satellite UTC, then verify GUI Flash/Repeat/Stop, visible LED and
   matching command ACK. The hub also needs variable-interval relay firmware.
 - Private recovery image: `collar/3004-pr256-variable-led-firmware.bin`.
+
+## Collar 3003 refresh — 6 October 2026
+
+- User confirmed a D1 LED is fitted. Enabled that output only in 3003's private
+  configuration and built the latest personal firmware with its existing identity
+  and credentials. COM19 MAC matched its original backup record.
+- Upload passed flash hash verification. The bounded GNSS attempt received valid
+  NMEA and valid UTC but no usable position. Packet 449 transmitted successfully,
+  received a hub receipt and was accepted by the live backend at 11:47:32 UK time.
+  It reported HOME/Power Save without valid GNSS, then slept for 1800 seconds.
+- Variable LED Flash/Repeat/Stop support and every-home-wake check-in policy are
+  included. Visible LED and cloud LED command execution still need confirmation.
+- Private recovery image: `collar/3003-pr256-variable-led-firmware.bin`.
