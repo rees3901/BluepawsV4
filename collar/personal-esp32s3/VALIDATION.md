@@ -365,3 +365,16 @@ outdoor tracking. This file will be updated as actual hardware evidence arrives.
   status signals and existing seven-flash button/Find behaviour.
 - Recovery image: collar/3003-four-status-flashes-firmware.bin, SHA256
   257147E3ED1B8119B2A034597C6889DD9BD2573BF7AEE3902892250D6B21AAF8.
+
+## Gizmo 3002 latest firmware and D1 LED — 6 October 2026
+
+- Built latest personal firmware with Gizmo's existing 3002 credentials. User
+  confirmed a fitted D1 LED; enabled PERSONAL_D1_LED in the private saved and
+  active configurations and reflashed COM18, MAC d8:3b:da:73:ea:a4.
+- All upload hashes verified. Post-flash serial confirmed a hub receipt.
+- Includes early presence, 30-second listening, four-flash wake/receipt feedback,
+  seven-flash button/Find cycles and configurable LED scheduling.
+- Recovery image: collar/3002-four-status-flashes-led-firmware.bin, SHA256
+  40A44855D8AFC2518D287AEB97FDF1572EC3DC8B9874D1BC3EE76C78B266A6A9.
+- Fresh diagnostics also confirmed trusted home BLE (seen=1, home=1) and ANTENNA
+  OK four times. A fresh GPS fix and cloud acceptance were not verified here.
