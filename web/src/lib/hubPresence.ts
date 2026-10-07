@@ -1,6 +1,7 @@
 import type { DeviceAvatar, TelemetryDevice } from "../types/telemetry";
 import type { HubReportingProfile } from "./hubReporting";
 export interface HubPresence {
+  ble_tx_power_dbm?: number | null; desired_ble_tx_power_dbm?: number;
   reporting_profile?: HubReportingProfile; desired_reporting_profile?: HubReportingProfile;
   control_poll_s?: number | null;
   avatar_kind?: "emoji" | "photo"; avatar_storage_path?: string | null;

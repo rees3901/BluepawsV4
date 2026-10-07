@@ -4,12 +4,15 @@ import { createPortal } from "react-dom";
 import type { HubPresence } from "@/lib/hubPresence";
 import { createClient } from "@/lib/supabase/client";
 import { DeviceCard, type DeviceCardProps } from "@/components/DeviceCard";
+import { HubBluetoothDialog } from "@/components/HubBluetoothDialog";
+import { isHubBlePower, type HubBlePower } from "@/lib/hubBluetooth";
 import { DeviceReportModal } from "@/components/DeviceReportModal";
 import { buildHubReport, hubReportCsv } from "@/lib/hubReports";
 import { hubControlFeedback, type HubControlAttempt } from "@/lib/hubControlFeedback";
 import { HUB_REPORTING, hubContactGrace, type HubReportingProfile } from "@/lib/hubReporting";
 
 export function HubCard({ hub, onSaved, cardProps }: { hub: HubPresence; onSaved: () => void; cardProps: DeviceCardProps }) {
+  const [bluetoothOpen, setBluetoothOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
   const commandForm = useRef<HTMLFormElement>(null);
@@ -46,25 +49,25 @@ export function HubCard({ hub, onSaved, cardProps }: { hub: HubPresence; onSaved
   const now = Date.parse(hub.received_at) + cardProps.ageSeconds * 1000;
   const feedback = hubControlFeedback(hub, attempt, now);
   const pending = busy || feedback?.state === "pending";
-  const save = async (target: { enabled: boolean } | { profile: HubReportingProfile }) => {
+  const save = async (target: { enabled: boolean; powerDbm?: HubBlePower } | { profile: HubReportingProfile }) => {
     setBusy(true); setError(""); setAttempt(null);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10000);
     try {
-      const values = "enabled" in target ? { desired_ble_enabled: target.enabled } : { desired_reporting_profile: target.profile };
+      const values = "enabled" in target ? { desired_ble_enabled: target.enabled, ...(target.powerDbm !== undefined ? { desired_ble_tx_power_dbm: target.powerDbm } : {}) } : { desired_reporting_profile: target.profile };
       const { data, error: failure } = await createClient().from("hub_presence").update(values)
         .eq("gateway_guid16", hub.gateway_guid16).eq("household_id", hub.household_id)
         .select("settings_revision").abortSignal(controller.signal);
       if (failure || !data?.length) throw new Error("Hub settings could not be saved");
       setAttempt({ ...target, revision: data[0].settings_revision, startedAt: Date.now() });
-      setCommandOpen(false);
+      setCommandOpen(false); setBluetoothOpen(false);
       onSaved();
     } catch { setError("Could not confirm saving the change. Check your connection and refresh the hub status before retrying."); onSaved(); }
     finally { clearTimeout(timeout); setBusy(false); }
   };
   return <><DeviceCard {...cardProps} onReportLog={() => void loadReport()} onReportExport={() => void loadReport(true)}
     bluetoothEnabled={hub.ble_enabled} bluetoothToggleDisabled={pending || offline}
-    onBluetoothToggle={() => void save({enabled: !hub.ble_enabled})}
+    onBluetoothToggle={() => { setError(""); setBluetoothOpen(true); }}
     hubDetails={<>
       <span className="label">Hub ID</span><span className="value">{hub.gateway_guid16.toString(16).padStart(4, "0")}</span>
       <span className="label">GPS fix</span><span className="value">{hub.position_simulated ? "Simulated testbed" : hub.fix_at ? new Date(hub.fix_at).toLocaleString() : "Not acquired"}</span>
@@ -73,19 +76,23 @@ export function HubCard({ hub, onSaved, cardProps }: { hub: HubPresence; onSaved
       <span className="label">Reporting profile</span><span className="value">{HUB_REPORTING[hub.reporting_profile ?? "normal"].label}</span>
     </>}
     hubActions={<>
-        <button type="button" className="btn-action" disabled={pending || offline} aria-pressed={hub.ble_enabled}
+        <button type="button" className="btn-action" disabled={pending || offline} aria-haspopup="dialog"
           title="Home beacon only operates while connected to primary Home Wi-Fi"
-          onClick={() => void save({enabled: !hub.ble_enabled})}><svg aria-hidden="true" width="14" height="16" viewBox="0 0 16 20"><path d="M4 5l9 10-5 4V1l5 4L4 15" fill="none" stroke="currentColor" strokeWidth="2"/></svg> Bluetooth {hub.ble_enabled ? "On" : "Off"}</button>
+          onClick={() => { setError(""); setBluetoothOpen(true); }}><svg aria-hidden="true" width="14" height="16" viewBox="0 0 16 20"><path d="M4 5l9 10-5 4V1l5 4L4 15" fill="none" stroke="currentColor" strokeWidth="2"/></svg> Bluetooth {hub.ble_enabled ? "On" : "Off"}</button>
         <button type="button" className="btn-action btn-cmd" disabled={pending || offline}
           onClick={() => { setProfile(hub.reporting_profile ?? "normal"); setCommandOpen(true); }}>⌘ Cmd</button>
       </>}
     hubFooter={<>
       {offline && <p className="hub-control-feedback" role="status">Hub contact lost — last Wi-Fi signal is no longer current. Check hub power and Wi-Fi.</p>}
       {feedback && <p className={`hub-control-feedback ${feedback.state}`} role={feedback.state === "failed" ? "alert" : "status"}>{feedback.text}</p>}
-      {!attempt && hub.desired_ble_enabled !== hub.ble_enabled && <p className="hub-control-feedback" role="status">Saved Bluetooth setting not yet confirmed by hub.</p>}
+      {!attempt && (hub.desired_ble_enabled !== hub.ble_enabled || (isHubBlePower(hub.ble_tx_power_dbm) && isHubBlePower(hub.desired_ble_tx_power_dbm) && hub.desired_ble_tx_power_dbm !== hub.ble_tx_power_dbm)) && <p className="hub-control-feedback" role="status">Saved Bluetooth setting not yet confirmed by hub.</p>}
       {error && <p role="alert">{error}</p>}
     </>}
-  />{commandOpen && typeof document !== "undefined" && createPortal(
+  />{bluetoothOpen && <HubBluetoothDialog name={hub.display_name} enabled={hub.desired_ble_enabled ?? hub.ble_enabled}
+    power={isHubBlePower(hub.desired_ble_tx_power_dbm) ? hub.desired_ble_tx_power_dbm : isHubBlePower(hub.ble_tx_power_dbm) ? hub.ble_tx_power_dbm : 3}
+    reportedPower={hub.ble_tx_power_dbm} supported={isHubBlePower(hub.ble_tx_power_dbm)} pending={pending} offline={offline} error={error}
+    onSave={(enabled, powerDbm) => void save({enabled, powerDbm})} onClose={() => setBluetoothOpen(false)} />}
+  {commandOpen && typeof document !== "undefined" && createPortal(
     <div className="modal" role="dialog" aria-modal="true" aria-labelledby="hub-command-title" onKeyDown={e => {
       if (e.key === "Escape") { e.preventDefault(); setCommandOpen(false); }
       if (e.key !== "Tab") return;

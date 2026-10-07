@@ -23,13 +23,13 @@ export async function handleHubSettings(db: SupabaseClient, payload: unknown, to
   if (gatewayError) return reply({ error: "service_unavailable" }, 503);
   if (!gateway?.household_id) return reply({ error: "unauthorized" }, 401);
   const { data: row, error } = await db.from("hub_presence")
-    .select("settings_revision,desired_ble_enabled,desired_reporting_profile,display_name,home_emoji,portable_emoji,marker_colour")
+    .select("settings_revision,desired_ble_enabled,desired_ble_tx_power_dbm,desired_reporting_profile,display_name,home_emoji,portable_emoji,marker_colour")
     .eq("gateway_guid16", id).eq("household_id", gateway.household_id).maybeSingle();
   if (error) return reply({ error: "service_unavailable" }, 503);
   // First status report creates this row. No stale data from another Family.
   if (!row) return reply({ settings: null }, 200);
   return reply({ settings: {
-    revision: row.settings_revision, ble_enabled: row.desired_ble_enabled,
+    revision: row.settings_revision, ble_enabled: row.desired_ble_enabled, ble_tx_power_dbm: row.desired_ble_tx_power_dbm,
     reporting_profile: row.desired_reporting_profile,
     display_name: row.display_name, home_emoji: row.home_emoji,
     portable_emoji: row.portable_emoji, marker_colour: row.marker_colour,
@@ -48,6 +48,8 @@ export function parseHubPresence(value: unknown) {
   };
   const boolean = (k: string) => { if (typeof p[k] !== "boolean") throw new Error("invalid_" + k); return p[k] as boolean; };
   const optionalBoolean = (k: string) => p[k] === undefined ? false : boolean(k);
+  const power = p.ble_tx_power_dbm ?? null;
+  if (power !== null && ![-12, 3, 9].includes(power as number)) throw new Error("invalid_ble_tx_power_dbm");
   const lat = p.latitude ?? null, lon = p.longitude ?? null;
   const battery = p.battery_percent ?? null;
   const reporting = p.reporting_profile === undefined ? "normal" : p.reporting_profile;
@@ -80,7 +82,7 @@ export function parseHubPresence(value: unknown) {
     p_fix_age_s: lat === null ? null : integer("fix_age_s", 0, 604800),
     p_uptime: integer("uptime_s", 0, 4294967295),
     p_rssi: p.wifi_rssi_dbm == null ? null : integer("wifi_rssi_dbm", -127, 0),
-    p_ble: boolean("ble_enabled"), p_advertising: boolean("ble_advertising"),
+    p_ble: boolean("ble_enabled"), p_ble_tx_power_dbm: power, p_advertising: boolean("ble_advertising"),
     p_heap: integer("free_heap", 0, 2147483647),
     p_applied: integer("applied_revision", 0, Number.MAX_SAFE_INTEGER),
     p_reporting_profile: reporting,
@@ -112,7 +114,7 @@ export async function handleHubPresence(db: SupabaseClient, payload: unknown, to
   // No collar commands are claimed by a hub's own heartbeat.
   return reply({ accepted: true, format: "hub_status", ingest_path: "hub_self",
     received_at: row.received_at, settings: {
-      revision: row.settings_revision, ble_enabled: row.desired_ble_enabled,
+      revision: row.settings_revision, ble_enabled: row.desired_ble_enabled, ble_tx_power_dbm: row.desired_ble_tx_power_dbm,
       reporting_profile: row.desired_reporting_profile,
       display_name: row.display_name, home_emoji: row.home_emoji,
       portable_emoji: row.portable_emoji, marker_colour: row.marker_colour,
