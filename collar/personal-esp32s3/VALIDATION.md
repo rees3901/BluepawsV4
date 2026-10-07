@@ -425,3 +425,19 @@ the follow-up radio transmission returned success. The bounded serial check
 did not capture its hub receipt or subsequent sleep. A fresh position, cloud
 acceptance and accuracy/ring display remain unverified. No cloud release or
 hub flash was performed.
+
+## Gizmo 3002 accuracy-update flash — 7 October 2026
+
+Flashed the personal collar build from 503a2be (accuracy change 4ce50d2) to
+COM18 using Gizmo's existing identity/key and D1 LED-enabled configuration.
+The expected ESP32-S3 MAC matched before flashing; upload hashes verified.
+Image SHA256: 47BBC4D90350AB8E5619F2731698C431DDBB4AC7E24BAEB4C78EA984B114974F.
+A private recoverable copy is stored as 3002-hdop-accuracy-firmware.bin.
+
+115200-baud diagnostics confirmed Home BLE detection, ANTENNA OK, and hub
+receipts for both wake presence and follow-up packets. Valid NMEA arrived;
+GPS acquisition stopped at its 60-second limit without an accepted fix
+(0 satellites used, HDOP 25.50). UTC was valid, the follow-up transmission
+succeeded, and the collar returned to its saved Power Save 1800-second sleep.
+A fresh position, cloud acceptance and accuracy/ring display remain unverified.
+No cloud release or hub flash was performed.
