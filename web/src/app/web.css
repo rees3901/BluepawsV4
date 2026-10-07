@@ -450,6 +450,10 @@ body.panel-open .maplibre-zoom-stack { left: calc(var(--panel-width) + 10px); }
 .maplibre-zoom-stack { bottom: 10px; left: 10px; overflow: hidden; border: 1px solid #7a8791; border-radius: 4px; box-shadow: 0 2px 7px rgb(0 0 0 / 28%); }
 .maplibre-zoom-stack button { width: 41px; height: 41px; border: 0; border-bottom: 1px solid #7a8791; border-radius: 0; background: var(--bg-primary); color: var(--text-primary); font-size: 25px; line-height: 1; }
 .maplibre-zoom-stack button:last-child { border-bottom: 0; }
+.map-north-icon { display: inline-block; width: 25px; height: 25px; vertical-align: middle; background: currentColor; mask: url("/icons/map-north.png") center / contain no-repeat; }
+.maplibre-zoom-stack .map-north-control { height: 0; padding: 0; border-bottom-width: 0; opacity: 0; visibility: hidden; overflow: hidden; pointer-events: none; transition: opacity 180ms ease, height 180ms ease, visibility 180ms; }
+.maplibre-zoom-stack .map-north-control.is-visible { height: 41px; border-bottom-width: 1px; opacity: 1; visibility: visible; pointer-events: auto; }
+@media (prefers-reduced-motion: reduce) { .maplibre-zoom-stack .map-north-control { transition: none; } }
 .maplibre-zoom-stack button:hover,
 .maplibre-zoom-stack button:focus-visible { background: var(--accent); color: #fff; }
 .measure-popup .maplibregl-popup-content { padding: 6px 9px; border-radius: 6px; font-weight: 800; }
