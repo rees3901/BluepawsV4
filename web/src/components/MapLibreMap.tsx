@@ -8,6 +8,7 @@ import { emojiImageUrl } from "@/lib/emoji";
 import { COLLAR_FRESHNESS_CLASS_NAMES, COLLAR_RECEIVE_WINDOW_SECONDS, collarCardFreshness, collarFreshnessClass, type CollarCardFreshness } from "@/lib/devicePresence";
 import { mapLibreStyle } from "@/lib/mapLibreStyle";
 import { formatMapCoordinates } from "@/lib/mapLocation";
+import { gnssUncertainty, uncertaintyPolygon } from "@/lib/gnssUncertainty";
 import { contextMenuHtml, copyTextToClipboard, temporaryPinPopupHtml } from "@/lib/mapLocationPopup";
 import { EMPTY_MAP_CENTER, EMPTY_MAP_ZOOM } from "@/lib/mapViewport";
 import { normalizeMarkerColor } from "@/lib/markerColor";
@@ -209,6 +210,7 @@ export default function MapLibreMap(props: ConfiguredMapRendererProps) {
         }
       }
       syncTrails(map, visible, avatars, trailIds, trailHistory, trailPointsRef.current, presenceNow);
+      syncUncertainty(map, visible, avatars);
     };
     if (map.loaded()) sync();
     else map.once("load", sync);
@@ -420,4 +422,22 @@ function fitDevices(map: MapLibre, devices: TelemetryDevice[], sidebarOpen: bool
   if (devices.length === 0) return;
   const bounds = devices.reduce((value, device) => value.extend([device.lon, device.lat]), new maplibregl.LngLatBounds());
   map.fitBounds(bounds as LngLatBoundsLike, { padding: { top: 70, right: 70, bottom: 70, left: sidebarOpen ? 430 : 70 }, maxZoom: JUMP_TO_ZOOM });
+}
+
+function syncUncertainty(map: MapLibre, devices: TelemetryDevice[], avatars: Record<number, DeviceAvatar>) {
+  const features = devices.flatMap(device => {
+    const uncertainty = gnssUncertainty(device);
+    return uncertainty ? [{ type: "Feature" as const,
+      properties: { color: normalizeMarkerColor(avatars[device.id]?.color), capped: uncertainty.capped },
+      geometry: uncertaintyPolygon(device.lat, device.lon, uncertainty.radius) }] : [];
+  });
+  const data = { type: "FeatureCollection" as const, features };
+  const source = map.getSource("bluepaws-uncertainty") as GeoJSONSource | undefined;
+  if (source) source.setData(data);
+  else {
+    map.addSource("bluepaws-uncertainty", { type: "geojson", data });
+    map.addLayer({ id: "bluepaws-uncertainty-fill", type: "fill", source: "bluepaws-uncertainty", paint: { "fill-color": ["get", "color"], "fill-opacity": 0.08 } });
+    for (const capped of [false, true]) map.addLayer({ id: `bluepaws-uncertainty-line-${capped}`, type: "line", source: "bluepaws-uncertainty",
+      filter: ["==", ["get", "capped"], capped], paint: { "line-color": ["get", "color"], "line-width": 1.5, ...(capped ? { "line-dasharray": [3, 3] } : {}) } });
+  }
 }
