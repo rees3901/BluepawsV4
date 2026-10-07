@@ -500,6 +500,9 @@ Flashed COM23 with existing 3004 credentials and D1 LED enabled; upload hashes
 verified and NVS preserved. The backend accepted wake presence sequence 1601.
 Serial confirmed a hub receipt, Home beacon detection and ANTENNA OK. A private
 recovery image and logs are stored under 3004-home-fault-20261007.
+Startup GNSS timed out at 60 seconds with valid UTC and no accepted fix. The
+backend accepted follow-up sequence 1602 as Home, beacon-seen flag set (8),
+GNSS invalid, and no stale-fix/error flags: live verification of the remedy.
 Only 3004 has this additional Home-fault suppression update; 3001 has the preceding
 location-status fix, and 3002–3003 still have the earlier accuracy firmware.
 This change remains isolated from canonical main; no application deployment occurred.
