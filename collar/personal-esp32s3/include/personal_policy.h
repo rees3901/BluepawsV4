@@ -76,6 +76,18 @@ inline uint16_t fixAge(uint32_t now, uint32_t fix) {
     return age > 65534 ? 65534 : uint16_t(age);
 }
 
+// Home is established by BLE, so an unavailable indoor GPS fix is not a
+// location fault. Preserve actual GNSS validity and beacon evidence separately.
+inline uint8_t gpsReportFlags(bool presenceOnly, bool homeSeen, bool atHome,
+                              bool valid, bool haveFix, bool gpsFailed) {
+    uint8_t flags = homeSeen ? FLAG_HOME_BEACON_SEEN : 0;
+    if (presenceOnly) return flags;
+    if (valid) flags |= FLAG_GNSS_VALID;
+    else if (haveFix && !atHome) flags |= FLAG_STALE_FIX;
+    if (gpsFailed && !atHome) flags |= FLAG_ERROR_PRESENT;
+    return flags;
+}
+
 inline uint8_t sign(uint8_t* p, const uint8_t* key) {
     const uint8_t size = pkt_finalize(p);
     bp_hmac_sha256_truncated8(key, 32, p, size - BP_AUTH_TAG_SIZE, p + size - BP_AUTH_TAG_SIZE);

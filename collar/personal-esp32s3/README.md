@@ -26,7 +26,10 @@ not the legacy 868 MHz JSON protocol. This image cannot communicate with V3 hubs
 
 - Location status is Home or Out independently of GPS availability. Lost remains
   the existing explicit finding state. GPS failures and stale fixes retain their
-  separate fault flags; they never replace an away status with Error. Out means
+  separate fault flags while Away/Lost; they never replace an away status with Error.
+  Home reports suppress GPS-unavailable/stale-fix faults because BLE establishes
+  Home independently. GNSS_VALID still requires a genuinely valid fix; receiver
+  diagnostics and bounded periodic acquisition continue unchanged. Out means
   Home has not been confirmed by the beacon policy, not proof the cat is outdoors.
 - HMAC-SHA256 authenticated V4 TLV v1.2 uplinks, addressed to one provisioned hub.
   Neither V3 JSON nor a device MAC-derived identity is transmitted.

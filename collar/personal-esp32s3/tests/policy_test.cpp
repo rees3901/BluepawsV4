@@ -22,6 +22,15 @@ int main() {
     assert(personal::fixAge(100000, 1) == 65534);
     assert(personal::fixAge(0, 0) == 65535);
 
+    // Indoor refresh failure must not create a fault on a BLE Home report.
+    assert(personal::gpsReportFlags(false, true, true, false, true, true) == FLAG_HOME_BEACON_SEEN);
+    assert(personal::gpsReportFlags(false, false, true, false, true, true) == 0);
+    assert(personal::gpsReportFlags(false, true, true, true, true, false) == (FLAG_HOME_BEACON_SEEN | FLAG_GNSS_VALID));
+    // Away/Lost failures keep the fault; Home never fabricates GNSS validity.
+    assert(personal::gpsReportFlags(false, false, false, false, true, true) == (FLAG_STALE_FIX | FLAG_ERROR_PRESENT));
+    assert(personal::gpsReportFlags(false, false, false, false, false, true) == FLAG_ERROR_PRESENT);
+    assert(personal::gpsReportFlags(true, false, false, false, true, true) == 0);
+
     personal::CommandRecord cache[16] = {};
     pkt_init(p, 48, 3001, 41, 0, STATUS_HOME, PROFILE_NORMAL, 0, TX_CONFIG);
     pkt_add_tlv_u8(p, TLV_PROFILE, PROFILE_LOST);

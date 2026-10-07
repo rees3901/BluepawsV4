@@ -487,3 +487,19 @@ and the error flag retained: the intended separation is verified on live packets
 No new position was acquired. Recovery firmware
 and diagnostics are stored privately under 3001-location-status-20261007.
 Only 3001 has this new location-status image; 3002–3004 still need individual updates.
+
+## Simba 3004 Home/GPS-fault update — 7 October 2026
+
+Home reports now omit GPS-unavailable and stale-fix flags, while genuine GNSS
+validity and BLE beacon evidence remain separate. Away/Lost GPS faults remain
+reported. GNSS acquisition limits and diagnostics are unchanged. Native policy
+regressions cover Home failures, valid Home fixes, Away failures and presence;
+independent Python HMAC/wire verification and the firmware build passed.
+
+Flashed COM23 with existing 3004 credentials and D1 LED enabled; upload hashes
+verified and NVS preserved. The backend accepted wake presence sequence 1601.
+Serial confirmed a hub receipt, Home beacon detection and ANTENNA OK. A private
+recovery image and logs are stored under 3004-home-fault-20261007.
+Only 3004 has this additional Home-fault suppression update; 3001 has the preceding
+location-status fix, and 3002–3003 still have the earlier accuracy firmware.
+This change remains isolated from canonical main; no application deployment occurred.

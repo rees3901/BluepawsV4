@@ -348,10 +348,9 @@ uint8_t buildPacket(uint8_t* p, uint8_t reason, bool homeSeen, uint16_t ack = 0)
     const bool presenceOnly = reason == TX_WAKE_CHECKIN;
     const uint16_t age = personal::fixAge(now, retained.fixTime);
     const bool valid = !presenceOnly && retained.fixTime && age <= GPS_STALE_THRESHOLD_S && !gpsFailed;
-    uint8_t flags = homeSeen ? FLAG_HOME_BEACON_SEEN : 0;
-    if (valid) flags |= FLAG_GNSS_VALID;
-    else if (!presenceOnly && retained.fixTime) flags |= FLAG_STALE_FIX;
-    if (!presenceOnly && gpsFailed) flags |= FLAG_ERROR_PRESENT;
+    const bool atHome = retained.home && state.profile != PROFILE_LOST;
+    const uint8_t flags = personal::gpsReportFlags(presenceOnly, homeSeen, atHome,
+        valid, retained.fixTime != 0, gpsFailed);
     // Location state is independent of GPS health; faults remain in the flags.
     uint8_t status = state.profile == PROFILE_LOST ? STATUS_LOST : retained.home ? STATUS_HOME : STATUS_OUT_AND_ABOUT;
     pkt_init(p, PERSONAL_DEVICE_ID, PERSONAL_HUB_ID, nextSequence(), now, status, state.profile, flags, reason);
