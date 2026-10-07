@@ -6,7 +6,8 @@ import { Protocol } from "pmtiles";
 import { useEffect, useRef, useState, type MutableRefObject } from "react";
 import { emojiImageUrl } from "@/lib/emoji";
 import { COLLAR_FRESHNESS_CLASS_NAMES, COLLAR_RECEIVE_WINDOW_SECONDS, collarCardFreshness, collarFreshnessClass, type CollarCardFreshness } from "@/lib/devicePresence";
-import { mapLibreStyle } from "@/lib/mapLibreStyle";
+import { mapLibreStyle, mapLibreRasterStyle } from "@/lib/mapLibreStyle";
+import { MAP_LAYER_DEFINITIONS } from "@/lib/mapLayers";
 import { formatMapCoordinates } from "@/lib/mapLocation";
 import { gnssUncertainty, uncertaintyPolygon } from "@/lib/gnssUncertainty";
 import { contextMenuHtml, copyTextToClipboard, temporaryPinPopupHtml } from "@/lib/mapLocationPopup";
@@ -29,8 +30,10 @@ let protocolRegistered = false;
 maplibregl.setWorkerUrl("/maplibre/maplibre-gl-worker.mjs");
 
 export default function MapLibreMap(props: ConfiguredMapRendererProps) {
-  const { devices, avatars, presenceNow, sidebarOpen, followedId, trailIds, trailHistory, vectorSource, command, onNotice } = props;
+  const { devices, avatars, presenceNow, sidebarOpen, followedId, trailIds, trailHistory, vectorSource, command, onNotice, mapStyle = "Vector" } = props;
   const containerRef = useRef<HTMLDivElement | null>(null);
+  // Capture once: telemetry and camera updates must not recreate the map.
+  const initialViewportRef = useRef(props.initialViewport);
   const mapRef = useRef<MapLibre | null>(null);
   const markersRef = useRef(new Map<number, maplibregl.Marker>());
   const trailPointsRef = useRef(new Map<number, TrailPoint[]>());
@@ -55,18 +58,21 @@ export default function MapLibreMap(props: ConfiguredMapRendererProps) {
     }
     const map = new maplibregl.Map({
       container: containerRef.current,
-      style: mapLibreStyle(vectorSource === "pmtiles" ? process.env.NEXT_PUBLIC_BLUEPAWS_PMTILES_URL : undefined),
-      center: [EMPTY_MAP_CENTER[1], EMPTY_MAP_CENTER[0]],
-      zoom: EMPTY_MAP_ZOOM,
+      style: mapStyle === "Vector" ? mapLibreStyle(vectorSource === "pmtiles" ? process.env.NEXT_PUBLIC_BLUEPAWS_PMTILES_URL : undefined) : mapLibreRasterStyle(mapStyle),
+      maxZoom: mapStyle === "Vector" ? 24 : MAP_LAYER_DEFINITIONS[mapStyle].maxZoom,
+      center: initialViewportRef.current ? [initialViewportRef.current.longitude, initialViewportRef.current.latitude] : [EMPTY_MAP_CENTER[1], EMPTY_MAP_CENTER[0]],
+      zoom: initialViewportRef.current?.zoom ?? EMPTY_MAP_ZOOM,
       attributionControl: {},
     });
     map.addControl(new maplibregl.ScaleControl({ unit: "imperial" }), "bottom-right");
-    map.on("error", event => onNotice?.(`Vector map: ${event.error?.message ?? "source failed"}`));
+    map.on("error", event => onNotice?.(`${mapStyle} map: ${event.error?.message ?? "source failed"}`));
     const stopFollowingForGesture = (event: maplibregl.MapLibreEvent<MouseEvent | TouchEvent | WheelEvent | undefined>) => {
       if (event.originalEvent && propsRef.current.followedId !== null) propsRef.current.onUserNavigation?.();
     };
     map.on("dragstart", stopFollowingForGesture);
     map.on("zoomstart", stopFollowingForGesture);
+    map.on("rotatestart", stopFollowingForGesture);
+    map.on("pitchstart", stopFollowingForGesture);
     const reportViewport = () => {
       const center = map.getCenter();
       propsRef.current.onViewportChange?.({ latitude: center.lat, longitude: center.lng, zoom: map.getZoom() });
@@ -146,7 +152,7 @@ export default function MapLibreMap(props: ConfiguredMapRendererProps) {
       map.remove();
       mapRef.current = null;
     };
-  }, [onNotice, vectorSource]);
+  }, [onNotice, vectorSource, mapStyle]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -272,8 +278,9 @@ export default function MapLibreMap(props: ConfiguredMapRendererProps) {
   };
 
   return <>
-    <div ref={containerRef} id="map" className="maplibre-map" aria-label="Live animal tracking vector map" />
-    <div className="maplibre-tool-stack" aria-label="Vector map tools">
+    <div ref={containerRef} id="map" className="maplibre-map" aria-label={`Live animal tracking ${mapStyle === "Vector" ? "vector" : "raster"} map`} />
+    <div className="maplibre-tool-stack" aria-label="Map tools">
+      <button type="button" className="leaflet-map-btn" title="Reset north and flatten map" aria-label="Reset north and flatten map" onClick={() => mapRef.current?.easeTo({ bearing: 0, pitch: 0 })}><span aria-hidden="true">↑ N</span></button>
       <button type="button" className="leaflet-map-btn" title="Center on Home Hub" aria-label="Center map on Home Hub" data-tour="map-home" onClick={centerHome}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="8" cy="8" r="5"/><path d="M8 1v3m0 8v3M1 8h3m8 0h3"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/></svg></button>
       <button type="button" className="leaflet-map-btn" title="Fit all markers into view" aria-label="Fit all markers into view" data-tour="map-fit" onClick={fitAll}><span className="fit-markers-icon maplibre-fit-markers-icon" aria-hidden="true" /></button>
       {props.onAllTrailsToggle ? <button type="button" className={`leaflet-map-btn global-trails-btn${props.allTrailsVisible ? " active" : ""}`} title={props.allTrailsVisible ? "Hide all breadcrumb trails" : "Show all breadcrumb trails"} aria-label={props.allTrailsVisible ? "Hide all breadcrumb trails" : "Show all breadcrumb trails"} aria-pressed={props.allTrailsVisible} disabled={!props.trailsAvailable} data-tour="map-trails" onClick={props.onAllTrailsToggle}><span className="global-trails-icon" aria-hidden="true" /></button> : null}
