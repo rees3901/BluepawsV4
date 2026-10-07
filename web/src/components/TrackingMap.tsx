@@ -5,6 +5,7 @@ import { useEffect, useRef } from "react";
 import { emojiImageUrl } from "@/lib/emoji";
 import { COLLAR_RECEIVE_WINDOW_SECONDS, collarCardFreshness, collarFreshnessClass, type CollarCardFreshness } from "@/lib/devicePresence";
 import { formatMapCoordinates } from "@/lib/mapLocation";
+import { gnssUncertainty } from "@/lib/gnssUncertainty";
 import { contextMenuHtml, copyTextToClipboard, temporaryPinPopupHtml } from "@/lib/mapLocationPopup";
 import { MAP_LAYER_DEFINITIONS, type MapLayerName } from "@/lib/mapLayers";
 import { mapPopupHtml } from "@/lib/mapPopup";
@@ -28,6 +29,7 @@ export default function LeafletMap(props: ConfiguredMapRendererProps) {
   const mapRef = useRef<L.Map | null>(null);
   const baseLayerRef = useRef<L.TileLayer | null>(null);
   const markersRef = useRef(new Map<number, L.Marker>());
+  const uncertaintyRef = useRef(new Map<number, L.Circle>());
   const markerAnimationsRef = useRef(new Map<number, number>());
   const trailsRef = useRef(new Map<number, L.Polyline>());
   const trailPointsRef = useRef(new Map<number, TrailPoint[]>());
@@ -65,6 +67,7 @@ export default function LeafletMap(props: ConfiguredMapRendererProps) {
 
   useEffect(() => {
     const markers = markersRef.current;
+    const uncertainty = uncertaintyRef.current;
     const markerAnimations = markerAnimationsRef.current;
     const trails = trailsRef.current;
     const trailPoints = trailPointsRef.current;
@@ -295,6 +298,7 @@ export default function LeafletMap(props: ConfiguredMapRendererProps) {
       mapRef.current = null;
       allTrailsButtonRef.current = null;
       markers.clear();
+      uncertainty.clear();
       trails.clear();
       trailPoints.clear();
       temporaryPins.clear();
@@ -333,6 +337,10 @@ export default function LeafletMap(props: ConfiguredMapRendererProps) {
     // exist before their first fix, so their numeric adapter placeholders aren't locations.
     const visibleDevices = locatedDevices(devices);
     const activeDeviceIds = new Set(visibleDevices.map((device) => device.id));
+    uncertaintyRef.current.forEach((circle, id) => {
+      if (visibleDevices.some(device => device.id === id && gnssUncertainty(device))) return;
+      circle.removeFrom(map); uncertaintyRef.current.delete(id);
+    });
     markersRef.current.forEach((marker, deviceId) => {
       if (activeDeviceIds.has(deviceId)) return;
       cancelMarkerAnimation(markerAnimationsRef.current, deviceId);
@@ -352,6 +360,16 @@ export default function LeafletMap(props: ConfiguredMapRendererProps) {
       const ageSeconds = Math.max(0, Math.floor((presenceNow - device.lastUpdate) / 1000));
       const freshness = device.entity === "hub" ? null : collarCardFreshness(ageSeconds, ageSeconds < COLLAR_RECEIVE_WINDOW_SECONDS);
       const latLng: TrailLatLng = [device.lat, device.lon];
+      const uncertainty = gnssUncertainty(device);
+      if (uncertainty) {
+        let circle = uncertaintyRef.current.get(device.id);
+        const style = { color: markerColor, fillColor: markerColor, fillOpacity: 0.08, weight: 1.5, dashArray: uncertainty.capped ? "4 4" : undefined };
+        if (!circle) {
+          circle = L.circle(latLng, { ...style, radius: uncertainty.radius }).addTo(map);
+          uncertaintyRef.current.set(device.id, circle);
+        } else circle.setLatLng(latLng).setRadius(uncertainty.radius).setStyle(style);
+        circle.bindTooltip(uncertainty.label);
+      }
       let marker = markersRef.current.get(device.id);
       const icon = L.divIcon({
         className: "bp-marker-icon",
