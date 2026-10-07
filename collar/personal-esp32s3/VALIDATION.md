@@ -451,3 +451,20 @@ and display of the new estimate. Macy remained Home, so no uncertainty ring
 was expected. No command was sent or setting changed during this check.
 The personal firmware branch remained unmerged. Other collars' fresh accuracy
 reports and outdoor ring rendering remain unverified on live data.
+
+## Podge 3001 accuracy-update flash — 7 October 2026
+
+Flashed the personal collar build from 9f7091b (accuracy change 4ce50d2) to
+COM4 using Podge's existing identity/key and D1 LED-enabled configuration.
+The expected ESP32-S3 MAC matched before flashing; upload hashes verified.
+Image SHA256: AF4D796E5BBF5BD4C654FC3E12A399E0CB02DCD406FB839E776D98B020589204.
+A private recoverable copy is stored as 3001-hdop-accuracy-firmware.bin.
+
+115200-baud diagnostics confirmed the wake presence transmission and hub
+receipt, Home BLE detection and ANTENNA OK. Acquisition stopped at its
+60-second limit without an accepted fix (0 satellites used, HDOP 25.50).
+UTC was unavailable, so the full follow-up report was suppressed; the collar
+returned to its saved Normal profile's 600-second sleep. A fresh position and
+accuracy report remain unverified for Podge. All four personal collars now
+have verified uploads of the accuracy firmware with individual credentials
+and D1 LED controls enabled. No cloud release or hub flash was performed.
