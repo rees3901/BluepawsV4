@@ -13,13 +13,15 @@ does not unlock fast repeats. If the reported profile changes while the dialog
 is open, an unavailable interval falls back to 60 seconds before sending.
 Delivery still waits for a listening window; this GUI restriction does not change
 the existing command protocol or invalidate previously queued commands.
-Personal firmware provides one D1 flash on hardware wake and another on a matched
-hub receipt. That receipt confirms radio delivery, not cloud acceptance.
+Personal firmware provides four rapid D1 flashes on hardware wake and another
+four on a matched hub receipt. That receipt confirms radio delivery, not cloud
+acceptance. Button and Find cycles use the separate seven-flash pattern.
 
 This is a reusable V4 command, initially gated to the fitted personal batch
 3001–3004 in the UI and guarded queue. Other devices remain disabled until
-compatible firmware/capability discovery is available. Only 3004 has received
-the new collar image so far. Do not infer firmware support from the device ID.
+compatible firmware/capability discovery is available. Flash records for the
+personal batch remain on its isolated branch. Do not infer firmware support
+from the device ID.
 
 ## Delivery and cancellation
 
