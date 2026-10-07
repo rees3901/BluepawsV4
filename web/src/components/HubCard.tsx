@@ -90,7 +90,7 @@ export function HubCard({ hub, onSaved, cardProps }: { hub: HubPresence; onSaved
     </>}
   />{bluetoothOpen && <HubBluetoothDialog name={hub.display_name} enabled={hub.desired_ble_enabled ?? hub.ble_enabled}
     power={isHubBlePower(hub.desired_ble_tx_power_dbm) ? hub.desired_ble_tx_power_dbm : isHubBlePower(hub.ble_tx_power_dbm) ? hub.ble_tx_power_dbm : 3}
-    reportedPower={hub.ble_tx_power_dbm} supported={isHubBlePower(hub.ble_tx_power_dbm)} pending={pending} offline={offline} error={error}
+    reportedPower={hub.ble_tx_power_dbm} supported={isHubBlePower(hub.ble_tx_power_dbm)} steps={hub.ble_power_steps} pending={pending} offline={offline} error={error}
     onSave={(enabled, powerDbm) => void save({enabled, powerDbm})} onClose={() => setBluetoothOpen(false)} />}
   {commandOpen && typeof document !== "undefined" && createPortal(
     <div className="modal" role="dialog" aria-modal="true" aria-labelledby="hub-command-title" onKeyDown={e => {

@@ -5,9 +5,11 @@ Apply saves advertising on/off and power together; closing discards edits.
 
 | Preset | Advertising transmit power |
 | --- | --- |
-| Min | -12 dBm |
+| Lowest | -12 dBm |
+| Low | -6 dBm |
 | Medium (default) | +3 dBm |
-| Max | +9 dBm |
+| High | +6 dBm |
+| Highest | +9 dBm |
 
 These are conservative supported presets, not universal chip hardware limits.
 They affect BLE advertising only, not Wi-Fi, LoRa or BLE scanning. The Home
@@ -17,7 +19,9 @@ saved while advertising is off and used when it resumes.
 `desired_ble_tx_power_dbm` is the saved preference. `ble_tx_power_dbm` is the
 power accepted/read back by the controller. The backend leaves the latter null
 for old firmware. The GUI disables power control until a supported power is
-reported; advertising on/off remains available. Confirmation requires the
+reported; advertising on/off remains available. `ble_power_steps=5` enables all
+five presets. Older three-level firmware keeps Low/High disabled; omitted capability
+with a non-null power report means three levels, never five. Confirmation requires the
 settings revision, enabled preference and power to match the request.
 
 Arduino ESP32 hub firmware persists the preference in its existing NVS namespace
