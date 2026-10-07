@@ -125,3 +125,9 @@ test('authenticated hub handler passes quality unchanged to the existing RPC',as
   assert.equal((await handleHubPresence(m.db,{...report,position_simulated:true},'synthetic-test-token','test')).status,400);
   assert.equal(m.calls.length,1);
 });
+
+test('reported BLE power is optional for legacy firmware and restricted to presets',()=>{
+  assert.equal(parseHubPresence(payload).p_ble_tx_power_dbm,null);
+  for(const power of [-12,3,9]) assert.equal(parseHubPresence({...payload,ble_tx_power_dbm:power}).p_ble_tx_power_dbm,power);
+  for(const power of [-24,0,20,'3',true,NaN,3.5]) assert.throws(()=>parseHubPresence({...payload,ble_tx_power_dbm:power}));
+});

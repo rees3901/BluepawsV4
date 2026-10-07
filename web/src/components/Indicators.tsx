@@ -98,20 +98,20 @@ export function WifiIndicator({ rssi, contactLost = false }: { rssi: number | nu
   </span>;
 }
 
-export function BluetoothBeaconIndicator({ advertising, enabled = advertising, disabled = false, onToggle }: {
+export function BluetoothBeaconIndicator({ advertising, disabled = false, onToggle }: {
   advertising: boolean;
   enabled?: boolean;
   disabled?: boolean;
   onToggle?: () => void;
 }) {
   const stateLabel = advertising ? "Home beacon advertising" : "Home beacon not advertising";
-  const actionLabel = `${stateLabel}. Click to turn Bluetooth ${enabled ? "off" : "on"}.`;
+  const actionLabel = `${stateLabel}. Open Bluetooth advertising settings.`;
   const content = <>
     <svg aria-hidden="true" viewBox="0 0 16 20"><path d="M4 5l9 10-5 4V1l5 4L4 15" fill="none" stroke="currentColor" strokeWidth="2" /></svg>
     <span className={`bluetooth-beacon-state ${advertising ? "on" : "off"}`} aria-hidden="true">{advertising ? "✓" : "❌"}</span>
   </>;
   if (onToggle) return <button type="button" className={`bluetooth-beacon${advertising ? " active" : ""}`} title={actionLabel}
-    aria-label={actionLabel} aria-pressed={enabled} disabled={disabled}
+    aria-label={actionLabel} aria-haspopup="dialog" disabled={disabled}
     onClick={(event) => { event.stopPropagation(); onToggle(); }}>{content}</button>;
   return <span className={`bluetooth-beacon${advertising ? " active" : ""}`} title={stateLabel} role="img" aria-label={stateLabel}>{content}</span>;
 }

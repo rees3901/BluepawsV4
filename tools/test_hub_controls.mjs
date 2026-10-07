@@ -80,7 +80,7 @@ test('cloud hub clears stale Wi-Fi bars at 90 seconds and displays reported, not
   assert.match(stale,/No contact/);
   assert.doesNotMatch(stale,/Wi-Fi -40 dBm/);
   assert.match(stale,/Hub contact lost/);
-  assert.match(stale,/disabled="" aria-pressed="true"/);
+  assert.match(stale,/disabled="" aria-haspopup="dialog"/);
   const pending=renderHub({desired_ble_enabled:false,settings_revision:2});
   assert.match(pending,/Bluetooth On/);
   assert.match(pending,/not yet confirmed/);
@@ -146,4 +146,18 @@ test('local BLE confirmation times out with an actionable warning',async()=>{
   h.timers.values().find(t=>t.ms===8000).fn();
   assert.equal(h.panel.feedback().state,'failed');
   assert.match(h.panel.feedback().text,/not confirmed/);
+});
+
+test('BLE power confirmation requires matching applied power, not just revision',()=>{
+  const attempt={enabled:true,powerDbm:9,revision:2,startedAt:1000};
+  const pending={...hub,settings_revision:2,applied_revision:2,desired_ble_enabled:true,desired_ble_tx_power_dbm:9};
+  for(const value of [undefined,null,3]) assert.equal(hubControlFeedback({...pending,ble_tx_power_dbm:value},attempt,2000).state,'pending');
+  assert.equal(hubControlFeedback({...pending,ble_tx_power_dbm:9},attempt,2000).state,'confirmed');
+  assert.equal(hubControlFeedback({...pending,settings_revision:3,desired_ble_tx_power_dbm:3},attempt,2000).state,'failed');
+});
+test('gateway settings response includes the saved advertising power',async()=>{
+  const m=database({hub_presence:{data:{settings_revision:8,desired_ble_enabled:true,desired_ble_tx_power_dbm:9,desired_reporting_profile:'normal',display_name:'Hub',home_emoji:'🏡',portable_emoji:'📱',marker_colour:'#38bdf8'}}});
+  const response=await handleHubSettings(m.db,request,'test','test');
+  assert.equal(response.status,200);
+  assert.equal((await response.json()).settings.ble_tx_power_dbm,9);
 });

@@ -29,7 +29,8 @@ static bool settingsPolled = false;
 
 static bool hubBleSettled() {
     const bool shouldAdvertise = !hubProfileUsesBleScanning() && homeBeaconAllowed && hubBeaconEnabled;
-    return hubBeaconAdvertising.load() == shouldAdvertise;
+    return hubBeaconAdvertising.load() == shouldAdvertise
+        && hubBeaconAppliedPowerDbm.load() == hubBeaconPowerDbm.load();
 }
 static bool validHubText(const String &s) {
     if (s.length()==0 || s.length()>64) return false;
@@ -88,6 +89,7 @@ static void hubGnssTask(void *) {
             auto s = copyHubSelf();
             prefs.putString("name",s.name); prefs.putString("home",s.homeEmoji);
             prefs.putString("portable",s.portableEmoji); prefs.putString("colour",s.colour);
+            prefs.putInt("ble_power",hubBeaconPowerDbm.load());
             prefs.putBool("beacon",hubBeaconEnabled.load()); prefs.putULong64("revision",s.revision);
             prefs.putString("reporting",hubReportingName(s.reporting));
         }
@@ -106,7 +108,9 @@ static void initHubPresence() {
         strlcpy(hubSelf.colour,p.getString("colour","#38bdf8").c_str(),sizeof(hubSelf.colour));
         hubSelf.revision = p.getULong64("revision",0);
         parseHubReporting(p.getString("reporting","power_save").c_str(),hubSelf.reporting);
-        hubBeaconEnabled = p.getBool("beacon",true); p.end();
+        hubBeaconEnabled = p.getBool("beacon",true);
+        const int power = p.getInt("ble_power",3);
+        hubBeaconPowerDbm = validHubBlePower(power) ? power : 3; p.end();
     }
     if (xTaskCreatePinnedToCore(hubGnssTask,"hub-gnss",6144,nullptr,1,nullptr,0) != pdPASS)
         Serial.println("[HUB GNSS] Task allocation failed; no position will be fabricated");
@@ -121,6 +125,8 @@ static String hubPresenceJson(bool cloud) {
     doc["uptime_s"]=millis()/1000; doc["free_heap"]=ESP.getFreeHeap();
     if (staConnected) doc["wifi_rssi_dbm"]=WiFi.RSSI(); else doc["wifi_rssi_dbm"]=nullptr;
     doc["ble_enabled"]=hubBeaconEnabled.load(); doc["ble_advertising"]=hubBeaconAdvertising.load();
+    if (validHubBlePower(hubBeaconAppliedPowerDbm.load())) doc["ble_tx_power_dbm"]=hubBeaconAppliedPowerDbm.load();
+    else doc["ble_tx_power_dbm"]=nullptr;
     doc["applied_revision"]=s.revision;
     doc["reporting_profile"]=hubReportingName(s.reporting);
     doc["report_interval_s"]=hubReportingIntervalMs(s.reporting)/1000;
@@ -162,6 +168,10 @@ static void handleHubPreferences() {
          !parseHubReporting(doc["reporting_profile"].as<const char*>(),reporting))) {
         httpServer.send(400,"application/json","{\"error\":\"invalid_reporting_profile\"}"); return;
     }
+    const int power=doc["ble_tx_power_dbm"] | hubBeaconPowerDbm.load();
+    if ((!doc["ble_tx_power_dbm"].isNull() && !doc["ble_tx_power_dbm"].is<int>()) || !validHubBlePower(power)) {
+        httpServer.send(400,"application/json","{\"error\":\"invalid_ble_power\"}"); return;
+    }
     String name=doc["display_name"] | s.name;
     String home=doc["home_emoji"] | s.homeEmoji;
     String portable=doc["portable_emoji"] | s.portableEmoji;
@@ -176,6 +186,7 @@ static void handleHubPreferences() {
         strlcpy(hubSelf.portableEmoji,portable.c_str(),sizeof(hubSelf.portableEmoji));
         strlcpy(hubSelf.colour,colour.c_str(),sizeof(hubSelf.colour));
         if (doc["ble_enabled"].is<bool>()) hubBeaconEnabled=doc["ble_enabled"].as<bool>();
+        hubBeaconPowerDbm=power;
         hubSelf.reporting=reporting;
         xSemaphoreGive(hubSelfMutex);
         hubSelfDirty=true;
@@ -187,6 +198,8 @@ static void handleHubPreferences() {
 static void applyHubSettings(JsonObject settings) {
     const uint64_t rev=settings["revision"] | uint64_t(0);
     if (rev<=copyHubSelf().revision || !settings["ble_enabled"].is<bool>()) return;
+    const int power=settings["ble_tx_power_dbm"] | hubBeaconPowerDbm.load();
+    if ((!settings["ble_tx_power_dbm"].isNull() && !settings["ble_tx_power_dbm"].is<int>()) || !validHubBlePower(power)) return;
     String name=settings["display_name"] | "";
     String home=settings["home_emoji"] | "";
     String portable=settings["portable_emoji"] | "";
@@ -201,6 +214,7 @@ static void applyHubSettings(JsonObject settings) {
         strlcpy(hubSelf.portableEmoji,portable.c_str(),sizeof(hubSelf.portableEmoji));
         strlcpy(hubSelf.colour,colour.c_str(),sizeof(hubSelf.colour));
         hubSelf.revision=rev; hubBeaconEnabled=settings["ble_enabled"].as<bool>();
+        hubBeaconPowerDbm=power;
         hubSelf.reporting=reporting;
         xSemaphoreGive(hubSelfMutex);
         hubSelfDirty=true; hubSelfReportRequested=true;
