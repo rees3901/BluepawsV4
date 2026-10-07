@@ -12,6 +12,7 @@
 #include "hardware.h"
 #include "personal_policy.h"
 #include "gnss_recovery.h"
+#include "gnss_accuracy.h"
 #include "finder_flash.h"
 #include "user_gestures.h"
 #include "led_schedule.h"
@@ -59,6 +60,7 @@ struct RetainedState {
     uint32_t homeCycles = 0;
     uint8_t misses = 2;
     uint8_t satellites = 255;
+    uint16_t accuracyMetres = 0;
     bool home = false;
 } ;
 RTC_DATA_ATTR RetainedState retained;
@@ -267,6 +269,7 @@ void acquireGps(bool cold) {
                 retained.lon = int32_t(llround(gps.location.lng() * 1e7));
                 retained.fixTime = utc();
                 retained.satellites = uint8_t(min(gps.satellites.value(), uint32_t(254)));
+                retained.accuracyMetres = personal::estimatedAccuracyMetres(gps.hdop.hdop());
                 freshFix = true;
                 break;
         }
@@ -354,8 +357,9 @@ uint8_t buildPacket(uint8_t* p, uint8_t reason, bool homeSeen, uint16_t ack = 0)
     pkt_init(p, PERSONAL_DEVICE_ID, PERSONAL_HUB_ID, nextSequence(), now, status, state.profile, flags, reason);
     if (!presenceOnly) pkt_set_gps(p, retained.lat, retained.lon);
     // No battery divider/fuel gauge is established on this assembly. Zero is
-    // an unmeasured value, NOT an invented voltage. HDOP is not accuracy in metres.
-    pkt_set_quality(p, 0, 0, presenceOnly ? UINT16_MAX : age);
+    // an unmeasured value, NOT an invented voltage. Accuracy is an HDOP x 5
+    // heuristic captured with the accepted position, never from a failed retry.
+    pkt_set_quality(p, 0, presenceOnly ? 0 : retained.accuracyMetres, presenceOnly ? UINT16_MAX : age);
     pkt_set_sat_count(p, !presenceOnly && retained.fixTime ? retained.satellites : 255);
     pkt_add_tlv_u16(p, TLV_FW_VER, 0x0100);
     if (reason == TX_ACK) pkt_add_tlv_u16(p, TLV_ACKED_MSG_SEQ_ID, ack);

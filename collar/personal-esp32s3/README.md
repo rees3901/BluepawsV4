@@ -254,3 +254,18 @@ Profile sleep intervals and the two-second receipt ACK retry remain unchanged.
 The deployed GUI currently shows a shorter conservative awake indication; this
 firmware update alone does not extend that indication. Longer RX windows add
 awake time, including on LED-only wakes.
+
+## Estimated GNSS accuracy
+
+Accepted L76K fixes now report `acc_m = ceil(HDOP * 5)` in the existing V4
+quality field. This is a rough uncertainty estimate, not a measured error bound.
+It is captured alongside the accepted coordinates and retained through deep
+sleep. A failed acquisition preserves the estimate belonging to the last fix;
+presence-only reports use unknown accuracy (0). Existing fix acceptance gates,
+radio contracts and authentication are unchanged.
+
+The GUI change is separately reviewed: metre-based rings are limited to 50 m
+for display, while telemetry retains the complete estimate. Home markers have
+no GPS ring. Devices need individual builds and flashes to emit this field.
+Native conversion tests and the personal ESP32-S3 build passed on 7 October
+2026. This build has not yet been flashed or verified with a live GPS fix.
