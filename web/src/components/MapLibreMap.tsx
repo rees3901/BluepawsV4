@@ -428,7 +428,7 @@ function syncUncertainty(map: MapLibre, devices: TelemetryDevice[], avatars: Rec
   const features = devices.flatMap(device => {
     const uncertainty = gnssUncertainty(device);
     return uncertainty ? [{ type: "Feature" as const,
-      properties: { color: normalizeMarkerColor(avatars[device.id]?.color), capped: uncertainty.capped },
+      properties: { color: normalizeMarkerColor(avatars[device.id]?.color) },
       geometry: uncertaintyPolygon(device.lat, device.lon, uncertainty.radius) }] : [];
   });
   const data = { type: "FeatureCollection" as const, features };
@@ -436,8 +436,6 @@ function syncUncertainty(map: MapLibre, devices: TelemetryDevice[], avatars: Rec
   if (source) source.setData(data);
   else {
     map.addSource("bluepaws-uncertainty", { type: "geojson", data });
-    map.addLayer({ id: "bluepaws-uncertainty-fill", type: "fill", source: "bluepaws-uncertainty", paint: { "fill-color": ["get", "color"], "fill-opacity": 0.08 } });
-    for (const capped of [false, true]) map.addLayer({ id: `bluepaws-uncertainty-line-${capped}`, type: "line", source: "bluepaws-uncertainty",
-      filter: ["==", ["get", "capped"], capped], paint: { "line-color": ["get", "color"], "line-width": 1.5, ...(capped ? { "line-dasharray": [3, 3] } : {}) } });
+    map.addLayer({ id: "bluepaws-uncertainty-fill", type: "fill", source: "bluepaws-uncertainty", paint: { "fill-color": ["get", "color"], "fill-opacity": 0.08, "fill-antialias": false } });
   }
 }

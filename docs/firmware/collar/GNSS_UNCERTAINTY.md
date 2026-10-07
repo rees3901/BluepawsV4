@@ -8,7 +8,8 @@ packets keep accuracy unknown (0) and do not replace GPS history.
 
 Leaflet and MapLibre draw rings in geographic metres around non-Home collar GPS
 positions. The drawn radius is capped at 50m; telemetry retains the full estimate.
-Capped rings have a dashed outline and the popup states the actual value and cap.
+Circles use a translucent fill without an outline; the popup states the actual
+value and cap.
 Unknown/invalid accuracy and Home/hub markers have no collar GPS ring. Rings
 describe uncertainty at the last fix and do not account for later movement.
 

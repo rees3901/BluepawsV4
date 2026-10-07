@@ -363,7 +363,7 @@ export default function LeafletMap(props: ConfiguredMapRendererProps) {
       const uncertainty = gnssUncertainty(device);
       if (uncertainty) {
         let circle = uncertaintyRef.current.get(device.id);
-        const style = { color: markerColor, fillColor: markerColor, fillOpacity: 0.08, weight: 1.5, dashArray: uncertainty.capped ? "4 4" : undefined };
+        const style = { stroke: false, fillColor: markerColor, fillOpacity: 0.08 };
         if (!circle) {
           circle = L.circle(latLng, { ...style, radius: uncertainty.radius }).addTo(map);
           uncertaintyRef.current.set(device.id, circle);
