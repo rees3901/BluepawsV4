@@ -49,7 +49,9 @@ export function parseHubPresence(value: unknown) {
   const boolean = (k: string) => { if (typeof p[k] !== "boolean") throw new Error("invalid_" + k); return p[k] as boolean; };
   const optionalBoolean = (k: string) => p[k] === undefined ? false : boolean(k);
   const power = p.ble_tx_power_dbm ?? null;
-  if (power !== null && ![-12, 3, 9].includes(power as number)) throw new Error("invalid_ble_tx_power_dbm");
+  const steps = p.ble_power_steps ?? (power === null ? null : 3);
+  if (steps !== null && steps !== 3 && steps !== 5) throw new Error("invalid_ble_power_steps");
+  if (power !== null && !(steps === 5 ? [-12, -6, 3, 6, 9] : [-12, 3, 9]).includes(power as number)) throw new Error("invalid_ble_tx_power_dbm");
   const lat = p.latitude ?? null, lon = p.longitude ?? null;
   const battery = p.battery_percent ?? null;
   const reporting = p.reporting_profile === undefined ? "normal" : p.reporting_profile;
@@ -82,7 +84,7 @@ export function parseHubPresence(value: unknown) {
     p_fix_age_s: lat === null ? null : integer("fix_age_s", 0, 604800),
     p_uptime: integer("uptime_s", 0, 4294967295),
     p_rssi: p.wifi_rssi_dbm == null ? null : integer("wifi_rssi_dbm", -127, 0),
-    p_ble: boolean("ble_enabled"), p_ble_tx_power_dbm: power, p_advertising: boolean("ble_advertising"),
+    p_ble: boolean("ble_enabled"), p_ble_tx_power_dbm: power, p_ble_power_steps: steps, p_advertising: boolean("ble_advertising"),
     p_heap: integer("free_heap", 0, 2147483647),
     p_applied: integer("applied_revision", 0, Number.MAX_SAFE_INTEGER),
     p_reporting_profile: reporting,

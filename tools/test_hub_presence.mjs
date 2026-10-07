@@ -128,6 +128,16 @@ test('authenticated hub handler passes quality unchanged to the existing RPC',as
 
 test('reported BLE power is optional for legacy firmware and restricted to presets',()=>{
   assert.equal(parseHubPresence(payload).p_ble_tx_power_dbm,null);
+  assert.equal(parseHubPresence(payload).p_ble_power_steps,null);
   for(const power of [-12,3,9]) assert.equal(parseHubPresence({...payload,ble_tx_power_dbm:power}).p_ble_tx_power_dbm,power);
   for(const power of [-24,0,20,'3',true,NaN,3.5]) assert.throws(()=>parseHubPresence({...payload,ble_tx_power_dbm:power}));
+});
+test('five-level capability accepts new powers without assuming old firmware support',()=>{
+  for (const power of [-12,-6,3,6,9]) {
+    const args=parseHubPresence({...payload,ble_tx_power_dbm:power,ble_power_steps:5});
+    assert.equal(args.p_ble_tx_power_dbm,power); assert.equal(args.p_ble_power_steps,5);
+  }
+  assert.equal(parseHubPresence({...payload,ble_tx_power_dbm:3}).p_ble_power_steps,3);
+  for (const power of [-6,6]) assert.throws(()=>parseHubPresence({...payload,ble_tx_power_dbm:power}));
+  for (const steps of [0,4,'5',true,NaN]) assert.throws(()=>parseHubPresence({...payload,ble_tx_power_dbm:3,ble_power_steps:steps}));
 });

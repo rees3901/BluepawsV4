@@ -125,6 +125,7 @@ static String hubPresenceJson(bool cloud) {
     doc["uptime_s"]=millis()/1000; doc["free_heap"]=ESP.getFreeHeap();
     if (staConnected) doc["wifi_rssi_dbm"]=WiFi.RSSI(); else doc["wifi_rssi_dbm"]=nullptr;
     doc["ble_enabled"]=hubBeaconEnabled.load(); doc["ble_advertising"]=hubBeaconAdvertising.load();
+    doc["ble_power_steps"]=5;
     if (validHubBlePower(hubBeaconAppliedPowerDbm.load())) doc["ble_tx_power_dbm"]=hubBeaconAppliedPowerDbm.load();
     else doc["ble_tx_power_dbm"]=nullptr;
     doc["applied_revision"]=s.revision;
