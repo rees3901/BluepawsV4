@@ -268,4 +268,5 @@ The GUI change is separately reviewed: metre-based rings are limited to 50 m
 for display, while telemetry retains the complete estimate. Home markers have
 no GPS ring. Devices need individual builds and flashes to emit this field.
 Native conversion tests and the personal ESP32-S3 build passed on 7 October
-2026. This build has not yet been flashed or verified with a live GPS fix.
+2026. Macy 3003 was flashed on 7 October; the other collars still need this update.
+A fresh GPS fix and live accuracy display have not yet been verified.

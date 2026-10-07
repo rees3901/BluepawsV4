@@ -393,3 +393,19 @@ outdoor tracking. This file will be updated as actual hardware evidence arrives.
   with D1 LED enabled and individual credentials. GUI restrictions remain PR 261.
 - Fresh serial also confirmed home BLE (seen=1, home=1) and ANTENNA OK four
   times. Fresh GPS position and cloud acceptance were not tested in this check.
+
+## Macy 3003 accuracy-update flash — 7 October 2026
+
+Flashed the personal collar build from 679521b (accuracy change 4ce50d2) to
+COM19 using Macy's existing identity/key and D1 LED-enabled configuration.
+The expected ESP32-S3 MAC matched before flashing; upload hashes verified.
+Image SHA256: 7BB788771B11920C879BEEA4257F6EAC26388E630164F91E341F5B6CD57E827C.
+A private recoverable copy is stored as 3003-hdop-accuracy-firmware.bin.
+
+115200-baud diagnostics confirmed a hub receipt for the wake presence packet,
+Home BLE detection and ANTENNA OK. L76K produced valid NMEA with no checksum
+errors. Acquisition stopped at its 60-second limit without an accepted fix
+(0 satellites used, HDOP 25.50); UTC was valid and the collar then transmitted
+its follow-up report successfully, received a hub receipt, and returned to
+the saved Power Save profile's 1800-second sleep. This is not a verified fresh position or
+an end-to-end accuracy/ring check. No cloud release or hub flash was performed.
