@@ -27,7 +27,7 @@ and must keep the power selector disabled.
 
 Rollout: review the migration and existing Family-scoped RLS; apply the migration,
 then deploy ingest-position, update the selected hub firmware, and release the
-web application. None of those live release operations is performed by this PR.
+web application. Release of these operations was authorized on 7 October 2026.
 Older firmware reports remain accepted. Roll back the web/firmware independently;
 retain the additive columns/RPC until no new sender depends on them.
 
