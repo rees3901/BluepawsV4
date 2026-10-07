@@ -19,7 +19,7 @@ import { HubCard } from "@/components/HubCard";
 import { useHubPhotos } from "@/lib/useHubPhotos";
 import { saveHubAppearance } from "@/lib/hubAppearances";
 import { commandMessage } from "@/lib/collarFeedback";
-import { CUSTOMER_POWER_PROFILES, powerProfileLabel, type CustomerPowerProfile } from "@/lib/powerProfiles";
+import { powerProfileLabel, type CustomerPowerProfile } from "@/lib/powerProfiles";
 import { deviceCardOrderChanged, deviceCardOrderStorageKey, deviceCardPinStorageKey, moveDeviceToHoverTarget, orderDeviceIds, pinDeviceFirst, sortDeviceIds, type CardSortField, type CardSortDirection } from "@/lib/deviceCardOrder";
 import { buildCurrentDeviceReport, deviceReportsToCsv, loadDeviceReports, type DeviceReport } from "@/lib/deviceReports";
 import { loadDeviceAppearances, revokeAvatarUrls } from "@/lib/deviceAppearances";
@@ -93,8 +93,6 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
   const [portableMode, setPortableMode] = useState(false);
   const [mapCommand, setMapCommand] = useState<MapCommand | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [commandDevice, setCommandDevice] = useState<SelectedDevice | null>(null);
-  const [commandSending, setCommandSending] = useState(false);
   const [findSending, setFindSending] = useState(false);
   const [findError, setFindError] = useState<string | null>(null);
   const [findDevice, setFindDevice] = useState<SelectedDevice | null>(null);
@@ -152,27 +150,16 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
     setInitialisedCardIds(current => [...new Set([...current, ...mapDevices.map(device => device.id)])]);
   }
 
-  const handlePowerProfileCommand = useCallback(async (profile: CustomerPowerProfile) => {
-    if (!commandDevice || commandSending) return;
+  const handlePowerProfileCommand = useCallback(async (deviceId: number, profile: CustomerPowerProfile) => {
     if (tutorialMode) {
-      setCommandDevice(null);
       setToast(`Tutorial command preview: ${powerProfileLabel(profile)}`);
       return;
     }
-
-    setCommandSending(true);
-    try {
-      const command = await queuePowerProfileCommand(commandDevice.id, profile);
-      refreshFeedback();
-      setCommandDevice(null);
-      const expiry = new Date(command.expires_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-      setToast(`${powerProfileLabel(profile)} queued until ${expiry}`);
-    } catch (error) {
-      setToast(error instanceof Error ? error.message : "Unable to queue collar command");
-    } finally {
-      setCommandSending(false);
-    }
-  }, [commandDevice, commandSending, tutorialMode, refreshFeedback]);
+    const command = await queuePowerProfileCommand(deviceId, profile);
+    refreshFeedback();
+    const expiry = new Date(command.expires_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    setToast(`${powerProfileLabel(profile)} queued until ${expiry}`);
+  }, [tutorialMode, refreshFeedback]);
   const orderedDevices = useMemo(() => {
     const devicesById = new Map(mapDevices.map((device) => [device.id, device]));
     return orderedDeviceIds.flatMap((deviceId) => {
@@ -508,7 +495,17 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
       if (!trailVisible) requestTrailHistory([device.id]);
     }
     if (action === "find") setFindDevice({ id: device.id, name: device.name });
-    if (action === "command") setCommandDevice({ id: device.id, name: device.name });
+    if (action === "command") {
+      setSidebarOpen(true);
+      const expand = isDeviceInactive(device, Date.now()) ? setInactiveExpandedIds : setExpandedIds;
+      expand(current => current.includes(device.id) ? current : [...current, device.id]);
+      requestAnimationFrame(() => {
+        const selector = document.getElementById(`collar-profile-${device.id}`);
+        selector?.closest("details")?.setAttribute("open", "");
+        selector?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        selector?.focus({ preventScroll: true });
+      });
+    }
   }, [requestTrailHistory, trailIds]);
 
   const handleAllTrailsToggle = useCallback(() => {
@@ -752,6 +749,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
       reportedFaultReport={feedback[device.id]?.faultReport}
       onExpand={() => (inactive ? setInactiveExpandedIds : setExpandedIds)((current) => nextExpandedDeviceCards(current, device.id))}
       onAction={(action) => handleAction(device, action)}
+      onProfileCommand={(profile) => handlePowerProfileCommand(device.id, profile)}
       onAvatarEdit={tutorialMode ? undefined : () => setAvatarDevice(device)}
       onDragStart={() => handleCardDragStart(device.id)}
       onDragOver={() => handleCardDragOver(device.id)}
@@ -870,7 +868,6 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
       {tutorialPromptOpen && (
         <TutorialWelcomeCard onStart={startTutorialFromPrompt} onDismiss={dismissTutorialPrompt} />
       )}
-      {commandDevice && <CommandModal device={commandDevice} sending={commandSending} onClose={() => { if (!commandSending) setCommandDevice(null); }} onSend={handlePowerProfileCommand} />}
       {findDevice && <FindModal device={{ ...findDevice, profile: devices.find(device => device.id === findDevice.id)?.profile }} sending={findSending} error={findError}
         onClose={() => { setFindDevice(null); setFindError(null); }} onSend={async (action, seconds, interval) => {
           if (findSending) return;
@@ -1000,20 +997,6 @@ function TutorialWelcomeCard({ onStart, onDismiss }: { onStart: () => void; onDi
         <button className="btn-secondary" type="button" onClick={onDismiss}>Not now</button>
       </div>
     </aside>
-  );
-}
-
-function CommandModal({ device, sending, onClose, onSend }: { device: SelectedDevice; sending: boolean; onClose: () => void; onSend: (mode: CustomerPowerProfile) => void }) {
-  const [mode, setMode] = useState<CustomerPowerProfile>("normal");
-  return (
-    <div className="modal" role="dialog" aria-modal="true" aria-labelledby="command-title">
-      <div className="modal-content">
-        <h2 id="command-title">Send Command</h2><p>Device: <strong>{device.name}</strong></p>
-        <div className="form-group"><label htmlFor="cmdMode">Change Power Profile</label><select id="cmdMode" value={mode} disabled={sending} onChange={(event) => setMode(event.target.value as CustomerPowerProfile)}>{CUSTOMER_POWER_PROFILES.map((profile) => <option key={profile.value} value={profile.value}>{profile.label}</option>)}</select></div>
-        <p className="form-hint">Bluepaws attempts delivery on the collar&apos;s next check-in. The command expires after ten minutes without an acknowledgement.</p>
-        <div className="modal-actions"><button className="btn-primary" disabled={sending} onClick={() => onSend(mode)}>{sending ? "Queueing…" : "Send command"}</button><button className="btn-secondary" disabled={sending} onClick={onClose}>Cancel</button></div>
-      </div>
-    </div>
   );
 }
 

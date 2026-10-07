@@ -70,10 +70,11 @@ test('hub emoji changes remove the photo and invalid identities cannot write',as
 
 test('hub and collar share card shell, avatar, expansion and navigation',()=>{
   for (const html of [renderHub(),renderCollar()]) {
-    for (const cls of ['device-card expanded','card-summary','card-avatar-wrap','card-reorder-handle',
+    for (const cls of ['card-summary','card-avatar-wrap','card-reorder-handle',
       'card-avatar-edit','card-detail-reveal','card-grid','btn-jump','btn-follow','btn-trail'])
       assert.ok(html.includes(cls),cls);
   }
+  for (const html of [renderHub(),renderCollar()]) assert.match(html,/class="device-card[^"]* expanded/);
   const html=renderHub();
   assert.match(html,/Wi-Fi -40 dBm/);
   assert.match(html,/Bluetooth On/);
@@ -81,7 +82,8 @@ test('hub and collar share card shell, avatar, expansion and navigation',()=>{
   assert.doesNotMatch(html,/Power Profile|Dist From Hub|btn-find|Reported fault|hub-summary|Uptime|Free memory/);
   assert.match(html,/btn-cmd/); assert.match(html,/Reporting profile/);
   assert.match(renderCollar(),/Power Profile/);
-  assert.match(renderCollar(),/btn-cmd/);
+  assert.match(renderCollar(),/inline-profile-select/);
+  assert.doesNotMatch(renderCollar(),/btn-cmd/);
 });
 
 test('hub profile badge uses confirmed state and collar styling in both card sizes',()=>{

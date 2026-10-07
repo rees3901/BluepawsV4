@@ -1,5 +1,6 @@
 /* eslint-disable @next/next/no-img-element -- Tiny pre-sized emoji artwork is intentionally served directly from the picker CDN. */
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import { CUSTOMER_POWER_PROFILES, type CustomerPowerProfile } from "@/lib/powerProfiles";
 import { BatteryIndicator, BleProximity, BluetoothBeaconIndicator, GnssIndicator, HomeDistance, LastSeen, SignalIndicator, WifiIndicator } from "@/components/Indicators";
 import { HUB_REPORTING, hubContactGrace } from "@/lib/hubReporting";
 import { emojiImageUrl } from "@/lib/emoji";
@@ -33,6 +34,7 @@ export interface DeviceCardProps {
   commandFeedback?: ReturnType<typeof commandMessage>;
   reportedFlags?: number | null;
   reportedFaultReport?: CollarFaultReport | null;
+  onProfileCommand?: (profile: CustomerPowerProfile) => Promise<void>;
   onExpand: () => void;
   onAction: (action: DeviceAction) => void;
   onDragStart: () => void;
@@ -182,7 +184,7 @@ export function DeviceCard(props: DeviceCardProps) {
               {isHub && props.hubDetails}
               <span className="label">Last report</span><span className="value">{formatAge(ageSeconds)}</span>
             </div>
-            <ActionButtons followed={followed} trailVisible={trailVisible} onAction={onAction} collarControls={!isHub} hasGps={hasGps} extra={props.hubActions} />
+            <ActionButtons followed={followed} trailVisible={trailVisible} onAction={onAction} collarControls={!isHub} hasGps={hasGps} extra={isHub ? props.hubActions : <InlineProfileControl device={device} onSend={props.onProfileCommand} />} />
             {!isHub && props.commandFeedback && <div role="status" className={`command-feedback ${props.commandFeedback.pending ? "pending" : props.commandFeedback.status}`}>{props.commandFeedback.text}<span className="command-feedback-help">{props.commandFeedback.help}</span></div>}
             <div className="log-btn-row">
               <button className="btn-device-log btn-secondary" type="button" onClick={onReportLog}>Message Log</button>
@@ -204,11 +206,51 @@ export function ActionButtons({ followed, trailVisible, onAction, collarControls
       <button className="btn-action btn-jump" disabled={!hasGps} onClick={() => onAction("jump")} title="Jump to location">↗ Jump To</button>
       <button className={`btn-action btn-follow${followed ? " active" : ""}`} onClick={() => onAction("follow")} title="Auto-follow on map">● {followed ? "Following" : "Follow"}</button>
       <button className={`btn-action btn-trail${trailVisible ? " active" : ""}`} onClick={() => onAction("trail")} title="Toggle breadcrumb trail">⌁ Trail</button>
-      {collarControls && <><button className="btn-action btn-find" onClick={() => onAction("find")} title="Find Alert — flash collar LED">♟ Find Alert</button>
-      <button className="btn-action btn-cmd" onClick={() => onAction("command")} title="Command & Control">⌘ Cmd</button></>}
+      {collarControls && <><button className="btn-action btn-find" onClick={() => onAction("find")} title="Set collar LED flashing">✦ LED Flash</button></>}
       {extra}
     </div>
   );
+}
+
+export function InlineProfileControl({ device, onSend }: {
+  device: Pick<TelemetryDevice, "id" | "name" | "profile">;
+  onSend?: (profile: CustomerPowerProfile) => Promise<void>;
+}) {
+  const current = CUSTOMER_POWER_PROFILES.find(option => option.label.replaceAll(" ", "").toLowerCase() === device.profile.replaceAll(" ", "").toLowerCase())?.value ?? "";
+  const [draft, setDraft] = useState<{ reported: string; value: CustomerPowerProfile } | null>(null);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // New telemetry invalidates a draft based on an older reported profile.
+  const selected = draft?.reported === device.profile ? draft.value : current;
+  const changed = selected !== current;
+  const id = `collar-profile-${device.id}`;
+  async function send() {
+    if (!onSend || !changed || !selected || sending) return;
+    setSending(true);
+    setError(null);
+    try {
+      await onSend(selected);
+      setDraft(null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to queue collar command");
+    } finally {
+      setSending(false);
+    }
+  }
+  return <div className={`inline-profile${changed ? " editing" : ""}`}>
+    <label className="inline-profile-label" htmlFor={id}>Profile</label>
+    <select id={id} aria-label={`Power profile for ${device.name}`} className="btn-action inline-profile-select" value={selected} disabled={sending || !onSend}
+      onChange={event => { setDraft({ reported: device.profile, value: event.target.value as CustomerPowerProfile }); setError(null); }}>
+      {!current && <option value="" disabled>{device.profile} (reported)</option>}
+      {CUSTOMER_POWER_PROFILES.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+    </select>
+    {changed && <div className="inline-profile-confirm">
+      <button type="button" className="btn-action active" disabled={sending} onClick={send}>{sending ? "Queueing…" : "Send command"}</button>
+      <button type="button" className="btn-action" disabled={sending} onClick={() => { setDraft(null); setError(null); }}>Cancel</button>
+      <p className="inline-profile-help">Delivered when the collar next listens. Expires after ten minutes without acknowledgement.</p>
+      {error && <p role="alert" className="inline-profile-error">{error}</p>}
+    </div>}
+  </div>;
 }
 
 export function DownloadIcon() {
