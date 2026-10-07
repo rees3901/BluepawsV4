@@ -12,7 +12,7 @@ const MapStylePreview = dynamic(() => import("@/components/MapStylePreview"), { 
 const STORAGE_KEY = "bluepaws-map-renderer";
 const RASTER_KEY = "bluepaws-raster-layer";
 const VECTOR_KEY = "bluepaws-vector-source";
-const PICKER_IDLE_MS = 30_000;
+const PICKER_IDLE_MS = 20_000;
 
 export default function MapContainer(props: MapRendererProps) {
   const [renderer, setRenderer] = useState<MapRendererName>(() => {
