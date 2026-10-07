@@ -42,6 +42,7 @@ test('queue errors preserve draft and allow retry; duplicate sends disabled whil
 test('new reported profile invalidates an unsent draft; unknown Debug is preserved until selection',()=>{
  const h=harness(async()=>{});h.change('active');h.profile('PowerSave');assert.equal(h.get('select').props.value,'power_save');
  assert.equal(h.get('button','Send command'),undefined);
+ h.profile('Normal');assert.equal(h.get('select').props.value,'normal');assert.equal(h.get('button','Send command'),undefined);
  h.profile('Debug');assert.equal(h.get('select').props.value,'');assert.equal(h.get('button','Send command'),undefined);
  h.change('normal');assert.ok(h.get('button','Send command'));
 });

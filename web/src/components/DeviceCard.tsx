@@ -220,7 +220,8 @@ export function InlineProfileControl({ device, onSend }: {
   const [draft, setDraft] = useState<{ reported: string; value: CustomerPowerProfile } | null>(null);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // New telemetry invalidates a draft based on an older reported profile.
+  // Discard old drafts permanently when the reported profile changes.
+  if (draft && draft.reported !== device.profile) setDraft(null);
   const selected = draft?.reported === device.profile ? draft.value : current;
   const changed = selected !== current;
   const id = `collar-profile-${device.id}`;
