@@ -409,3 +409,19 @@ errors. Acquisition stopped at its 60-second limit without an accepted fix
 its follow-up report successfully, received a hub receipt, and returned to
 the saved Power Save profile's 1800-second sleep. This is not a verified fresh position or
 an end-to-end accuracy/ring check. No cloud release or hub flash was performed.
+
+## Simba 3004 accuracy-update flash — 7 October 2026
+
+Flashed the personal collar build from a56bd81 (accuracy change 4ce50d2) to
+COM23 using Simba's existing identity/key and D1 LED-enabled configuration.
+The expected ESP32-S3 MAC matched before flashing; upload hashes verified.
+Image SHA256: 28E303D06579B8C7AFDC394D26D83C8A3C6EC9C010344EEF9D607DE281D1B2E4.
+A private recoverable copy is stored as 3004-hdop-accuracy-firmware.bin.
+
+115200-baud diagnostics confirmed a hub receipt for the wake presence packet,
+Home BLE detection and ANTENNA OK. Acquisition stopped at its 60-second limit
+without an accepted fix (0 satellites used, HDOP 25.50); UTC was valid and
+the follow-up radio transmission returned success. The bounded serial check
+did not capture its hub receipt or subsequent sleep. A fresh position, cloud
+acceptance and accuracy/ring display remain unverified. No cloud release or
+hub flash was performed.
