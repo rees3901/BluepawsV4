@@ -63,7 +63,7 @@ struct bp_profile_config_t {
 static const bp_profile_config_t BP_PROFILES[] = {
     //                        power  sleep   led  beacon  gps_cont  cell_ratio  checkin  home_gnss  lte_heartbeat  LoRa failures->LTE
     { PROFILE_NORMAL,          14,    600,    5,  false,  false,    10,          1,       10,        3600,          3 }, // default everyday collar
-    { PROFILE_POWERSAVE,       10,   1800,    3,  false,  false,    30,          2,       10,        10800,         3 }, // lazy/low-battery conservation
+    { PROFILE_POWERSAVE,       10,   1800,    3,  false,  false,    30,          1,       10,        10800,         3 }, // lazy/low-battery conservation
     { PROFILE_ACTIVE,          20,     60,    5,  false,  false,     5,          1,       10,        600,           2 }, // interested/high-frequency monitoring
     { PROFILE_DEBUG,           14,     30,    2,  false,  false,     1,          1,        1,        30,            1 }, // development-only noisy telemetry
     { PROFILE_LOST,            20,      0,   10,  true,   true,      3,          1,        1,        60,            1 }, // emergency; handled outside home gate

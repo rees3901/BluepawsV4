@@ -62,3 +62,8 @@ If this library still contains legacy constants or packet helpers, update the im
 `tx_reason = BOOT` and `tx_reason = WAKE_CHECKIN` use the v1.2 addressed header. Do not add new header flag meanings for boot diagnostics. Use TLVs such as `firmware_version`, `reset_reason`, and `uptime_s`.
 
 No-GNSS boot and wake-check-in packets are valid presence/diagnostic reports. Cloud ingestion should update last-seen/presence while preserving the last known valid coordinates.
+
+All profiles using the BLE-home path check in on every scheduled home wake.
+Power Save sleeps for 30 minutes between cycles and no longer skips alternate
+home check-ins. GNSS refresh and LTE heartbeat cadences remain separate;
+Lost Alert bypasses home gating and follows its emergency reporting cycle.
