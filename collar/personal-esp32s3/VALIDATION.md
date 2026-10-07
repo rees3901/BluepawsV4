@@ -480,7 +480,10 @@ D1 LED enablement and NVS settings were preserved.
 
 Serial confirmed a hub receipt and ANTENNA OK; this scan missed the Home beacon.
 Read-only live verification confirmed signed wake presence sequence 2113 was
-accepted with Out status and no GPS fault flags. This presence acceptance does
-not verify a new GPS fix or the later full-report fault state. Recovery firmware
+accepted with Out status and no GPS fault flags. The boot acquisition timed out
+at 60 seconds without a fresh fix (0 satellites, HDOP 25.50), with valid UTC.
+The backend also accepted follow-up sequence 2114 with Out status, GNSS invalid
+and the error flag retained: the intended separation is verified on live packets.
+No new position was acquired. Recovery firmware
 and diagnostics are stored privately under 3001-location-status-20261007.
 Only 3001 has this new location-status image; 3002–3004 still need individual updates.
