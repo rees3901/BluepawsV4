@@ -1,3 +1,4 @@
+import { hubContactGrace } from "./hubReporting.ts";
 import type { TelemetryDevice } from "@/types/telemetry";
 
 // POWER_SAVE collars may intentionally use their scheduled LTE heartbeat only
@@ -49,4 +50,10 @@ export function collarSummary(devices: TelemetryDevice[], nowMs: number) {
   const collars = devices.filter(device => device.entity !== "hub");
   const offline = collars.filter(device => isCollarOffline(device, nowMs)).length;
   return { total: collars.length, live: collars.length - offline, offline };
+}
+
+// Use the existing contact thresholds, including each hub reporting profile.
+export function isDeviceInactive(device: TelemetryDevice, nowMs: number) {
+  const age = Math.max(0, (nowMs - device.lastUpdate) / 1000);
+  return device.entity === "hub" ? age >= hubContactGrace(device.hubReportingProfile) : isCollarOfflineAge(age);
 }

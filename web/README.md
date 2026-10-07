@@ -4,6 +4,9 @@ Customer-facing Next.js dashboard for Vercel. This is a one-for-one React and
 TypeScript refactor of the ESP32-hosted interface in `hub/platformio/data/`; the original
 embedded GUI remains intact.
 
+Device grouping, command feedback and marker selection are described in
+[Dashboard usability](../docs/development/DASHBOARD_USABILITY.md).
+
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Frees3901%2FBluepawsV4&root-directory=web)
 
 ## Local development

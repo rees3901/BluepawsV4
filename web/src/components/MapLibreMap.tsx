@@ -13,6 +13,7 @@ import { contextMenuHtml, copyTextToClipboard, temporaryPinPopupHtml } from "@/l
 import { EMPTY_MAP_CENTER, EMPTY_MAP_ZOOM } from "@/lib/mapViewport";
 import { normalizeMarkerColor } from "@/lib/markerColor";
 import { mapPopupHtml } from "@/lib/mapPopup";
+import { isDeviceInactive } from "@/lib/devicePresence";
 import { updateTrailPoints } from "@/lib/trailPoints";
 import { locatedDevices, type ConfiguredMapRendererProps } from "@/components/mapRenderer";
 import type { DeviceAvatar, TelemetryDevice, TrailPoint } from "@/types/telemetry";
@@ -229,7 +230,11 @@ export default function MapLibreMap(props: ConfiguredMapRendererProps) {
     if (!map || !command) return;
     const currentProps = propsRef.current;
     const visible = locatedDevices(currentProps.devices);
-    if (command.type === "fit") fitDevices(map, visible, currentProps.sidebarOpen);
+    if (command.type === "fit") {
+      const live = visible.filter(device => !isDeviceInactive(device, Date.now()));
+      if (live.length) fitDevices(map, live, currentProps.sidebarOpen);
+      else currentProps.onNotice?.("No active markers with a known location");
+    }
     if ((command.type === "jump" || command.type === "open") && command.deviceId !== undefined) {
       const device = visible.find(item => item.id === command.deviceId);
       const marker = markersRef.current.get(command.deviceId);
@@ -255,7 +260,9 @@ export default function MapLibreMap(props: ConfiguredMapRendererProps) {
     const map = mapRef.current;
     if (!map) return;
     stopFollowing();
-    fitDevices(map, locatedDevices(propsRef.current.devices), propsRef.current.sidebarOpen);
+    const live = locatedDevices(propsRef.current.devices).filter(device => !isDeviceInactive(device, Date.now()));
+    if (live.length) fitDevices(map, live, propsRef.current.sidebarOpen);
+    else propsRef.current.onNotice?.("No active markers with a known location");
   };
   const zoomBy = (delta: number) => {
     const map = mapRef.current;
@@ -414,7 +421,7 @@ function syncTrails(map: MapLibre, devices: TelemetryDevice[], avatars: Record<n
   if (source) source.setData(data);
   else {
     map.addSource(TRAILS_SOURCE, { type: "geojson", data });
-    map.addLayer({ id: TRAILS_LAYER, type: "line", source: TRAILS_SOURCE, paint: { "line-color": ["get", "color"], "line-width": 2, "line-opacity": 0.75, "line-dasharray": [3, 2] } });
+    map.addLayer({ id: TRAILS_LAYER, type: "line", source: TRAILS_SOURCE, paint: { "line-color": ["get", "color"], "line-width": 1, "line-opacity": 0.5, "line-dasharray": [3, 5] } });
   }
 }
 

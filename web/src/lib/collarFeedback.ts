@@ -32,8 +32,8 @@ export function commandMessage(command: CommandFeedback | null | undefined, now:
   let status = command.status;
   if ((status === "pending" || status === "sent") && now >= expiry) status = "expired";
   const labels: Record<string, string> = {
-    pending: "Command pending", sent: "Command pending · awaiting ACK",
-    acked: "Command acknowledged", expired: "Command expired · no ACK",
+    pending: "Queued", sent: "Sent to hub · awaiting collar confirmation",
+    acked: "Confirmed by collar", expired: "Expired · collar did not confirm",
     failed: "Command failed", cancelled: "Command replaced or cancelled",
   };
   if (!labels[status]) return null;
@@ -41,7 +41,13 @@ export function commandMessage(command: CommandFeedback | null | undefined, now:
     ? `profile → ${PROFILE_LABELS[command.command_payload.profile ?? ""] ?? "Unknown"}`
     : command.command_type === "led_find" ? `LED → ${command.command_payload.action ?? "Unknown"}`
       : command.command_type.replaceAll("_", " ");
-  return { text: `${labels[status]}: ${detail}`, pending: status === "pending" || status === "sent", status };
+  const help = status === "pending" ? "Waiting for delivery when the collar next listens."
+    : status === "sent" ? "The hub has collected the command; collar delivery is not yet confirmed."
+    : status === "acked" ? "The collar acknowledged this command."
+    : status === "expired" ? "The command timed out; send it again when the collar is reachable."
+    : status === "failed" ? "The command could not be completed."
+    : "This command is no longer queued.";
+  return { help, text: `${labels[status]}: ${detail}`, pending: status === "pending" || status === "sent", status };
 }
 
 // Server supplies remaining time, not a new ten-second timer. Subtract the

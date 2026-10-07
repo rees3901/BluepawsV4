@@ -22,6 +22,7 @@
   },
   "dependencies": {
     "@protomaps/basemaps": "^5.7.2",
+    "@rich-devtools/ts-overlapping-marker-spiderfier-leaflet": "1.0.11",
     "@supabase/ssr": "0.12.4",
     "@supabase/supabase-js": "2.112.2",
     "emoji-picker-react": "4.19.1",
