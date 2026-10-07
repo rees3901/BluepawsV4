@@ -28,7 +28,7 @@ export default function MapContainer(props: MapRendererProps) {
   const [vectorSource] = useState<VectorSourceName>(() =>
     typeof window !== "undefined" && window.localStorage.getItem(VECTOR_KEY) === "pmtiles" ? "pmtiles" : "online");
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [rotateRaster, setRotateRaster] = useState(() => typeof window !== "undefined" && window.localStorage.getItem(ROTATION_KEY) === "true");
+  const [rotateRaster, setRotateRaster] = useState(() => typeof window === "undefined" || window.localStorage.getItem(ROTATION_KEY) !== "false");
   const pickerRef = useRef<HTMLDivElement>(null);
   const [viewport, setViewport] = useState<MapViewport>({ latitude: EMPTY_MAP_CENTER[0], longitude: EMPTY_MAP_CENTER[1], zoom: EMPTY_MAP_ZOOM });
 
