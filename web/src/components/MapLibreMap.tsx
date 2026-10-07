@@ -34,6 +34,7 @@ export default function MapLibreMap(props: ConfiguredMapRendererProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   // Capture once: telemetry and camera updates must not recreate the map.
   const initialViewportRef = useRef(props.initialViewport);
+  const [mapRotated, setMapRotated] = useState(false);
   const mapRef = useRef<MapLibre | null>(null);
   const markersRef = useRef(new Map<number, maplibregl.Marker>());
   const trailPointsRef = useRef(new Map<number, TrailPoint[]>());
@@ -73,6 +74,9 @@ export default function MapLibreMap(props: ConfiguredMapRendererProps) {
     map.on("zoomstart", stopFollowingForGesture);
     map.on("rotatestart", stopFollowingForGesture);
     map.on("pitchstart", stopFollowingForGesture);
+    const reportRotation = () => setMapRotated(Math.abs(map.getBearing()) > 0.1);
+    map.on("rotate", reportRotation);
+    reportRotation();
     const reportViewport = () => {
       const center = map.getCenter();
       propsRef.current.onViewportChange?.({ latitude: center.lat, longitude: center.lng, zoom: map.getZoom() });
@@ -149,6 +153,7 @@ export default function MapLibreMap(props: ConfiguredMapRendererProps) {
       temporaryPins.clear();
       map.off("contextmenu", openLocationMenu);
       map.off("moveend", reportViewport);
+      map.off("rotate", reportRotation);
       map.remove();
       mapRef.current = null;
     };
@@ -280,13 +285,13 @@ export default function MapLibreMap(props: ConfiguredMapRendererProps) {
   return <>
     <div ref={containerRef} id="map" className="maplibre-map" aria-label={`Live animal tracking ${mapStyle === "Vector" ? "vector" : "raster"} map`} />
     <div className="maplibre-tool-stack" aria-label="Map tools">
-      <button type="button" className="leaflet-map-btn" title="Reset north and flatten map" aria-label="Reset north and flatten map" onClick={() => mapRef.current?.easeTo({ bearing: 0, pitch: 0 })}><span aria-hidden="true">↑ N</span></button>
       <button type="button" className="leaflet-map-btn" title="Center on Home Hub" aria-label="Center map on Home Hub" data-tour="map-home" onClick={centerHome}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="8" cy="8" r="5"/><path d="M8 1v3m0 8v3M1 8h3m8 0h3"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/></svg></button>
       <button type="button" className="leaflet-map-btn" title="Fit all markers into view" aria-label="Fit all markers into view" data-tour="map-fit" onClick={fitAll}><span className="fit-markers-icon maplibre-fit-markers-icon" aria-hidden="true" /></button>
       {props.onAllTrailsToggle ? <button type="button" className={`leaflet-map-btn global-trails-btn${props.allTrailsVisible ? " active" : ""}`} title={props.allTrailsVisible ? "Hide all breadcrumb trails" : "Show all breadcrumb trails"} aria-label={props.allTrailsVisible ? "Hide all breadcrumb trails" : "Show all breadcrumb trails"} aria-pressed={props.allTrailsVisible} disabled={!props.trailsAvailable} data-tour="map-trails" onClick={props.onAllTrailsToggle}><span className="global-trails-icon" aria-hidden="true" /></button> : null}
       <button type="button" className={`leaflet-map-btn${measuring ? " active" : ""}`} title="Measure distance (click points on map)" aria-label="Measure distance on the map" aria-pressed={measuring} data-tour="map-measure" onClick={() => setMeasuring(active => !active)}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="1" y="7" width="22" height="10" rx="1"/><path d="M5 7v5M9 7v3M13 7v5M17 7v3M21 7v5"/></svg></button>
     </div>
     <div className="maplibre-zoom-stack" aria-label="Map zoom controls">
+      <button type="button" className={`map-north-control${mapRotated ? " is-visible" : ""}`} title="North up — reset rotation and tilt" aria-label="Reset map north up and flatten tilt" aria-hidden={!mapRotated} tabIndex={mapRotated ? 0 : -1} disabled={!mapRotated} onClick={() => mapRef.current?.easeTo({ bearing: 0, pitch: 0 })}><span className="map-north-icon" aria-hidden="true" /></button>
       <button type="button" aria-label="Zoom in" onClick={() => zoomBy(1)}>+</button>
       <button type="button" aria-label="Zoom out" onClick={() => zoomBy(-1)}>−</button>
     </div>
