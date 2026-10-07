@@ -378,3 +378,18 @@ outdoor tracking. This file will be updated as actual hardware evidence arrives.
   40A44855D8AFC2518D287AEB97FDF1572EC3DC8B9874D1BC3EE76C78B266A6A9.
 - Fresh diagnostics also confirmed trusted home BLE (seen=1, home=1) and ANTENNA
   OK four times. A fresh GPS fix and cloud acceptance were not verified here.
+
+## Podge 3001 latest firmware and D1 LED — 7 October 2026
+
+- Built latest personal source c8a066b with Podge's existing 3001 credentials.
+  User confirmed a fitted D1 LED; enabled it in saved and active private configs.
+- Flashed COM4, MAC d8:3b:da:75:ef:2c; all upload hashes verified. Initial attempt
+  failed before connecting because COM4 was absent; successful retry followed.
+- Post-flash serial confirmed a hub receipt. Includes early presence, 30-second
+  listening, four-flash wake/receipt feedback and seven-flash button/Find cycles.
+- Recovery image: collar/3001-four-status-flashes-led-firmware.bin, SHA256
+  90EF9835B0D229AF3C237696A1282244570BA898CCC1878534C6A726A1D61797.
+- All four personal collars now have confirmed uploads of this firmware source
+  with D1 LED enabled and individual credentials. GUI restrictions remain PR 261.
+- Fresh serial also confirmed home BLE (seen=1, home=1) and ANTENNA OK four
+  times. Fresh GPS position and cloud acceptance were not tested in this check.
