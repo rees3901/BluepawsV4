@@ -270,4 +270,6 @@ no GPS ring. Devices need individual builds and flashes to emit this field.
 Native conversion tests and the personal ESP32-S3 build passed on 7 October
 2026. Gizmo 3002, Macy 3003 and Simba 3004 were flashed on 7 October; collar
 3001 still needs this update.
-A fresh GPS fix and live accuracy display have not yet been verified.
+Macy's fresh GPS report and live accuracy annotation were verified on 7 October
+after release of PR 262 (9 satellites, estimated accuracy 9 m). The other
+collars' new accuracy reports and an outdoor uncertainty ring still need verification.

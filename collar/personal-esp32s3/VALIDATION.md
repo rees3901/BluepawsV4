@@ -441,3 +441,13 @@ GPS acquisition stopped at its 60-second limit without an accepted fix
 succeeded, and the collar returned to its saved Power Save 1800-second sleep.
 A fresh position, cloud acceptance and accuracy/ring display remain unverified.
 No cloud release or hub flash was performed.
+
+## Live accuracy annotation — 7 October 2026
+
+After canonical PRs 257, 261 and 262 were merged separately, Vercel production
+was READY at main 584edff. A read-only browser check showed Macy 3003's fresh
+report with 9 satellites and Est. acc: 9 m, confirming an accepted GPS report
+and display of the new estimate. Macy remained Home, so no uncertainty ring
+was expected. No command was sent or setting changed during this check.
+The personal firmware branch remained unmerged. Other collars' fresh accuracy
+reports and outdoor ring rendering remain unverified on live data.
