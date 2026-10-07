@@ -210,7 +210,7 @@ static std::atomic<bool> hubApEnabled{false};
 static std::atomic<bool> homeBeaconAllowed{false};
 static std::atomic<int> hubBeaconPowerDbm{3};
 static std::atomic<int> hubBeaconAppliedPowerDbm{127}; // unknown until controller accepts it
-static bool validHubBlePower(int dbm) { return dbm == -12 || dbm == 3 || dbm == 9; }
+static bool validHubBlePower(int dbm) { return dbm == -12 || dbm == -6 || dbm == 3 || dbm == 6 || dbm == 9; }
 static std::atomic<bool> hubBeaconEnabled{true}; // User preference; cannot bypass Home Wi-Fi gate.
 static std::atomic<bool> hubBeaconAdvertising{false}; // Actual BLE task state.
 static void initHubPresence();
@@ -2852,7 +2852,8 @@ static void bleTask(void *param) {
         int role = hubProfileUsesBleScanning() ? 2 : (homeBeaconAllowed && hubBeaconEnabled ? 1 : 0);
         const int power = hubBeaconPowerDbm.load();
         if (power != hubBeaconAppliedPowerDbm.load()) {
-            const esp_power_level_t level = power == -12 ? ESP_PWR_LVL_N12 : power == 9 ? ESP_PWR_LVL_P9 : ESP_PWR_LVL_P3;
+            const esp_power_level_t level = power == -12 ? ESP_PWR_LVL_N12 : power == -6 ? ESP_PWR_LVL_N6
+                : power == 6 ? ESP_PWR_LVL_P6 : power == 9 ? ESP_PWR_LVL_P9 : ESP_PWR_LVL_P3;
             const esp_err_t result = esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV, level);
             if (result == ESP_OK && esp_ble_tx_power_get(ESP_BLE_PWR_TYPE_ADV) == level) {
                 hubBeaconAppliedPowerDbm = power;
