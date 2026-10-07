@@ -863,7 +863,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
         <TutorialWelcomeCard onStart={startTutorialFromPrompt} onDismiss={dismissTutorialPrompt} />
       )}
       {commandDevice && <CommandModal device={commandDevice} sending={commandSending} onClose={() => { if (!commandSending) setCommandDevice(null); }} onSend={handlePowerProfileCommand} />}
-      {findDevice && <FindModal device={findDevice} sending={findSending} error={findError}
+      {findDevice && <FindModal device={{ ...findDevice, profile: devices.find(device => device.id === findDevice.id)?.profile }} sending={findSending} error={findError}
         onClose={() => { setFindDevice(null); setFindError(null); }} onSend={async (action, seconds, interval) => {
           if (findSending) return;
           if (tutorialMode) { setToast("Tutorial LED command previewed"); setFindDevice(null); return; }
