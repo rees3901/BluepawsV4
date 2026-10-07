@@ -1,10 +1,13 @@
 "use client";
 
 import L from "leaflet";
+import { OverlappingMarkerSpiderfier } from "@rich-devtools/ts-overlapping-marker-spiderfier-leaflet/dist/omsleaflet";
+import { isDeviceInactive } from "@/lib/devicePresence";
 import { useEffect, useRef } from "react";
 import { emojiImageUrl } from "@/lib/emoji";
 import { COLLAR_RECEIVE_WINDOW_SECONDS, collarCardFreshness, collarFreshnessClass, type CollarCardFreshness } from "@/lib/devicePresence";
 import { formatMapCoordinates } from "@/lib/mapLocation";
+import { gnssUncertainty } from "@/lib/gnssUncertainty";
 import { contextMenuHtml, copyTextToClipboard, temporaryPinPopupHtml } from "@/lib/mapLocationPopup";
 import { MAP_LAYER_DEFINITIONS, type MapLayerName } from "@/lib/mapLayers";
 import { mapPopupHtml } from "@/lib/mapPopup";
@@ -25,9 +28,13 @@ const MAX_ANIMATED_MARKER_DISTANCE_METRES = 2_000;
 
 export default function LeafletMap(props: ConfiguredMapRendererProps) {
   const { devices, avatars, presenceNow, sidebarOpen, followedId, trailIds, trailHistory, rasterLayer, allTrailsVisible = false, trailsAvailable = false, command, onAction, onAllTrailsToggle, onNotice, readOnly = false } = props;
+  const fitLiveRef = useRef<(() => void) | null>(null);
   const mapRef = useRef<L.Map | null>(null);
   const baseLayerRef = useRef<L.TileLayer | null>(null);
+  const positionsRef = useRef("");
+  const spiderfierRef = useRef<OverlappingMarkerSpiderfier | null>(null);
   const markersRef = useRef(new Map<number, L.Marker>());
+  const uncertaintyRef = useRef(new Map<number, L.Circle>());
   const markerAnimationsRef = useRef(new Map<number, number>());
   const trailsRef = useRef(new Map<number, L.Polyline>());
   const trailPointsRef = useRef(new Map<number, TrailPoint[]>());
@@ -65,11 +72,34 @@ export default function LeafletMap(props: ConfiguredMapRendererProps) {
 
   useEffect(() => {
     const markers = markersRef.current;
+    const uncertainty = uncertaintyRef.current;
     const markerAnimations = markerAnimationsRef.current;
     const trails = trailsRef.current;
     const trailPoints = trailPointsRef.current;
     const map = L.map("map", { center: [...EMPTY_MAP_CENTER], zoom: EMPTY_MAP_ZOOM, zoomControl: false, tapHold: true });
     mapRef.current = map;
+    const spiderfier = new OverlappingMarkerSpiderfier(map, { keepSpiderfied: true, nearbyDistance: 42, circleFootSeparation: 48, legWeight: 1, legColors: { usual: "#78909c", highlighted: "#1d9bf0" } });
+    spiderfierRef.current = spiderfier;
+    spiderfier.addListener("click", marker => marker.openPopup());
+    spiderfier.addListener("spiderfy", () => map.closePopup());
+    const syncSpiderfier = () => {
+      spiderfier.clearMarkers();
+      markers.forEach(marker => {
+        marker.off("click");
+        if (map.getZoom() >= JUMP_TO_ZOOM) spiderfier.addMarker(marker);
+        else marker.on("click", () => marker.openPopup());
+      });
+    };
+    map.on("zoomend", syncSpiderfier);
+    const fitLiveMarkers = () => {
+      spiderfier.unspiderfy();
+      map.closePopup();
+      const ids = new Set(devicesRef.current.filter(device => !isDeviceInactive(device, Date.now())).map(device => device.id));
+      const live = new Map([...markers].filter(([id]) => ids.has(id)));
+      if (live.size) fitMarkers(map, live);
+      else noticeRef.current?.("No active markers with a known location");
+    };
+    fitLiveRef.current = fitLiveMarkers;
     const reportViewport = () => {
       const center = map.getCenter();
       viewportChangeRef.current?.({ latitude: center.lat, longitude: center.lng, zoom: map.getZoom() });
@@ -122,7 +152,7 @@ export default function LeafletMap(props: ConfiguredMapRendererProps) {
         button.setAttribute("data-tour", "map-fit");
         button.innerHTML = '<img class="fit-markers-icon" src="/icons/location-fit-markers.png" alt="" aria-hidden="true">';
         L.DomEvent.disableClickPropagation(button);
-        L.DomEvent.on(button, "click", () => fitMarkers(map, markersRef.current));
+        L.DomEvent.on(button, "click", () => fitLiveRef.current?.());
         return button;
       },
     });
@@ -291,10 +321,14 @@ export default function LeafletMap(props: ConfiguredMapRendererProps) {
       mapContainer.removeEventListener("click", handleMapAction);
       markerAnimations.forEach((frameId) => window.cancelAnimationFrame(frameId));
       markerAnimations.clear();
+      spiderfier.clearMarkers();
+      spiderfierRef.current = null;
+      fitLiveRef.current = null;
       map.remove();
       mapRef.current = null;
       allTrailsButtonRef.current = null;
       markers.clear();
+      uncertainty.clear();
       trails.clear();
       trailPoints.clear();
       temporaryPins.clear();
@@ -333,9 +367,14 @@ export default function LeafletMap(props: ConfiguredMapRendererProps) {
     // exist before their first fix, so their numeric adapter placeholders aren't locations.
     const visibleDevices = locatedDevices(devices);
     const activeDeviceIds = new Set(visibleDevices.map((device) => device.id));
+    uncertaintyRef.current.forEach((circle, id) => {
+      if (visibleDevices.some(device => device.id === id && gnssUncertainty(device))) return;
+      circle.removeFrom(map); uncertaintyRef.current.delete(id);
+    });
     markersRef.current.forEach((marker, deviceId) => {
       if (activeDeviceIds.has(deviceId)) return;
       cancelMarkerAnimation(markerAnimationsRef.current, deviceId);
+      spiderfierRef.current?.removeMarker(marker);
       map.removeLayer(marker);
       markersRef.current.delete(deviceId);
     });
@@ -346,13 +385,27 @@ export default function LeafletMap(props: ConfiguredMapRendererProps) {
       trailPointsRef.current.delete(deviceId);
     });
 
+    const positions = visibleDevices.map(device => `${device.id}:${device.lat}:${device.lon}`).join(",");
+    if (positions !== positionsRef.current) spiderfierRef.current?.unspiderfy();
+    positionsRef.current = positions;
     visibleDevices.forEach((device) => {
       const avatar = avatars[device.id];
       const markerColor = normalizeMarkerColor(avatar.color);
       const ageSeconds = Math.max(0, Math.floor((presenceNow - device.lastUpdate) / 1000));
       const freshness = device.entity === "hub" ? null : collarCardFreshness(ageSeconds, ageSeconds < COLLAR_RECEIVE_WINDOW_SECONDS);
       const latLng: TrailLatLng = [device.lat, device.lon];
+      const uncertainty = gnssUncertainty(device);
+      if (uncertainty) {
+        let circle = uncertaintyRef.current.get(device.id);
+        const style = { stroke: false, fillColor: markerColor, fillOpacity: 0.08 };
+        if (!circle) {
+          circle = L.circle(latLng, { ...style, radius: uncertainty.radius }).addTo(map);
+          uncertaintyRef.current.set(device.id, circle);
+        } else circle.setLatLng(latLng).setRadius(uncertainty.radius).setStyle(style);
+        circle.bindTooltip(uncertainty.label);
+      }
       let marker = markersRef.current.get(device.id);
+      const newMarker = !marker;
       const icon = L.divIcon({
         className: "bp-marker-icon",
         html: markerElement(avatar, markerColor, device.status, freshness),
@@ -365,18 +418,26 @@ export default function LeafletMap(props: ConfiguredMapRendererProps) {
         markersRef.current.set(device.id, marker);
       } else {
         marker.setIcon(icon);
-        slideMarkerTo(marker, L.latLng(device.lat, device.lon), markerAnimationsRef.current, device.id);
+        if (!spiderfierRef.current?.getMarkers().some(item => item === marker && item._omsData))
+          slideMarkerTo(marker, L.latLng(device.lat, device.lon), markerAnimationsRef.current, device.id);
       }
       const popupContent = mapPopupHtml(device, avatar, presenceNow, readOnly, followedId === device.id, trailIds.has(device.id));
       if (marker.getPopup()) marker.setPopupContent(popupContent);
       else marker.bindPopup(popupContent, { className: "device-marker-popup", minWidth: 300, maxWidth: 380 });
+      if (newMarker) {
+        // Let the spiderfier own clicks, rather than Leaflet opening a popup
+        // on the first click that spreads the overlapping group.
+        marker.off("click");
+        if (map.getZoom() >= JUMP_TO_ZOOM) spiderfierRef.current?.addMarker(marker);
+        else marker.on("click", () => marker.openPopup());
+      }
 
       const points = updateTrailPoints(trailPointsRef.current.get(device.id) ?? [], trailHistory[device.id] ?? [], device, presenceNow);
       trailPointsRef.current.set(device.id, points);
       const coordinates: TrailLatLng[] = points.map(point => [point.lat, point.lon]);
       let trail = trailsRef.current.get(device.id);
       if (!trail) {
-        trail = L.polyline(coordinates, { color: markerColor, weight: 2, opacity: 0.75, dashArray: "6,5" });
+        trail = L.polyline(coordinates, { color: markerColor, weight: 1, opacity: 0.5, dashArray: "3,5" });
         trailsRef.current.set(device.id, trail);
       } else {
         trail.setLatLngs(coordinates);
@@ -407,7 +468,7 @@ export default function LeafletMap(props: ConfiguredMapRendererProps) {
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !command) return;
-    if (command.type === "fit") fitMarkers(map, markersRef.current);
+    if (command.type === "fit") fitLiveRef.current?.();
     if (command.type === "jump" && command.deviceId !== undefined) {
       const marker = markersRef.current.get(command.deviceId);
       if (marker) {

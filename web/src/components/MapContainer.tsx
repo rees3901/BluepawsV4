@@ -12,7 +12,8 @@ const MapStylePreview = dynamic(() => import("@/components/MapStylePreview"), { 
 const STORAGE_KEY = "bluepaws-map-renderer";
 const RASTER_KEY = "bluepaws-raster-layer";
 const VECTOR_KEY = "bluepaws-vector-source";
-const PICKER_IDLE_MS = 30_000;
+const ROTATION_KEY = "bluepaws-raster-rotation";
+const PICKER_IDLE_MS = 20_000;
 
 export default function MapContainer(props: MapRendererProps) {
   const [renderer, setRenderer] = useState<MapRendererName>(() => {
@@ -27,6 +28,7 @@ export default function MapContainer(props: MapRendererProps) {
   const [vectorSource] = useState<VectorSourceName>(() =>
     typeof window !== "undefined" && window.localStorage.getItem(VECTOR_KEY) === "pmtiles" ? "pmtiles" : "online");
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [rotateRaster, setRotateRaster] = useState(() => typeof window === "undefined" || window.localStorage.getItem(ROTATION_KEY) !== "false");
   const pickerRef = useRef<HTMLDivElement>(null);
   const [viewport, setViewport] = useState<MapViewport>({ latitude: EMPTY_MAP_CENTER[0], longitude: EMPTY_MAP_CENTER[1], zoom: EMPTY_MAP_ZOOM });
 
@@ -82,9 +84,9 @@ export default function MapContainer(props: MapRendererProps) {
 
   return (
     <div className="map-renderer-shell">
-      {renderer === "leaflet"
+      {renderer === "leaflet" && !rotateRaster
         ? <LeafletMap {...props} rasterLayer={rasterLayer} vectorSource={vectorSource} onViewportChange={setViewport} />
-        : <MapLibreMap {...props} rasterLayer={rasterLayer} vectorSource={vectorSource} onViewportChange={setViewport} />}
+        : <MapLibreMap key={selectedStyle} {...props} initialViewport={viewport} mapStyle={renderer === "maplibre" ? "Vector" : rasterLayer} rasterLayer={rasterLayer} vectorSource={vectorSource} onViewportChange={setViewport} />}
       <div ref={pickerRef} className={`map-style-picker${pickerOpen ? " open" : ""}`} data-tour="map-layers">
         <button type="button" className="map-style-preview" aria-label="Choose map style" aria-expanded={pickerOpen} onClick={() => setPickerOpen(open => !open)}>
           <MapStylePreview layer={previewLayer} viewport={viewport} />
@@ -95,6 +97,7 @@ export default function MapContainer(props: MapRendererProps) {
             {MAP_LAYER_PICKER_NAMES.map(name => <button type="button" key={name} className={renderer === "leaflet" && rasterLayer === name ? "active" : ""} onClick={() => chooseRaster(name)}><span className="map-style-option-title">{RASTER_LABELS[name]}</span><span className="map-style-option-description">{RASTER_DESCRIPTIONS[name]}</span></button>)}
             <button type="button" className={renderer === "maplibre" ? "active" : ""} onClick={() => chooseRenderer("maplibre")}><span className="map-style-option-title">Vector</span><span className="map-style-option-description">Smooth map with rotate and tilt controls.</span></button>
           </div>
+          {renderer === "leaflet" && <label className="map-rotation-option" title="Right-drag or use two fingers to rotate and tilt. Switch off to use the original map."><input type="checkbox" checked={rotateRaster} onChange={event => { setRotateRaster(event.target.checked); window.localStorage.setItem(ROTATION_KEY, String(event.target.checked)); }} />Allow rotation and tilt</label>}
         </div>}
       </div>
     </div>

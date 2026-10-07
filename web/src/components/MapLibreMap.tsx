@@ -6,12 +6,15 @@ import { Protocol } from "pmtiles";
 import { useEffect, useRef, useState, type MutableRefObject } from "react";
 import { emojiImageUrl } from "@/lib/emoji";
 import { COLLAR_FRESHNESS_CLASS_NAMES, COLLAR_RECEIVE_WINDOW_SECONDS, collarCardFreshness, collarFreshnessClass, type CollarCardFreshness } from "@/lib/devicePresence";
-import { mapLibreStyle } from "@/lib/mapLibreStyle";
+import { mapLibreStyle, mapLibreRasterStyle } from "@/lib/mapLibreStyle";
+import { MAP_LAYER_DEFINITIONS } from "@/lib/mapLayers";
 import { formatMapCoordinates } from "@/lib/mapLocation";
+import { gnssUncertainty, uncertaintyPolygon } from "@/lib/gnssUncertainty";
 import { contextMenuHtml, copyTextToClipboard, temporaryPinPopupHtml } from "@/lib/mapLocationPopup";
 import { EMPTY_MAP_CENTER, EMPTY_MAP_ZOOM } from "@/lib/mapViewport";
 import { normalizeMarkerColor } from "@/lib/markerColor";
 import { mapPopupHtml } from "@/lib/mapPopup";
+import { isDeviceInactive } from "@/lib/devicePresence";
 import { updateTrailPoints } from "@/lib/trailPoints";
 import { locatedDevices, type ConfiguredMapRendererProps } from "@/components/mapRenderer";
 import type { DeviceAvatar, TelemetryDevice, TrailPoint } from "@/types/telemetry";
@@ -27,8 +30,11 @@ let protocolRegistered = false;
 maplibregl.setWorkerUrl("/maplibre/maplibre-gl-worker.mjs");
 
 export default function MapLibreMap(props: ConfiguredMapRendererProps) {
-  const { devices, avatars, presenceNow, sidebarOpen, followedId, trailIds, trailHistory, vectorSource, command, onNotice } = props;
+  const { devices, avatars, presenceNow, sidebarOpen, followedId, trailIds, trailHistory, vectorSource, command, onNotice, mapStyle = "Vector" } = props;
   const containerRef = useRef<HTMLDivElement | null>(null);
+  // Capture once: telemetry and camera updates must not recreate the map.
+  const initialViewportRef = useRef(props.initialViewport);
+  const [mapRotated, setMapRotated] = useState(false);
   const mapRef = useRef<MapLibre | null>(null);
   const markersRef = useRef(new Map<number, maplibregl.Marker>());
   const trailPointsRef = useRef(new Map<number, TrailPoint[]>());
@@ -53,18 +59,24 @@ export default function MapLibreMap(props: ConfiguredMapRendererProps) {
     }
     const map = new maplibregl.Map({
       container: containerRef.current,
-      style: mapLibreStyle(vectorSource === "pmtiles" ? process.env.NEXT_PUBLIC_BLUEPAWS_PMTILES_URL : undefined),
-      center: [EMPTY_MAP_CENTER[1], EMPTY_MAP_CENTER[0]],
-      zoom: EMPTY_MAP_ZOOM,
+      style: mapStyle === "Vector" ? mapLibreStyle(vectorSource === "pmtiles" ? process.env.NEXT_PUBLIC_BLUEPAWS_PMTILES_URL : undefined) : mapLibreRasterStyle(mapStyle),
+      maxZoom: mapStyle === "Vector" ? 24 : MAP_LAYER_DEFINITIONS[mapStyle].maxZoom,
+      center: initialViewportRef.current ? [initialViewportRef.current.longitude, initialViewportRef.current.latitude] : [EMPTY_MAP_CENTER[1], EMPTY_MAP_CENTER[0]],
+      zoom: initialViewportRef.current?.zoom ?? EMPTY_MAP_ZOOM,
       attributionControl: {},
     });
     map.addControl(new maplibregl.ScaleControl({ unit: "imperial" }), "bottom-right");
-    map.on("error", event => onNotice?.(`Vector map: ${event.error?.message ?? "source failed"}`));
+    map.on("error", event => onNotice?.(`${mapStyle} map: ${event.error?.message ?? "source failed"}`));
     const stopFollowingForGesture = (event: maplibregl.MapLibreEvent<MouseEvent | TouchEvent | WheelEvent | undefined>) => {
       if (event.originalEvent && propsRef.current.followedId !== null) propsRef.current.onUserNavigation?.();
     };
     map.on("dragstart", stopFollowingForGesture);
     map.on("zoomstart", stopFollowingForGesture);
+    map.on("rotatestart", stopFollowingForGesture);
+    map.on("pitchstart", stopFollowingForGesture);
+    const reportRotation = () => setMapRotated(Math.abs(map.getBearing()) > 0.1);
+    map.on("rotate", reportRotation);
+    reportRotation();
     const reportViewport = () => {
       const center = map.getCenter();
       propsRef.current.onViewportChange?.({ latitude: center.lat, longitude: center.lng, zoom: map.getZoom() });
@@ -141,10 +153,11 @@ export default function MapLibreMap(props: ConfiguredMapRendererProps) {
       temporaryPins.clear();
       map.off("contextmenu", openLocationMenu);
       map.off("moveend", reportViewport);
+      map.off("rotate", reportRotation);
       map.remove();
       mapRef.current = null;
     };
-  }, [onNotice, vectorSource]);
+  }, [onNotice, vectorSource, mapStyle]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -209,6 +222,7 @@ export default function MapLibreMap(props: ConfiguredMapRendererProps) {
         }
       }
       syncTrails(map, visible, avatars, trailIds, trailHistory, trailPointsRef.current, presenceNow);
+      syncUncertainty(map, visible, avatars);
     };
     if (map.loaded()) sync();
     else map.once("load", sync);
@@ -227,7 +241,11 @@ export default function MapLibreMap(props: ConfiguredMapRendererProps) {
     if (!map || !command) return;
     const currentProps = propsRef.current;
     const visible = locatedDevices(currentProps.devices);
-    if (command.type === "fit") fitDevices(map, visible, currentProps.sidebarOpen);
+    if (command.type === "fit") {
+      const live = visible.filter(device => !isDeviceInactive(device, Date.now()));
+      if (live.length) fitDevices(map, live, currentProps.sidebarOpen);
+      else currentProps.onNotice?.("No active markers with a known location");
+    }
     if ((command.type === "jump" || command.type === "open") && command.deviceId !== undefined) {
       const device = visible.find(item => item.id === command.deviceId);
       const marker = markersRef.current.get(command.deviceId);
@@ -253,7 +271,9 @@ export default function MapLibreMap(props: ConfiguredMapRendererProps) {
     const map = mapRef.current;
     if (!map) return;
     stopFollowing();
-    fitDevices(map, locatedDevices(propsRef.current.devices), propsRef.current.sidebarOpen);
+    const live = locatedDevices(propsRef.current.devices).filter(device => !isDeviceInactive(device, Date.now()));
+    if (live.length) fitDevices(map, live, propsRef.current.sidebarOpen);
+    else propsRef.current.onNotice?.("No active markers with a known location");
   };
   const zoomBy = (delta: number) => {
     const map = mapRef.current;
@@ -263,14 +283,15 @@ export default function MapLibreMap(props: ConfiguredMapRendererProps) {
   };
 
   return <>
-    <div ref={containerRef} id="map" className="maplibre-map" aria-label="Live animal tracking vector map" />
-    <div className="maplibre-tool-stack" aria-label="Vector map tools">
+    <div ref={containerRef} id="map" className="maplibre-map" aria-label={`Live animal tracking ${mapStyle === "Vector" ? "vector" : "raster"} map`} />
+    <div className="maplibre-tool-stack" aria-label="Map tools">
       <button type="button" className="leaflet-map-btn" title="Center on Home Hub" aria-label="Center map on Home Hub" data-tour="map-home" onClick={centerHome}><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="8" cy="8" r="5"/><path d="M8 1v3m0 8v3M1 8h3m8 0h3"/><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none"/></svg></button>
       <button type="button" className="leaflet-map-btn" title="Fit all markers into view" aria-label="Fit all markers into view" data-tour="map-fit" onClick={fitAll}><span className="fit-markers-icon maplibre-fit-markers-icon" aria-hidden="true" /></button>
       {props.onAllTrailsToggle ? <button type="button" className={`leaflet-map-btn global-trails-btn${props.allTrailsVisible ? " active" : ""}`} title={props.allTrailsVisible ? "Hide all breadcrumb trails" : "Show all breadcrumb trails"} aria-label={props.allTrailsVisible ? "Hide all breadcrumb trails" : "Show all breadcrumb trails"} aria-pressed={props.allTrailsVisible} disabled={!props.trailsAvailable} data-tour="map-trails" onClick={props.onAllTrailsToggle}><span className="global-trails-icon" aria-hidden="true" /></button> : null}
       <button type="button" className={`leaflet-map-btn${measuring ? " active" : ""}`} title="Measure distance (click points on map)" aria-label="Measure distance on the map" aria-pressed={measuring} data-tour="map-measure" onClick={() => setMeasuring(active => !active)}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="1" y="7" width="22" height="10" rx="1"/><path d="M5 7v5M9 7v3M13 7v5M17 7v3M21 7v5"/></svg></button>
     </div>
     <div className="maplibre-zoom-stack" aria-label="Map zoom controls">
+      <button type="button" className={`map-north-control${mapRotated ? " is-visible" : ""}`} title="North up — reset rotation and tilt" aria-label="Reset map north up and flatten tilt" aria-hidden={!mapRotated} tabIndex={mapRotated ? 0 : -1} disabled={!mapRotated} onClick={() => mapRef.current?.easeTo({ bearing: 0, pitch: 0 })}><span className="map-north-icon" aria-hidden="true" /></button>
       <button type="button" aria-label="Zoom in" onClick={() => zoomBy(1)}>+</button>
       <button type="button" aria-label="Zoom out" onClick={() => zoomBy(-1)}>−</button>
     </div>
@@ -412,7 +433,7 @@ function syncTrails(map: MapLibre, devices: TelemetryDevice[], avatars: Record<n
   if (source) source.setData(data);
   else {
     map.addSource(TRAILS_SOURCE, { type: "geojson", data });
-    map.addLayer({ id: TRAILS_LAYER, type: "line", source: TRAILS_SOURCE, paint: { "line-color": ["get", "color"], "line-width": 2, "line-opacity": 0.75, "line-dasharray": [3, 2] } });
+    map.addLayer({ id: TRAILS_LAYER, type: "line", source: TRAILS_SOURCE, paint: { "line-color": ["get", "color"], "line-width": 1, "line-opacity": 0.5, "line-dasharray": [3, 5] } });
   }
 }
 
@@ -420,4 +441,20 @@ function fitDevices(map: MapLibre, devices: TelemetryDevice[], sidebarOpen: bool
   if (devices.length === 0) return;
   const bounds = devices.reduce((value, device) => value.extend([device.lon, device.lat]), new maplibregl.LngLatBounds());
   map.fitBounds(bounds as LngLatBoundsLike, { padding: { top: 70, right: 70, bottom: 70, left: sidebarOpen ? 430 : 70 }, maxZoom: JUMP_TO_ZOOM });
+}
+
+function syncUncertainty(map: MapLibre, devices: TelemetryDevice[], avatars: Record<number, DeviceAvatar>) {
+  const features = devices.flatMap(device => {
+    const uncertainty = gnssUncertainty(device);
+    return uncertainty ? [{ type: "Feature" as const,
+      properties: { color: normalizeMarkerColor(avatars[device.id]?.color) },
+      geometry: uncertaintyPolygon(device.lat, device.lon, uncertainty.radius) }] : [];
+  });
+  const data = { type: "FeatureCollection" as const, features };
+  const source = map.getSource("bluepaws-uncertainty") as GeoJSONSource | undefined;
+  if (source) source.setData(data);
+  else {
+    map.addSource("bluepaws-uncertainty", { type: "geojson", data });
+    map.addLayer({ id: "bluepaws-uncertainty-fill", type: "fill", source: "bluepaws-uncertainty", paint: { "fill-color": ["get", "color"], "fill-opacity": 0.08, "fill-antialias": false } });
+  }
 }

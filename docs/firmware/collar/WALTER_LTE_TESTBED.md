@@ -160,8 +160,9 @@ before acting, and never disturb the hub/1001 network to manufacture a failure.
 | Lost | 30 s | Every 3 cycles | Home gating bypassed | Every cycle |
 
 The first `start` cycle forces a BOOT LTE report; `send` forces one INTERRUPT
-report. Both count as a cycle. PowerSave home check-ins occur every second home
-cycle; other profiles check in every home cycle. Home heartbeats are timed from
+report. Both count as a cycle. All profiles using the home path, including
+PowerSave, check in every home cycle. PowerSave retains its 1800-second wait.
+Home heartbeats are timed from
 the last LTE **attempt**, regardless of acceptance. These values come from
 `bp_config.h`, not a second copied policy table. Acquisition/registration time is
 additional to the wait, so this is not an exact wall-clock transmission schedule.

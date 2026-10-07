@@ -11,6 +11,7 @@ import {
   collarSummary,
   isCollarOffline,
   isCollarOfflineAge,
+  isDeviceInactive,
 } from "./devicePresence.ts";
 import type { TelemetryDevice } from "../types/telemetry.ts";
 
@@ -65,4 +66,17 @@ test("never applies the collar rule to a Home Hub", () => {
 test("does not treat a future timestamp as offline", () => {
   const collar = { lastUpdate: 10_000 } as TelemetryDevice;
   assert.equal(isCollarOffline(collar, 5_000), false);
+});
+
+
+test("inactive grouping and fit use collar and profile-specific hub boundaries", () => {
+  const now = 20_000_000;
+  const device = (age: number, entity?: "hub", hubReportingProfile?: "power_save" | "normal" | "active") =>
+    ({lastUpdate: now - age * 1000, entity, hubReportingProfile}) as TelemetryDevice;
+  assert.equal(isDeviceInactive(device(14399), now), false);
+  assert.equal(isDeviceInactive(device(14400), now), true);
+  for (const [profile, boundary] of [["power_save", 210], ["normal", 90], ["active", 60]] as const) {
+    assert.equal(isDeviceInactive(device(boundary - 1, "hub", profile), now), false);
+    assert.equal(isDeviceInactive(device(boundary, "hub", profile), now), true);
+  }
 });

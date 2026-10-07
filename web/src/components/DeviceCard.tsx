@@ -183,7 +183,7 @@ export function DeviceCard(props: DeviceCardProps) {
               <span className="label">Last report</span><span className="value">{formatAge(ageSeconds)}</span>
             </div>
             <ActionButtons followed={followed} trailVisible={trailVisible} onAction={onAction} collarControls={!isHub} hasGps={hasGps} extra={props.hubActions} />
-            {!isHub && props.commandFeedback && <div role="status" className={`command-feedback ${props.commandFeedback.pending ? "pending" : props.commandFeedback.status}`}>{props.commandFeedback.text}</div>}
+            {!isHub && props.commandFeedback && <div role="status" className={`command-feedback ${props.commandFeedback.pending ? "pending" : props.commandFeedback.status}`}>{props.commandFeedback.text}<span className="command-feedback-help">{props.commandFeedback.help}</span></div>}
             <div className="log-btn-row">
               <button className="btn-device-log btn-secondary" type="button" onClick={onReportLog}>Message Log</button>
               <button className="btn-log-export" type="button" title="Export report log as CSV" aria-label="Export report log" onClick={onReportExport}>

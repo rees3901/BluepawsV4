@@ -2,6 +2,8 @@
 .gnss-indicator { position: relative; color: var(--text-secondary); }
 /* Let the sidebar grow with the viewport instead of crushing expanded cards. */
 :root { --panel-width: min(calc(100vw - 64px), max(490px, min(32vw, 620px), var(--panel-content-width, 490px))); }
+/* Keep GNSS details together and wrap the group instead of clipping accuracy. */
+.card-indicators-primary { flex-wrap: wrap; }
 .card-indicators-primary > .gnss-indicator { flex: 0 0 auto; max-width: 100%; }
 .card-indicators-row3 .card-lastseen-group { font-variant-numeric: tabular-nums; }
 @media (max-width: 768px) {
@@ -24,7 +26,7 @@
 .gnss-indicator summary::-webkit-details-marker { display: none; }
 .gnss-indicator summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
 .gnss-emoji { font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif; font-size: 0.88rem; line-height: 1; margin-right: 3px; flex-shrink: 0; }
-.gnss-detail { display: block; max-width: 250px; padding: 8px; background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius); font-size: 0.7rem; line-height: 1.5; overflow-wrap: anywhere; }
+.gnss-detail { position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; display: block; width: min(280px, calc(100vw - 80px)); max-height: 220px; overflow-y: auto; box-shadow: 0 6px 20px #0005; padding: 8px; background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius); font-size: 0.7rem; line-height: 1.5; overflow-wrap: anywhere; }
 button, input, select {
   font: inherit;
 }
@@ -419,6 +421,8 @@ body.light .leaflet-map-btn:focus-visible .fit-markers-icon {
 .map-style-options button:disabled { cursor: not-allowed; opacity: 0.48; }
 .map-style-option-title { color: var(--text-primary); font-size: 0.72rem; font-weight: 750; }
 .map-style-option-description { color: var(--text-secondary); font-size: 0.61rem; font-weight: 500; line-height: 1.3; }
+.map-rotation-option { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 4px 8px; font-size: 0.75rem; cursor: pointer; }
+.map-rotation-option input { accent-color: var(--accent); }
 .maplibre-map { width: 100%; height: 100%; }
 .maplibre-tool-stack,
 .maplibre-zoom-stack {
@@ -446,6 +450,10 @@ body.panel-open .maplibre-zoom-stack { left: calc(var(--panel-width) + 10px); }
 .maplibre-zoom-stack { bottom: 10px; left: 10px; overflow: hidden; border: 1px solid #7a8791; border-radius: 4px; box-shadow: 0 2px 7px rgb(0 0 0 / 28%); }
 .maplibre-zoom-stack button { width: 41px; height: 41px; border: 0; border-bottom: 1px solid #7a8791; border-radius: 0; background: var(--bg-primary); color: var(--text-primary); font-size: 25px; line-height: 1; }
 .maplibre-zoom-stack button:last-child { border-bottom: 0; }
+.map-north-icon { display: inline-block; width: 25px; height: 25px; vertical-align: middle; background: currentColor; mask: url("/icons/map-north.png") center / contain no-repeat; }
+.maplibre-zoom-stack .map-north-control { height: 0; padding: 0; border-bottom-width: 0; opacity: 0; visibility: hidden; overflow: hidden; pointer-events: none; transition: opacity 180ms ease, height 180ms ease, visibility 180ms; }
+.maplibre-zoom-stack .map-north-control.is-visible { height: 41px; border-bottom-width: 1px; opacity: 1; visibility: visible; pointer-events: auto; }
+@media (prefers-reduced-motion: reduce) { .maplibre-zoom-stack .map-north-control { transition: none; } }
 .maplibre-zoom-stack button:hover,
 .maplibre-zoom-stack button:focus-visible { background: var(--accent); color: #fff; }
 .measure-popup .maplibregl-popup-content { padding: 6px 9px; border-radius: 6px; font-weight: 800; }
@@ -2736,4 +2744,15 @@ body.light .collar-awake.sleeping {
   color: #7890a5;
   font-size: 0.76rem;
   text-align: center;
+}
+
+.device-card:has(.gnss-indicator[open]) { overflow: visible; z-index: 30; }
+.inactive-devices > summary { cursor: pointer; padding: 14px 4px; color: var(--text-secondary); font-size: 0.85rem; }
+.inactive-device-list { display: grid; gap: 10px; }
+.command-feedback-help { display: block; color: var(--text-muted); font-size: 0.72rem; }
+
+.card-indicators-primary:has(.gnss-indicator[open]) { overflow: visible; }
+@media (max-width: 768px) {
+  .gnss-indicator { position: static; }
+  .gnss-detail { left: 12px; right: 12px; top: 100%; width: auto; }
 }

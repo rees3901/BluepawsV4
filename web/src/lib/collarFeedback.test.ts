@@ -61,3 +61,13 @@ test('missing/denied diagnostics never reuse old detail or hide the reported fau
     assert.equal(collarFault({flags:rows[0].flags})?.label,'Reported fault — cause unspecified');
   }
 });
+
+
+test('command progress distinguishes hub collection from collar confirmation', () => {
+  assert.match(commandMessage({...command,status:'pending'},start)!.text,/Queued/);
+  assert.match(commandMessage({...command,status:'pending'},start)!.help,/next listens/);
+  assert.match(commandMessage(command,start)!.text,/Sent to hub/);
+  assert.match(commandMessage(command,start)!.help,/not yet confirmed/);
+  assert.match(commandMessage({...command,status:'acked'},start)!.text,/Confirmed by collar/);
+  assert.equal(commandMessage({...command,status:'acked'},start)!.pending,false);
+});
