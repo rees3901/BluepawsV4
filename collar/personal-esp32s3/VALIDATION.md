@@ -468,3 +468,19 @@ returned to its saved Normal profile's 600-second sleep. A fresh position and
 accuracy report remain unverified for Podge. All four personal collars now
 have verified uploads of the accuracy firmware with individual credentials
 and D1 LED controls enabled. No cloud release or hub flash was performed.
+
+## Podge 3001 location-status update — 7 October 2026
+
+Corrected the personal packet builder so GPS validity no longer changes an away
+location status to Error. Home/Out and explicit Lost are independent of the
+unchanged GPS fault flags. Canonical sources and protocol contracts are unchanged.
+The personal policy tests and live firmware build passed; COM4 matched Podge's
+recorded chip identity and upload hashes verified. Existing 3001 credentials,
+D1 LED enablement and NVS settings were preserved.
+
+Serial confirmed a hub receipt and ANTENNA OK; this scan missed the Home beacon.
+Read-only live verification confirmed signed wake presence sequence 2113 was
+accepted with Out status and no GPS fault flags. This presence acceptance does
+not verify a new GPS fix or the later full-report fault state. Recovery firmware
+and diagnostics are stored privately under 3001-location-status-20261007.
+Only 3001 has this new location-status image; 3002–3004 still need individual updates.

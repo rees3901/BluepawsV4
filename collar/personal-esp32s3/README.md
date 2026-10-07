@@ -24,6 +24,10 @@ not the legacy 868 MHz JSON protocol. This image cannot communicate with V3 hubs
 
 ## Behaviour and compatibility limits
 
+- Location status is Home or Out independently of GPS availability. Lost remains
+  the existing explicit finding state. GPS failures and stale fixes retain their
+  separate fault flags; they never replace an away status with Error. Out means
+  Home has not been confirmed by the beacon policy, not proof the cat is outdoors.
 - HMAC-SHA256 authenticated V4 TLV v1.2 uplinks, addressed to one provisioned hub.
   Neither V3 JSON nor a device MAC-derived identity is transmitted.
 - Real GNSS only. Every acquisition allows at most 60 seconds total, including

@@ -352,8 +352,8 @@ uint8_t buildPacket(uint8_t* p, uint8_t reason, bool homeSeen, uint16_t ack = 0)
     if (valid) flags |= FLAG_GNSS_VALID;
     else if (!presenceOnly && retained.fixTime) flags |= FLAG_STALE_FIX;
     if (!presenceOnly && gpsFailed) flags |= FLAG_ERROR_PRESENT;
-    uint8_t status = state.profile == PROFILE_LOST ? STATUS_LOST : retained.home ? STATUS_HOME :
-        (valid || presenceOnly) ? STATUS_OUT_AND_ABOUT : STATUS_ERROR;
+    // Location state is independent of GPS health; faults remain in the flags.
+    uint8_t status = state.profile == PROFILE_LOST ? STATUS_LOST : retained.home ? STATUS_HOME : STATUS_OUT_AND_ABOUT;
     pkt_init(p, PERSONAL_DEVICE_ID, PERSONAL_HUB_ID, nextSequence(), now, status, state.profile, flags, reason);
     if (!presenceOnly) pkt_set_gps(p, retained.lat, retained.lon);
     // No battery divider/fuel gauge is established on this assembly. Zero is
