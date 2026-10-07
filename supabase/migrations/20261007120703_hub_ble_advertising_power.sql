@@ -76,4 +76,3 @@ grant execute on function public.bluepaws_record_hub_presence(
   integer,text,double precision,double precision,integer,bigint,integer,
   boolean,boolean,integer,bigint,text,integer,integer,boolean,boolean,boolean,integer,double precision,double precision,integer
 ) to service_role;
-
