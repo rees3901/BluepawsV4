@@ -30,6 +30,8 @@ export interface MapRendererProps {
 }
 
 export interface ConfiguredMapRendererProps extends MapRendererProps {
+  mapStyle?: MapLayerPickerName | "Vector";
+  initialViewport?: MapViewport;
   rasterLayer: MapLayerPickerName;
   vectorSource: VectorSourceName;
 }

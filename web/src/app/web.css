@@ -421,6 +421,8 @@ body.light .leaflet-map-btn:focus-visible .fit-markers-icon {
 .map-style-options button:disabled { cursor: not-allowed; opacity: 0.48; }
 .map-style-option-title { color: var(--text-primary); font-size: 0.72rem; font-weight: 750; }
 .map-style-option-description { color: var(--text-secondary); font-size: 0.61rem; font-weight: 500; line-height: 1.3; }
+.map-rotation-option { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 4px 8px; font-size: 0.75rem; cursor: pointer; }
+.map-rotation-option input { accent-color: var(--accent); }
 .maplibre-map { width: 100%; height: 100%; }
 .maplibre-tool-stack,
 .maplibre-zoom-stack {
