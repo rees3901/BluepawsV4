@@ -14,3 +14,8 @@ describe uncertainty at the last fix and do not account for later movement.
 
 No protocol layout or database schema changes are required. Personal firmware
 remains isolated and needs a device-specific rebuild/flash to emit estimates.
+
+The GPS indicator shows "Sats: N" and "Est. acc: X m" when accuracy is known.
+This displays the full estimate, not the 50 m ring cap. Its details describe the
+last GPS fix; at Home this is historical GNSS information, not BLE accuracy.
+The indicator group wraps on narrow cards to keep the estimate visible.

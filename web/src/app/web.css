@@ -2,6 +2,8 @@
 .gnss-indicator { position: relative; color: var(--text-secondary); }
 /* Let the sidebar grow with the viewport instead of crushing expanded cards. */
 :root { --panel-width: min(calc(100vw - 64px), max(490px, min(32vw, 620px), var(--panel-content-width, 490px))); }
+/* Keep GNSS details together and wrap the group instead of clipping accuracy. */
+.card-indicators-primary { flex-wrap: wrap; }
 .card-indicators-primary > .gnss-indicator { flex: 0 0 auto; max-width: 100%; }
 .card-indicators-row3 .card-lastseen-group { font-variant-numeric: tabular-nums; }
 @media (max-width: 768px) {
