@@ -26,7 +26,7 @@
 .gnss-indicator summary::-webkit-details-marker { display: none; }
 .gnss-indicator summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
 .gnss-emoji { font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif; font-size: 0.88rem; line-height: 1; margin-right: 3px; flex-shrink: 0; }
-.gnss-detail { display: block; max-width: 250px; padding: 8px; background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius); font-size: 0.7rem; line-height: 1.5; overflow-wrap: anywhere; }
+.gnss-detail { position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; display: block; width: min(280px, calc(100vw - 80px)); max-height: 220px; overflow-y: auto; box-shadow: 0 6px 20px #0005; padding: 8px; background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius); font-size: 0.7rem; line-height: 1.5; overflow-wrap: anywhere; }
 button, input, select {
   font: inherit;
 }
@@ -2738,4 +2738,15 @@ body.light .collar-awake.sleeping {
   color: #7890a5;
   font-size: 0.76rem;
   text-align: center;
+}
+
+.device-card:has(.gnss-indicator[open]) { overflow: visible; z-index: 30; }
+.inactive-devices > summary { cursor: pointer; padding: 14px 4px; color: var(--text-secondary); font-size: 0.85rem; }
+.inactive-device-list { display: grid; gap: 10px; }
+.command-feedback-help { display: block; color: var(--text-muted); font-size: 0.72rem; }
+
+.card-indicators-primary:has(.gnss-indicator[open]) { overflow: visible; }
+@media (max-width: 768px) {
+  .gnss-indicator { position: static; }
+  .gnss-detail { left: 12px; right: 12px; top: 100%; width: auto; }
 }

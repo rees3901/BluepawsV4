@@ -10,7 +10,7 @@ import { GuidedTour } from "@/components/GuidedTour";
 import { SearchPartyViewer } from "@/components/SearchPartyViewer";
 import { AccountMenu } from "@/components/AccountMenu";
 import { defaultDeviceAvatar } from "@/lib/defaultDeviceAvatar";
-import { collarSummary } from "@/lib/devicePresence";
+import { collarSummary, isDeviceInactive } from "@/lib/devicePresence";
 import { queuePowerProfileCommand, queueLedFindCommand } from "@/lib/deviceCommands";
 import { useCollarFeedback } from "@/lib/useCollarFeedback";
 import { useHubPresence } from "@/lib/useHubPresence";
@@ -84,6 +84,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
   const [searchPartyMode, setSearchPartyMode] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [darkMode, setDarkMode] = useState(true);
+  const [inactiveExpandedIds, setInactiveExpandedIds] = useState<number[]>([]);
   const [expandedIds, setExpandedIds] = useState<number[]>([]);
   const [initialisedCardIds, setInitialisedCardIds] = useState<number[]>([]);
   const [followedId, setFollowedId] = useState<number | null>(null);
@@ -725,7 +726,42 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
   const handleThemeToggle = useCallback(() => setDarkMode((dark) => !dark), []);
 
   const collarCounts = collarSummary(mapDevices, now);
-
+  const activeDevices = orderedDevices.filter(device => !isDeviceInactive(device, now));
+  const inactiveDevices = orderedDevices.filter(device => isDeviceInactive(device, now));
+  const renderDevice = (device: TelemetryDevice, index: number, inactive = false) => {
+    const hub = device.entity === "hub" ? hubs.find(h => h.gateway_guid16 === -device.id) : undefined;
+    return <DashboardDeviceCard
+      hub={hub}
+      onHubSaved={refreshHubs}
+      key={device.id}
+      device={device}
+      avatar={mapAvatars[device.id]}
+      expanded={(inactive ? inactiveExpandedIds : expandedIds).includes(device.id)}
+      dragging={draggingDeviceId === device.id}
+      dragOver={dragOverDeviceId === device.id && draggingDeviceId !== device.id}
+      first={index === 0}
+      pinned={pinnedDeviceId === device.id}
+      followed={followedId === device.id}
+      trailVisible={trailIds.has(device.id)}
+      portableMode={portableMode}
+      distance={formatHomeDistance(homeDistanceMetres(device))}
+      ageSeconds={Math.max(0, Math.floor((now - device.lastUpdate) / 1000))}
+      awakeSeconds={now ? Math.max(0, Math.ceil(((feedback[device.id]?.rxWindowUntil ?? 0) - now) / 1000)) : 0}
+      commandFeedback={commandMessage(feedback[device.id]?.command, now)}
+      reportedFlags={feedback[device.id]?.flags}
+      reportedFaultReport={feedback[device.id]?.faultReport}
+      onExpand={() => (inactive ? setInactiveExpandedIds : setExpandedIds)((current) => nextExpandedDeviceCards(current, device.id))}
+      onAction={(action) => handleAction(device, action)}
+      onAvatarEdit={tutorialMode ? undefined : () => setAvatarDevice(device)}
+      onDragStart={() => handleCardDragStart(device.id)}
+      onDragOver={() => handleCardDragOver(device.id)}
+      onDrop={handleCardDrop}
+      onDragEnd={handleCardDragEnd}
+      onPinToggle={() => handleCardPinToggle(device.id)}
+      onReportLog={() => handleReportLog(device)}
+      onReportExport={() => handleReportExport(device)}
+    />;
+  };
   if (searchPartyMode) {
     return <SearchPartyViewer token="" initialSnapshot={searchPartyPreviewSnapshot} previewMode onExitPreview={() => handleSearchPartyModeChange(false)} />;
   }
@@ -797,39 +833,11 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
               </div>
             </div>
           )}
-          {orderedDevices.map((device, index) => {
-            const hub = device.entity === "hub" ? hubs.find(h => h.gateway_guid16 === -device.id) : undefined;
-            return <DashboardDeviceCard
-              hub={hub}
-              onHubSaved={refreshHubs}
-              key={device.id}
-              device={device}
-              avatar={mapAvatars[device.id]}
-              expanded={expandedIds.includes(device.id)}
-              dragging={draggingDeviceId === device.id}
-              dragOver={dragOverDeviceId === device.id && draggingDeviceId !== device.id}
-              first={index === 0}
-              pinned={pinnedDeviceId === device.id}
-              followed={followedId === device.id}
-              trailVisible={trailIds.has(device.id)}
-              portableMode={portableMode}
-              distance={formatHomeDistance(homeDistanceMetres(device))}
-              ageSeconds={Math.max(0, Math.floor((now - device.lastUpdate) / 1000))}
-              awakeSeconds={now ? Math.max(0, Math.ceil(((feedback[device.id]?.rxWindowUntil ?? 0) - now) / 1000)) : 0}
-              commandFeedback={commandMessage(feedback[device.id]?.command, now)}
-              reportedFlags={feedback[device.id]?.flags}
-              reportedFaultReport={feedback[device.id]?.faultReport}
-              onExpand={() => setExpandedIds((current) => nextExpandedDeviceCards(current, device.id))}
-              onAction={(action) => handleAction(device, action)}
-              onAvatarEdit={tutorialMode ? undefined : () => setAvatarDevice(device)}
-              onDragStart={() => handleCardDragStart(device.id)}
-              onDragOver={() => handleCardDragOver(device.id)}
-              onDrop={handleCardDrop}
-              onDragEnd={handleCardDragEnd}
-              onPinToggle={() => handleCardPinToggle(device.id)}
-              onReportLog={() => handleReportLog(device)}
-              onReportExport={() => handleReportExport(device)}
-            />; })}
+          {activeDevices.map((device, index) => renderDevice(device, index))}
+          {inactiveDevices.length > 0 && <details className="inactive-devices" data-panel-static>
+            <summary>Inactive devices ({inactiveDevices.length})</summary>
+            <div className="inactive-device-list">{inactiveDevices.map((device, index) => renderDevice(device, index, true))}</div>
+          </details>}
         </div>
       </aside>
 
@@ -871,7 +879,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
           try {
             await queueLedFindCommand(findDevice.id, action, seconds, interval);
             refreshFeedback(); setFindDevice(null);
-            setToast(action === "stop" ? "Stop LED cycle queued · awaiting collar ACK" : "LED command queued · awaiting collar ACK");
+            setToast(action === "stop" ? "Stop LED cycle queued · waiting for collar to listen" : "LED command queued · waiting for collar to listen");
           } catch (error) { setFindError(error instanceof Error ? error.message : "Unable to queue LED command"); }
           finally { setFindSending(false); }
         }} />}
