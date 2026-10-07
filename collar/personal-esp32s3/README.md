@@ -54,6 +54,12 @@ not the legacy 868 MHz JSON protocol. This image cannot communicate with V3 hubs
   wake and sends any due check-in, with the fresh-beacon-seen flag cleared.
   Optional `PERSONAL_HOME_BLE_ADDRESS` restricts it
   to the personal hub's observed BLE address; the canonical beacon has no hub ID.
+- `[BLE DIAG]` logs controller state, scan-start success, aggregate discovered
+  device count/strongest RSSI, Home-name candidates, weak candidates and address
+  filter rejects. `-127` means no candidate, not a measured signal strength.
+  Nearby devices' names/addresses are not dumped. These are reception diagnostics,
+  not an antenna continuity test. L76K `ANTENNA OK/OPEN` messages describe only
+  the separate GPS antenna; they do not diagnose the XIAO Wi-Fi/BLE antenna.
 - Every hardware wake sends a signed `WAKE_CHECKIN` presence packet before BLE
   scanning or GNSS acquisition, including single-button and LED-only timer wakes.
   It omits GPS, stale-fix and GPS-error flags and uses the previously retained

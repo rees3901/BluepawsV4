@@ -7,6 +7,7 @@
 #include <BLEAdvertising.h>
 #include <Preferences.h>
 #include <esp_sleep.h>
+#include <esp_bt.h>
 #include <driver/rtc_io.h>
 #include <sys/time.h>
 #include "hardware.h"
@@ -286,6 +287,8 @@ void initBle() {
     if (bleReady) return;
     BLEDevice::init("BluePaws personal collar");
     bleReady = true;
+    Serial.printf("[BLE DIAG] controller=%d (2=enabled); antenna continuity unmeasured\n",
+        int(esp_bt_controller_get_status()));
 }
 bool scanHome() {
     initBle();
@@ -295,20 +298,31 @@ bool scanHome() {
     scan->setInterval(160);
     scan->setWindow(80);
     // Async BLE scan keeps gestures and LED timing serviced during discovery.
-    scan->start(BLE_SCAN_DURATION_S, [](BLEScanResults) {}, false);
+    const bool scanStartedOk = scan->start(BLE_SCAN_DURATION_S, [](BLEScanResults) {}, false);
+    Serial.printf("[BLE DIAG] scan_start=%u duration=%us gate=-90dBm address_filter=%u\n",
+        scanStartedOk, BLE_SCAN_DURATION_S, strlen(PERSONAL_HOME_BLE_ADDRESS) != 0);
     const uint32_t scanStarted = millis();
     while (millis() - scanStarted < BLE_SCAN_DURATION_S * 1000UL + 100) {
         pumpGps(); delay(5);
     }
     auto results = scan->getResults();
     bool seen = false;
+    int strongest = -127, strongestHome = -127;
+    unsigned homeCandidates = 0, weakHome = 0, filteredHome = 0;
     for (int i = 0; i < results.getCount(); ++i) {
         auto device = results.getDevice(i);
-        if (!device.haveName() || device.getName() != BLE_HOME_BEACON_NAME || device.getRSSI() < -90) continue;
-        if (strlen(PERSONAL_HOME_BLE_ADDRESS) && strcasecmp(device.getAddress().toString().c_str(), PERSONAL_HOME_BLE_ADDRESS)) continue;
+        strongest = max(strongest, device.getRSSI());
+        if (!device.haveName() || device.getName() != BLE_HOME_BEACON_NAME) continue;
+        ++homeCandidates;
+        strongestHome = max(strongestHome, device.getRSSI());
+        if (device.getRSSI() < -90) { ++weakHome; continue; }
+        if (strlen(PERSONAL_HOME_BLE_ADDRESS) && strcasecmp(device.getAddress().toString().c_str(), PERSONAL_HOME_BLE_ADDRESS)) { ++filteredHome; continue; }
         Serial.printf("[BLE] Home beacon %s RSSI=%d\n", device.getAddress().toString().c_str(), device.getRSSI());
         seen = true;
     }
+    // Aggregate nearby RF evidence without logging other devices' names/MACs.
+    Serial.printf("[BLE DIAG] devices=%d strongest=%ddBm home_candidates=%u home_strongest=%ddBm weak=%u filtered=%u (-127=none)\n",
+        results.getCount(), strongest, homeCandidates, strongestHome, weakHome, filteredHome);
     scan->clearResults();
     if (seen) { retained.home = true; retained.misses = 0; }
     else if (++retained.misses >= 2) { retained.misses = 2; retained.home = false; retained.homeCycles = 0; }

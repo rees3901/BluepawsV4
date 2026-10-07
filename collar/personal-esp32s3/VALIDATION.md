@@ -506,3 +506,21 @@ GNSS invalid, and no stale-fix/error flags: live verification of the remedy.
 Only 3004 has this additional Home-fault suppression update; 3001 has the preceding
 location-status fix, and 3002–3003 still have the earlier accuracy firmware.
 This change remains isolated from canonical main; no application deployment occurred.
+
+## Podge 3001 BLE diagnostics — 7 October 2026
+
+Added personal-only serial scan diagnostics: controller status, scan start,
+aggregate device count/strongest RSSI, Home-name candidates and filter outcomes.
+No nearby names/addresses are dumped and scan timing/acceptance are unchanged.
+Build and COM4 upload passed, hashes verified, original 3001 credentials and
+D1 LED retained. This image also includes the Home/GPS-fault suppression fix.
+
+Live diagnostics showed controller enabled (2), scan start successful, ten-second
+scan, no address restriction, six devices received, strongest -71 dBm, and zero
+Home-name candidates. The hub reported advertising at +6 dBm. Simba's earlier
+successful Home scan was -88 dBm, only 2 dB above the -90 dBm acceptance gate;
+this was an earlier comparison, not a simultaneous calibrated RF measurement.
+Reception proves some BLE operation, not antenna continuity or full sensitivity.
+A faulty/detuned antenna remains possible; close-range comparison with the hub
+and physical inspection/known-good antenna comparison remain outstanding.
+Private diagnostic logs/recovery firmware: 3001-ble-diagnostics-20261007.
