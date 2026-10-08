@@ -1,5 +1,5 @@
 /* eslint-disable @next/next/no-img-element -- Tiny pre-sized emoji artwork is intentionally served directly from the picker CDN. */
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { CUSTOMER_POWER_PROFILES, type CustomerPowerProfile } from "@/lib/powerProfiles";
 import { BatteryIndicator, BleProximity, BluetoothBeaconIndicator, GnssIndicator, HomeDistance, LastSeen, SignalIndicator, WifiIndicator } from "@/components/Indicators";
 import { HUB_REPORTING, hubContactGrace } from "@/lib/hubReporting";
@@ -224,6 +224,11 @@ export function InlineProfileControl({ device, onSend }: {
   if (draft && draft.reported !== device.profile) setDraft(null);
   const selected = draft?.reported === device.profile ? draft.value : current;
   const changed = selected !== current;
+  useEffect(() => {
+    if (!changed || sending) return;
+    const timeout = setTimeout(() => { setDraft(null); setError(null); }, 10_000);
+    return () => clearTimeout(timeout);
+  }, [draft, changed, sending]);
   const id = `collar-profile-${device.id}`;
   async function send() {
     if (!onSend || !changed || !selected || sending) return;
@@ -248,7 +253,7 @@ export function InlineProfileControl({ device, onSend }: {
     {changed && <div className="inline-profile-confirm">
       <button type="button" className="btn-action active" disabled={sending} onClick={send}>{sending ? "Queueing…" : "Send command"}</button>
       <button type="button" className="btn-action" disabled={sending} onClick={() => { setDraft(null); setError(null); }}>Cancel</button>
-      <p className="inline-profile-help">Delivered when the collar next listens. Expires after ten minutes without acknowledgement.</p>
+      <p className="inline-profile-help">Unsent selection cancels after 10 seconds. Delivered when the collar next listens. Expires after ten minutes without acknowledgement.</p>
       {error && <p role="alert" className="inline-profile-error">{error}</p>}
     </div>}
   </div>;
