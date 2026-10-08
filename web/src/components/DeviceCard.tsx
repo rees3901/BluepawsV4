@@ -32,6 +32,7 @@ export interface DeviceCardProps {
   ageSeconds: number;
   awakeSeconds?: number;
   commandFeedback?: ReturnType<typeof commandMessage>;
+  onCancelCommand?: (commandId: string) => Promise<void>;
   reportedFlags?: number | null;
   reportedFaultReport?: CollarFaultReport | null;
   onProfileCommand?: (profile: CustomerPowerProfile) => Promise<void>;
@@ -54,6 +55,7 @@ export interface DeviceCardProps {
 }
 
 export function DeviceCard(props: DeviceCardProps) {
+  const [cancellingCommand, setCancellingCommand] = useState(false);
   const { device, avatar, expanded, dragging, dragOver, first, pinned, followed, trailVisible, portableMode, distance, ageSeconds, onExpand, onAction, onDragStart, onDragOver, onDrop, onDragEnd, onPinToggle, onReportLog, onReportExport, onAvatarEdit } = props;
   const isHub = device.entity === "hub";
   const collarAwake = !isHub && (props.awakeSeconds ?? 0) > 0;
@@ -185,7 +187,7 @@ export function DeviceCard(props: DeviceCardProps) {
               <span className="label">Last report</span><span className="value">{formatAge(ageSeconds)}</span>
             </div>
             <ActionButtons followed={followed} trailVisible={trailVisible} onAction={onAction} collarControls={!isHub} hasGps={hasGps} extra={isHub ? props.hubActions : <InlineProfileControl device={device} onSend={props.onProfileCommand} />} />
-            {!isHub && props.commandFeedback && <div role="status" className={`command-feedback ${props.commandFeedback.pending ? "pending" : props.commandFeedback.status}`}>{props.commandFeedback.text}<span className="command-feedback-help">{props.commandFeedback.help}</span></div>}
+            {!isHub && props.commandFeedback && <div role="status" className={`command-feedback ${props.commandFeedback.pending ? "pending" : props.commandFeedback.status}`}>{props.commandFeedback.text}<span className="command-feedback-help">{props.commandFeedback.help}</span>{props.commandFeedback.cancellable && props.onCancelCommand && <button type="button" className="btn-action" disabled={cancellingCommand} aria-label={`Cancel pending power profile command for ${device.name}`} onClick={async event => { event.stopPropagation(); setCancellingCommand(true); try { await props.onCancelCommand?.(props.commandFeedback!.id); } finally { setCancellingCommand(false); } }}>{cancellingCommand ? "Cancelling…" : "× Cancel"}</button>}</div>}
             <div className="log-btn-row">
               <button className="btn-device-log btn-secondary" type="button" onClick={onReportLog}>Message Log</button>
               <button className="btn-log-export" type="button" title="Export report log as CSV" aria-label="Export report log" onClick={onReportExport}>
@@ -253,7 +255,7 @@ export function InlineProfileControl({ device, onSend }: {
     {changed && <div className="inline-profile-confirm">
       <button type="button" className="btn-action active" disabled={sending} onClick={send}>{sending ? "Queueing…" : "Send command"}</button>
       <button type="button" className="btn-action" disabled={sending} onClick={() => { setDraft(null); setError(null); }}>Cancel</button>
-      <p className="inline-profile-help">Unsent selection cancels after 10 seconds. Delivered when the collar next listens. Expires after ten minutes without acknowledgement.</p>
+      <p className="inline-profile-help">Unsent selection cancels after 10 seconds. Once queued, waits up to one hour for the collar. Cancel is available until the hub collects the command.</p>
       {error && <p role="alert" className="inline-profile-error">{error}</p>}
     </div>}
   </div>;

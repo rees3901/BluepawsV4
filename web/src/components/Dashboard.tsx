@@ -11,7 +11,7 @@ import { SearchPartyViewer } from "@/components/SearchPartyViewer";
 import { AccountMenu } from "@/components/AccountMenu";
 import { defaultDeviceAvatar } from "@/lib/defaultDeviceAvatar";
 import { collarSummary, isDeviceInactive } from "@/lib/devicePresence";
-import { queuePowerProfileCommand, queueLedFindCommand } from "@/lib/deviceCommands";
+import { queuePowerProfileCommand, queueLedFindCommand, cancelPowerProfileCommand } from "@/lib/deviceCommands";
 import { useCollarFeedback } from "@/lib/useCollarFeedback";
 import { useHubPresence } from "@/lib/useHubPresence";
 import { hubAvatar, hubMapDevice, type HubPresence } from "@/lib/hubPresence";
@@ -160,6 +160,17 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
     const expiry = new Date(command.expires_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     setToast(`${powerProfileLabel(profile)} queued until ${expiry}`);
   }, [tutorialMode, refreshFeedback]);
+  const handleCancelProfileCommand = async (commandId: string) => {
+    if (tutorialMode) return;
+    try {
+      const cancelled = await cancelPowerProfileCommand(commandId);
+      setToast(cancelled ? "Profile command cancelled" : "Command already collected or completed; it cannot be cancelled");
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : "Unable to cancel command");
+    } finally {
+      refreshFeedback();
+    }
+  };
   const orderedDevices = useMemo(() => {
     const devicesById = new Map(mapDevices.map((device) => [device.id, device]));
     return orderedDeviceIds.flatMap((deviceId) => {
@@ -745,6 +756,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
       ageSeconds={Math.max(0, Math.floor((now - device.lastUpdate) / 1000))}
       awakeSeconds={now ? Math.max(0, Math.ceil(((feedback[device.id]?.rxWindowUntil ?? 0) - now) / 1000)) : 0}
       commandFeedback={commandMessage(feedback[device.id]?.command, now)}
+      onCancelCommand={tutorialMode ? undefined : handleCancelProfileCommand}
       reportedFlags={feedback[device.id]?.flags}
       reportedFaultReport={feedback[device.id]?.faultReport}
       onExpand={() => (inactive ? setInactiveExpandedIds : setExpandedIds)((current) => nextExpandedDeviceCards(current, device.id))}

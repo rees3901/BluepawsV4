@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
 import { CUSTOMER_POWER_PROFILES, powerProfileLabel } from "./powerProfiles.ts";
+
+test("profile queue requests one hour without changing LED command expiry", () => {
+  const source = readFileSync(new URL("./deviceCommands.ts", import.meta.url), "utf8");
+  const [profile, led] = source.split("export async function queueLedFindCommand");
+  assert.match(profile, /requested_expires_in: "01:00:00"/);
+  assert.match(led, /requested_expires_in: "00:10:00"/);
+});
 
 test("customer profile choices use the canonical backend values", () => {
   assert.deepEqual(CUSTOMER_POWER_PROFILES, [

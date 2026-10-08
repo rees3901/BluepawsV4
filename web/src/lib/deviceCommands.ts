@@ -22,13 +22,19 @@ export async function queuePowerProfileCommand(deviceId: number, profile: Custom
     requested_device_id: deviceId,
     requested_command_type: "set_profile",
     requested_payload: { profile },
-    requested_expires_in: "00:10:00",
+    requested_expires_in: "01:00:00",
   });
 
   if (error) throw new Error(error.message || "Unable to queue collar command");
   const command = Array.isArray(data) ? data[0] : data;
   if (!command) throw new Error("The command queue returned no command");
   return command as QueuedDeviceCommand;
+}
+
+export async function cancelPowerProfileCommand(commandId: string) {
+  const { data, error } = await createClient().rpc("bluepaws_cancel_profile_command", { requested_command_id: commandId });
+  if (error) throw new Error(error.message || "Unable to cancel collar command");
+  return data === true;
 }
 
 export async function queueLedFindCommand(deviceId: number, action: LedFindAction, seconds = 600, interval = 60) {
