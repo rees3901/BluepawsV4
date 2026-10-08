@@ -705,6 +705,16 @@ body.light .device-card.offline {
     flex-wrap: wrap;
 }
 
+.inline-profile { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.inline-profile-label { color: var(--text-muted); font-size: 0.68rem; }
+.inline-profile-select { max-width: 100%; background: var(--bg-card); }
+.inline-profile.editing { flex-basis: 100%; }
+.inline-profile-confirm { display: flex; flex-wrap: wrap; gap: 4px; width: 100%; }
+.inline-profile-help, .inline-profile-error { flex-basis: 100%; margin: 3px 0; font-size: 12px; line-height: 1.5; }
+.inline-profile-help { color: var(--text-muted); }
+.inline-profile-error { color: var(--danger, #ef4444); }
+.inline-profile-select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
 .btn-action {
     display: inline-flex;
     align-items: center;

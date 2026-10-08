@@ -14,7 +14,7 @@ export function FindModal({ device, sending, error, onClose, onSend }: {
   const effectiveInterval = intervals.includes(interval as typeof intervals[number]) ? interval : 60;
   return <div className="modal" role="dialog" aria-modal="true" aria-labelledby="find-title">
     <div className="modal-content">
-      <h2 id="find-title">Find Alert</h2><p>Device: <strong>{device.name}</strong></p>
+      <h2 id="find-title">LED Flash</h2><p>Device: <strong>{device.name}</strong></p>
       {!supported && <p role="status">LED Find requires compatible collar firmware. Currently enabled for the fitted personal batch (3001–3004).</p>}
       <p>Each cycle is seven rapid LED flashes in about one second.</p>
       {lost && <button className="btn-primary" disabled={sending || !supported} onClick={() => onSend("flash", seconds, effectiveInterval)}>Flash now</button>}

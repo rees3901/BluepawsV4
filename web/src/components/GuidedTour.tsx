@@ -53,8 +53,8 @@ const TOUR_STEPS: TourStep[] = [
     description: "When a tile is expanded, the most useful actions are gathered together in one convenient row. These let you move around the map, review a journey or prepare a collar action without hunting through another menu.",
     items: [
       "Jump To centres the pet once, while Follow keeps the map centred as fresh positions arrive.",
-      "Trail draws the pet's recent movement; Find Alert is where you can ask the collar to flash its light.",
-      "Cmd opens the available power-profile choices and other supported collar commands.",
+      "Trail draws the pet's recent movement; LED Flash is where you can ask the collar to flash its light.",
+      "Use the Profile dropdown on a pet card, then Send command to queue a change.",
     ],
   },
   {
@@ -71,7 +71,7 @@ const TOUR_STEPS: TourStep[] = [
     items: [
       "The popup brings the latest battery, signal, power profile, coordinates and report age together in one place.",
       "Jump To, Follow and Trail are repeated here, so you can use them without returning to the pet list.",
-      "Find Alert and Cmd are owner controls. They are deliberately hidden whenever somebody opens the read-only Search Party view.",
+      "LED Flash and Profile are owner controls. They are deliberately hidden whenever somebody opens the read-only Search Party view.",
     ],
   },
   {

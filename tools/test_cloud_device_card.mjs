@@ -9,6 +9,7 @@ import * as hubReporting from '../web/src/lib/hubReporting.ts';
 import * as collarFault from '../web/src/lib/collarFault.ts';
 import * as collarFeedback from '../web/src/lib/collarFeedback.ts';
 import * as devicePresence from '../web/src/lib/devicePresence.ts';
+import * as powerProfiles from '../web/src/lib/powerProfiles.ts';
 import {buildDiagnosticPacket,defaultDeviceSettings,generateDeviceCredential} from './tlv-web-console/lib/tlv-core.mjs';
 import {parseTlvPacket} from '../supabase/functions/ingest-position/tlv.ts';
 const require = createRequire(new URL('../web/package.json',import.meta.url));
@@ -24,6 +25,7 @@ const context=vm.createContext({exports:{},require(name){
   if(name==='@/lib/hubReporting')return hubReporting;
   if(name==='@/lib/collarFault')return collarFault;
   if(name==='@/lib/devicePresence')return devicePresence;
+  if(name==='@/lib/powerProfiles')return powerProfiles;
   if(name==='@/lib/emoji')return {emojiImageUrl:()=>'/favicon.svg'};
   if(name==='@/lib/mapLocation')return {googleMapsUrl:()=> '#',formatMapCoordinates:()=> '51.9, -2.2'};
   return require(name);
