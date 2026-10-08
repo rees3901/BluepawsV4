@@ -8,6 +8,7 @@ export interface CommandFeedback {
   status: string;
   requested_at: string;
   expires_at: string;
+  status_at?: string;
 }
 
 export interface CollarFeedback {
@@ -28,9 +29,12 @@ export function commandMessage(command: CommandFeedback | null | undefined, now:
   if (!command) return null;
   const submitted = Date.parse(command.requested_at);
   const expiry = Date.parse(command.expires_at);
-  if (!Number.isFinite(submitted) || !Number.isFinite(expiry) || now < submitted || now - submitted >= 900_000) return null;
+  if (!Number.isFinite(submitted) || !Number.isFinite(expiry) || now < submitted) return null;
   let status = command.status;
   if ((status === "pending" || status === "sent") && now >= expiry) status = "expired";
+  const pending = status === "pending" || status === "sent";
+  const statusAt = status === "expired" ? expiry : Date.parse(command.status_at ?? command.requested_at);
+  if (!pending && now - (Number.isFinite(statusAt) ? statusAt : submitted) >= 900_000) return null;
   const labels: Record<string, string> = {
     pending: "Queued", sent: "Sent to hub · awaiting collar confirmation",
     acked: "Confirmed by collar", expired: "Expired · collar did not confirm",
@@ -41,13 +45,14 @@ export function commandMessage(command: CommandFeedback | null | undefined, now:
     ? `profile → ${PROFILE_LABELS[command.command_payload.profile ?? ""] ?? "Unknown"}`
     : command.command_type === "led_find" ? `LED → ${command.command_payload.action ?? "Unknown"}`
       : command.command_type.replaceAll("_", " ");
-  const help = status === "pending" ? "Waiting for delivery when the collar next listens."
+  const until = new Date(expiry).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const help = status === "pending" ? `Waiting for delivery when the collar next listens. Queued until ${until}.`
     : status === "sent" ? "The hub has collected the command; collar delivery is not yet confirmed."
     : status === "acked" ? "The collar acknowledged this command."
     : status === "expired" ? "The command timed out; send it again when the collar is reachable."
     : status === "failed" ? "The command could not be completed."
     : "This command is no longer queued.";
-  return { help, text: `${labels[status]}: ${detail}`, pending: status === "pending" || status === "sent", status };
+  return { id: command.id, cancellable: status === "pending" && command.command_type === "set_profile", help, text: `${labels[status]}: ${detail}`, pending, status };
 }
 
 // Server supplies remaining time, not a new ten-second timer. Subtract the

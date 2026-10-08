@@ -4,12 +4,26 @@ import {commandMessage, receiveDeadline, type CommandFeedback} from './collarFee
 import {collarFault, loadFaultReports} from './collarFault.ts';
 const start = Date.parse('2026-08-27T10:00:00Z');
 const command: CommandFeedback = {id:'test',device_id:1001,command_type:'set_profile',command_payload:{profile:'active'},status:'sent',requested_at:new Date(start).toISOString(),expires_at:new Date(start+600000).toISOString()};
-test('cloud feedback uses actual expiry and clears fifteen minutes after submission', () => {
+test('cloud feedback uses actual expiry and clears fifteen minutes after expiry', () => {
   assert.equal(commandMessage(command,start+599999)?.pending,true);
   assert.equal(commandMessage(command,start+600000)?.status,'expired');
-  assert.equal(commandMessage(command,start+900000),null);
+  assert.equal(commandMessage(command,start+1500000),null);
   assert.equal(commandMessage({...command,status:'acked'},start+600000)?.status,'acked');
   assert.match(commandMessage(command,start)!.text,/profile → Active/);
+});
+
+test('hour-long commands stay visible through sleeping collar check-ins and only queued profiles can cancel', () => {
+  const long = {...command, expires_at:new Date(start+3600000).toISOString()};
+  for (const status of ['pending','sent']) {
+    assert.equal(commandMessage({...long,status},start+1800000)?.pending,true);
+    assert.equal(commandMessage({...long,status},start+3599999)?.pending,true);
+    assert.equal(commandMessage({...long,status},start+3600000)?.status,'expired');
+  }
+  assert.equal(commandMessage({...long,status:'pending'},start+1800000)?.cancellable,true);
+  assert.equal(commandMessage(long,start+1800000)?.cancellable,false);
+  assert.equal(commandMessage({...long,status:'pending',command_type:'led_find'},start)?.cancellable,false);
+  assert.equal(commandMessage({...long,status:'cancelled',status_at:new Date(start+1800000).toISOString()},start+1800001)?.status,'cancelled');
+  assert.equal(commandMessage(long,start+4500000),null);
 });
 test('cloud receive window subtracts latency and cannot restart for a cached report', () => {
   assert.equal(receiveDeadline(9000,10000,1000),18000);
