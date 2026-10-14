@@ -55,6 +55,7 @@
 #include "collar_secrets.h"  // Local-only per-collar HMAC key; ignored by Git
 #endif
 #include "collar_routing.h"  // Explicitly provisioned affiliated Home Hub
+#include "collar_report_policy.h" // Location state independent of GNSS health
 
 #ifndef BLUEPAWS_BUILD_UNIX_TIME
 #error "Build through PlatformIO with tools/firmware_build_time.py enabled"
@@ -1114,29 +1115,11 @@ static void sendTelemetry() {
 static void sendTelemetryWithReason(uint8_t txReason) {
     messageSeq++;
 
-    bp_status_t status;
-    uint8_t flags = 0;
-
-    // Check if GNSS fix is valid and recent
     uint32_t fixAgeS = (millis() - gnssFixAgeMs) / 1000;
     bool locValid = gpsFix && (fixAgeS < GPS_STALE_THRESHOLD_S);
-
-    if (bleHomeFound) {
-        // A home GNSS sanity refresh is still a HOME observation. GNSS may
-        // improve last-known accuracy, but seeing the trusted home beacon is
-        // the stronger state signal for the customer-facing status.
-        status = STATUS_HOME;
-        flags |= FLAG_HOME_BEACON_SEEN;
-        if (locValid) flags |= FLAG_GNSS_VALID | FLAG_FIX_3D;
-    } else if (locValid) {
-        status = STATUS_OUT_AND_ABOUT;  // Pet is outside with valid position
-        flags |= FLAG_GNSS_VALID | FLAG_FIX_3D;
-    } else {
-        status = STATUS_INVALID_GPS;    // No usable GPS fix this cycle
-    }
-
-    if (gpsWarmStart && !locValid) flags |= FLAG_STALE_FIX;
-    if (lastError != BP_ERROR_NONE) flags |= FLAG_ERROR_PRESENT;
+    const bp_status_t status = collarLocationStatus(currentProfile, bleHomeFound);
+    const uint8_t flags = collarReportFlags(currentProfile, bleHomeFound,
+                                           locValid, gpsWarmStart, lastError);
 
     uint32_t unixTime = gnssGetUnixTime();  // Get timestamp from GNSS
 
@@ -1194,24 +1177,12 @@ static void sendTelemetryWithReason(uint8_t txReason) {
 static void sendBootReport(bool atHome, bool haveFix) {
     messageSeq++;
 
-    uint8_t flags = 0;
-    bp_status_t status = STATUS_INVALID_GPS;
     uint32_t fixAgeS = (millis() - gnssFixAgeMs) / 1000;
     bool locValid = haveFix && gpsFix && (fixAgeS < GPS_STALE_THRESHOLD_S);
-
-    if (atHome) {
-        status = STATUS_HOME;
-        flags |= FLAG_HOME_BEACON_SEEN;
-    } else if (locValid) {
-        status = STATUS_OUT_AND_ABOUT;
-    }
-
-    if (locValid) {
-        flags |= FLAG_GNSS_VALID | FLAG_FIX_3D;
-    } else {
-        flags |= FLAG_STALE_FIX | FLAG_ERROR_PRESENT;
-    }
-    if (lastError != BP_ERROR_NONE) flags |= FLAG_ERROR_PRESENT;
+    const bp_status_t status = collarLocationStatus(currentProfile, atHome);
+    const bp_error_t reportError = !locValid && lastError == BP_ERROR_NONE ? BP_ERROR_GPS : lastError;
+    const uint8_t flags = collarReportFlags(currentProfile, atHome,
+                                           locValid, gpsWarmStart, reportError);
 
     uint32_t unixTime = locValid ? gnssGetUnixTime() : (compileTimeUnix() + millis() / 1000UL);
 
@@ -1265,11 +1236,11 @@ static void sendWakeCheckin() {
     messageSeq++;
 
     uint8_t buf[BP_MAX_PACKET_SIZE];
-    uint8_t flags = FLAG_HOME_BEACON_SEEN;
-    if (lastError != BP_ERROR_NONE) flags |= FLAG_ERROR_PRESENT;
+    const uint8_t flags = collarReportFlags(currentProfile, true, false, gpsWarmStart,
+                                           lastError, true);
 
     pkt_init(buf, MY_DEVICE_ID, MY_HOME_HUB_ID, (uint16_t)(messageSeq & 0xFFFF), 0,
-             STATUS_HOME, currentProfile, flags, TX_WAKE_CHECKIN);
+             collarLocationStatus(currentProfile, true), currentProfile, flags, TX_WAKE_CHECKIN);
 
     uint16_t batt_mV = 3700;  // TODO: Read actual battery voltage via ADC
     pkt_set_quality(buf, batt_mV, 0, 65535);

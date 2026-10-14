@@ -107,7 +107,7 @@ stateDiagram-v2
   HomeGnssDue --> AcquireGnss: sanity refresh
   AcquireGnss --> HomeTelemetry: fix acquired, status remains HOME
   AcquireGnss --> HomeGnssFailure: fix failed indoors
-  HomeGnssFailure --> KeepLastKnown: set stale/error flags; do not erase coordinates
+  HomeGnssFailure --> KeepLastKnown: HOME without GPS-only fault; keep last fix
 
   HomePath --> LteHeartbeatDue: time-based LTE heartbeat
   LteHeartbeatDue --> CellularSend: send same TLV via HTTPS wrapper
@@ -138,7 +138,7 @@ On every cold boot, reboot, watchdog recovery or firmware restart, the collar mu
 5. Open the normal 15-second receipt-ACK and command receive window.
 6. Queue the same boot TLV for LTE direct-to-cloud POST.
 
-If GNSS succeeds, the boot report includes valid coordinates. If GNSS fails, the boot report remains valid and useful: set stale/error indicators, include diagnostics, and let the backend update presence/last-seen without moving or erasing the last known map position.
+If GNSS succeeds, the boot report includes valid coordinates. If GNSS fails, the boot report remains useful: location status is Home when the beacon was heard, Out otherwise, or Lost for the explicit Lost profile. GPS-only faults are suppressed at Home; independent faults remain visible. Away reports retain GPS faults and stale-fix evidence when a prior fix exists. The backend updates presence/last-seen without inventing a new position.
 
 Boot diagnostics use existing TLVs only:
 
@@ -179,8 +179,9 @@ If BLE Home is seen and a scheduled GNSS sanity refresh fails:
 
 - Keep `status = HOME`.
 - Do not erase the last known position.
-- Set stale/error flags where appropriate.
-- Treat this as low concern because indoor GNSS failure is expected.
+- Do not set stale/error flags solely for unavailable indoor GNSS.
+- Preserve independent RF, cellular and module fault indications.
+- Set GNSS validity only when a genuinely valid fix exists.
 
 The customer-facing map should continue showing the last useful position with updated last-seen/presence rather than jumping to null or implying the cat has moved.
 
@@ -233,3 +234,10 @@ Early firmware may advertise a stable device identifier for development. Product
 - Authenticate hub-to-collar receipt ACKs and commands, with replay protection, before treating downlinks or ACK-driven power decisions as production-secure.
 - Decide final user-facing rules for automatic profile changes.
 - Validate deep sleep current on the final collar PCB.
+
+## Lessons transferred from personal collars
+
+See [the extraction audit](PERSONAL_FIRMWARE_EXTRACTION.md) for features already
+in main, the portable report policy in this change, and remaining RAK validation.
+ESP32 sleep, L76K handling, wiring and personal identities are not production
+implementations for the RAK4630/GM02SP hardware.
