@@ -11,6 +11,8 @@ import { emojiImageUrl } from "@/lib/emoji";
 import { COLLAR_RECEIVE_WINDOW_SECONDS, collarCardFreshness, collarFreshnessClass } from "@/lib/devicePresence";
 import { followedDeviceAfterAction } from "@/lib/followState";
 import { formatMapCoordinates, googleMapsUrl } from "@/lib/mapLocation";
+import { gpsFreshness } from "@/lib/gpsFreshness";
+import { GpsAgeBadge, GpsAsAt } from "@/components/GpsLocation";
 import type { SearchPartySnapshot } from "@/lib/searchParty";
 import type { DeviceAction, DeviceAvatar, MapCommand, TelemetryDevice } from "@/types/telemetry";
 
@@ -230,6 +232,7 @@ function SearchPartyDeviceRow({ device, avatar, now, followed, trailVisible, onA
   const mapsUrl = googleMapsUrl(device.lat, device.lon);
   const ageSeconds = Math.max(0, Math.floor((now - device.lastUpdate) / 1000));
   const isHub = device.entity === "hub";
+  const gps = gpsFreshness(device, now);
   const freshness = isHub ? null : collarCardFreshness(ageSeconds, ageSeconds < COLLAR_RECEIVE_WINDOW_SECONDS);
   const offline = freshness === "offline";
   const freshnessClass = collarFreshnessClass(freshness);
@@ -272,22 +275,25 @@ function SearchPartyDeviceRow({ device, avatar, now, followed, trailVisible, onA
             <HomeDistance>{distance}</HomeDistance>
             <LastSeen>{formatLastSeen(ageSeconds)}</LastSeen>
           </div></>}
+          {!isHub && <GpsAgeBadge gps={gps} />}
         </div>
       </div>
       <div className="card-detail-reveal" aria-hidden={false}>
         <div className="card-detail-reveal-inner">
           <div className="card-detail">
             {offline && <p className="card-offline-notice"><strong>Offline.</strong> These are last-known details from {formatAge(ageSeconds)} and may no longer be current.</p>}
+            {!isHub && gps.warning && <p className={`gps-location-notice ${gps.className}`}>{gps.notice}</p>}
             <div className="card-grid">
-              <span className="label">{offline ? "Last known coordinates" : "Coordinates"}</span>
+              <span className="label">{offline || (!isHub && gps.warning) ? "Last known coordinates" : "Coordinates"}</span>
               <span className="value">{device.hasGps ? (
-                <a className="card-coords card-coords-link" href={mapsUrl} target="_blank" rel="noopener noreferrer">
+                <a className={`card-coords card-coords-link${isHub ? "" : ` ${gps.className}`}`} href={mapsUrl} target="_blank" rel="noopener noreferrer">
                   {formatMapCoordinates(device.lat, device.lon)}
                 </a>
               ) : "No GPS fix yet"}</span>
+              {!isHub && <GpsAsAt gps={gps} now={now} />}
               {!isHub && <><span className="label">{offline ? "Last known distance" : "Dist From Hub"}</span><span className="value">{distance}</span></>}
               {isHub && <><span className="label">Mode</span><span className="value">{hubMode}</span></>}
-              <span className="label">Last report</span><span className="value">{formatAge(ageSeconds)}</span>
+              <span className="label">Last contact</span><span className="value">{formatAge(ageSeconds)}</span>
             </div>
             <div className="card-actions search-party-card-actions">
               <button className="btn-action btn-jump" type="button" disabled={!device.hasGps} onClick={() => onAction("jump")}>↗ Centre</button>

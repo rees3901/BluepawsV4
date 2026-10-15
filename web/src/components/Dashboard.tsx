@@ -754,6 +754,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
       portableMode={portableMode}
       distance={formatHomeDistance(homeDistanceMetres(device))}
       ageSeconds={Math.max(0, Math.floor((now - device.lastUpdate) / 1000))}
+      now={now}
       awakeSeconds={now ? Math.max(0, Math.ceil(((feedback[device.id]?.rxWindowUntil ?? 0) - now) / 1000)) : 0}
       commandFeedback={commandMessage(feedback[device.id]?.command, now)}
       onCancelCommand={tutorialMode ? undefined : handleCancelProfileCommand}

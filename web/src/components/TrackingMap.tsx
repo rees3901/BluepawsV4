@@ -8,6 +8,7 @@ import { emojiImageUrl } from "@/lib/emoji";
 import { COLLAR_RECEIVE_WINDOW_SECONDS, collarCardFreshness, collarFreshnessClass, type CollarCardFreshness } from "@/lib/devicePresence";
 import { formatMapCoordinates } from "@/lib/mapLocation";
 import { gnssUncertainty } from "@/lib/gnssUncertainty";
+import { updateGpsMarker } from "@/lib/gpsMarker";
 import { contextMenuHtml, copyTextToClipboard, temporaryPinPopupHtml } from "@/lib/mapLocationPopup";
 import { MAP_LAYER_DEFINITIONS, type MapLayerName } from "@/lib/mapLayers";
 import { mapPopupHtml } from "@/lib/mapPopup";
@@ -406,9 +407,11 @@ export default function LeafletMap(props: ConfiguredMapRendererProps) {
       }
       let marker = markersRef.current.get(device.id);
       const newMarker = !marker;
+      const pin = markerElement(avatar, markerColor, device.status, freshness);
+      updateGpsMarker(pin, device, presenceNow);
       const icon = L.divIcon({
         className: "bp-marker-icon",
-        html: markerElement(avatar, markerColor, device.status, freshness),
+        html: pin,
         iconSize: [36, 48],
         iconAnchor: [18, 47],
         popupAnchor: [0, -43],

@@ -1200,6 +1200,21 @@ body.light .collar-awake.sleeping {
   overflow: visible;
 }
 
+/* Location freshness is separate from radio/contact freshness. */
+.gps-fresh { --gps-color: #4ade80; }
+.gps-aging, .gps-unknown { --gps-color: #fbbf24; }
+.gps-stale, .gps-missing { --gps-color: #f87171; }
+.gps-age-badge, .gps-as-at, .card-coords-link[class*="gps-"] { color: var(--gps-color); }
+.gps-age-badge { margin-top: 4px; font-size: 0.73rem; font-weight: 650; line-height: 1.35; }
+.gps-as-at { font-size: 0.76rem; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.gps-location-notice { margin: 8px 0; padding: 7px 9px; border: 1px solid var(--gps-color); border-radius: 7px; color: var(--gps-color); font-size: 0.75rem; line-height: 1.4; }
+.gps-location-notice[hidden] { display: none; }
+.marker-gps-age { position: absolute; z-index: 3; bottom: calc(100% + 3px); left: 50%; transform: translateX(-50%); pointer-events: none; white-space: nowrap; padding: 2px 5px; border: 1px solid var(--gps-color); border-radius: 4px; background: #15232e; color: var(--gps-color); font: 650 10px/1.4 system-ui, sans-serif; }
+body.light .gps-fresh { --gps-color: #15803d; }
+body.light .gps-aging, body.light .gps-unknown { --gps-color: #92400e; }
+body.light .gps-stale, body.light .gps-missing { --gps-color: #b91c1c; }
+body.light .marker-gps-age { background: #fff; }
+
 .marker-pin {
   --marker-color: var(--accent);
   position: relative;
