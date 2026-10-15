@@ -23,6 +23,7 @@ function load(name) {
   vm.runInContext(output,context); modules.set(name,context.exports);
   return context.exports;
 }
+export { load as fixtureModule };
 export const hub = {gateway_guid16:16, household_id:'synthetic-family', mode:'home',
   display_name:'Bluepaws Test Hub',home_emoji:'🏡',portable_emoji:'📱',marker_colour:'#38bdf8',
   received_at:'2026-08-27T12:00:00Z',latitude:51.907,longitude:-2.24,fix_at:'2026-08-27T11:59:57Z',
@@ -50,6 +51,21 @@ if (process.argv.includes('--serve')) {
       return res.end(readFileSync(new URL('../web/src/app'+req.url,import.meta.url)));
     }
     res.setHeader('Content-Type','text/html; charset=utf-8');
+    if (req.url === '/gps-freshness') {
+      const now=Date.now();
+      const cases=[['Fresh GPS',15],['Ageing GPS',120],['Old GPS, new contact',8049],['Unknown fix time',null]];
+      res.end('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">' +
+        '<title>GPS age — synthetic fixture</title><link rel="stylesheet" href="/parity.css"><link rel="stylesheet" href="/web.css">' +
+        '<main style="width:100%;min-width:0;height:100vh;overflow:auto;padding:12px;display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start">' +
+        cases.map(([name,age])=>{
+          const at=new Date(now-(age??0)*1000).toISOString();
+          const device={id:3001,name,profile:'PowerSave',status:'Out',error:'None',lat:51,lon:-2,hasGps:true,
+            batt:3900,rssi:-90,snr:8,ingestPath:'lora_hub',lastUpdate:now,positionRecordedAt:at,
+            gnss:age===null?null:{accuracyM:6,satellites:8,fixAgeS:0,recordedAt:at}};
+          return '<section style="width:390px;max-width:100%;min-width:0"><h3>'+name+'</h3>'+[false,true].map(expanded=>renderCollar({device,now,expanded,ageSeconds:0})).join('')+'</section>';
+        }).join('')+'</main>');
+      return;
+    }
     if (req.url === '/faults') {
       const cases=[['Stale GPS',0xc1,0],['GPS unavailable',0x80,0],['Low battery',0x85,0],
         ['Multiple indicators',0xc4,4],['Wake check-in',0x88,7],['Healthy / Lost Alert',0x09,7]];

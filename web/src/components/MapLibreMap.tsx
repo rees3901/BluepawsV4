@@ -13,7 +13,8 @@ import { gnssUncertainty, uncertaintyPolygon } from "@/lib/gnssUncertainty";
 import { contextMenuHtml, copyTextToClipboard, temporaryPinPopupHtml } from "@/lib/mapLocationPopup";
 import { EMPTY_MAP_CENTER, EMPTY_MAP_ZOOM } from "@/lib/mapViewport";
 import { normalizeMarkerColor } from "@/lib/markerColor";
-import { mapPopupHtml } from "@/lib/mapPopup";
+import { mapPopupHtml, refreshMapPopupGps } from "@/lib/mapPopup";
+import { updateGpsMarker } from "@/lib/gpsMarker";
 import { isDeviceInactive } from "@/lib/devicePresence";
 import { updateTrailPoints } from "@/lib/trailPoints";
 import { locatedDevices, type ConfiguredMapRendererProps } from "@/components/mapRenderer";
@@ -220,6 +221,15 @@ export default function MapLibreMap(props: ConfiguredMapRendererProps) {
           marker.setLngLat([device.lon, device.lat]);
           updateMarkerElement(marker.getElement(), device.name, avatar, normalizeMarkerColor(avatar.color), device.status, freshness);
         }
+        updateGpsMarker(marker.getElement(), device, presenceNow);
+      }
+      const popup = devicePopupRef.current;
+      const content = popup?.getElement()?.querySelector<HTMLElement>("[data-map-device-id]");
+      const selected = content ? visible.find(device => device.id === Number(content.dataset.mapDeviceId)) : undefined;
+      if (popup && content && selected) {
+        refreshMapPopupGps(content, selected, presenceNow);
+        const point = popup.getLngLat();
+        if (point.lng !== selected.lon || point.lat !== selected.lat) popup.setLngLat([selected.lon, selected.lat]);
       }
       syncTrails(map, visible, avatars, trailIds, trailHistory, trailPointsRef.current, presenceNow);
       syncUncertainty(map, visible, avatars);

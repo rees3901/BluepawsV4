@@ -3,19 +3,21 @@ import { transportPresentation } from "@/lib/transportPath";
 import type { IngestPath } from "@/types/telemetry";
 import type { TelemetryDevice } from "@/types/telemetry";
 import { gnssQuality } from "@/lib/gnssQuality";
+import type { GpsFreshness } from "@/lib/gpsFreshness";
 
-export function GnssIndicator({ device }: { device: TelemetryDevice }) {
+export function GnssIndicator({ device, gps }: { device: TelemetryDevice; gps?: GpsFreshness }) {
   const fix = device.gnss;
   const quality = gnssQuality(fix?.accuracyM, device.hasGps);
-  const description = !device.hasGps ? "No GNSS fix available" : !fix
+  const description = (gps ? `${gps.label}. ${gps.notice} ` : "") + (!device.hasGps ? "No GNSS fix available" : !fix
     ? device.entity === "hub"
       ? `${device.source ?? "Last hub position"}. Satellite count and accuracy are not included in the hub report.`
       : "Last GNSS fix: quality not reported"
-    : `Last GNSS fix: ${quality.label}. Estimated accuracy at the last GPS fix: ${quality.level ? `${fix.accuracyM} m` : "unknown"}; satellites: ${fix.satellites ?? "unknown"}${fix.hdop != null ? `; HDOP: ${fix.hdop} (not accuracy in metres)` : ""}; fix age at report: ${fix.fixAgeS} seconds. Report: ${fix.recordedAt}. Accuracy is a rough estimate, not a guaranteed error bound. Not a live satellite signal reading.`;
+    : `Last GNSS fix: ${quality.label}. Estimated accuracy at the last GPS fix: ${quality.level ? `${fix.accuracyM} m` : "unknown"}; satellites: ${fix.satellites ?? "unknown"}${fix.hdop != null ? `; HDOP: ${fix.hdop} (not accuracy in metres)` : ""}; fix age at report: ${fix.fixAgeS} seconds. Report: ${fix.recordedAt}. Accuracy is a rough estimate, not a guaranteed error bound. Not a live satellite signal reading.`);
+  const barColor = gps?.warning ? "#94a3b8" : quality.color;
   return <details className="gnss-indicator" onClick={event => event.stopPropagation()}>
     <summary className="signal-indicator" title={description} aria-label={`${description}. Show GPS details`}>
       <span className="gnss-emoji" aria-hidden="true">🛰️</span>
-      {[1, 2, 3, 4, 5].map(bar => <span aria-hidden="true" key={bar} className={`sig-bar${bar <= quality.level ? " filled" : ""}`} style={{ height: 4 + bar * 3, background: bar <= quality.level ? quality.color : undefined }} />)}
+      {[1, 2, 3, 4, 5].map(bar => <span aria-hidden="true" key={bar} className={`sig-bar${bar <= quality.level ? " filled" : ""}`} style={{ height: 4 + bar * 3, background: bar <= quality.level ? barColor : undefined }} />)}
       <span className="sig-label">Sats: {device.hasGps ? fix?.satellites ?? "—" : "—"}</span>
       {quality.level > 0 && <span className="sig-label gnss-accuracy">Est. acc: {fix?.accuracyM} m</span>}
     </summary>
@@ -161,7 +163,7 @@ export function HomeDistance({ children }: { children: ReactNode }) {
 
 export function LastSeen({ children }: { children: ReactNode }) {
   return (
-    <span className="card-indicator-group card-lastseen-group" title="Last seen">
+    <span className="card-indicator-group card-lastseen-group" title="Last contact — not the GPS fix time">
       <svg className="indicator-icon icon-stopwatch" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <circle cx="12" cy="13" r="8" /><line x1="12" y1="9" x2="12" y2="13" />
         <line x1="9" y1="1" x2="15" y2="1" /><line x1="12" y1="1" x2="12" y2="5" />
