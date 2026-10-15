@@ -159,7 +159,7 @@ export function DeviceCard(props: DeviceCardProps) {
             </>}
           </div>
           {fault && <div className="card-fault-row"><span className="error-badge" title={fault.title} aria-label={fault.title}>{fault.label}</span></div>}
-          {offline ? <div className="card-offline-summary">No reports for {lastSeen}</div> : <><div className="card-indicators card-indicators-primary">
+          {offline ? <div className="card-offline-summary card-contact-gps-row">No reports for {lastSeen}{!isHub && <GpsAgeBadge gps={gps} />}</div> : <><div className="card-indicators card-indicators-primary">
             <span className="card-indicator-group"><BatteryIndicator millivolts={isHub ? null : device.batt} percent={device.batteryPercent} /></span>
             <span className="card-indicator-group">{isHub ? <><WifiIndicator rssi={device.rssi} contactLost={ageSeconds >= hubContactGrace(device.hubReportingProfile)} /><BluetoothBeaconIndicator advertising={device.bleHome} enabled={props.bluetoothEnabled} disabled={props.bluetoothToggleDisabled} onToggle={props.onBluetoothToggle} /></> : <SignalIndicator rssi={device.rssi} snr={device.snr} ingestPath={device.ingestPath} />}</span>
             <GnssIndicator device={device} gps={isHub ? undefined : gps} />
@@ -168,9 +168,9 @@ export function DeviceCard(props: DeviceCardProps) {
             {!isHub && <HomeDistance>{distance}</HomeDistance>}
             <LastSeen>{lastSeen}</LastSeen>
             {!isHub && <span className={`collar-awake ${collarAwake ? "awake" : "sleeping"}`} title={collarAwake ? "Fresh packet received — expected ten-second command receive window, not guaranteed delivery" : "Receive window ended — collar probably sleeping; sleep is not directly confirmed"} aria-label={collarAwake ? `Collar recently heard; ${props.awakeSeconds} seconds remaining` : "Collar probably sleeping"}>{collarAwake ? "💡" : "💤"}</span>}
+            {!isHub && <GpsAgeBadge gps={gps} />}
             {!isHub && portableMode && <span className="card-indicator-group"><BleProximity rssi={device.rssi === null ? null : device.rssi + 28} /></span>}
           </div></>}
-          {!isHub && <GpsAgeBadge gps={gps} />}
         </div>
         <span className="card-chevron">{expanded ? "▲" : "▼"}</span>
       </div>
@@ -179,7 +179,6 @@ export function DeviceCard(props: DeviceCardProps) {
         <div className="card-detail-reveal-inner">
           <div className="card-detail">
             {offline && <p className="card-offline-notice"><strong>Offline.</strong> These are last-known details from {formatAge(ageSeconds)} and may no longer be current.</p>}
-            {!isHub && gps.warning && <p className={`gps-location-notice ${gps.className}`}>{gps.notice}</p>}
             <div className="card-grid">
               <span className="label">{offline || (!isHub && gps.warning) ? "Last known coordinates" : "Coordinates"}</span>
               <span className="value">
