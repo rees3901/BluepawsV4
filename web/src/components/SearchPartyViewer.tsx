@@ -267,22 +267,21 @@ function SearchPartyDeviceRow({ device, avatar, now, followed, trailVisible, onA
             </>}
           </div>
           {fault && <div className="card-fault-row"><span className="error-badge" title={fault.title} aria-label={fault.title}>{fault.label}</span></div>}
-          {offline ? <div className="card-offline-summary">No reports for {formatLastSeen(ageSeconds)}</div> : isHub ? <div className="card-hub-guest-summary">Read-only hub bearing · updated {formatLastSeen(ageSeconds)} ago</div> : <><div className="card-indicators">
+          {offline ? <div className="card-offline-summary card-contact-gps-row">No reports for {formatLastSeen(ageSeconds)}{!isHub && <GpsAgeBadge gps={gps} />}</div> : isHub ? <div className="card-hub-guest-summary">Read-only hub bearing · updated {formatLastSeen(ageSeconds)} ago</div> : <><div className="card-indicators">
             <span className="card-indicator-group"><BatteryIndicator millivolts={device.batt} percent={device.batteryPercent} /></span>
             <span className="card-indicator-group"><SignalIndicator rssi={device.rssi} snr={device.snr} ingestPath={device.ingestPath} /></span>
           </div>
           <div className="card-indicators card-indicators-row3">
             <HomeDistance>{distance}</HomeDistance>
             <LastSeen>{formatLastSeen(ageSeconds)}</LastSeen>
+            <GpsAgeBadge gps={gps} />
           </div></>}
-          {!isHub && <GpsAgeBadge gps={gps} />}
         </div>
       </div>
       <div className="card-detail-reveal" aria-hidden={false}>
         <div className="card-detail-reveal-inner">
           <div className="card-detail">
             {offline && <p className="card-offline-notice"><strong>Offline.</strong> These are last-known details from {formatAge(ageSeconds)} and may no longer be current.</p>}
-            {!isHub && gps.warning && <p className={`gps-location-notice ${gps.className}`}>{gps.notice}</p>}
             <div className="card-grid">
               <span className="label">{offline || (!isHub && gps.warning) ? "Last known coordinates" : "Coordinates"}</span>
               <span className="value">{device.hasGps ? (

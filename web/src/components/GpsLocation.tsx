@@ -1,7 +1,7 @@
 import { gpsAsAt, type GpsFreshness } from "@/lib/gpsFreshness";
 
 export function GpsAgeBadge({ gps }: { gps: GpsFreshness }) {
-  return <div className={`gps-age-badge ${gps.className}`} title={gps.notice}>{gps.warning ? "⚠ " : ""}{gps.label}</div>;
+  return <span className={`gps-age-badge ${gps.className}`} title={gps.notice}>{gps.warning ? "⚠ " : ""}{gps.label}</span>;
 }
 
 export function GpsAsAt({ gps, now }: { gps: GpsFreshness; now: number }) {

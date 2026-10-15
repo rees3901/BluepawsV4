@@ -21,6 +21,8 @@ test('expanded and collapsed cards cannot confuse new contact with old GPS', () 
     assert.match(html, /datetime="2026-10-15T15:13:55.000Z"/i);
     assert.match(html, /Last contact/);
     assert.match(html, /not a current position/);
+    assert.match(html.match(/<div class="card-indicators card-indicators-row3">(.*?)<\/div>/s)[1], /gps-age-badge/);
+    assert.doesNotMatch(html, /gps-location-notice/);
     assert.doesNotMatch(html.match(/<details class="gnss-indicator">.*?<\/details>/s)[0], /background:#84cc16/);
   }
 });
@@ -33,6 +35,8 @@ test('the same popup HTML warns in either renderer, even without a hardware faul
   assert.match(html, /card-coords card-coords-link gps-stale/);
   assert.match(html, /Last known location — not a current position/);
   assert.doesNotMatch(html, /Reported fault/);
+  assert.match(html.match(/<div class="card-indicators card-indicators-row3">(.*?)<\/div>/s)[1], /data-gps-age/);
+  assert.doesNotMatch(html, /data-gps-notice|gps-location-notice/);
 });
 
 test('a fresh fix removes stale notices and restores green GPS information', () => {
@@ -44,19 +48,19 @@ test('a fresh fix removes stale notices and restores green GPS information', () 
 });
 
 test('open vector popup updates GPS and contact in place, without replacing actions', () => {
-  const nodes = Object.fromEntries(['gps-age', 'gps-as-at', 'gps-notice', 'gps-coordinates', 'gps-coordinate-label', 'last-contact'].map(key => [`[data-${key}]`, {}]));
+  const nodes = Object.fromEntries(['gps-age', 'gps-as-at', 'gps-coordinates', 'gps-coordinate-label', 'last-contact'].map(key => [`[data-${key}]`, {}]));
   const root = { querySelector: selector => nodes[selector] };
   const refresh = fixtureModule('@/lib/mapPopup').refreshMapPopupGps;
   refresh(root, device, now);
   assert.equal(nodes['[data-gps-age]'].textContent, '⚠ GPS 2h 14m old');
   assert.equal(nodes['[data-last-contact]'].textContent, 'just now');
-  assert.equal(nodes['[data-gps-notice]'].hidden, false);
+  assert.match(nodes['[data-gps-as-at]'].title, /not a current position/);
   const stamp = nodes['[data-gps-as-at]'].textContent;
   refresh(root, { ...device, lastUpdate: now + 30_000 }, now + 30_000);
   assert.equal(nodes['[data-last-contact]'].textContent, 'just now');
   assert.equal(nodes['[data-gps-as-at]'].textContent, stamp);
   refresh(root, { ...device, gnss: { ...device.gnss, recordedAt: new Date(now).toISOString() }, positionRecordedAt: new Date(now).toISOString() }, now);
-  assert.equal(nodes['[data-gps-notice]'].hidden, true);
+  assert.match(nodes['[data-gps-as-at]'].title, /Recent GPS fix/);
   assert.equal(nodes['[data-gps-coordinates]'].className, 'card-coords card-coords-link gps-fresh');
 });
 
@@ -72,7 +76,7 @@ test('both map implementations apply the shared age badge without changing pin a
 test('marker badges never accumulate and disappear on a new fix; the pin is not moved', () => {
   class Element {
     children=[]; attributes={}; className='';
-    querySelector() { return this.children.find(e=>e.className.includes('marker-gps-age')); }
+    querySelector() { return this.children.find(e=>e.className.includes('marker-gps-warning')); }
     setAttribute(key,value) { this.attributes[key]=value; }
     append(child) { child.parent=this; this.children.push(child); }
     remove() { this.parent.children=this.parent.children.filter(e=>e!==this); }
@@ -86,9 +90,17 @@ test('marker badges never accumulate and disappear on a new fix; the pin is not 
   const update=context.exports.updateGpsMarker;
   update(pin,device,now); update(pin,device,now+1000);
   assert.equal(pin.children.length,1);
-  assert.equal(pin.children[0].textContent,'⚠ GPS 2h 14m old');
+  assert.equal(pin.children[0].textContent,'🛰');
+  assert.match(pin.children[0].className,/marker-gps-warning gps-stale/);
+  assert.match(pin.title,/GPS 2h 14m old/);
   assert.match(pin.attributes['aria-label'],/not a current position/);
   const current={...device,positionRecordedAt:new Date(now).toISOString(),gnss:{...device.gnss,recordedAt:new Date(now).toISOString()}};
   update(pin,current,now);
   assert.equal(pin.children.length,0);
+});
+
+test('offline cards keep the compact GPS age next to the contact summary', () => {
+  const html=renderCollar({device,now:now+4*3600_000,ageSeconds:4*3600});
+  assert.match(html.match(/<div class="card-offline-summary card-contact-gps-row">(.*?)<\/div>/s)[1], /gps-age-badge/);
+  assert.doesNotMatch(html,/gps-location-notice/);
 });
