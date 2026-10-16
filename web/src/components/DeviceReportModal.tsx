@@ -1,6 +1,6 @@
 "use client";
 import { createPortal } from "react-dom";
-import type { DeviceReport } from "@/lib/deviceReports";
+import type { DeviceReport, DeviceReportTableRow } from "@/lib/deviceReports";
 
 interface DeviceReportModalProps {
   deviceName: string;
@@ -48,7 +48,7 @@ export function DeviceReportModal({ deviceName, reports, loading, error, onClose
                   </tr>
                 </thead>
                 <tbody>
-                  {latest.rows.map((row) => (
+                  {latest.rows.filter(row => !row.advanced).map((row) => (
                     <tr key={row.field}>
                       <th scope="row">{row.field}</th>
                       <td>{row.data}</td>
@@ -59,6 +59,11 @@ export function DeviceReportModal({ deviceName, reports, loading, error, onClose
                 </tbody>
               </table>
             </div>
+
+            {latest.rows.some(row => row.advanced) && <details className="previous-reports report-diagnostics">
+              <summary>Advanced packet diagnostics</summary>
+              <ReportDiagnosticsTable rows={latest.rows.filter(row => row.advanced)} />
+            </details>}
 
             {reports.length > 1 && (
               <details className="previous-reports">
@@ -83,4 +88,11 @@ export function DeviceReportModal({ deviceName, reports, loading, error, onClose
     </div>,
     document.body
   );
+}
+
+function ReportDiagnosticsTable({rows}: {rows: DeviceReportTableRow[]}) {
+  return <div className="report-table-wrap"><table className="report-table" aria-label="Advanced packet diagnostics">
+    <thead><tr>{["Field","Data","Description","What this means"].map(label => <th key={label} scope="col">{label}</th>)}</tr></thead>
+    <tbody>{rows.map(row => <tr key={row.field}><th scope="row">{row.field}</th><td>{row.data}</td><td>{row.description}</td><td>{row.meaning}</td></tr>)}</tbody>
+  </table></div>;
 }
