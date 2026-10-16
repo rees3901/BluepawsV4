@@ -55,15 +55,50 @@ test('on-schedule Power Save and Home presence never relabel old coordinates as 
     const card = renderCollar({ device: collar, now, ageSeconds: 0 });
     const popup = fixtureModule('@/lib/mapPopup').mapPopupHtml(collar, avatar, now);
     for (const html of [card, popup]) {
-      assert.match(html, /gps-age-badge gps-fresh/);
+      assert.match(html, collar === home ? /gps-age-badge gps-aging/ : /gps-age-badge gps-fresh/);
       assert.match(html, /Last known coordinates/);
       assert.match(html, /not a current position/);
       assert.doesNotMatch(html, /Recent GPS fix/);
       assert.match(html, /GPS as at/);
     }
     assert.match(card, /age (20m|2h 14m)/);
-    if (collar === home) assert.match(card, /Home confirmed · age 2h 14m/);
+    if (collar === home) {
+      assert.match(card, /class="home-beacon-confirmed"[^>]*>Home confirmed<\/span>/);
+      assert.match(card, /gps-age-badge gps-aging[^>]*>⚠ age 2h 14m/);
+    }
   }
+});
+
+test('recent Home beacon confirmation stays independent when GPS hits the four-hour red cap', () => {
+  const at = new Date(now - 4 * 3600_000).toISOString();
+  const home = { ...device, status: 'Home', bleHome: true, homeBeaconSeenAt: now,
+    lastReportReason: 7, positionRecordedAt: at, gnss: { ...device.gnss, recordedAt: at } };
+  for (const html of [renderCollar({device:home,now,ageSeconds:0}), fixtureModule('@/lib/mapPopup').mapPopupHtml(home,avatar,now)]) {
+    assert.match(html, /class="home-beacon-confirmed"(?! hidden)[^>]*>Home confirmed<\/span>/);
+    assert.match(html, /gps-age-badge gps-stale[^>]*>⚠ age 4h 0m/);
+    assert.match(html, /Last known coordinates/);
+    assert.match(html, /not a current position/);
+  }
+  const css = readFileSync(new URL('../web/src/app/web.css', import.meta.url), 'utf8');
+  assert.match(css, /\.home-beacon-confirmed \{ color: #4ade80; \}/);
+  assert.match(css, /\.home-beacon-confirmed\[hidden\] \{ display: none; \}/);
+});
+
+test('open popup independently expires Home confirmation and updates GPS age without replacing actions', () => {
+  const nodes = Object.fromEntries(['home-beacon','gps-age','gps-as-at','gps-coordinates','gps-coordinate-label','last-contact'].map(key => [`[data-${key}]`, {}]));
+  const root = { querySelector: selector => nodes[selector] };
+  const at = new Date(now - 4 * 3600_000).toISOString();
+  const home = {...device,status:'Home',bleHome:true,homeBeaconSeenAt:now,lastReportReason:7,
+    positionRecordedAt:at,gnss:{...device.gnss,recordedAt:at}};
+  const refresh = fixtureModule('@/lib/mapPopup').refreshMapPopupGps;
+  refresh(root,home,now);
+  assert.equal(nodes['[data-home-beacon]'].hidden,false);
+  assert.equal(nodes['[data-gps-age]'].textContent,'⚠ age 4h 0m');
+  assert.match(nodes['[data-gps-age]'].className,/gps-stale/);
+  refresh(root,home,now+1861_000);
+  assert.equal(nodes['[data-home-beacon]'].hidden,true);
+  assert.match(nodes['[data-gps-age]'].className,/gps-stale/);
+  assert.equal(nodes['[data-gps-coordinate-label]'].textContent,'Last known coordinates');
 });
 
 test('a green on-schedule old fix still has a last-known warning on the map pin', () => {

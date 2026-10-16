@@ -26,6 +26,11 @@ grace. Green lasts through one such window; amber begins after one expected
 cycle without a new fix; red begins after three. These are inferred missed
 opportunities, not counts of received check-ins.
 
+There are independent absolute GPS-age backstops: **amber at one hour** and
+**red at four hours**, even when the Home refresh schedule is longer. Shorter
+profile warnings still apply sooner. These caps do not fabricate missed full
+telemetry cycles, alter the firmware's refresh schedule, or mark a collar offline.
+
 Separately, up to three actual newer no-fix full reports are read from existing
 observations. Reasons `Telemetry (0)`, `Interrupt (3)` and `Boot (4)` represent
 GPS attempts. ACKs, keepalives, other lightweight messages and wake check-ins
@@ -36,7 +41,10 @@ A genuine new position resets this count; a check-in does not.
 Home relaxation requires a collar Home/beacon report no older than its wake
 interval plus 60 seconds. Command ACKs do not renew beacon evidence. An away
 report clears it; Emergency Lost never relaxes its GPS schedule. The UI shows
-`Home confirmed · age …`, retaining the actual GPS age and timestamp.
+a separate green `Home confirmed` indicator alongside the independently
+coloured GPS age. Home confirmation can remain green while an old GPS position
+is amber or red; neither changes the actual fix age or timestamp. Beacon expiry
+removes only the Home confirmation; a genuine fresh GPS fix clears the age warning.
 
 The currently **reported** profile is used, never a queued profile command.
 These rules are shared by device cards, raster/vector popups and map markers.
