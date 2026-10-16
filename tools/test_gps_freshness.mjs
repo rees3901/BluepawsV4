@@ -64,7 +64,8 @@ test('on-schedule Power Save and Home presence never relabel old coordinates as 
     }
     assert.match(card, /GPS age: (20m|2h 14m)/);
     if (collar === home) {
-      assert.match(card, /class="home-beacon-confirmed"[^>]*>Home confirmed<\/span>/);
+      assert.match(card, /class="card-status status-home" title="The collar recently detected/);
+      assert.doesNotMatch(card, /home-beacon-confirmed|>Home confirmed</);
       assert.match(card, /gps-age-badge gps-aging[^>]*>⚠ GPS age: 2h 14m/);
     }
   }
@@ -75,14 +76,12 @@ test('recent Home beacon confirmation stays independent when GPS hits the four-h
   const home = { ...device, status: 'Home', bleHome: true, homeBeaconSeenAt: now,
     lastReportReason: 7, positionRecordedAt: at, gnss: { ...device.gnss, recordedAt: at } };
   for (const html of [renderCollar({device:home,now,ageSeconds:0}), fixtureModule('@/lib/mapPopup').mapPopupHtml(home,avatar,now)]) {
-    assert.match(html, /class="home-beacon-confirmed"(?! hidden)[^>]*>Home confirmed<\/span>/);
+    assert.match(html, /class="card-status status-home"[^>]*title="The collar recently detected/);
+    assert.doesNotMatch(html, /home-beacon-confirmed|>Home confirmed</);
     assert.match(html, /gps-age-badge gps-stale[^>]*>⚠ GPS age: 4h 0m/);
     assert.match(html, /Last known coordinates/);
     assert.match(html, /not a current position/);
   }
-  const css = readFileSync(new URL('../web/src/app/web.css', import.meta.url), 'utf8');
-  assert.match(css, /\.home-beacon-confirmed \{ color: #4ade80; \}/);
-  assert.match(css, /\.home-beacon-confirmed\[hidden\] \{ display: none; \}/);
 });
 
 test('open popup independently expires Home confirmation and updates GPS age without replacing actions', () => {
@@ -93,11 +92,11 @@ test('open popup independently expires Home confirmation and updates GPS age wit
     positionRecordedAt:at,gnss:{...device.gnss,recordedAt:at}};
   const refresh = fixtureModule('@/lib/mapPopup').refreshMapPopupGps;
   refresh(root,home,now);
-  assert.equal(nodes['[data-home-beacon]'].hidden,false);
+  assert.match(nodes['[data-home-beacon]'].title,/recently detected/);
   assert.equal(nodes['[data-gps-age]'].textContent,'⚠ GPS age: 4h 0m');
   assert.match(nodes['[data-gps-age]'].className,/gps-stale/);
   refresh(root,home,now+1861_000);
-  assert.equal(nodes['[data-home-beacon]'].hidden,true);
+  assert.match(nodes['[data-home-beacon]'].title,/recent Home beacon confirmation is unavailable/);
   assert.match(nodes['[data-gps-age]'].className,/gps-stale/);
   assert.equal(nodes['[data-gps-coordinate-label]'].textContent,'Last known coordinates');
 });

@@ -1,8 +1,24 @@
 import { createClient } from "@/lib/supabase/client";
 import { formatMapCoordinates, googleMapsUrl } from "@/lib/mapLocation";
 import type { CollarStatus, IngestPath, PowerProfile, TelemetryDevice } from "@/types/telemetry";
+import { accuracyMeaning, batteryMeaning, fixAgeMeaning, radioMeaning, satellitesMeaning } from "./reportInsights.ts";
+import { isFullGpsReport } from "./gpsReporting.ts";
 
 const REPORT_LIMIT = 10;
+const REPORT_DESCRIPTIONS: Record<string, string> = {
+  Received: "Server acceptance time of this report, not its GPS measurement time.",
+  "Report type": "Message category identifying why the collar transmitted.",
+  Status: "Home/Out/Lost/Error state declared by this packet.",
+  "Power profile": "Selected collar power and reporting policy.",
+  Position: "Latitude and longitude included in this packet.",
+  Battery: "Battery voltage in millivolts (1000 mV = 1 V), not a charge percentage.",
+  "GPS detail": "GNSS quality and fix age recorded in this packet, not live satellite readings.",
+  "Radio RSSI": "Received signal strength in dBm (decibels relative to one milliwatt); less negative is stronger.",
+  "Radio SNR": "Signal-to-noise ratio in dB: signal power relative to the receiver's measured noise.",
+  Source: "The transport route that delivered this accepted packet.",
+  Sequence: "Collar's rolling message sequence counter.",
+  "Accepted routes": "Receipt count for this one observation on the selected route, not a count of distinct routes.",
+};
 
 export interface DeviceObservationRow {
   id: number;
@@ -47,6 +63,7 @@ export interface DeviceReportTableRow {
   field: string;
   data: string;
   description: string;
+  meaning: string;
 }
 
 export async function loadDeviceReports(deviceId: number): Promise<DeviceReport[]> {
@@ -126,14 +143,16 @@ export function buildDeviceReport(observation: DeviceObservationRow, path: Devic
   const reportType = txReasonLabel(observation.tx_reason);
   const status = statusLabel(observation.status);
   const profile = profileLabel(observation.power_profile);
-  const signal = signalLabel(path?.link_rssi_dbm ?? null, path?.link_snr_db ?? null);
   const source = sourceLabel(path);
   const receivedAt = formatDateTime(observation.received_at);
-  const positionData = observation.gnss_valid && observation.latitude !== null && observation.longitude !== null
-    ? formatMapCoordinates(observation.latitude, observation.longitude)
+  const usablePosition = observation.gnss_valid && observation.latitude !== null && observation.longitude !== null
+    && Number.isFinite(observation.latitude) && Math.abs(observation.latitude) <= 90
+    && Number.isFinite(observation.longitude) && Math.abs(observation.longitude) <= 180;
+  const positionData = usablePosition
+    ? formatMapCoordinates(observation.latitude!, observation.longitude!)
     : "No fresh GPS fix";
 
-  const rows: DeviceReportTableRow[] = [
+  const rows: Omit<DeviceReportTableRow, "meaning">[] = [
     {
       field: "Received",
       data: receivedAt,
@@ -157,9 +176,11 @@ export function buildDeviceReport(observation: DeviceObservationRow, path: Devic
     {
       field: "Position",
       data: positionData,
-      description: observation.gnss_valid
-        ? "This report included a fresh GPS position."
-        : "This report did not include a new GPS position, so the map should keep the last valid location.",
+      description: positionData !== "No fresh GPS fix"
+        ? "A GPS position was included, but it may already have been old. Check fix age and the current GPS age before searching here."
+        : observation.tx_reason === 7
+          ? "This is a lightweight wake check-in, so no new GPS position is expected. It confirms contact, not current coordinates."
+          : "No usable GPS position was included. Keep the last known location and its original timestamp; this report cannot confirm where the pet is now.",
     },
     {
       field: "Battery",
@@ -176,10 +197,14 @@ export function buildDeviceReport(observation: DeviceObservationRow, path: Devic
         : "Expected for a home wake check-in or an indoor collar where GNSS was skipped or unavailable.",
     },
     {
-      field: "Signal",
-      data: signal,
+      field: "Radio RSSI",
+      data: path?.link_rssi_dbm == null ? "Not reported" : `${path.link_rssi_dbm} dBm`,
       description: signalDescription(path?.link_type ?? null),
     },
+    { field: "Radio SNR", data: path?.link_snr_db == null ? "Not reported" : `${path.link_snr_db} dB`, description: signalDescription(path?.link_type ?? null) },
+    { field: "GPS accuracy", data: observation.gnss_valid ? `${observation.acc_m} m` : "Not available in this packet", description: "Estimated horizontal error in metres for the reported fix, not a guaranteed radius." },
+    { field: "Satellites", data: observation.gnss_valid ? String(observation.sat_count) : "Not available in this packet", description: "Reported satellite count at the time of this fix, not a live signal-strength measurement." },
+    { field: "Fix age at report", data: observation.gnss_valid ? `${observation.fix_age_s} seconds` : "Not available in this packet", description: "How old the GNSS fix already was when this telemetry packet was recorded." },
     {
       field: "Source",
       data: source,
@@ -206,7 +231,16 @@ export function buildDeviceReport(observation: DeviceObservationRow, path: Devic
   return {
     observation,
     path,
-    rows,
+    rows: rows.map(row => ({ ...row, description: REPORT_DESCRIPTIONS[row.field] ?? row.description,
+      meaning: row.field === "Battery" ? batteryMeaning(observation.batt_mv)
+        : row.field === "Radio RSSI" || row.field === "Radio SNR" ? radioMeaning(path?.link_rssi_dbm ?? null, path?.link_snr_db ?? null, path?.link_type ?? null, row.field === "Radio RSSI" ? "rssi" : "snr")
+        : row.field === "GPS detail" && observation.gnss_valid ? usablePosition ? `${accuracyMeaning(observation.acc_m)} This packet's metadata does not by itself establish a new GPS measurement; check GPS age.` : "The GNSS-valid flag and coordinates disagree. Do not rely on this packet as a valid new position."
+        : row.field === "GPS accuracy" ? usablePosition ? accuracyMeaning(observation.acc_m) : "No usable position in this packet; an accuracy estimate must not be mistaken for a valid new position."
+        : row.field === "Satellites" ? observation.gnss_valid ? satellitesMeaning(observation.sat_count) : "No new satellite count in this packet; this does not imply zero satellites now."
+        : row.field === "Fix age at report" ? observation.gnss_valid ? isFullGpsReport(observation.tx_reason) ? fixAgeMeaning(observation.fix_age_s) : "This is not a full GPS telemetry message. Included fix metadata may be cached; a check-in or ACK cannot by itself refresh the GPS timestamp." : "No new fix time in this packet. Keep the map's last known GPS timestamp unchanged."
+        : row.field === "Sequence" ? "Use with timestamps to distinguish reports. This rolling counter can wrap or restart; a gap alone does not prove packet loss."
+        : row.field === "Accepted routes" && path ? `${path.receipt_count} receipt(s) on this route. Repeated copies are not new GPS fixes or additional collar check-ins.`
+        : row.description })),
     summary: `Device ${observation.device_guid16} ${summaryVerb(observation.tx_reason)} with status ${status.toLowerCase()} at ${receivedAt}.`,
   };
 }
@@ -225,6 +259,8 @@ export function deviceReportsToCsv(reports: DeviceReport[]) {
       "signal",
       "source",
       "summary",
+      "field_descriptions",
+      "reading_meanings",
     ],
     ...reports.map((report) => [
       report.observation.received_at,
@@ -240,6 +276,8 @@ export function deviceReportsToCsv(reports: DeviceReport[]) {
       signalLabel(report.path?.link_rssi_dbm ?? null, report.path?.link_snr_db ?? null),
       sourceLabel(report.path),
       report.summary,
+      JSON.stringify(Object.fromEntries(report.rows.map(row => [row.field, row.description]))),
+      JSON.stringify(Object.fromEntries(report.rows.map(row => [row.field, row.meaning]))),
     ]),
   ];
   return lines.map((line) => line.map(csvCell).join(",")).join("\n");
@@ -327,7 +365,8 @@ function statusDescription(value: number) {
   if (value === 0) return "The collar believes the pet is at home, usually because the Home Hub BLE beacon was seen.";
   if (value === 1) return "The collar believes the pet is away from the home beacon area.";
   if (value === 2) return "The pet has been marked as lost or is in a lost/search state.";
-  return "The collar reported a problem or unusual condition.";
+  if (value === 3) return "The collar reported a problem or unusual condition; inspect diagnostic flags rather than assuming a cause.";
+  return "Unrecognised status code. Do not infer Home, Out or a fault from this value.";
 }
 
 function profileLabel(value: number) {
@@ -339,7 +378,7 @@ function profileDescription(value: number) {
   if (value === 1) return "Everyday tracking mode for normal collar use.";
   if (value === 2) return "More frequent reporting for closer monitoring.";
   if (value === 4) return "Development-only noisy reporting mode used for bench testing.";
-  return "Emergency search mode with aggressive reporting at the cost of battery life.";
+  return value === 3 ? "Emergency search mode with aggressive reporting at the cost of battery life." : "Unrecognised profile code; its reporting cadence cannot be inferred safely.";
 }
 
 function batteryDescription(millivolts: number) {

@@ -41,9 +41,10 @@ export function DeviceReportModal({ deviceName, reports, loading, error, onClose
               <table className="report-table">
                 <thead>
                   <tr>
-                    <th>Field</th>
-                    <th>Data</th>
-                    <th>What this means</th>
+                    <th scope="col">Field</th>
+                    <th scope="col">Data</th>
+                    <th scope="col">Description</th>
+                    <th scope="col">What this means</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -52,6 +53,7 @@ export function DeviceReportModal({ deviceName, reports, loading, error, onClose
                       <th scope="row">{row.field}</th>
                       <td>{row.data}</td>
                       <td>{row.description}</td>
+                      <td>{row.meaning}</td>
                     </tr>
                   ))}
                 </tbody>

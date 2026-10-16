@@ -44,6 +44,15 @@ export function renderCollar(props={}) {
   return renderToStaticMarkup(React.createElement(load('@/components/DeviceCard').DeviceCard,
     {...cardProps,device,avatar:{kind:'emoji',emoji:'🐱',color:'#0099ff'},...props}));
 }
+export function renderReport(report, entityLabel='hub') {
+  // The real modal, with only the portal target substituted for static fixture QA.
+  const source=readFileSync(new URL('../web/src/components/DeviceReportModal.tsx',import.meta.url),'utf8');
+  const context=vm.createContext({exports:{},document:{body:{}},require(name){
+    return name==='react-dom' ? {createPortal:node=>node} : load(name);
+  }});
+  vm.runInContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText,context);
+  return renderToStaticMarkup(React.createElement(context.exports.DeviceReportModal,{deviceName:'Synthetic report',reports:[report],entityLabel,loading:false,error:null,onClose:noop,onDownload:noop}));
+}
 if (process.argv.includes('--serve')) {
   createServer((req,res) => {
     if (['/parity.css','/web.css','/hub-presence.css'].includes(req.url)) {
@@ -51,6 +60,10 @@ if (process.argv.includes('--serve')) {
       return res.end(readFileSync(new URL('../web/src/app'+req.url,import.meta.url)));
     }
     res.setHeader('Content-Type','text/html; charset=utf-8');
+    if(req.url === '/report-log') {
+      const report=load('@/lib/hubReports').buildHubReport({...hub,received_at:new Date().toISOString(),wifi_rssi_dbm:-69,uptime_s:90});
+      return res.end('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Contextual report fixture</title><link rel="stylesheet" href="/parity.css"><link rel="stylesheet" href="/web.css">'+renderReport(report));
+    }
     if (req.url === '/gps-freshness') {
       const now=Date.now();
       const cases=[['Fresh GPS',15],['Ageing GPS',2400],['Old GPS, new contact',8049],['Home, GPS last known',8049,true],['Unknown fix time',null]];

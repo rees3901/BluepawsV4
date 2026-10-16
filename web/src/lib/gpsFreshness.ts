@@ -8,6 +8,9 @@ export const GPS_AMBER_AGE_CAP_SECONDS = 60 * 60;
 export const GPS_RED_AGE_CAP_SECONDS = 4 * 60 * 60;
 export const HOME_BEACON_NOTICE = "The collar recently detected the Home Hub beacon. This confirms Home presence, not a fresh GPS position.";
 export type GpsFreshness = ReturnType<typeof gpsFreshness>;
+export function homeStatusTooltip(gps: GpsFreshness) {
+  return gps.homeConfirmed ? HOME_BEACON_NOTICE : "Home was last reported, but recent Home beacon confirmation is unavailable. This does not confirm a fresh GPS position.";
+}
 
 // Contact and beacon evidence affect the EXPECTED full-telemetry schedule,
 // never the GPS fix timestamp. 65535 means unknown fix age.

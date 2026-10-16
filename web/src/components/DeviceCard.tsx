@@ -9,7 +9,7 @@ import type { DeviceAction, DeviceAvatar, TelemetryDevice } from "@/types/teleme
 import type { commandMessage } from "@/lib/collarFeedback";
 import { collarFault, type CollarFaultReport } from "@/lib/collarFault";
 import { collarCardFreshness, collarFreshnessClass } from "@/lib/devicePresence";
-import { gpsFreshness } from "@/lib/gpsFreshness";
+import { gpsFreshness, homeStatusTooltip } from "@/lib/gpsFreshness";
 import { GpsAgeBadge, GpsAsAt } from "@/components/GpsLocation";
 
 const STATUS = {
@@ -154,7 +154,7 @@ export function DeviceCard(props: DeviceCardProps) {
           <div className="card-name-row">
             <span className="card-name">{device.name}</span>
             {offline ? <span className="card-status status-offline">Offline</span> : <>
-              {(status.css !== "status-error") && <span className={`card-status ${status.css}`}>{status.emoji} {status.label}</span>}
+              {(status.css !== "status-error") && <span className={`card-status ${status.css}`} title={!isHub && device.status === "Home" ? homeStatusTooltip(gps) : undefined}>{status.emoji} {status.label}</span>}
               <span className={`card-profile ${profileClass}`}>{profileLabel}</span>
             </>}
           </div>
