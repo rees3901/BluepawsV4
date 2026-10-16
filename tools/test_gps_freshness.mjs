@@ -15,7 +15,7 @@ const avatar = { kind: 'emoji', emoji: '🐱', color: '#0099ff' };
 test('expanded and collapsed cards cannot confuse new contact with old GPS', () => {
   for (const expanded of [false, true]) {
     const html = renderCollar({ device, now, expanded, ageSeconds: 0 });
-    assert.match(html, /gps-age-badge gps-stale[^>]*>⚠ GPS 2h 14m old/);
+    assert.match(html, /gps-age-badge gps-stale[^>]*>⚠ age 2h 14m/);
     assert.match(html, /Last known coordinates/);
     assert.match(html, /GPS as at/);
     assert.match(html, /datetime="2026-10-15T15:13:55.000Z"/i);
@@ -52,7 +52,8 @@ test('open vector popup updates GPS and contact in place, without replacing acti
   const root = { querySelector: selector => nodes[selector] };
   const refresh = fixtureModule('@/lib/mapPopup').refreshMapPopupGps;
   refresh(root, device, now);
-  assert.equal(nodes['[data-gps-age]'].textContent, '⚠ GPS 2h 14m old');
+  assert.equal(nodes['[data-gps-age]'].textContent, '⚠ age 2h 14m');
+  assert.match(nodes['[data-gps-age]'].title, /GPS 2h 14m old/);
   assert.equal(nodes['[data-last-contact]'].textContent, 'just now');
   assert.match(nodes['[data-gps-as-at]'].title, /not a current position/);
   const stamp = nodes['[data-gps-as-at]'].textContent;
@@ -103,4 +104,17 @@ test('offline cards keep the compact GPS age next to the contact summary', () =>
   const html=renderCollar({device,now:now+4*3600_000,ageSeconds:4*3600});
   assert.match(html.match(/<div class="card-offline-summary card-contact-gps-row">(.*?)<\/div>/s)[1], /gps-age-badge/);
   assert.doesNotMatch(html,/gps-location-notice/);
+});
+
+test('GNSS copy is compact while detailed satellite and accuracy explanations remain available', () => {
+  const html=renderCollar({device,now,ageSeconds:0});
+  const summary=html.match(/<summary class="signal-indicator"[^>]*>(.*?)<\/summary>/s)[1];
+  assert.match(summary, /class="sig-label">:8<\/span>/);
+  assert.match(summary, />acc:6m<\/span>/);
+  assert.doesNotMatch(summary, /Sats:|Est\. acc:/);
+  assert.match(html, /satellites: 8/);
+  assert.match(html, /Estimated accuracy at the last GPS fix: 6 m/);
+  const unknown=renderCollar({device:{...device,gnss:null},now,ageSeconds:0});
+  assert.match(unknown, />acc:—<\/span>/);
+  assert.match(unknown, />⚠ age —<\/span>/);
 });

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { gpsAsAt, gpsFreshness, formatGpsAge } from "./gpsFreshness.ts";
+import { gpsAgeLabel, gpsAsAt, gpsFreshness, formatGpsAge } from "./gpsFreshness.ts";
 import { applyPresenceToTelemetryDevice } from "./telemetryRows.ts";
 import type { TelemetryDevice } from "../types/telemetry.ts";
 
@@ -58,4 +58,11 @@ test("age formatting and old-fix timestamps include a date", () => {
   assert.equal(formatGpsAge(90061), "1d 1h");
   const now = start + 2 * 86400_000;
   assert.match(gpsAsAt(gpsFreshness(device, now), now), /2026/);
+});
+
+test("compact age copy preserves freshness and distinguishes unknown from no fix", () => {
+  assert.equal(gpsAgeLabel(gpsFreshness(device, start + 4980_000)), "age 1h 23m");
+  assert.equal(gpsAgeLabel(gpsFreshness(device, start + 10_000)), "age 10s");
+  assert.equal(gpsAgeLabel(gpsFreshness({ ...device, gnss: null }, start)), "age —");
+  assert.equal(gpsAgeLabel(gpsFreshness({ ...device, hasGps: false }, start)), "no fix");
 });

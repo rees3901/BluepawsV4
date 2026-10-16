@@ -43,6 +43,12 @@ export function formatGpsAge(seconds: number) {
   return `${Math.floor(seconds / 86400)}d ${Math.floor(seconds % 86400 / 3600)}h`;
 }
 
+/** Compact visible copy; the full GPS label and notice remain in tooltips. */
+export function gpsAgeLabel(gps: GpsFreshness) {
+  if (gps.state === "missing") return "no fix";
+  return gps.ageSeconds === null ? "age —" : `age ${formatGpsAge(gps.ageSeconds)}`;
+}
+
 export function gpsAsAt(gps: GpsFreshness, now: number) {
   if (gps.fixAt === null) return "Unknown";
   const date = new Date(gps.fixAt);
