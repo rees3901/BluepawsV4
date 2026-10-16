@@ -25,7 +25,9 @@
 .gnss-indicator summary { display: flex; cursor: pointer; list-style: none; }
 .gnss-indicator summary::-webkit-details-marker { display: none; }
 .gnss-indicator summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
-.gnss-emoji { font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif; font-size: 0.88rem; line-height: 1; margin-right: 3px; flex-shrink: 0; }
+.gnss-satellites { display: inline-flex; align-items: center; gap: 1px; }
+.gnss-satellites .gnss-count { margin-left: 0; }
+.gnss-emoji { font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif; font-size: 0.88rem; line-height: 1; flex-shrink: 0; }
 .gnss-detail { position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; display: block; width: min(280px, calc(100vw - 80px)); max-height: 220px; overflow-y: auto; box-shadow: 0 6px 20px #0005; padding: 8px; background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius); font-size: 0.7rem; line-height: 1.5; overflow-wrap: anywhere; }
 button, input, select {
   font: inherit;

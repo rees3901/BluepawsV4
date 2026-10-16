@@ -15,13 +15,14 @@ const avatar = { kind: 'emoji', emoji: '🐱', color: '#0099ff' };
 test('expanded and collapsed cards cannot confuse new contact with old GPS', () => {
   for (const expanded of [false, true]) {
     const html = renderCollar({ device, now, expanded, ageSeconds: 0 });
-    assert.match(html, /gps-age-badge gps-stale[^>]*>⚠ age 2h 14m/);
+    assert.match(html, /gps-age-badge gps-stale[^>]*>⚠ GPS age: 2h 14m/);
     assert.match(html, /Last known coordinates/);
     assert.match(html, /GPS as at/);
     assert.match(html, /datetime="2026-10-15T15:13:55.000Z"/i);
     assert.match(html, /Last contact/);
     assert.match(html, /not a current position/);
-    assert.match(html.match(/<div class="card-indicators card-indicators-row3">(.*?)<\/div>/s)[1], /gps-age-badge/);
+    assert.match(html.match(/<div class="card-indicators card-indicators-primary">(.*?)<\/div>/s)[1], /gps-age-badge/);
+    assert.doesNotMatch(html.match(/<div class="card-indicators card-indicators-row3">(.*?)<\/div>/s)[1], /gps-age-badge/);
     assert.doesNotMatch(html, /gps-location-notice/);
     assert.doesNotMatch(html.match(/<details class="gnss-indicator">.*?<\/details>/s)[0], /background:#84cc16/);
   }
@@ -61,10 +62,10 @@ test('on-schedule Power Save and Home presence never relabel old coordinates as 
       assert.doesNotMatch(html, /Recent GPS fix/);
       assert.match(html, /GPS as at/);
     }
-    assert.match(card, /age (20m|2h 14m)/);
+    assert.match(card, /GPS age: (20m|2h 14m)/);
     if (collar === home) {
       assert.match(card, /class="home-beacon-confirmed"[^>]*>Home confirmed<\/span>/);
-      assert.match(card, /gps-age-badge gps-aging[^>]*>⚠ age 2h 14m/);
+      assert.match(card, /gps-age-badge gps-aging[^>]*>⚠ GPS age: 2h 14m/);
     }
   }
 });
@@ -75,7 +76,7 @@ test('recent Home beacon confirmation stays independent when GPS hits the four-h
     lastReportReason: 7, positionRecordedAt: at, gnss: { ...device.gnss, recordedAt: at } };
   for (const html of [renderCollar({device:home,now,ageSeconds:0}), fixtureModule('@/lib/mapPopup').mapPopupHtml(home,avatar,now)]) {
     assert.match(html, /class="home-beacon-confirmed"(?! hidden)[^>]*>Home confirmed<\/span>/);
-    assert.match(html, /gps-age-badge gps-stale[^>]*>⚠ age 4h 0m/);
+    assert.match(html, /gps-age-badge gps-stale[^>]*>⚠ GPS age: 4h 0m/);
     assert.match(html, /Last known coordinates/);
     assert.match(html, /not a current position/);
   }
@@ -93,7 +94,7 @@ test('open popup independently expires Home confirmation and updates GPS age wit
   const refresh = fixtureModule('@/lib/mapPopup').refreshMapPopupGps;
   refresh(root,home,now);
   assert.equal(nodes['[data-home-beacon]'].hidden,false);
-  assert.equal(nodes['[data-gps-age]'].textContent,'⚠ age 4h 0m');
+  assert.equal(nodes['[data-gps-age]'].textContent,'⚠ GPS age: 4h 0m');
   assert.match(nodes['[data-gps-age]'].className,/gps-stale/);
   refresh(root,home,now+1861_000);
   assert.equal(nodes['[data-home-beacon]'].hidden,true);
@@ -131,7 +132,7 @@ test('open vector popup updates GPS and contact in place, without replacing acti
   const root = { querySelector: selector => nodes[selector] };
   const refresh = fixtureModule('@/lib/mapPopup').refreshMapPopupGps;
   refresh(root, device, now);
-  assert.equal(nodes['[data-gps-age]'].textContent, '⚠ age 2h 14m');
+  assert.equal(nodes['[data-gps-age]'].textContent, '⚠ GPS age: 2h 14m');
   assert.match(nodes['[data-gps-age]'].title, /GPS 2h 14m old/);
   assert.equal(nodes['[data-last-contact]'].textContent, 'just now');
   assert.match(nodes['[data-gps-as-at]'].title, /not a current position/);
@@ -188,12 +189,15 @@ test('offline cards keep the compact GPS age next to the contact summary', () =>
 test('GNSS copy is compact while detailed satellite and accuracy explanations remain available', () => {
   const html=renderCollar({device,now,ageSeconds:0});
   const summary=html.match(/<summary class="signal-indicator"[^>]*>(.*?)<\/summary>/s)[1];
-  assert.match(summary, /class="sig-label">:8<\/span>/);
+  assert.match(summary, /class="sig-label gnss-count">x8<\/span>/);
+  assert.match(summary, /class="gnss-satellites"><span class="gnss-emoji"[^>]*>🛰️<\/span><span class="sig-label gnss-count">x8<\/span><\/span>/);
+  const css = readFileSync(new URL('../web/src/app/web.css', import.meta.url), 'utf8');
+  assert.match(css, /\.gnss-satellites \.gnss-count \{ margin-left: 0; \}/);
   assert.match(summary, />acc:6m<\/span>/);
   assert.doesNotMatch(summary, /Sats:|Est\. acc:/);
   assert.match(html, /satellites: 8/);
   assert.match(html, /Estimated accuracy at the last GPS fix: 6 m/);
   const unknown=renderCollar({device:{...device,gnss:null},now,ageSeconds:0});
   assert.match(unknown, />acc:—<\/span>/);
-  assert.match(unknown, />⚠ age —<\/span>/);
+  assert.match(unknown, />⚠ GPS age: —<\/span>/);
 });

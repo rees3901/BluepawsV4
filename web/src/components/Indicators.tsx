@@ -16,8 +16,7 @@ export function GnssIndicator({ device, gps }: { device: TelemetryDevice; gps?: 
   const barColor = gps?.lastKnown ? "#94a3b8" : quality.color;
   return <details className="gnss-indicator" onClick={event => event.stopPropagation()}>
     <summary className="signal-indicator" title={description} aria-label={`${description}. Show GPS details`}>
-      <span className="gnss-emoji" aria-hidden="true">🛰️</span>
-      <span className="sig-label">:{device.hasGps ? fix?.satellites ?? "—" : "—"}</span>
+      <span className="gnss-satellites"><span className="gnss-emoji" aria-hidden="true">🛰️</span><span className="sig-label gnss-count">x{device.hasGps ? fix?.satellites ?? "—" : "—"}</span></span>
       {[1, 2, 3, 4, 5].map(bar => <span aria-hidden="true" key={bar} className={`sig-bar${bar <= quality.level ? " filled" : ""}`} style={{ height: 4 + bar * 3, background: bar <= quality.level ? barColor : undefined }} />)}
       <span className="sig-label gnss-accuracy">acc:{quality.level > 0 ? `${fix?.accuracyM}m` : "—"}</span>
     </summary>
