@@ -8,7 +8,7 @@ export function updateGpsMarker(element: HTMLElement, device: TelemetryDevice, n
   const description = device.entity === "hub" ? device.name : `${device.name}. ${gps.label}. ${gps.notice}`;
   element.title = description;
   element.setAttribute("aria-label", `Open ${description}`);
-  if (device.entity === "hub" || !gps.warning) return;
+  if (device.entity === "hub" || !gps.lastKnown) return;
   const badge = document.createElement("span");
   badge.className = `marker-gps-warning ${gps.className}`;
   badge.textContent = "🛰";

@@ -1,11 +1,13 @@
 import { createClient } from "@/lib/supabase/client";
 import { withGnssQuality } from "@/lib/gnssTelemetry";
+import { isFullGpsReport } from "@/lib/gpsReporting";
 import { familyRealtimeTopic, nextFamilyAccessVersion } from "@/lib/familyRealtime";
 import {
   applyPresenceToTelemetryDevice,
   isDevicePresenceRow,
   isPositionRow,
   positionToTelemetryDevice,
+  retainGpsReportingContext,
   type DevicePresenceRow,
   type PositionRow,
 } from "@/lib/telemetryRows";
@@ -32,6 +34,8 @@ export function createRealtimeTelemetrySource(
       let realtimeConnected = false;
       let channel: ReturnType<typeof supabase.channel> | null = null;
       let accessVersion = initialAccessVersion;
+      let refreshing = false;
+      let refreshQueued = false;
 
       const publish = () => {
         listener([...devices.values()].sort((left, right) => left.id - right.id));
@@ -92,7 +96,7 @@ export function createRealtimeTelemetrySource(
         incoming.forEach((row: PositionRow) => {
           const next = positionToTelemetryDevice(row);
           const current = devices.get(next.id);
-          devices.set(next.id, current ? { ...next, name: current.name } : next);
+          devices.set(next.id, current ? { ...retainGpsReportingContext(next, current), name: current.name } : next);
         });
         presenceRows.forEach((row) => {
           const current = devices.get(row.device_id);
@@ -102,9 +106,15 @@ export function createRealtimeTelemetrySource(
       };
 
       const refreshSafely = () => {
+        if (!active) return;
+        if (refreshing) { refreshQueued = true; return; }
+        refreshing = true;
         void refresh().catch((error: unknown) => {
           if (!active) return;
           statusListener?.("degraded", error instanceof Error ? error.message : "Unable to refresh latest positions");
+        }).finally(() => {
+          refreshing = false;
+          if (refreshQueued) { refreshQueued = false; refreshSafely(); }
         });
       };
 
@@ -136,6 +146,9 @@ export function createRealtimeTelemetrySource(
       const handlePresenceBroadcast = (payload: unknown) => {
         const row = extractBroadcastRecord(payload);
         updateFromPresenceRow(row);
+        // A no-fix full report has no new position broadcast, but must still
+        // update its GPS failure count. Wake check-ins/ACKs never increment it.
+        if (isDevicePresenceRow(row) && row.household_id === householdId && isFullGpsReport(row.last_seen_tx_reason)) refreshSafely();
       };
 
       const handleAccessChange = (payload: unknown) => {

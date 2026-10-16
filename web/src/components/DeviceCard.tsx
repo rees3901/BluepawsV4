@@ -180,7 +180,7 @@ export function DeviceCard(props: DeviceCardProps) {
           <div className="card-detail">
             {offline && <p className="card-offline-notice"><strong>Offline.</strong> These are last-known details from {formatAge(ageSeconds)} and may no longer be current.</p>}
             <div className="card-grid">
-              <span className="label">{offline || (!isHub && gps.warning) ? "Last known coordinates" : "Coordinates"}</span>
+              <span className="label">{offline || (!isHub && gps.lastKnown) ? "Last known coordinates" : "Coordinates"}</span>
               <span className="value">
                 {hasGps ? <a className={`card-coords card-coords-link${isHub ? "" : ` ${gps.className}`}`} href={googleMapsUrl(device.lat, device.lon)} target="_blank" rel="noopener noreferrer">
                   {formatMapCoordinates(device.lat, device.lon)}

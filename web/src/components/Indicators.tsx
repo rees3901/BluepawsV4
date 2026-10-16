@@ -13,7 +13,7 @@ export function GnssIndicator({ device, gps }: { device: TelemetryDevice; gps?: 
       ? `${device.source ?? "Last hub position"}. Satellite count and accuracy are not included in the hub report.`
       : "Last GNSS fix: quality not reported"
     : `Last GNSS fix: ${quality.label}. Estimated accuracy at the last GPS fix: ${quality.level ? `${fix.accuracyM} m` : "unknown"}; satellites: ${fix.satellites ?? "unknown"}${fix.hdop != null ? `; HDOP: ${fix.hdop} (not accuracy in metres)` : ""}; fix age at report: ${fix.fixAgeS} seconds. Report: ${fix.recordedAt}. Accuracy is a rough estimate, not a guaranteed error bound. Not a live satellite signal reading.`);
-  const barColor = gps?.warning ? "#94a3b8" : quality.color;
+  const barColor = gps?.lastKnown ? "#94a3b8" : quality.color;
   return <details className="gnss-indicator" onClick={event => event.stopPropagation()}>
     <summary className="signal-indicator" title={description} aria-label={`${description}. Show GPS details`}>
       <span className="gnss-emoji" aria-hidden="true">🛰️</span>
