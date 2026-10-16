@@ -5,7 +5,7 @@ import { COLLAR_RECEIVE_WINDOW_SECONDS, collarCardFreshness, collarFreshnessClas
 import { formatHomeDistance, formatMapCoordinates, googleMapsUrl, homeDistanceMetres } from "@/lib/mapLocation";
 import { normalizeMarkerColor } from "@/lib/markerColor";
 import { gnssUncertainty } from "@/lib/gnssUncertainty";
-import { gpsAgeLabel, gpsAsAt, gpsFreshness } from "@/lib/gpsFreshness";
+import { gpsAgeLabel, gpsAsAt, gpsFreshness, HOME_BEACON_NOTICE } from "@/lib/gpsFreshness";
 import { transportPresentation } from "@/lib/transportPath";
 import type { DeviceAvatar, TelemetryDevice } from "@/types/telemetry";
 
@@ -13,7 +13,7 @@ export function mapPopupHtml(device: TelemetryDevice, avatar: DeviceAvatar, pres
   const name = escapeHtml(device.name);
   const isHub = device.entity === "hub";
   const gps = gpsFreshness(device, presenceNow);
-  const gpsBadge = isHub ? "" : `<span data-gps-age class="gps-age-badge ${gps.className}" title="${gps.label}. ${gps.notice}">${gps.warning ? "⚠ " : ""}${gpsAgeLabel(gps)}</span>`;
+  const gpsBadge = isHub ? "" : `<span data-home-beacon class="home-beacon-confirmed"${gps.homeConfirmed ? "" : " hidden"} title="${HOME_BEACON_NOTICE}">Home confirmed</span><span data-gps-age class="gps-age-badge ${gps.className}" title="${gps.label}. ${gps.notice}">${gps.warning ? "⚠ " : ""}${gpsAgeLabel(gps)}</span>`;
   const gpsTime = isHub ? "" : `<span class="label">GPS as at</span><span data-gps-as-at class="value gps-as-at ${gps.className}" title="${gps.notice}">${escapeHtml(gpsAsAt(gps, presenceNow))}</span>`;
   const coordinates = formatMapCoordinates(device.lat, device.lon);
   const uncertainty = gnssUncertainty(device);
@@ -45,6 +45,8 @@ export function mapPopupHtml(device: TelemetryDevice, avatar: DeviceAvatar, pres
 export function refreshMapPopupGps(root: HTMLElement, device: TelemetryDevice, now: number) {
   if (device.entity === "hub") return;
   const gps = gpsFreshness(device, now);
+  const home = root.querySelector<HTMLElement>("[data-home-beacon]");
+  if (home) home.hidden = !gps.homeConfirmed;
   const badge = root.querySelector<HTMLElement>("[data-gps-age]");
   if (badge) { badge.className = `gps-age-badge ${gps.className}`; badge.textContent = `${gps.warning ? "⚠ " : ""}${gpsAgeLabel(gps)}`; badge.title = `${gps.label}. ${gps.notice}`; }
   const stamp = root.querySelector<HTMLElement>("[data-gps-as-at]");

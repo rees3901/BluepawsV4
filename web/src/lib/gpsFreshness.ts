@@ -3,6 +3,10 @@ import { GPS_REPORT_GRACE_SECONDS, gpsReportingSchedule, isFullGpsReport } from 
 
 export const GPS_AGING_AFTER_SECONDS = 60;
 export const GPS_STALE_AFTER_SECONDS = 5 * 60;
+// Absolute location-age backstops, not missed/failed telemetry counters.
+export const GPS_AMBER_AGE_CAP_SECONDS = 60 * 60;
+export const GPS_RED_AGE_CAP_SECONDS = 4 * 60 * 60;
+export const HOME_BEACON_NOTICE = "The collar recently detected the Home Hub beacon. This confirms Home presence, not a fresh GPS position.";
 export type GpsFreshness = ReturnType<typeof gpsFreshness>;
 
 // Contact and beacon evidence affect the EXPECTED full-telemetry schedule,
@@ -41,7 +45,8 @@ export function gpsFreshness(device: Pick<TelemetryDevice, "hasGps" | "gnss" | "
   const state = !device.hasGps ? "missing" : ageSeconds === null ? "unknown"
     : device.entity === "hub" ? ageSeconds >= GPS_STALE_AFTER_SECONDS ? "stale"
       : ageSeconds >= GPS_AGING_AFTER_SECONDS || reportedStale ? "aging" : "fresh"
-    : missedFullTelemetry >= 3 ? "stale" : missedFullTelemetry >= 1 ? "aging" : "fresh";
+    : missedFullTelemetry >= 3 || ageSeconds >= GPS_RED_AGE_CAP_SECONDS ? "stale"
+    : missedFullTelemetry >= 1 || ageSeconds >= GPS_AMBER_AGE_CAP_SECONDS ? "aging" : "fresh";
   // Green means on schedule, not a live location. Older coordinates remain
   // explicitly last-known, including while Home presence is confirmed.
   const lastKnown = ageSeconds === null || ageSeconds >= GPS_AGING_AFTER_SECONDS || reportedStale || failedReports > 0;
@@ -54,7 +59,7 @@ export function gpsFreshness(device: Pick<TelemetryDevice, "hasGps" | "gnss" | "
     : lastKnown ? "Last known location — not a current position."
     : "Recent GPS fix — position may have changed since it was measured.";
   const scheduleNotice = device.entity === "hub" ? ""
-    : ` Full GPS telemetry expected every ${formatGpsAge(fullTelemetrySeconds)}, plus up to ${GPS_REPORT_GRACE_SECONDS}s acquisition/delivery grace. Wake check-ins and ACKs are not GPS updates.`;
+    : ` Full GPS telemetry expected every ${formatGpsAge(fullTelemetrySeconds)}, plus up to ${GPS_REPORT_GRACE_SECONDS}s acquisition/delivery grace. Wake check-ins and ACKs are not GPS updates. GPS age alone turns amber at 1h and red at 4h; profile timing or failed full reports may warn sooner.`;
   const notice = (homeConfirmed ? "Home confirmed by a recent collar beacon report; GPS refreshes less often at home. " : "") + locationNotice + scheduleNotice;
   return { state, fixAt, ageSeconds, label, warning, lastKnown, homeConfirmed, missedFullTelemetry, fullTelemetrySeconds, notice, className: `gps-${state}` };
 }
@@ -69,7 +74,7 @@ export function formatGpsAge(seconds: number) {
 /** Compact visible copy; the full GPS label and notice remain in tooltips. */
 export function gpsAgeLabel(gps: GpsFreshness) {
   const age = gps.state === "missing" ? "no fix" : gps.ageSeconds === null ? "age —" : `age ${formatGpsAge(gps.ageSeconds)}`;
-  return `${gps.homeConfirmed ? "Home confirmed · " : ""}${age}`;
+  return age;
 }
 
 export function gpsAsAt(gps: GpsFreshness, now: number) {

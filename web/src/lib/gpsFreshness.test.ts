@@ -91,11 +91,11 @@ test("only recent beacon evidence enables the less frequent Home GPS schedule", 
   const gps = gpsFreshness(home, now);
   assert.equal(gps.homeConfirmed, true);
   assert.equal(gps.fullTelemetrySeconds, 5 * 3600);
-  assert.equal(gps.state, "fresh");
+  assert.equal(gps.state, "aging");
   assert.equal(gps.lastKnown, true);
   assert.equal(gps.ageSeconds, 7200);
   assert.equal(gps.fixAt, start);
-  assert.equal(gpsAgeLabel(gps), "Home confirmed · age 2h 0m");
+  assert.equal(gpsAgeLabel(gps), "age 2h 0m");
   assert.match(gps.notice, /not a current position/);
   assert.equal(gpsFreshness(home, now + 1860_000).homeConfirmed, true);
   assert.equal(gpsFreshness(home, now + 1861_000).homeConfirmed, false);
@@ -104,6 +104,32 @@ test("only recent beacon evidence enables the less frequent Home GPS schedule", 
     const away = gpsFreshness({ ...home, ...changed }, now);
     assert.equal(away.homeConfirmed, false);
     assert.equal(away.state, "stale");
+  }
+});
+
+test("absolute GPS age caps do not fabricate missed full reports or invalidate recent Home confirmation", () => {
+  for (const [seconds, state] of [[3599,"fresh"],[3600,"aging"],[14399,"aging"],[14400,"stale"],[20000,"stale"]] as const) {
+    const now = start + seconds * 1000;
+    const home = { ...device, profile: "PowerSave" as const, status: "Home" as const,
+      bleHome: true, homeBeaconSeenAt: now, lastUpdate: now, lastReportReason: 7 };
+    const gps = gpsFreshness(home, now);
+    assert.equal(gps.state, state, `GPS age ${seconds}s`);
+    assert.equal(gps.homeConfirmed, true);
+    assert.equal(gps.fixAt, start);
+    assert.equal(gps.ageSeconds, seconds);
+    if (seconds <= 14400) assert.equal(gps.missedFullTelemetry, 0);
+    assert.match(gps.notice, /GPS age alone turns amber at 1h and red at 4h/);
+  }
+});
+
+test("caps never delay the shorter profile warnings; Home Normal also caps at one/four hours", () => {
+  for (const [profile, amber, red] of [["Normal",3600,14400],["PowerSave",3600,14400],
+    ["Active",661,1981],["Emergency Lost",91,271],["Debug",91,271]] as const) {
+    for (const [seconds, state] of [[amber,"aging"],[red,"stale"]] as const) {
+      const now = start + seconds * 1000;
+      const home = { ...device, profile, status: "Home" as const, bleHome: true, homeBeaconSeenAt: now };
+      assert.equal(gpsFreshness(home, now).state, state, `${profile} at ${seconds}s`);
+    }
   }
 });
 
