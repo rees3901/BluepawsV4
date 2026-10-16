@@ -3,6 +3,7 @@ import { formatMapCoordinates, googleMapsUrl } from "@/lib/mapLocation";
 import type { CollarStatus, IngestPath, PowerProfile, TelemetryDevice } from "@/types/telemetry";
 import { accuracyMeaning, batteryMeaning, fixAgeMeaning, radioMeaning, satellitesMeaning } from "./reportInsights.ts";
 import { isFullGpsReport } from "./gpsReporting.ts";
+import { packetReportDiagnostics } from "./packetReportDiagnostics.ts";
 
 const REPORT_LIMIT = 10;
 const REPORT_DESCRIPTIONS: Record<string, string> = {
@@ -38,6 +39,9 @@ export interface DeviceObservationRow {
   fix_age_s: number;
   sat_count: number;
   received_at: string;
+  tlv_data?: unknown;
+  /** False for a reconstructed dashboard fallback, not an accepted packet. */
+  packetAvailable?: boolean;
 }
 
 export interface DeviceObservationPathRow {
@@ -64,13 +68,14 @@ export interface DeviceReportTableRow {
   data: string;
   description: string;
   meaning: string;
+  advanced?: boolean;
 }
 
 export async function loadDeviceReports(deviceId: number): Promise<DeviceReport[]> {
   const supabase = createClient();
   const { data: observations, error } = await supabase
     .from("observations")
-    .select("id,device_guid16,msg_seq_id,time_unix,recorded_at,status,power_profile,flags,tx_reason,gnss_valid,latitude,longitude,batt_mv,acc_m,fix_age_s,sat_count,received_at")
+    .select("id,device_guid16,msg_seq_id,time_unix,recorded_at,status,power_profile,flags,tx_reason,gnss_valid,latitude,longitude,batt_mv,acc_m,fix_age_s,sat_count,received_at,tlv_data")
     .eq("device_guid16", deviceId)
     .order("received_at", { ascending: false })
     .limit(REPORT_LIMIT);
@@ -106,6 +111,7 @@ export async function loadDeviceReports(deviceId: number): Promise<DeviceReport[
 export function buildCurrentDeviceReport(device: TelemetryDevice): DeviceReport {
   const observation: DeviceObservationRow = {
     id: 0,
+    packetAvailable: false,
     device_guid16: device.id,
     msg_seq_id: device.seq,
     time_unix: device.time,
@@ -231,7 +237,7 @@ export function buildDeviceReport(observation: DeviceObservationRow, path: Devic
   return {
     observation,
     path,
-    rows: rows.map(row => ({ ...row, description: REPORT_DESCRIPTIONS[row.field] ?? row.description,
+    rows: [...rows.map(row => ({ ...row, description: REPORT_DESCRIPTIONS[row.field] ?? row.description,
       meaning: row.field === "Battery" ? batteryMeaning(observation.batt_mv)
         : row.field === "Radio RSSI" || row.field === "Radio SNR" ? radioMeaning(path?.link_rssi_dbm ?? null, path?.link_snr_db ?? null, path?.link_type ?? null, row.field === "Radio RSSI" ? "rssi" : "snr")
         : row.field === "GPS detail" && observation.gnss_valid ? usablePosition ? `${accuracyMeaning(observation.acc_m)} This packet's metadata does not by itself establish a new GPS measurement; check GPS age.` : "The GNSS-valid flag and coordinates disagree. Do not rely on this packet as a valid new position."
@@ -240,7 +246,7 @@ export function buildDeviceReport(observation: DeviceObservationRow, path: Devic
         : row.field === "Fix age at report" ? observation.gnss_valid ? isFullGpsReport(observation.tx_reason) ? fixAgeMeaning(observation.fix_age_s) : "This is not a full GPS telemetry message. Included fix metadata may be cached; a check-in or ACK cannot by itself refresh the GPS timestamp." : "No new fix time in this packet. Keep the map's last known GPS timestamp unchanged."
         : row.field === "Sequence" ? "Use with timestamps to distinguish reports. This rolling counter can wrap or restart; a gap alone does not prove packet loss."
         : row.field === "Accepted routes" && path ? `${path.receipt_count} receipt(s) on this route. Repeated copies are not new GPS fixes or additional collar check-ins.`
-        : row.description })),
+        : row.description })), ...packetReportDiagnostics(observation.flags, observation.tx_reason, observation.tlv_data, observation.packetAvailable)],
     summary: `Device ${observation.device_guid16} ${summaryVerb(observation.tx_reason)} with status ${status.toLowerCase()} at ${receivedAt}.`,
   };
 }

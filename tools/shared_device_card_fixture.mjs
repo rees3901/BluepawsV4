@@ -60,6 +60,10 @@ if (process.argv.includes('--serve')) {
       return res.end(readFileSync(new URL('../web/src/app'+req.url,import.meta.url)));
     }
     res.setHeader('Content-Type','text/html; charset=utf-8');
+    if(req.url === '/packet-log') {
+      const report=load('@/lib/deviceReports').buildDeviceReport({id:1,device_guid16:3001,msg_seq_id:12,time_unix:1770000000,recorded_at:new Date().toISOString(),received_at:new Date().toISOString(),status:0,power_profile:0,flags:200,tx_reason:4,gnss_valid:false,latitude:null,longitude:null,batt_mv:0,acc_m:0,fix_age_s:65535,sat_count:255,tlv_data:{fw_ver:258,reset_reason:4,uptime_s:0}},null);
+      return res.end('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Packet diagnostics fixture</title><link rel="stylesheet" href="/parity.css"><link rel="stylesheet" href="/web.css">'+renderReport(report,'collar'));
+    }
     if(req.url === '/report-log') {
       const report=load('@/lib/hubReports').buildHubReport({...hub,received_at:new Date().toISOString(),wifi_rssi_dbm:-69,uptime_s:90});
       return res.end('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Contextual report fixture</title><link rel="stylesheet" href="/parity.css"><link rel="stylesheet" href="/web.css">'+renderReport(report));
