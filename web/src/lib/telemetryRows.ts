@@ -3,6 +3,7 @@ import type { TelemetryDevice } from "@/types/telemetry";
 export interface PositionRow {
   observation_id?: number | null;
   gnss?: TelemetryDevice["gnss"];
+  gpsFailedReports?: number;
   position_id: number;
   device_uid: number;
   household_id: string;
@@ -49,6 +50,10 @@ export function positionToTelemetryDevice(row: PositionRow): TelemetryDevice {
     seq: row.message_id,
     time: Math.floor(recordedAt / 1000),
     positionRecordedAt: new Date(Math.min(recordedAt, Date.parse(row.received_at))).toISOString(),
+    lastReportReason: row.tx_reason,
+    homeBeaconSeenAt: flags !== null && (flags & 0x08) !== 0 && row.tx_reason !== 1
+      ? Math.min(recordedAt, Date.parse(row.received_at)) : null,
+    gpsFailedReports: row.gpsFailedReports,
     status: statusName(row.status_code),
     profile: profileName(row.power_profile_code),
     error: flags !== null && (flags & 0x80) !== 0 ? "Module" : "None",
@@ -85,6 +90,8 @@ export function applyPresenceToTelemetryDevice(device: TelemetryDevice, row: Dev
   if (!Number.isFinite(lastSeenAt) || lastSeenAt <= device.lastUpdate) return device;
 
   const hasFreshBattery = row.last_seen_battery_mv !== null;
+  const home = row.last_seen_status_code === 0 || row.last_seen_tx_reason === 7;
+  const away = row.last_seen_status_code !== null && row.last_seen_status_code !== 0;
   return {
     ...device,
     time: Math.floor(lastSeenAt / 1000),
@@ -95,10 +102,25 @@ export function applyPresenceToTelemetryDevice(device: TelemetryDevice, row: Dev
     profile: row.last_seen_power_profile_code === null ? device.profile : profileName(row.last_seen_power_profile_code),
     batt: row.last_seen_battery_mv ?? device.batt,
     batteryPercent: hasFreshBattery ? null : device.batteryPercent,
-    bleHome: device.bleHome || row.last_seen_tx_reason === 7 || row.last_seen_status_code === 0,
+    // Home evidence expires independently. An ACK is not a new beacon scan,
+    // and an old Home flag must not stick after the collar reports away.
+    bleHome: home ? true : away ? false : device.bleHome,
+    homeBeaconSeenAt: home && row.last_seen_tx_reason !== 1 ? lastSeenAt
+      : away ? null : device.homeBeaconSeenAt,
+    lastReportReason: row.last_seen_tx_reason,
     lastUpdate: lastSeenAt,
     source: row.last_seen_tx_reason === 7 ? "tlv-wake-checkin" : device.source,
   };
+}
+
+// Refreshing the same GPS observation must not drop newer beacon/presence
+// evidence or turn an unavailable failure-count read into "zero failures".
+export function retainGpsReportingContext(next: TelemetryDevice, current: TelemetryDevice) {
+  if (next.id !== current.id || next.seq !== current.seq || next.positionRecordedAt !== current.positionRecordedAt) return next;
+  const recent = current.lastUpdate > next.lastUpdate ? current : next;
+  return { ...recent, gnss: next.gnss ?? current.gnss,
+    gpsFailedReports: next.gpsFailedReports ?? current.gpsFailedReports,
+    homeBeaconSeenAt: Math.max(next.homeBeaconSeenAt ?? 0, current.homeBeaconSeenAt ?? 0) || null };
 }
 
 export function isPositionRow(value: unknown): value is PositionRow {

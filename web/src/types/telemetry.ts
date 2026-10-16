@@ -13,6 +13,10 @@ export interface TelemetryDevice {
   time: number;
   // Position age is independent of newer wake/check-in presence.
   positionRecordedAt?: string | null;
+  // Message/contact context must never replace the original GPS timestamp.
+  lastReportReason?: number | null;
+  homeBeaconSeenAt?: number | null;
+  gpsFailedReports?: number;
   status: CollarStatus;
   profile: PowerProfile;
   error: TelemetryError;

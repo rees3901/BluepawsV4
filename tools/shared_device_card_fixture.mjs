@@ -53,13 +53,13 @@ if (process.argv.includes('--serve')) {
     res.setHeader('Content-Type','text/html; charset=utf-8');
     if (req.url === '/gps-freshness') {
       const now=Date.now();
-      const cases=[['Fresh GPS',15],['Ageing GPS',120],['Old GPS, new contact',8049],['Unknown fix time',null]];
+      const cases=[['Fresh GPS',15],['Ageing GPS',2400],['Old GPS, new contact',8049],['Home, GPS last known',8049,true],['Unknown fix time',null]];
       res.end('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">' +
         '<title>GPS age — synthetic fixture</title><link rel="stylesheet" href="/parity.css"><link rel="stylesheet" href="/web.css">' +
         '<main id="deviceCards" style="width:100%;min-width:0;height:100vh;overflow:auto;padding:12px;display:flex;flex-direction:row;flex-wrap:wrap;gap:16px;align-items:flex-start">' +
-        cases.map(([name,age])=>{
+        cases.map(([name,age,home])=>{
           const at=new Date(now-(age??0)*1000).toISOString();
-          const device={id:3001,name,profile:'PowerSave',status:'Out',error:'None',lat:51,lon:-2,hasGps:true,
+          const device={id:3001,name,profile:'PowerSave',status:home?'Home':'Out',bleHome:!!home,homeBeaconSeenAt:home?now:null,lastReportReason:home?7:0,error:'None',lat:51,lon:-2,hasGps:true,
             batt:3900,rssi:-90,snr:8,ingestPath:'lora_hub',lastUpdate:now,positionRecordedAt:at,
             gnss:age===null?null:{accuracyM:6,satellites:8,fixAgeS:0,recordedAt:at}};
           return '<section style="width:490px;max-width:100%;min-width:0"><h3>'+name+'</h3>'+[false,true].map(expanded=>renderCollar({device,now,expanded,ageSeconds:0})).join('')+'</section>';

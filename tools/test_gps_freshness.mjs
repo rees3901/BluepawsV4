@@ -47,6 +47,50 @@ test('a fresh fix removes stale notices and restores green GPS information', () 
   assert.match(html, /background:#84cc16/);
 });
 
+test('on-schedule Power Save and Home presence never relabel old coordinates as current', () => {
+  const at = new Date(now - 20 * 60_000).toISOString();
+  const scheduled = { ...device, gnss: { ...device.gnss, recordedAt: at }, positionRecordedAt: at };
+  const home = { ...device, status: 'Home', bleHome: true, homeBeaconSeenAt: now, lastReportReason: 7 };
+  for (const collar of [scheduled, home]) {
+    const card = renderCollar({ device: collar, now, ageSeconds: 0 });
+    const popup = fixtureModule('@/lib/mapPopup').mapPopupHtml(collar, avatar, now);
+    for (const html of [card, popup]) {
+      assert.match(html, /gps-age-badge gps-fresh/);
+      assert.match(html, /Last known coordinates/);
+      assert.match(html, /not a current position/);
+      assert.doesNotMatch(html, /Recent GPS fix/);
+      assert.match(html, /GPS as at/);
+    }
+    assert.match(card, /age (20m|2h 14m)/);
+    if (collar === home) assert.match(card, /Home confirmed · age 2h 14m/);
+  }
+});
+
+test('a green on-schedule old fix still has a last-known warning on the map pin', () => {
+  let badge;
+  const require = createRequire(new URL('../web/package.json', import.meta.url));
+  const ts = require('typescript');
+  const source = readFileSync(new URL('../web/src/lib/gpsMarker.ts', import.meta.url), 'utf8');
+  const context = vm.createContext({ exports: {}, document: { createElement: () => ({ setAttribute() {} }) }, require: () => fixtureModule('@/lib/gpsFreshness') });
+  vm.runInContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, context);
+  const at = new Date(now - 20 * 60_000).toISOString();
+  const pin = { querySelector() {}, setAttribute() {}, append(value) { badge = value; } };
+  context.exports.updateGpsMarker(pin, { ...device, positionRecordedAt: at, gnss: { ...device.gnss, recordedAt: at } }, now);
+  assert.match(badge.className, /gps-fresh/);
+  assert.match(pin.title, /GPS 20m old/);
+  assert.match(pin.title, /not a current position/);
+});
+
+test('no-fix full reports turn cards and popups amber/red, and check-ins cannot clear them', () => {
+  const at = new Date(now - 60_000).toISOString();
+  for (const [gpsFailedReports, css] of [[1,'gps-aging'],[3,'gps-stale']]) {
+    const collar = { ...device, positionRecordedAt: at, gnss: { ...device.gnss, recordedAt: at },
+      lastReportReason: 7, gpsFailedReports };
+    assert.match(renderCollar({ device: collar, now, ageSeconds: 0 }), new RegExp(`gps-age-badge ${css}`));
+    assert.match(fixtureModule('@/lib/mapPopup').mapPopupHtml(collar, avatar, now), new RegExp(`gps-age-badge ${css}`));
+  }
+});
+
 test('open vector popup updates GPS and contact in place, without replacing actions', () => {
   const nodes = Object.fromEntries(['gps-age', 'gps-as-at', 'gps-coordinates', 'gps-coordinate-label', 'last-contact'].map(key => [`[data-${key}]`, {}]));
   const root = { querySelector: selector => nodes[selector] };

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { applyPresenceToTelemetryDevice, positionToTelemetryDevice, type DevicePresenceRow, type PositionRow } from "./telemetryRows.ts";
+import { applyPresenceToTelemetryDevice, positionToTelemetryDevice, retainGpsReportingContext, type DevicePresenceRow, type PositionRow } from "./telemetryRows.ts";
 
 test("future collar clock cannot freeze contact age; old replay cannot renew it", () => {
   const received = Date.parse("2026-08-28T10:18:03Z");
@@ -149,4 +149,34 @@ test("overlays newer wake-check-in presence without moving the last known positi
   assert.equal(device.source, "tlv-wake-checkin");
   assert.equal(device.faultReport, null, "new presence must discard older map-fix diagnostics");
   assert.equal(device.lastUpdate, Date.parse("2026-08-13T09:00:00.000Z"));
+  assert.equal(device.homeBeaconSeenAt, device.lastUpdate);
+  assert.equal(device.lastReportReason, 7);
+});
+
+test("ACKs cannot renew beacon evidence; away reports clear old Home state", () => {
+  const beaconAt = Date.parse("2026-10-16T10:00:00Z");
+  const home = { id: 3001, status: "Home", bleHome: true, homeBeaconSeenAt: beaconAt,
+    lastUpdate: beaconAt, gpsFailedReports: 2 } as ReturnType<typeof positionToTelemetryDevice>;
+  const presence: DevicePresenceRow = { device_id: 3001, household_id: "family",
+    last_seen_at: new Date(beaconAt + 3600_000).toISOString(), last_seen_status_code: 0,
+    last_seen_power_profile_code: 0, last_seen_tx_reason: 1, last_seen_battery_mv: 3900 };
+  const ack = applyPresenceToTelemetryDevice(home, presence);
+  assert.equal(ack.lastUpdate, beaconAt + 3600_000);
+  assert.equal(ack.homeBeaconSeenAt, beaconAt);
+  assert.equal(ack.gpsFailedReports, 2);
+  assert.equal(ack.lastReportReason, 1);
+  const away = applyPresenceToTelemetryDevice(home, { ...presence, last_seen_status_code: 1, last_seen_tx_reason: 0 });
+  assert.equal(away.bleHome, false);
+  assert.equal(away.homeBeaconSeenAt, null);
+  assert.equal(away.gpsFailedReports, 2);
+});
+
+test("same-position refreshes retain newer contact and GPS failures; a new fix resets them", () => {
+  const current = { id: 3001, seq: 12, positionRecordedAt: "2026-10-16T10:00:00Z",
+    lastUpdate: 2000, homeBeaconSeenAt: 1500, status: "Home", gpsFailedReports: 3, gnss: null } as ReturnType<typeof positionToTelemetryDevice>;
+  const snapshot = { ...current, lastUpdate: 1000, homeBeaconSeenAt: null, gpsFailedReports: undefined };
+  assert.deepEqual(retainGpsReportingContext(snapshot, current), current);
+  assert.equal(retainGpsReportingContext({ ...snapshot, gpsFailedReports: 2 }, current).gpsFailedReports, 2);
+  const newFix = { ...snapshot, seq: 13, positionRecordedAt: "2026-10-16T10:30:00Z", gpsFailedReports: 0 };
+  assert.deepEqual(retainGpsReportingContext(newFix, current), newFix);
 });

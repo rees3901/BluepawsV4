@@ -1,12 +1,13 @@
 import type { TelemetryDevice } from "../types/telemetry.ts";
+import { GPS_REPORT_GRACE_SECONDS, gpsReportingSchedule, isFullGpsReport } from "./gpsReporting.ts";
 
 export const GPS_AGING_AFTER_SECONDS = 60;
 export const GPS_STALE_AFTER_SECONDS = 5 * 60;
 export type GpsFreshness = ReturnType<typeof gpsFreshness>;
 
-// Contact/presence is deliberately NOT an input. Only the observation backing
-// the displayed coordinates can date that location. 65535 means unknown age.
-export function gpsFreshness(device: Pick<TelemetryDevice, "hasGps" | "gnss" | "positionRecordedAt" | "entity" | "faultReport">, now: number, latestFlags?: number | null) {
+// Contact and beacon evidence affect the EXPECTED full-telemetry schedule,
+// never the GPS fix timestamp. 65535 means unknown fix age.
+export function gpsFreshness(device: Pick<TelemetryDevice, "hasGps" | "gnss" | "positionRecordedAt" | "entity" | "faultReport" | "profile" | "status" | "bleHome" | "homeBeaconSeenAt" | "lastReportReason" | "gpsFailedReports">, now: number, latestFlags?: number | null) {
   let fixAt: number | null = null;
   const fix = device.gnss;
   if (device.hasGps && fix && Number.isInteger(fix.fixAgeS) && fix.fixAgeS >= 0 && fix.fixAgeS < 65535) {
@@ -21,19 +22,41 @@ export function gpsFreshness(device: Pick<TelemetryDevice, "hasGps" | "gnss" | "
     if (Number.isFinite(measuredAt) && measuredAt > 0 && measuredAt <= now) fixAt = measuredAt;
   }
   const ageSeconds = fixAt === null ? null : Math.floor((now - fixAt) / 1000);
-  const reportedStale = ((latestFlags ?? device.faultReport?.flags ?? 0) & 0x40) !== 0;
+  const flags = latestFlags ?? device.faultReport?.flags ?? 0;
+  const reason = device.lastReportReason ?? device.faultReport?.txReason;
+  const reportedStale = (flags & 0x40) !== 0 && (reason == null || isFullGpsReport(reason));
+  const contactWindow = gpsReportingSchedule(device.profile).contactWindowSeconds;
+  const beaconAge = (now - (device.homeBeaconSeenAt ?? NaN)) / 1000;
+  const homeConfirmed = device.entity !== "hub" && device.profile !== "Emergency Lost"
+    && device.status === "Home" && device.bleHome && Number.isFinite(beaconAge)
+    && beaconAge >= 0 && beaconAge <= contactWindow;
+  const { fullTelemetrySeconds } = gpsReportingSchedule(device.profile, homeConfirmed);
+  // Allow a GNSS acquisition/delivery grace. Home wake-check-ins do not
+  // consume a full-telemetry opportunity (normally only every tenth wake).
+  const missedScheduled = ageSeconds === null ? 0
+    : Math.max(0, Math.ceil(ageSeconds / (fullTelemetrySeconds + GPS_REPORT_GRACE_SECONDS)) - 1);
+  const failedReports = Number.isInteger(device.gpsFailedReports) && device.gpsFailedReports! > 0
+    ? Math.min(3, device.gpsFailedReports!) : 0;
+  const missedFullTelemetry = Math.max(missedScheduled, failedReports, reportedStale ? 1 : 0);
   const state = !device.hasGps ? "missing" : ageSeconds === null ? "unknown"
-    : ageSeconds >= GPS_STALE_AFTER_SECONDS ? "stale"
-    : ageSeconds >= GPS_AGING_AFTER_SECONDS || reportedStale ? "aging" : "fresh";
+    : device.entity === "hub" ? ageSeconds >= GPS_STALE_AFTER_SECONDS ? "stale"
+      : ageSeconds >= GPS_AGING_AFTER_SECONDS || reportedStale ? "aging" : "fresh"
+    : missedFullTelemetry >= 3 ? "stale" : missedFullTelemetry >= 1 ? "aging" : "fresh";
+  // Green means on schedule, not a live location. Older coordinates remain
+  // explicitly last-known, including while Home presence is confirmed.
+  const lastKnown = ageSeconds === null || ageSeconds >= GPS_AGING_AFTER_SECONDS || reportedStale || failedReports > 0;
   const age = ageSeconds === null ? null : formatGpsAge(ageSeconds);
   const label = state === "missing" ? "No GPS fix" : state === "unknown" ? "GPS time unknown"
-    : state === "fresh" ? `GPS ${age} ago` : `GPS ${age} old`;
+    : lastKnown ? `GPS ${age} old` : `GPS ${age} ago`;
   const warning = state !== "fresh";
-  const notice = state === "missing" ? "No GPS location available."
+  const locationNotice = state === "missing" ? "No GPS location available."
     : state === "unknown" ? "Last known location — fix time unavailable; not a confirmed current position."
-    : warning ? "Last known location — not a current position."
+    : lastKnown ? "Last known location — not a current position."
     : "Recent GPS fix — position may have changed since it was measured.";
-  return { state, fixAt, ageSeconds, label, warning, notice, className: `gps-${state}` };
+  const scheduleNotice = device.entity === "hub" ? ""
+    : ` Full GPS telemetry expected every ${formatGpsAge(fullTelemetrySeconds)}, plus up to ${GPS_REPORT_GRACE_SECONDS}s acquisition/delivery grace. Wake check-ins and ACKs are not GPS updates.`;
+  const notice = (homeConfirmed ? "Home confirmed by a recent collar beacon report; GPS refreshes less often at home. " : "") + locationNotice + scheduleNotice;
+  return { state, fixAt, ageSeconds, label, warning, lastKnown, homeConfirmed, missedFullTelemetry, fullTelemetrySeconds, notice, className: `gps-${state}` };
 }
 
 export function formatGpsAge(seconds: number) {
@@ -45,8 +68,8 @@ export function formatGpsAge(seconds: number) {
 
 /** Compact visible copy; the full GPS label and notice remain in tooltips. */
 export function gpsAgeLabel(gps: GpsFreshness) {
-  if (gps.state === "missing") return "no fix";
-  return gps.ageSeconds === null ? "age —" : `age ${formatGpsAge(gps.ageSeconds)}`;
+  const age = gps.state === "missing" ? "no fix" : gps.ageSeconds === null ? "age —" : `age ${formatGpsAge(gps.ageSeconds)}`;
+  return `${gps.homeConfirmed ? "Home confirmed · " : ""}${age}`;
 }
 
 export function gpsAsAt(gps: GpsFreshness, now: number) {
