@@ -95,7 +95,7 @@ test("only recent beacon evidence enables the less frequent Home GPS schedule", 
   assert.equal(gps.lastKnown, true);
   assert.equal(gps.ageSeconds, 7200);
   assert.equal(gps.fixAt, start);
-  assert.equal(gpsAgeLabel(gps), "age 2h 0m");
+  assert.equal(gpsAgeLabel(gps), "GPS age: 2h 0m");
   assert.match(gps.notice, /not a current position/);
   assert.equal(gpsFreshness(home, now + 1860_000).homeConfirmed, true);
   assert.equal(gpsFreshness(home, now + 1861_000).homeConfirmed, false);
@@ -174,8 +174,8 @@ test("age formatting and old-fix timestamps include a date", () => {
 });
 
 test("compact age copy preserves freshness and distinguishes unknown from no fix", () => {
-  assert.equal(gpsAgeLabel(gpsFreshness(device, start + 4980_000)), "age 1h 23m");
-  assert.equal(gpsAgeLabel(gpsFreshness(device, start + 10_000)), "age 10s");
-  assert.equal(gpsAgeLabel(gpsFreshness({ ...device, gnss: null }, start)), "age —");
-  assert.equal(gpsAgeLabel(gpsFreshness({ ...device, hasGps: false }, start)), "no fix");
+  assert.equal(gpsAgeLabel(gpsFreshness(device, start + 4980_000)), "GPS age: 1h 23m");
+  assert.equal(gpsAgeLabel(gpsFreshness(device, start + 10_000)), "GPS age: 10s");
+  assert.equal(gpsAgeLabel(gpsFreshness({ ...device, gnss: null }, start)), "GPS age: —");
+  assert.equal(gpsAgeLabel(gpsFreshness({ ...device, hasGps: false }, start)), "GPS age: no fix");
 });
