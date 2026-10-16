@@ -176,7 +176,7 @@ test("same-position refreshes retain newer contact and GPS failures; a new fix r
     lastUpdate: 2000, homeBeaconSeenAt: 1500, status: "Home", gpsFailedReports: 3, gnss: null } as ReturnType<typeof positionToTelemetryDevice>;
   const snapshot = { ...current, lastUpdate: 1000, homeBeaconSeenAt: null, gpsFailedReports: undefined };
   assert.deepEqual(retainGpsReportingContext(snapshot, current), current);
-  assert.equal(retainGpsReportingContext({ ...snapshot, gpsFailedReports: 2 }, current).gpsFailedReports, 2);
+  assert.equal(retainGpsReportingContext({ ...snapshot, gpsFailedReports: 2 }, current).gpsFailedReports, 3);
   const newFix = { ...snapshot, seq: 13, positionRecordedAt: "2026-10-16T10:30:00Z", gpsFailedReports: 0 };
   assert.deepEqual(retainGpsReportingContext(newFix, current), newFix);
 });

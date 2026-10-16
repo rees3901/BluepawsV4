@@ -119,7 +119,8 @@ export function retainGpsReportingContext(next: TelemetryDevice, current: Teleme
   if (next.id !== current.id || next.seq !== current.seq || next.positionRecordedAt !== current.positionRecordedAt) return next;
   const recent = current.lastUpdate > next.lastUpdate ? current : next;
   return { ...recent, gnss: next.gnss ?? current.gnss,
-    gpsFailedReports: next.gpsFailedReports ?? current.gpsFailedReports,
+    gpsFailedReports: next.gpsFailedReports === undefined && current.gpsFailedReports === undefined ? undefined
+      : Math.max(next.gpsFailedReports ?? 0, current.gpsFailedReports ?? 0),
     homeBeaconSeenAt: Math.max(next.homeBeaconSeenAt ?? 0, current.homeBeaconSeenAt ?? 0) || null };
 }
 

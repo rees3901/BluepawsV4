@@ -68,6 +68,13 @@ test("failure-read outages do not fabricate a successful GPS cycle", async () =>
   assert.equal(row.gpsFailedReports, undefined);
   assert.equal(row.gnss?.recordedAt, observation.recorded_at);
 });
+
+test("a previously fast collar clock cannot hide subsequent full GPS failures", async () => {
+  const ahead = { ...position, recorded_at: "2026-10-04T13:00:00Z" };
+  const [row] = await withGnssQuality(client([{ ...observation, recorded_at: ahead.recorded_at },
+    { id: 13, device_guid16: 3001, gnss_valid: false, tx_reason: 0, recorded_at: "2026-10-04T12:01:00Z" }]), "family", [ahead]);
+  assert.equal(row.gpsFailedReports, 1);
+});
 test("wrong observations, no-fix reports and failures cannot fabricate GNSS quality", async () => {
   for (const row of [{ ...observation, id: 13 }, { ...observation, device_guid16: 3002 }, { ...observation, gnss_valid: false }]) {
     assert.equal((await withGnssQuality(client([row]), "family", [position]))[0].gnss, undefined);

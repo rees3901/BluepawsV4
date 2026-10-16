@@ -2,7 +2,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { PositionRow } from "./telemetryRows";
 import { GPS_FULL_REPORT_REASONS } from "./gpsReporting.ts";
 
-// Read only the observations backing the displayed positions, not newer no-fix check-ins.
+// Quality comes only from the displayed position. Newer full no-fix reports
+// contribute a separate failure count, never a replacement GPS timestamp.
 export async function withGnssQuality(client: SupabaseClient, householdId: string, positions: PositionRow[]): Promise<PositionRow[]> {
   const ids = [...new Set(positions.flatMap(row => typeof row.observation_id === "number" ? [row.observation_id] : []))];
   if (!ids.length) return positions;
@@ -13,13 +14,14 @@ export async function withGnssQuality(client: SupabaseClient, householdId: strin
     const failuresRead = Promise.all(positions.map(async row => {
       if (!Number.isInteger(row.observation_id)) return undefined;
       try {
+        const since = new Date(Math.min(Date.parse(row.recorded_at), Date.parse(row.received_at))).toISOString();
         // Bounded, household/device-scoped, backed by the existing
         // (household_id, device_guid16, recorded_at) index. Observations are
         // deduplicated by packet identity, so LoRa/LTE retries count once.
         const { data, error } = await client.from("observations")
           .select("id").eq("household_id", householdId).eq("device_guid16", row.device_uid)
           .in("tx_reason", [...GPS_FULL_REPORT_REASONS]).eq("gnss_valid", false)
-          .gt("recorded_at", row.recorded_at).gt("id", row.observation_id!)
+          .gt("recorded_at", since).gt("id", row.observation_id!)
           .order("recorded_at", { ascending: false }).limit(3)
           .abortSignal(AbortSignal.timeout(3000));
         return error ? undefined : data?.length ?? 0;
