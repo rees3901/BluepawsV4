@@ -5,7 +5,7 @@ import { COLLAR_RECEIVE_WINDOW_SECONDS, collarCardFreshness, collarFreshnessClas
 import { formatHomeDistance, formatMapCoordinates, googleMapsUrl, homeDistanceMetres } from "@/lib/mapLocation";
 import { normalizeMarkerColor } from "@/lib/markerColor";
 import { gnssUncertainty } from "@/lib/gnssUncertainty";
-import { gpsAsAt, gpsFreshness } from "@/lib/gpsFreshness";
+import { gpsAgeLabel, gpsAsAt, gpsFreshness } from "@/lib/gpsFreshness";
 import { transportPresentation } from "@/lib/transportPath";
 import type { DeviceAvatar, TelemetryDevice } from "@/types/telemetry";
 
@@ -13,7 +13,7 @@ export function mapPopupHtml(device: TelemetryDevice, avatar: DeviceAvatar, pres
   const name = escapeHtml(device.name);
   const isHub = device.entity === "hub";
   const gps = gpsFreshness(device, presenceNow);
-  const gpsBadge = isHub ? "" : `<span data-gps-age class="gps-age-badge ${gps.className}" title="${gps.notice}">${gps.warning ? "⚠ " : ""}${gps.label}</span>`;
+  const gpsBadge = isHub ? "" : `<span data-gps-age class="gps-age-badge ${gps.className}" title="${gps.label}. ${gps.notice}">${gps.warning ? "⚠ " : ""}${gpsAgeLabel(gps)}</span>`;
   const gpsTime = isHub ? "" : `<span class="label">GPS as at</span><span data-gps-as-at class="value gps-as-at ${gps.className}" title="${gps.notice}">${escapeHtml(gpsAsAt(gps, presenceNow))}</span>`;
   const coordinates = formatMapCoordinates(device.lat, device.lon);
   const uncertainty = gnssUncertainty(device);
@@ -46,7 +46,7 @@ export function refreshMapPopupGps(root: HTMLElement, device: TelemetryDevice, n
   if (device.entity === "hub") return;
   const gps = gpsFreshness(device, now);
   const badge = root.querySelector<HTMLElement>("[data-gps-age]");
-  if (badge) { badge.className = `gps-age-badge ${gps.className}`; badge.textContent = `${gps.warning ? "⚠ " : ""}${gps.label}`; badge.title = gps.notice; }
+  if (badge) { badge.className = `gps-age-badge ${gps.className}`; badge.textContent = `${gps.warning ? "⚠ " : ""}${gpsAgeLabel(gps)}`; badge.title = `${gps.label}. ${gps.notice}`; }
   const stamp = root.querySelector<HTMLElement>("[data-gps-as-at]");
   if (stamp) { stamp.className = `value gps-as-at ${gps.className}`; stamp.textContent = gpsAsAt(gps, now); stamp.title = gps.notice; }
   const coords = root.querySelector<HTMLAnchorElement>("[data-gps-coordinates]");
