@@ -1,10 +1,7 @@
-import { gpsAgeLabel, gpsAsAt, HOME_BEACON_NOTICE, type GpsFreshness } from "@/lib/gpsFreshness";
+import { gpsAgeLabel, gpsAsAt, type GpsFreshness } from "@/lib/gpsFreshness";
 
 export function GpsAgeBadge({ gps }: { gps: GpsFreshness }) {
-  return <>
-    {gps.homeConfirmed && <span className="home-beacon-confirmed" title={HOME_BEACON_NOTICE}>Home confirmed</span>}
-    <span className={`gps-age-badge ${gps.className}`} title={`${gps.label}. ${gps.notice}`}>{gps.warning ? "⚠ " : ""}{gpsAgeLabel(gps)}</span>
-  </>;
+  return <span className={`gps-age-badge ${gps.className}`} title={`${gps.label}. ${gps.notice}`}>{gps.warning ? "⚠ " : ""}{gpsAgeLabel(gps)}</span>;
 }
 
 export function GpsAsAt({ gps, now }: { gps: GpsFreshness; now: number }) {

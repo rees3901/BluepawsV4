@@ -1207,10 +1207,19 @@ body.light .collar-awake.sleeping {
 .gps-aging, .gps-unknown { --gps-color: #fbbf24; }
 .gps-stale, .gps-missing { --gps-color: #f87171; }
 .gps-age-badge, .gps-as-at, .card-coords-link[class*="gps-"] { color: var(--gps-color); }
-.gps-age-badge, .home-beacon-confirmed { display: inline-flex; align-items: center; flex: 0 0 auto; white-space: nowrap; font-size: 0.65rem; font-weight: 650; line-height: 1.35; }
-.home-beacon-confirmed { color: #4ade80; }
-.home-beacon-confirmed[hidden] { display: none; }
-body.light .home-beacon-confirmed { color: #15803d; }
+.gps-age-badge { display: inline-flex; align-items: center; flex: 0 0 auto; white-space: nowrap; font-size: 0.65rem; font-weight: 650; line-height: 1.35; }
+.device-report-modal { max-width: 1120px; }
+.report-table { table-layout: fixed; }
+.report-table tbody th { width: 14%; white-space: normal; }
+.report-table thead th:nth-child(1) { width: 14%; }
+.report-table thead th:nth-child(2), .report-table td:nth-child(2) { width: 19%; }
+.report-table thead th:nth-child(3) { width: 27%; }
+.report-table thead th:nth-child(4) { width: 40%; }
+.report-table td { overflow-wrap: anywhere; }
+.report-table td:nth-child(4) { color: var(--text-primary); line-height: 1.45; }
+@media (max-width: 700px) {
+  .report-table { min-width: 680px; }
+}
 .card-indicators-row3, .card-contact-gps-row { gap: 4px 8px; }
 .card-contact-gps-row { display: flex; flex-wrap: wrap; align-items: center; }
 .gps-as-at { font-size: 0.76rem; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }

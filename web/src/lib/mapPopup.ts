@@ -5,7 +5,7 @@ import { COLLAR_RECEIVE_WINDOW_SECONDS, collarCardFreshness, collarFreshnessClas
 import { formatHomeDistance, formatMapCoordinates, googleMapsUrl, homeDistanceMetres } from "@/lib/mapLocation";
 import { normalizeMarkerColor } from "@/lib/markerColor";
 import { gnssUncertainty } from "@/lib/gnssUncertainty";
-import { gpsAgeLabel, gpsAsAt, gpsFreshness, HOME_BEACON_NOTICE } from "@/lib/gpsFreshness";
+import { gpsAgeLabel, gpsAsAt, gpsFreshness, homeStatusTooltip } from "@/lib/gpsFreshness";
 import { transportPresentation } from "@/lib/transportPath";
 import type { DeviceAvatar, TelemetryDevice } from "@/types/telemetry";
 
@@ -13,7 +13,7 @@ export function mapPopupHtml(device: TelemetryDevice, avatar: DeviceAvatar, pres
   const name = escapeHtml(device.name);
   const isHub = device.entity === "hub";
   const gps = gpsFreshness(device, presenceNow);
-  const gpsBadge = isHub ? "" : `<span data-home-beacon class="home-beacon-confirmed"${gps.homeConfirmed ? "" : " hidden"} title="${HOME_BEACON_NOTICE}">Home confirmed</span><span data-gps-age class="gps-age-badge ${gps.className}" title="${gps.label}. ${gps.notice}">${gps.warning ? "⚠ " : ""}${gpsAgeLabel(gps)}</span>`;
+  const gpsBadge = isHub ? "" : `<span data-gps-age class="gps-age-badge ${gps.className}" title="${gps.label}. ${gps.notice}">${gps.warning ? "⚠ " : ""}${gpsAgeLabel(gps)}</span>`;
   const gpsTime = isHub ? "" : `<span class="label">GPS as at</span><span data-gps-as-at class="value gps-as-at ${gps.className}" title="${gps.notice}">${escapeHtml(gpsAsAt(gps, presenceNow))}</span>`;
   const coordinates = formatMapCoordinates(device.lat, device.lon);
   const uncertainty = gnssUncertainty(device);
@@ -35,7 +35,7 @@ export function mapPopupHtml(device: TelemetryDevice, avatar: DeviceAvatar, pres
     : `<span class="label">Device ID</span><span class="value">${device.id}</span><span class="label">${offline ? "Last reported profile" : "Power Profile"}</span><span class="value">${escapeHtml(device.profile)}</span><span class="label">${offline ? "Last known distance" : "Dist From Hub"}</span><span class="value">${distance}</span>`;
   const summary = offline
     ? `<div class="card-name-row"><span class="card-name">${name}</span><span class="card-status status-offline">Offline</span></div><div class="card-offline-summary card-contact-gps-row">No reports for ${formatLastSeen(ageSeconds)}${gpsBadge}</div>`
-    : `<div class="card-name-row"><span class="card-name">${name}</span>${status.css === "status-error" ? "" : `<span class="card-status ${status.css}">${status.emoji} ${status.label}</span>`}<span class="card-profile ${profile.css}">${profile.label}</span></div>${faultHtml}<div class="card-indicators card-indicators-primary"><span class="card-indicator-group">${batteryIndicatorHtml(isHub ? null : device.batt, device.batteryPercent)}</span><span class="card-indicator-group">${signalIndicatorHtml(device, isHub)}</span>${isHub ? "" : `<span class="collar-awake ${estimatedAwake ? "awake" : "sleeping"}" title="${estimatedAwake ? "Fresh report — command receive window may still be open" : "Receive window ended — collar probably sleeping"}">${estimatedAwake ? "💡" : "💤"}</span>`}</div><div class="card-indicators card-indicators-row3">${isHub ? "" : homeDistanceHtml(distance)}${lastSeenHtml(formatLastSeen(ageSeconds))}${gpsBadge}</div>`;
+    : `<div class="card-name-row"><span class="card-name">${name}</span>${status.css === "status-error" ? "" : `<span class="card-status ${status.css}"${!isHub && device.status === "Home" ? ` data-home-beacon title="${homeStatusTooltip(gps)}"` : ""}>${status.emoji} ${status.label}</span>`}<span class="card-profile ${profile.css}">${profile.label}</span></div>${faultHtml}<div class="card-indicators card-indicators-primary"><span class="card-indicator-group">${batteryIndicatorHtml(isHub ? null : device.batt, device.batteryPercent)}</span><span class="card-indicator-group">${signalIndicatorHtml(device, isHub)}</span>${isHub ? "" : `<span class="collar-awake ${estimatedAwake ? "awake" : "sleeping"}" title="${estimatedAwake ? "Fresh report — command receive window may still be open" : "Receive window ended — collar probably sleeping"}">${estimatedAwake ? "💡" : "💤"}</span>`}</div><div class="card-indicators card-indicators-row3">${isHub ? "" : homeDistanceHtml(distance)}${lastSeenHtml(formatLastSeen(ageSeconds))}${gpsBadge}</div>`;
   const offlineNotice = offline ? `<p class="card-offline-notice"><strong>Offline.</strong> These are last-known details from ${formatAge(ageSeconds)} and may no longer be current.</p>` : "";
   return `<div data-map-device-id="${device.id}" class="popup-content device-card map-device-card${freshnessClass ? ` ${freshnessClass}` : ""} expanded"><div class="card-summary map-popup-summary">${popupAvatarHtml(avatar)}<div class="card-identity">${summary}</div></div><div class="card-detail map-popup-detail">${offlineNotice}<div class="card-grid"><span data-gps-coordinate-label class="label">${offline || (!isHub && gps.lastKnown) ? "Last known coordinates" : "Coordinates"}</span><span class="value"><a data-gps-coordinates class="card-coords card-coords-link${isHub ? "" : ` ${gps.className}`}" href="${mapsUrl}" target="_blank" rel="noopener noreferrer" title="Open this location in Google Maps">${coordinates}</a></span>${gpsTime}${details}${uncertainty ? `<span class="label">GPS uncertainty</span><span class="value">${escapeHtml(uncertainty.label)}</span>` : ""}<span class="label">Last contact</span><span data-last-contact class="value">${formatAge(ageSeconds)}</span>${source}</div>${actions}</div></div>`;
 }
@@ -46,7 +46,7 @@ export function refreshMapPopupGps(root: HTMLElement, device: TelemetryDevice, n
   if (device.entity === "hub") return;
   const gps = gpsFreshness(device, now);
   const home = root.querySelector<HTMLElement>("[data-home-beacon]");
-  if (home) home.hidden = !gps.homeConfirmed;
+  if (home) home.title = homeStatusTooltip(gps);
   const badge = root.querySelector<HTMLElement>("[data-gps-age]");
   if (badge) { badge.className = `gps-age-badge ${gps.className}`; badge.textContent = `${gps.warning ? "⚠ " : ""}${gpsAgeLabel(gps)}`; badge.title = `${gps.label}. ${gps.notice}`; }
   const stamp = root.querySelector<HTMLElement>("[data-gps-as-at]");
