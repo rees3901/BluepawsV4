@@ -18,7 +18,9 @@
   #deviceCards .card-name-row { grid-column: 3; grid-row: 1; }
   #deviceCards .card-chevron { grid-column: 4; grid-row: 1; }
   #deviceCards .card-indicators, #deviceCards .card-fault-row, #deviceCards .card-offline-summary { grid-column: 1 / -1; }
-  #deviceCards .card-indicators-primary { overflow-x: auto; max-width: 100%; }
+  /* Wrapped metrics do not need a scroll container; emoji ink/hidden details
+     otherwise create a tiny vertical scrollbar through overflow-axis coupling. */
+  #deviceCards .card-indicators-primary { overflow: visible; max-width: 100%; }
 }
 .card-indicators-row3 > .collar-awake { flex: 0 0 auto; min-width: 1.3em; font-size: 1.3em; }
 /* Match the radio bars' natural height; avoid an inline baseline/descender gap. */
@@ -27,6 +29,7 @@
 .gnss-indicator summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
 .gnss-satellites { display: inline-flex; align-items: center; gap: 1px; }
 .gnss-satellites .gnss-count { margin-left: 0; }
+.gnss-indicator:not([open]) > .gnss-detail { display: none; }
 .gnss-emoji { font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif; font-size: 0.88rem; line-height: 1; flex-shrink: 0; }
 .gnss-detail { position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; display: block; width: min(280px, calc(100vw - 80px)); max-height: 220px; overflow-y: auto; box-shadow: 0 6px 20px #0005; padding: 8px; background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius); font-size: 0.7rem; line-height: 1.5; overflow-wrap: anywhere; }
 button, input, select {

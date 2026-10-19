@@ -182,6 +182,13 @@ test('collar GPS age follows distance, contact and awake state on the lower metr
   }
 });
 
+test('mobile wrapped telemetry is not a scroll container and closed GNSS details take no space', () => {
+  const css = readFileSync(new URL('../web/src/app/web.css', import.meta.url), 'utf8');
+  assert.match(css, /#deviceCards \.card-indicators-primary \{ overflow: visible; max-width: 100%; \}/);
+  assert.doesNotMatch(css, /#deviceCards \.card-indicators-primary \{ overflow-x: auto/);
+  assert.match(css, /\.gnss-indicator:not\(\[open\]\) > \.gnss-detail \{ display: none; \}/);
+});
+
 test('both map implementations apply the shared age badge without changing pin anchors', () => {
   for (const name of ['TrackingMap', 'MapLibreMap']) {
     const source = readFileSync(new URL(`../web/src/components/${name}.tsx`, import.meta.url), 'utf8');
