@@ -101,19 +101,39 @@ test('open popup independently expires Home confirmation and updates GPS age wit
   assert.equal(nodes['[data-gps-coordinate-label]'].textContent,'Last known coordinates');
 });
 
-test('a green on-schedule old fix still has a last-known warning on the map pin', () => {
+test('map GPS adornment starts only after eleven minutes, independently of card/profile warning bands', () => {
   let badge;
   const require = createRequire(new URL('../web/package.json', import.meta.url));
   const ts = require('typescript');
   const source = readFileSync(new URL('../web/src/lib/gpsMarker.ts', import.meta.url), 'utf8');
   const context = vm.createContext({ exports: {}, document: { createElement: () => ({ setAttribute() {} }) }, require: () => fixtureModule('@/lib/gpsFreshness') });
   vm.runInContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, context);
-  const at = new Date(now - 20 * 60_000).toISOString();
   const pin = { querySelector() {}, setAttribute() {}, append(value) { badge = value; } };
-  context.exports.updateGpsMarker(pin, { ...device, positionRecordedAt: at, gnss: { ...device.gnss, recordedAt: at } }, now);
-  assert.match(badge.className, /gps-fresh/);
-  assert.match(pin.title, /GPS 20m old/);
-  assert.match(pin.title, /not a current position/);
+  const update=context.exports.updateGpsMarker;
+  for(const profile of ['PowerSave','Normal','Active','Emergency Lost','Debug']) {
+    for(const age of [0,59,60,300,599,600,601,659,660,661,1200]) {
+      badge=undefined;
+      const at=new Date(now-age*1000).toISOString();
+      const collar={...device,profile,positionRecordedAt:at,gnss:{...device.gnss,recordedAt:at}};
+      update(pin,collar,now);
+      assert.equal(!!badge,age>660,`${profile}, age ${age}s`);
+      if(age>=60) assert.match(pin.title,/not a current position/);
+    }
+  }
+  // Explicit packet failures still warn on cards, but don't bypass map decluttering.
+  const at=new Date(now-60_000).toISOString();
+  badge=undefined;
+  update(pin,{...device,gpsFailedReports:3,positionRecordedAt:at,gnss:{...device.gnss,recordedAt:at}},now);
+  assert.equal(badge,undefined);
+  assert.match(pin.title,/not a current position/);
+  for(const gnss of [null,{...device.gnss,fixAgeS:65535}]) {
+    badge=undefined;
+    update(pin,{...device,gnss},now);
+    assert.ok(badge,'unknown GPS age remains visible');
+  }
+  badge=undefined;
+  update(pin,{...device,entity:'hub',gnss:null},now);
+  assert.equal(badge,undefined);
 });
 
 test('no-fix full reports turn cards and popups amber/red, and check-ins cannot clear them', () => {
@@ -176,6 +196,18 @@ test('marker badges never accumulate and disappear on a new fix; the pin is not 
   assert.match(pin.attributes['aria-label'],/not a current position/);
   const current={...device,positionRecordedAt:new Date(now).toISOString(),gnss:{...device.gnss,recordedAt:new Date(now).toISOString()}};
   update(pin,current,now);
+  assert.equal(pin.children.length,0);
+  // The clock alone adds the badge after eleven minutes, without a new report.
+  update(pin,current,now+600_000);
+  assert.equal(pin.children.length,0);
+  update(pin,current,now+601_000);
+  assert.equal(pin.children.length,0);
+  update(pin,current,now+660_000);
+  assert.equal(pin.children.length,0);
+  update(pin,current,now+661_000);
+  assert.equal(pin.children.length,1);
+  const fresh={...device,positionRecordedAt:new Date(now+661_000).toISOString(),gnss:{...device.gnss,recordedAt:new Date(now+661_000).toISOString()}};
+  update(pin,fresh,now+661_000);
   assert.equal(pin.children.length,0);
 });
 
