@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { homeDistanceMetres, formatHomeDistance } from "@/lib/mapLocation";
+import { observePanelSizing } from "@/lib/panelSizing";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { DeviceCard, DownloadIcon, type DeviceCardProps } from "@/components/DeviceCard";
@@ -120,7 +121,6 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
   const lastDragTargetRef = useRef<number | null>(null);
   const cardPositionsRef = useRef(new Map<number, number>());
   const previousCardOrderRef = useRef<number[]>([]);
-  const panelContentWidthRef = useRef(490);
   const customAvatarsRef = useRef<Record<number, DeviceAvatar>>({});
   const cardOrderKey = useMemo(() => deviceCardOrderStorageKey(userEmail, householdId), [householdId, userEmail]);
   const cardPinKey = useMemo(() => deviceCardPinStorageKey(userEmail, householdId), [householdId, userEmail]);
@@ -210,46 +210,10 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
   useLayoutEffect(() => {
     const panel = document.getElementById("panel");
     if (!panel) return;
-    let frame = 0;
-    const measure = () => {
-      // Phones use a full-width telemetry row instead of the desktop side layout.
-      if (window.innerWidth <= 768) return;
-      let required = panelContentWidthRef.current;
-      panel.querySelectorAll<HTMLElement>(".card-indicators-primary").forEach((row) => {
-        const summary = row.closest<HTMLElement>(".card-summary");
-        if (!summary) return;
-        const rowStyle = getComputedStyle(row);
-        const summaryStyle = getComputedStyle(summary);
-        const number = (value: string) => parseFloat(value) || 0;
-        const items = Array.from(row.children) as HTMLElement[];
-        const telemetryWidth = items.reduce((sum, item) => sum + item.offsetWidth, 0)
-          + Math.max(0, items.length - 1) * number(rowStyle.columnGap);
-        const siblings = Array.from(summary.children).filter(item => !item.classList.contains("card-identity")) as HTMLElement[];
-        const chromeWidth = siblings.reduce((sum, item) => {
-          const style = getComputedStyle(item);
-          // Reserve the expanded avatar width so opening a card won't squeeze it.
-          return sum + Math.max(item.offsetWidth, item.classList.contains("card-avatar-wrap") ? 78 : 0)
-            + number(style.marginLeft) + number(style.marginRight);
-        }, 0) + siblings.length * number(summaryStyle.columnGap)
-          + number(summaryStyle.paddingLeft) + number(summaryStyle.paddingRight)
-          + panel.clientWidth - summary.clientWidth;
-        required = Math.max(required, Math.ceil(telemetryWidth + chromeWidth + 2));
-      });
-      // Grow to fit real content, but never oscillate with polling/awake labels.
-      if (required > panelContentWidthRef.current || !document.documentElement.style.getPropertyValue("--panel-content-width")) {
-        panelContentWidthRef.current = required;
-        document.documentElement.style.setProperty("--panel-content-width", `${required}px`);
-      }
-    };
-    const schedule = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(measure); };
-    const observer = new ResizeObserver(schedule);
-    observer.observe(panel);
-    panel.querySelectorAll(".card-indicators-primary > *").forEach(item => observer.observe(item));
-    window.addEventListener("resize", schedule);
-    measure();
-    return () => { observer.disconnect(); cancelAnimationFrame(frame); window.removeEventListener("resize", schedule); };
+    return observePanelSizing(panel, width => {
+      document.documentElement.style.setProperty("--panel-content-width", `${width}px`);
+    });
   }, [orderedDeviceIds]);
-
   useEffect(() => () => { document.documentElement.style.removeProperty("--panel-content-width"); }, []);
 
   const avatars = useMemo<Record<number, DeviceAvatar>>(() => Object.fromEntries(orderedDevices.map((device) => [

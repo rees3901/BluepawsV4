@@ -8,6 +8,17 @@ const now=Date.parse('2026-10-19T12:00:00Z');
 const base={id:3001,name:'Cat',seq:1,time:now/1000,profile:'PowerSave',status:'Out',error:'None',lat:51,lon:-2,hasGps:true,batt:3900,rssi:-90,snr:8,ingestPath:'lora_hub',lastUpdate:now,positionRecordedAt:new Date(now).toISOString(),gnss:{accuracyM:6,satellites:8,fixAgeS:0,recordedAt:new Date(now).toISOString()},homeHub:{lat:51.01,lon:-2,fixAt:new Date(now).toISOString()}};
 const avatar={kind:'emoji',emoji:'🐱',color:'#0099ff'};
 
+test('sidebar grows immediately but ignores tiny shrink fluctuations before settling',()=>{
+  const {PANEL_BASE_WIDTH,PANEL_SHRINK_DELAY_MS,panelResizeDirection:direction}=fixtureModule('@/lib/panelSizing');
+  assert.equal(PANEL_BASE_WIDTH,460);
+  assert.equal(PANEL_SHRINK_DELAY_MS,1500);
+  assert.equal(direction(513,514),'grow');
+  assert.equal(direction(748,513),'shrink');
+  assert.equal(direction(513,501),'hold');
+  assert.equal(direction(513,500),'shrink');
+  assert.equal(direction(513,513),'hold');
+});
+
 test('distance/contact thresholds are strict, and invalid/unknown values stay neutral',()=>{
   for(const [value,css] of [[0,''],[600,''],[600.01,'metric-amber'],[1000,'metric-amber'],[1000.01,'metric-red']]) assert.equal(distance(value),css);
   for(const [value,css] of [[0,''],[1800,''],[1801,'metric-amber'],[7200,'metric-amber'],[7201,'metric-red']]) assert.equal(contact(value),css);
