@@ -1,7 +1,7 @@
 # Bluepaws Cat Tracker TLV Telemetry Protocol v1.1
 
 Status: locked v1.1 packet header, TLV set and transport wrapper contract; implementation validation remains active
-Last updated: 2026-10-19  
+Last updated: 2026-08-13  
 Scope: collar telemetry packet, LoRa collar-to-hub path, LTE-M/Cat-M1 direct path, hub relay path, Supabase Edge Function ingestion
 
 ## 1. Purpose
@@ -396,22 +396,6 @@ The collar and Home Hub use one fixed PHY profile. Only transmit power changes w
 | Dynamic SF/BW/CR profiles | Not used |
 
 CR4/6 adds 50 percent FEC overhead relative to the uncoded data. Equivalently, one third of the coded bits are redundancy. Actual LoRa airtime is determined by PHY symbol packing and is not calculated by simply treating a 64-byte application payload as a literal 96-byte LoRa payload.
-
-##### Why SF10 was selected instead of SF12
-
-For the maximum 64-byte application packet, using BW125, CR4/6, CRC, an explicit header and an 8-symbol preamble:
-
-| Comparison | SF10, selected | SF12, rejected |
-|---|---:|---:|
-| Time on air | 804.864 ms | 3,219.456 ms |
-| Relative airtime and TX energy | 1x | Approximately 4x |
-| Approximate sensitivity | -132 dBm | -137 dBm |
-| Link-budget improvement | Baseline | Approximately 5 dB |
-| Likely practical collar range | Baseline | Approximately 1.3x to 1.5x |
-
-SF12 was rejected because it consumes approximately four times the airtime and transmit energy for only about 30 to 50 percent more practical range in a ground-level pet-collar installation. The theoretical free-space range improvement from the additional 5 dB is about 1.78x, but buildings, foliage, ground proximity, antenna orientation and absorption by the animal make that unlikely in normal use.
-
-SF10 therefore remains the fixed long-range profile because it provides the better balance of usable range, battery consumption, channel occupancy and reporting frequency. SF12 would also require low data-rate optimisation to be enabled, while the selected SF10/BW125 profile keeps it disabled.
 
 Transmit-power policy:
 
