@@ -7,7 +7,8 @@ import { DeviceCard, type DeviceCardProps } from "@/components/DeviceCard";
 import { HubBluetoothDialog } from "@/components/HubBluetoothDialog";
 import { isHubBlePower, type HubBlePower } from "@/lib/hubBluetooth";
 import { DeviceReportModal } from "@/components/DeviceReportModal";
-import { buildHubReport, hubReportCsv } from "@/lib/hubReports";
+import { buildHubReport } from "@/lib/hubReports";
+import { createHubReportExport, saveReportExport, type ReportExportFormat } from "@/lib/reportExport";
 import { hubControlFeedback, type HubControlAttempt } from "@/lib/hubControlFeedback";
 import { HUB_REPORTING, hubContactGrace, type HubReportingProfile } from "@/lib/hubReporting";
 
@@ -29,10 +30,7 @@ export function HubCard({ hub, onSaved, cardProps }: { hub: HubPresence; onSaved
   const [reportLoading, setReportLoading] = useState(false);
   const [reportError, setReportError] = useState<string | null>(null);
   const [report, setReport] = useState<HubPresence | null>(null);
-  const download = (value: HubPresence) => {
-    const url = URL.createObjectURL(new Blob([hubReportCsv(value)], {type:"text/csv;charset=utf-8"}));
-    const a = document.createElement("a"); a.href=url; a.download=`bluepaws_hub_${value.gateway_guid16.toString(16).padStart(4,"0")}_report.csv`; a.click(); URL.revokeObjectURL(url);
-  };
+  const download = (value: HubPresence, format: ReportExportFormat = "json") => saveReportExport(createHubReportExport(value, format));
   const loadReport = async (exportOnly = false) => {
     setReportOpen(!exportOnly); setReportLoading(true); setReportError(null); setReport(null);
     try {
@@ -119,5 +117,5 @@ export function HubCard({ hub, onSaved, cardProps }: { hub: HubPresence; onSaved
     </div>, document.body)}
   {reportOpen && <DeviceReportModal deviceName={hub.display_name} entityLabel="Home Hub"
     reports={report ? [buildHubReport(report)] : []} loading={reportLoading} error={reportError}
-    onClose={() => setReportOpen(false)} onDownload={() => { if (report) download(report); }} />}</>;
+    onClose={() => setReportOpen(false)} onDownload={format => { if (report) download(report, format); }} />}</>;
 }

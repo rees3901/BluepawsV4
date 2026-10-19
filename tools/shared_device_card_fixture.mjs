@@ -44,14 +44,14 @@ export function renderCollar(props={}) {
   return renderToStaticMarkup(React.createElement(load('@/components/DeviceCard').DeviceCard,
     {...cardProps,device,avatar:{kind:'emoji',emoji:'🐱',color:'#0099ff'},...props}));
 }
-export function renderReport(report, entityLabel='hub') {
+export function renderReport(report, entityLabel='hub', props={}) {
   // The real modal, with only the portal target substituted for static fixture QA.
   const source=readFileSync(new URL('../web/src/components/DeviceReportModal.tsx',import.meta.url),'utf8');
   const context=vm.createContext({exports:{},document:{body:{}},require(name){
     return name==='react-dom' ? {createPortal:node=>node} : load(name);
   }});
   vm.runInContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX}}).outputText,context);
-  return renderToStaticMarkup(React.createElement(context.exports.DeviceReportModal,{deviceName:'Synthetic report',reports:[report],entityLabel,loading:false,error:null,onClose:noop,onDownload:noop}));
+  return renderToStaticMarkup(React.createElement(context.exports.DeviceReportModal,{deviceName:'Synthetic report',reports:[report],entityLabel,loading:false,error:null,onClose:noop,onDownload:noop,...props}));
 }
 if (process.argv.includes('--serve')) {
   createServer((req,res) => {

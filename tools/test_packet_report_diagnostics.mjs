@@ -5,7 +5,8 @@ import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 import {fixtureModule,renderReport} from './shared_device_card_fixture.mjs';
 const {packetReportDiagnostics:diagnostics}=fixtureModule('@/lib/packetReportDiagnostics');
-const {buildDeviceReport,buildCurrentDeviceReport,deviceReportsToCsv}=fixtureModule('@/lib/deviceReports');
+const {buildDeviceReport,buildCurrentDeviceReport}=fixtureModule('@/lib/deviceReports');
+const {createCollarReportExport}=fixtureModule('@/lib/reportExport');
 const field=(rows,name)=>rows.find(r=>r.field===name);
 const observation={id:1,device_guid16:3001,msg_seq_id:12,time_unix:1770000000,recorded_at:'2026-10-16T12:00:00Z',received_at:'2026-10-16T12:00:01Z',status:0,power_profile:0,flags:0,tx_reason:0,gnss_valid:false,latitude:null,longitude:null,batt_mv:0,acc_m:0,fix_age_s:65535,sat_count:255};
 
@@ -62,7 +63,7 @@ test('dashboard fallback never invents original flags or optional TLVs',()=>{
   assert.equal(field(diagnostics(255,4,{fw_ver:256,uptime_s:10},false),'Firmware version').data,'Not supplied');
 });
 
-test('advanced rows are collapsed separately, while CSV retains every diagnostic',()=>{
+test('advanced rows are collapsed separately, while JSON retains original diagnostics',()=>{
   const report=buildDeviceReport({...observation,tx_reason:4,flags:192,tlv_data:{fw_ver:256,reset_reason:4,uptime_s:9}},null);
   const html=renderReport(report,'collar');
   assert.match(html,/<details class="previous-reports report-diagnostics"><summary>Advanced packet diagnostics/);
@@ -70,15 +71,17 @@ test('advanced rows are collapsed separately, while CSV retains every diagnostic
   const beforeAdvanced=html.split('<details class="previous-reports report-diagnostics">')[0];
   assert.match(beforeAdvanced,/Stale GPS \(packet\)/); assert.match(beforeAdvanced,/Firmware version/);
   assert.doesNotMatch(beforeAdvanced,/Raw packet flags|Reset reason|Reported uptime/);
-  const csv=deviceReportsToCsv([report]);
-  for(const name of ['Raw packet flags','Reset reason','Firmware version']) assert.ok(csv.includes(name));
+  const json=JSON.parse(createCollarReportExport({id:3001,name:'Podge'},[report]).content);
+  assert.equal(json.reports[0].raw_observation.flags,192);
+  assert.equal(json.reports[0].raw_observation.tlv_data.reset_reason,4);
+  assert.equal(json.reports[0].raw_observation.tlv_data.fw_ver,256);
 });
 
 test('cloud report query selects stored TLVs and retains its device filter',async()=>{
   const require=createRequire(new URL('../web/package.json',import.meta.url));
   const ts=require('typescript'); let selected,filtered;
   const query={select(columns){selected=columns;return this;},eq(key,value){filtered=[key,value];return this;},order(){return this;},limit(){return Promise.resolve({data:[{...observation,tx_reason:4,tlv_data:{fw_ver:258,reset_reason:0,uptime_s:5}}],error:null});}};
-  const client={from(table){return table==='observations'?query:{select(){return this;},in(){return this;},order(){return Promise.resolve({data:[],error:null});}};}};
+  const client={from(table){return table==='observations'?query:{select(){return this;},in(){return this;},order(){return this;},limit(){return Promise.resolve({data:[],error:null});}};}};
   const source=readFileSync(new URL('../web/src/lib/deviceReports.ts',import.meta.url),'utf8');
   const context=vm.createContext({exports:{},console,require(name){return name==='@/lib/supabase/client'?{createClient:()=>client}:fixtureModule(name.startsWith('./')?'@/lib/'+name.slice(2).replace(/\.ts$/,''):name);}});
   vm.runInContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,context);

@@ -56,11 +56,3 @@ export function buildHubReport(hub: HubPresence): Pick<DeviceReport,"rows"|"summ
       : field === "Uptime" ? !Number.isFinite(hub.uptime_s) || hub.uptime_s < 0 ? "No usable uptime supplied; restart history cannot be assessed." : hub.uptime_s < 120 ? "The hub started recently; this may be normal. Repeated uptime resets warrant checking power stability." : "Running for this interval. A lower uptime in a newer report usually indicates a restart."
       : context }))};
 }
-
-export function hubReportCsv(hub: HubPresence) {
-  const report = buildHubReport(hub);
-  // Quoted cells alone do not stop spreadsheet formula interpretation.
-  const cell = (s: string) => `"${(/^[\s]*[=+\-@]/.test(s) ? "'"+s : s).replaceAll('"','""')}"`;
-  return [["Field","Data","Description","What this means"], ["Summary",report.summary,"Latest hub self-report","Snapshot, not a live connection guarantee"],
-    ...report.rows.map(r => [r.field,r.data,r.description,r.meaning])].map(row => row.map(cell).join(",")).join("\r\n");
-}

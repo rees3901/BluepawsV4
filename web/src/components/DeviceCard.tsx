@@ -199,7 +199,7 @@ export function DeviceCard(props: DeviceCardProps) {
             {!isHub && props.commandFeedback && <div role="status" className={`command-feedback ${props.commandFeedback.pending ? "pending" : props.commandFeedback.status}`}>{props.commandFeedback.text}<span className="command-feedback-help">{props.commandFeedback.help}</span>{props.commandFeedback.cancellable && props.onCancelCommand && <button type="button" className="btn-action" disabled={cancellingCommand} aria-label={`Cancel pending power profile command for ${device.name}`} onClick={async event => { event.stopPropagation(); setCancellingCommand(true); try { await props.onCancelCommand?.(props.commandFeedback!.id); } finally { setCancellingCommand(false); } }}>{cancellingCommand ? "Cancelling…" : "× Cancel"}</button>}</div>}
             <div className="log-btn-row">
               <button className="btn-device-log btn-secondary" type="button" onClick={onReportLog}>Message Log</button>
-              <button className="btn-log-export" type="button" title="Export report log as CSV" aria-label="Export report log" onClick={onReportExport}>
+              <button className="btn-log-export" type="button" title="Download report data as JSON" aria-label="Export report log" onClick={onReportExport}>
                 <DownloadIcon />
               </button>
             </div>

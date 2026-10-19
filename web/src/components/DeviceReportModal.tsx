@@ -1,6 +1,7 @@
 "use client";
 import { createPortal } from "react-dom";
 import type { DeviceReport, DeviceReportTableRow } from "@/lib/deviceReports";
+import type { ReportExportFormat } from "@/lib/reportExport";
 
 interface DeviceReportModalProps {
   deviceName: string;
@@ -9,10 +10,11 @@ interface DeviceReportModalProps {
   loading: boolean;
   error: string | null;
   onClose: () => void;
-  onDownload: () => void;
+  onDownload: (format: ReportExportFormat) => void;
+  exporting?: boolean;
 }
 
-export function DeviceReportModal({ deviceName, reports, loading, error, onClose, onDownload, entityLabel = "collar" }: DeviceReportModalProps) {
+export function DeviceReportModal({ deviceName, reports, loading, error, onClose, onDownload, exporting = false, entityLabel = "collar" }: DeviceReportModalProps) {
   const latest = reports[0] ?? null;
 
   // The sidebar animates/transforms: fixed descendants otherwise use its bounds.
@@ -80,8 +82,10 @@ export function DeviceReportModal({ deviceName, reports, loading, error, onClose
           </>
         )}
 
-        <div className="modal-actions">
-          <button className="btn-primary" type="button" onClick={onDownload} disabled={reports.length === 0}>Download CSV</button>
+        <p className="report-summary">{entityLabel === "hub" ? "Exports the latest hub snapshot only, not a history archive." : `Preview: ${reports.length} recent report(s). Downloads retrieve up to the latest 1,000 accepted reports.`} JSON includes readings, timestamps and packet diagnostics. CSV contains one data row per report, without repeated advice. Downloads contain location data; share carefully.</p>
+        <div className="modal-actions report-export-actions" aria-busy={exporting}>
+          <button className="btn-primary" type="button" onClick={() => onDownload("json")} disabled={loading || exporting || reports.length === 0}>{exporting ? "Preparing download…" : "Download JSON"}</button>
+          <button className="btn-secondary" type="button" onClick={() => onDownload("csv")} disabled={loading || exporting || reports.length === 0}>Data CSV</button>
           <button className="btn-secondary" type="button" onClick={onClose}>Close</button>
         </div>
       </div>

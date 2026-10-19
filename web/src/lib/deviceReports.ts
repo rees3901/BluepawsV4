@@ -1,9 +1,10 @@
 import { createClient } from "@/lib/supabase/client";
-import { formatMapCoordinates, googleMapsUrl } from "@/lib/mapLocation";
+import { formatMapCoordinates } from "@/lib/mapLocation";
 import type { CollarStatus, IngestPath, PowerProfile, TelemetryDevice } from "@/types/telemetry";
 import { accuracyMeaning, batteryMeaning, fixAgeMeaning, radioMeaning, satellitesMeaning } from "./reportInsights.ts";
 import { isFullGpsReport } from "./gpsReporting.ts";
 import { packetReportDiagnostics } from "./packetReportDiagnostics.ts";
+import { REPORT_EXPORT_LIMIT } from "./reportExport";
 
 const REPORT_LIMIT = 10;
 const REPORT_DESCRIPTIONS: Record<string, string> = {
@@ -59,6 +60,7 @@ export interface DeviceObservationPathRow {
 export interface DeviceReport {
   observation: DeviceObservationRow;
   path: DeviceObservationPathRow | null;
+  paths?: DeviceObservationPathRow[];
   rows: DeviceReportTableRow[];
   summary: string;
 }
@@ -71,40 +73,51 @@ export interface DeviceReportTableRow {
   advanced?: boolean;
 }
 
-export async function loadDeviceReports(deviceId: number): Promise<DeviceReport[]> {
+export async function loadDeviceReports(deviceId: number, limit = REPORT_LIMIT, requirePaths = false): Promise<DeviceReport[]> {
+  if (!Number.isInteger(limit) || limit < 1 || limit > REPORT_EXPORT_LIMIT) throw new Error("Invalid report history limit");
   const supabase = createClient();
   const { data: observations, error } = await supabase
     .from("observations")
     .select("id,device_guid16,msg_seq_id,time_unix,recorded_at,status,power_profile,flags,tx_reason,gnss_valid,latitude,longitude,batt_mv,acc_m,fix_age_s,sat_count,received_at,tlv_data")
     .eq("device_guid16", deviceId)
     .order("received_at", { ascending: false })
-    .limit(REPORT_LIMIT);
+    .order("id", { ascending: false })
+    .limit(limit);
 
   if (error) throw error;
 
   const validObservations = ((observations ?? []) as unknown[]).filter(isDeviceObservationRow);
+  if (requirePaths && (validObservations.length !== (observations ?? []).length || validObservations.some(row => row.device_guid16 !== deviceId))) {
+    throw new Error("History contains invalid or mismatched report data. No file was exported.");
+  }
   if (validObservations.length === 0) return [];
 
   const observationIds = validObservations.map((row) => row.id);
-  const { data: paths, error: pathError } = await supabase
-    .from("observation_paths")
-    .select("observation_id,ingest_path,link_type,gateway_guid16,link_rssi_dbm,link_snr_db,first_received_at,last_received_at,receipt_count")
-    .in("observation_id", observationIds)
-    .order("last_received_at", { ascending: false });
-
-  if (pathError) {
-    console.warn("Unable to load accepted report path details from Supabase", pathError);
-    return validObservations.map((observation: DeviceObservationRow) => buildDeviceReport(observation, null));
+  const paths: DeviceObservationPathRow[] = [];
+  // Keep URL/filter size and per-request results bounded for larger exports.
+  for (let start = 0; start < observationIds.length; start += 100) {
+    const { data, error: pathError } = await supabase.from("observation_paths")
+      .select("observation_id,ingest_path,link_type,gateway_guid16,link_rssi_dbm,link_snr_db,first_received_at,last_received_at,receipt_count")
+      .in("observation_id", observationIds.slice(start, start + 100))
+      .order("last_received_at", { ascending: false }).limit(1000);
+    if (pathError || (requirePaths && data?.length === 1000)) {
+      if (requirePaths) throw new Error("Could not retrieve complete route details. No history was exported.");
+      console.warn("Unable to load accepted report path details", pathError);
+      return validObservations.map(observation => buildDeviceReport(observation, null));
+    }
+    const validPaths = ((data ?? []) as unknown[]).filter(isDeviceObservationPathRow);
+    if (requirePaths && validPaths.length !== (data ?? []).length) throw new Error("History contains invalid route data. No file was exported.");
+    paths.push(...validPaths);
   }
 
-  const pathsByObservation = new Map<number, DeviceObservationPathRow>();
-  ((paths ?? []) as unknown[]).filter(isDeviceObservationPathRow).forEach((row) => {
-    if (!pathsByObservation.has(row.observation_id)) pathsByObservation.set(row.observation_id, row);
+  const pathsByObservation = new Map<number, DeviceObservationPathRow[]>();
+  paths.forEach((row) => {
+    pathsByObservation.set(row.observation_id, [...(pathsByObservation.get(row.observation_id) ?? []), row]);
   });
 
   return validObservations.map((observation: DeviceObservationRow) => {
-    const path = pathsByObservation.get(observation.id) ?? null;
-    return buildDeviceReport(observation, path);
+    const acceptedPaths = pathsByObservation.get(observation.id) ?? [];
+    return { ...buildDeviceReport(observation, acceptedPaths[0] ?? null), paths: acceptedPaths };
   });
 }
 
@@ -251,43 +264,6 @@ export function buildDeviceReport(observation: DeviceObservationRow, path: Devic
   };
 }
 
-export function deviceReportsToCsv(reports: DeviceReport[]) {
-  const lines = [
-    [
-      "received_at",
-      "device_id",
-      "sequence",
-      "report_type",
-      "status",
-      "power_profile",
-      "position",
-      "battery_mv",
-      "signal",
-      "source",
-      "summary",
-      "field_descriptions",
-      "reading_meanings",
-    ],
-    ...reports.map((report) => [
-      report.observation.received_at,
-      String(report.observation.device_guid16),
-      String(report.observation.msg_seq_id),
-      txReasonLabel(report.observation.tx_reason),
-      statusLabel(report.observation.status),
-      profileLabel(report.observation.power_profile),
-      report.observation.gnss_valid && report.observation.latitude !== null && report.observation.longitude !== null
-        ? googleMapsUrl(report.observation.latitude, report.observation.longitude)
-        : "No fresh GPS fix",
-      String(report.observation.batt_mv),
-      signalLabel(report.path?.link_rssi_dbm ?? null, report.path?.link_snr_db ?? null),
-      sourceLabel(report.path),
-      report.summary,
-      JSON.stringify(Object.fromEntries(report.rows.map(row => [row.field, row.description]))),
-      JSON.stringify(Object.fromEntries(report.rows.map(row => [row.field, row.meaning]))),
-    ]),
-  ];
-  return lines.map((line) => line.map(csvCell).join(",")).join("\n");
-}
 
 function isDeviceObservationRow(value: unknown): value is DeviceObservationRow {
   if (!value || typeof value !== "object") return false;
@@ -394,21 +370,6 @@ function batteryDescription(millivolts: number) {
   return "Low battery voltage; the collar may soon reduce activity or need charging.";
 }
 
-function signalLabel(rssi: number | null, snr: number | null) {
-  if (rssi === null && snr === null) return "Not reported";
-  const quality = signalQuality(rssi, snr);
-  const parts = [quality];
-  if (rssi !== null) parts.push(`${Math.round(rssi)} dBm`);
-  if (snr !== null) parts.push(`${snr.toFixed(1)} dB SNR`);
-  return parts.join(" · ");
-}
-
-function signalQuality(rssi: number | null, snr: number | null) {
-  if ((rssi !== null && rssi >= -90) || (snr !== null && snr >= 8)) return "Good";
-  if ((rssi !== null && rssi >= -110) || (snr !== null && snr >= 0)) return "Average";
-  return "Poor";
-}
-
 function signalDescription(linkType: "lora" | "lte" | null) {
   if (linkType === "lora") return "LoRa radio quality as measured by the Home Hub when it heard the collar.";
   if (linkType === "lte") return "Cellular link quality from the collar's mobile data path.";
@@ -440,8 +401,4 @@ function profileCode(value: PowerProfile) {
   if (value === "Emergency Lost") return 3;
   if (value === "Debug") return 4;
   return 1;
-}
-
-function csvCell(value: string) {
-  return `"${value.replaceAll('"', '""')}"`;
 }
