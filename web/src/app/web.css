@@ -1232,6 +1232,8 @@ body.light .device-card:is(.collar-sleeping, .freshness-subdued, .freshness-fade
 .device-card :is(.card-avatar-wrap, .card-name-row, .card-fault-row, .gnss-indicator),
 .device-card .card-indicators-primary > .card-indicator-group { filter: var(--card-freshness-filter, none); }
 .device-report-modal { max-width: 1120px; }
+.report-export-actions { flex-wrap: wrap; }
+.report-export-actions button { flex: 1 1 120px; min-height: 44px; }
 .report-table { table-layout: fixed; }
 .report-table tbody th { width: 14%; white-space: normal; }
 .report-table thead th:nth-child(1) { width: 14%; }

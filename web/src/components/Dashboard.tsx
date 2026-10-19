@@ -22,7 +22,8 @@ import { saveHubAppearance } from "@/lib/hubAppearances";
 import { commandMessage } from "@/lib/collarFeedback";
 import { powerProfileLabel, type CustomerPowerProfile } from "@/lib/powerProfiles";
 import { deviceCardOrderChanged, deviceCardOrderStorageKey, deviceCardPinStorageKey, moveDeviceToHoverTarget, orderDeviceIds, pinDeviceFirst, sortDeviceIds, type CardSortField, type CardSortDirection } from "@/lib/deviceCardOrder";
-import { buildCurrentDeviceReport, deviceReportsToCsv, loadDeviceReports, type DeviceReport } from "@/lib/deviceReports";
+import { buildCurrentDeviceReport, loadDeviceReports, type DeviceReport } from "@/lib/deviceReports";
+import { createCollarReportExport, saveReportExport, REPORT_EXPORT_LIMIT, type ReportExportFormat } from "@/lib/reportExport";
 import { loadDeviceAppearances, revokeAvatarUrls } from "@/lib/deviceAppearances";
 import { initialiseExpandedDeviceCards, nextExpandedDeviceCards } from "@/lib/expandedCards";
 import { followedDeviceAfterAction } from "@/lib/followState";
@@ -96,6 +97,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
   const [mapCommand, setMapCommand] = useState<MapCommand | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [findSending, setFindSending] = useState(false);
+  const [reportExporting, setReportExporting] = useState(false);
   const [findError, setFindError] = useState<string | null>(null);
   const [findDevice, setFindDevice] = useState<SelectedDevice | null>(null);
   const [toast, setToast] = useState<string | null>(null);
@@ -547,9 +549,9 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
     setToast("Device pinned to the first position in this browser");
   }, [mapDevices, pinnedDeviceId]);
 
-  const fetchReportsForDevice = useCallback(async (device: TelemetryDevice) => {
+  const fetchReportsForDevice = useCallback(async (device: TelemetryDevice, exportHistory = false) => {
     if (tutorialMode) return [buildCurrentDeviceReport(device)];
-    return loadDeviceReports(device.id);
+    return loadDeviceReports(device.id, exportHistory ? REPORT_EXPORT_LIMIT : 10, exportHistory);
   }, [tutorialMode]);
 
   const handleReportLog = useCallback((device: TelemetryDevice) => {
@@ -569,22 +571,25 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
       .finally(() => setReportLoading(false));
   }, [fetchReportsForDevice]);
 
-  const handleReportExport = useCallback((device: TelemetryDevice, existingReports?: DeviceReport[]) => {
+  const handleReportExport = useCallback((device: TelemetryDevice, format: ReportExportFormat = "json") => {
+    if (reportExporting) return;
+    setReportExporting(true);
     void (async () => {
       try {
-        const reports = existingReports ?? await fetchReportsForDevice(device);
+        const reports = await fetchReportsForDevice(device, true);
         if (reports.length === 0) {
           setToast("No accepted reports are available to export yet");
           return;
         }
-        downloadDeviceReports(device.name, reports);
+        saveReportExport(createCollarReportExport(device, reports, format));
+        setToast(`Downloaded ${reports.length} report(s) as ${format.toUpperCase()}`);
       } catch (error) {
         console.error("Unable to export device report log", error);
-        downloadDeviceReports(device.name, [buildCurrentDeviceReport(device)]);
-        setToast("Exported the current dashboard snapshot because report history could not be loaded");
+        setToast("Could not export report history. No file was downloaded. Please try again.");
       }
+      finally { setReportExporting(false); }
     })();
-  }, [fetchReportsForDevice]);
+  }, [fetchReportsForDevice, reportExporting]);
 
   const handleRefreshNow = useCallback(() => {
     setFamilyRetryCount(0);
@@ -866,7 +871,8 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
           loading={reportLoading}
           error={reportError}
           onClose={() => setReportDevice(null)}
-          onDownload={() => handleReportExport(reportDevice, deviceReports)}
+          exporting={reportExporting}
+          onDownload={format => handleReportExport(reportDevice, format)}
         />
       )}
       {avatarDevice && householdId && (
@@ -1015,16 +1021,6 @@ function downloadLog(logs: string[]) {
   const anchor = document.createElement("a");
   anchor.href = url;
   anchor.download = `bluepaws_console_${new Date().toISOString().slice(0, 10)}.csv`;
-  anchor.click();
-  URL.revokeObjectURL(url);
-}
-
-function downloadDeviceReports(deviceName: string, reports: DeviceReport[]) {
-  const blob = new Blob([deviceReportsToCsv(reports)], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = `bluepaws_${deviceName.toLowerCase().replace(/[^a-z0-9]+/g, "_")}_reports_${new Date().toISOString().slice(0, 10)}.csv`;
   anchor.click();
   URL.revokeObjectURL(url);
 }

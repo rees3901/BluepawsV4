@@ -5,7 +5,8 @@ import vm from 'node:vm';
 import {renderHub,renderCollar} from './shared_device_card_fixture.mjs';
 import {orderDeviceIds,pinDeviceFirst,moveDeviceBefore} from '../web/src/lib/deviceCardOrder.ts';
 import {nextExpandedDeviceCards} from '../web/src/lib/expandedCards.ts';
-import {buildHubReport,hubReportCsv} from '../web/src/lib/hubReports.ts';
+import {buildHubReport} from '../web/src/lib/hubReports.ts';
+import {createHubReportExport} from '../web/src/lib/reportExport.ts';
 import {hub} from './shared_device_card_fixture.mjs';
 import {createRequire} from 'node:module';
 import {normalizeDeviceName} from '../web/src/lib/deviceName.ts';
@@ -112,7 +113,7 @@ test('hub report and CSV use hub data, not invented collar fields',()=>{
   assert.equal(report.rows.find(r=>r.field==='Battery').data,'No data');
   assert.equal(report.rows.find(r=>r.field==='Wi-Fi signal').data,'-40 dBm');
   assert.ok(!report.rows.some(r=>/Power Profile|Sequence|TLV/.test(r.field)));
-  assert.match(hubReportCsv({...hub,display_name:'=formula',uptime_s:90}),/"'=formula/);
+  assert.match(createHubReportExport({...hub,mode:'=formula',uptime_s:90},'csv').content,/"'=formula/);
   assert.match(buildHubReport({...hub,latitude:null,longitude:null,fix_at:null}).rows.find(r=>r.field==='Coordinates').data,/Waiting/);
 });
 

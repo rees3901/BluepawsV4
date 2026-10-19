@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fixtureModule, hub, renderReport } from './shared_device_card_fixture.mjs';
-const {buildDeviceReport,deviceReportsToCsv}=fixtureModule('@/lib/deviceReports');
-const {buildHubReport,hubReportCsv}=fixtureModule('@/lib/hubReports');
+const {buildDeviceReport}=fixtureModule('@/lib/deviceReports');
+const {buildHubReport}=fixtureModule('@/lib/hubReports');
+const {createHubReportExport,createCollarReportExport}=fixtureModule('@/lib/reportExport');
 const insight=fixtureModule('@/lib/reportInsights');
 const observation={id:1,device_guid16:3001,msg_seq_id:12,time_unix:1770000000,recorded_at:'2026-10-16T12:00:00Z',received_at:'2026-10-16T12:00:01Z',status:0,power_profile:0,flags:0,tx_reason:0,gnss_valid:true,latitude:51,longitude:-2,batt_mv:3900,acc_m:6,fix_age_s:0,sat_count:8};
 const path={observation_id:1,ingest_path:'lora_hub',link_type:'lora',gateway_guid16:30,link_rssi_dbm:-100,link_snr_db:5,receipt_count:1};
@@ -85,13 +86,13 @@ test('hub permutations distinguish simulated data, missing charge, mode and beac
   assert.match(row(unknown,'Uptime').meaning,/No usable uptime/);
 });
 
-test('exports preserve contextual advice and safely quote hub cells',()=>{
-  const csv=hubReportCsv({...hub,display_name:'=formula',wifi_rssi_dbm:-69});
-  assert.match(csv,/"Field","Data","Description","What this means"/);
-  assert.match(csv,/"'=formula/);
-  assert.match(csv,/Moderate Wi-Fi/);
-  const collar=deviceReportsToCsv([buildDeviceReport(observation,path)]);
-  assert.match(collar,/field_descriptions/); assert.match(collar,/reading_meanings/);
+test('exports preserve numeric readings without repeating UI advice',()=>{
+  const csv=createHubReportExport({...hub,wifi_rssi_dbm:-69},'csv').content;
+  assert.match(csv,/wifi_rssi_dbm/); assert.match(csv,/-69/);
+  assert.doesNotMatch(csv,/Moderate Wi-Fi|What this means/);
+  const collar=createCollarReportExport({id:3001,name:'Podge'},[buildDeviceReport(observation,path)]).content;
+  assert.match(collar,/raw_observation/); assert.match(collar,/tlv_data|raw_flags/);
+  assert.doesNotMatch(collar,/field_descriptions|reading_meanings/);
 });
 
 test('four-column modal renders descriptions and interpretations as separate cells',()=>{
