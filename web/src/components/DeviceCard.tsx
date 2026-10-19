@@ -164,12 +164,12 @@ export function DeviceCard(props: DeviceCardProps) {
             <span className="card-indicator-group"><BatteryIndicator millivolts={isHub ? null : device.batt} percent={device.batteryPercent} /></span>
             <span className="card-indicator-group">{isHub ? <><WifiIndicator rssi={device.rssi} contactLost={ageSeconds >= hubContactGrace(device.hubReportingProfile)} /><BluetoothBeaconIndicator advertising={device.bleHome} enabled={props.bluetoothEnabled} disabled={props.bluetoothToggleDisabled} onToggle={props.onBluetoothToggle} /></> : <SignalIndicator rssi={device.rssi} snr={device.snr} ingestPath={device.ingestPath} />}</span>
             <GnssIndicator device={device} gps={isHub ? undefined : gps} />
-            {!isHub && <GpsAgeBadge gps={gps} />}
           </div>
           <div className="card-indicators card-indicators-row3">
             {!isHub && <HomeDistance metres={homeDistanceMetres(device)}>{distance}</HomeDistance>}
             <LastSeen ageSeconds={isHub ? undefined : ageSeconds}>{lastSeen}</LastSeen>
             {!isHub && <span className={`collar-awake ${collarAwake ? "awake" : "sleeping"}`} title={collarAwake ? "Fresh packet received — expected ten-second command receive window, not guaranteed delivery" : "Receive window ended — collar probably sleeping; sleep is not directly confirmed"} aria-label={collarAwake ? `Collar recently heard; ${props.awakeSeconds} seconds remaining` : "Collar probably sleeping"}>{collarAwake ? "💡" : "💤"}</span>}
+            {!isHub && <GpsAgeBadge gps={gps} />}
             {!isHub && portableMode && <span className="card-indicator-group"><BleProximity rssi={device.rssi === null ? null : device.rssi + 28} /></span>}
           </div></>}
         </div>
