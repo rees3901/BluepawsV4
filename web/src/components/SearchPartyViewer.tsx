@@ -2,7 +2,7 @@
 
 /* eslint-disable @next/next/no-img-element -- Tiny pre-sized emoji artwork is intentionally served directly from the picker CDN. */
 import dynamic from "next/dynamic";
-import { homeDistanceMetres, formatHomeDistance } from "@/lib/mapLocation";
+import { homeDistancePresentation } from "@/lib/mapLocation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { BatteryIndicator, HomeDistance, LastSeen, SignalIndicator } from "@/components/Indicators";
 import { collarFault } from "@/lib/collarFault";
@@ -234,6 +234,7 @@ function SearchPartyDeviceRow({ device, avatar, now, followed, trailVisible, onA
   const ageSeconds = Math.max(0, Math.floor((now - device.lastUpdate) / 1000));
   const isHub = device.entity === "hub";
   const gps = gpsFreshness(device, now);
+  const distanceInfo = homeDistancePresentation(device, gps.homeConfirmed);
   const freshness = isHub ? null : collarCardFreshness(ageSeconds, ageSeconds < COLLAR_RECEIVE_WINDOW_SECONDS);
   const offline = freshness === "offline";
   const freshnessClass = collarFreshnessClass(freshness);
@@ -241,7 +242,6 @@ function SearchPartyDeviceRow({ device, avatar, now, followed, trailVisible, onA
   const profileLower = device.profile.toLowerCase();
   const profileClass = `profile-${profileLower.replace("save", "").replaceAll(" ", "-")}`;
   const profileLabel = profileLower === "powersave" ? "💤 PowerSave" : profileLower === "debug" ? "🧪 Debug" : device.profile;
-  const distance = formatHomeDistance(homeDistanceMetres(device));
   const fault = isHub || offline ? null : collarFault(device.faultReport, device.error !== "None" || status.css === "status-error");
   const hubMode = device.hubMode === "portable" ? "Portable" : device.hubMode === "off_grid" ? "Off-Grid" : "Home";
 
@@ -273,7 +273,7 @@ function SearchPartyDeviceRow({ device, avatar, now, followed, trailVisible, onA
             <span className="card-indicator-group"><SignalIndicator rssi={device.rssi} snr={device.snr} ingestPath={device.ingestPath} /></span>
           </div>
           <div className="card-indicators card-indicators-row3">
-            <HomeDistance metres={homeDistanceMetres(device)}>{distance}</HomeDistance>
+            <HomeDistance metres={distanceInfo.metres} title={distanceInfo.title}>{distanceInfo.label}</HomeDistance>
             <LastSeen ageSeconds={ageSeconds}>{formatLastSeen(ageSeconds)}</LastSeen>
             <GpsAgeBadge gps={gps} />
           </div></>}
@@ -291,7 +291,7 @@ function SearchPartyDeviceRow({ device, avatar, now, followed, trailVisible, onA
                 </a>
               ) : "No GPS fix yet"}</span>
               {!isHub && <GpsAsAt gps={gps} now={now} />}
-              {!isHub && <><span className="label">{offline ? "Last known distance" : "Dist From Hub"}</span><span className={`value ${distanceMetricClass(homeDistanceMetres(device))}`}>{distance}</span></>}
+              {!isHub && <><span className="label">{offline ? "Last known distance" : "Dist From Hub"}</span><span className={`value ${distanceMetricClass(distanceInfo.metres)}`} title={distanceInfo.title}>{distanceInfo.label}</span></>}
               {isHub && <><span className="label">Mode</span><span className="value">{hubMode}</span></>}
               <span className="label">Last contact</span><span className={`value ${isHub ? "" : contactMetricClass(ageSeconds)}`}>{formatAge(ageSeconds)}</span>
             </div>

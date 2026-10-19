@@ -34,3 +34,14 @@ export function formatHomeDistance(metres: number | null) {
   const kilometres = Math.floor(metres / 100) / 10;
   return `${kilometres.toFixed(1)} km`;
 }
+
+export function homeDistancePresentation(device: Parameters<typeof homeDistanceMetres>[0], homeConfirmed: boolean, label?: string) {
+  const metres = homeConfirmed ? null : homeDistanceMetres(device);
+  return {
+    metres,
+    label: homeConfirmed ? "—" : label ?? formatHomeDistance(metres),
+    title: homeConfirmed
+      ? "Home confirmed by the collar's recent beacon report. Exact distance from the Home Hub is not measured; old GPS separation is not current."
+      : "Distance from Home Hub, based on last-known GPS positions, not guaranteed current separation",
+  };
+}

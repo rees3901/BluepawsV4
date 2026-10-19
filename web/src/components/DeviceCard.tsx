@@ -4,7 +4,7 @@ import { CUSTOMER_POWER_PROFILES, type CustomerPowerProfile } from "@/lib/powerP
 import { BatteryIndicator, BleProximity, BluetoothBeaconIndicator, GnssIndicator, HomeDistance, LastSeen, SignalIndicator, WifiIndicator } from "@/components/Indicators";
 import { HUB_REPORTING, hubContactGrace } from "@/lib/hubReporting";
 import { emojiImageUrl } from "@/lib/emoji";
-import { formatMapCoordinates, googleMapsUrl, homeDistanceMetres } from "@/lib/mapLocation";
+import { formatMapCoordinates, googleMapsUrl, homeDistancePresentation } from "@/lib/mapLocation";
 import { contactMetricClass, distanceMetricClass } from "@/lib/metricPresentation";
 import type { DeviceAction, DeviceAvatar, TelemetryDevice } from "@/types/telemetry";
 import type { commandMessage } from "@/lib/collarFeedback";
@@ -69,6 +69,7 @@ export function DeviceCard(props: DeviceCardProps) {
   const hasGps = device.hasGps;
   const now = props.now ?? device.lastUpdate + ageSeconds * 1000;
   const gps = gpsFreshness(device, now, props.reportedFlags);
+  const distanceInfo = homeDistancePresentation(device, gps.homeConfirmed, distance);
   const status = isHub
     ? { emoji: device.hubMode === "home" ? "🏡" : "📱", label: device.hubMode === "home" ? "Home" : device.hubMode === "portable" ? "Portable" : "Off-Grid", css: device.hubMode === "home" ? "status-home" : "status-out" }
     : STATUS[device.status.toLowerCase() as keyof typeof STATUS] ?? STATUS.error;
@@ -166,7 +167,7 @@ export function DeviceCard(props: DeviceCardProps) {
             <GnssIndicator device={device} gps={isHub ? undefined : gps} />
           </div>
           <div className="card-indicators card-indicators-row3">
-            {!isHub && <HomeDistance metres={homeDistanceMetres(device)}>{distance}</HomeDistance>}
+            {!isHub && <HomeDistance metres={distanceInfo.metres} title={distanceInfo.title}>{distanceInfo.label}</HomeDistance>}
             <LastSeen ageSeconds={isHub ? undefined : ageSeconds}>{lastSeen}</LastSeen>
             {!isHub && <span className={`collar-awake ${collarAwake ? "awake" : "sleeping"}`} title={collarAwake ? "Fresh packet received — expected ten-second command receive window, not guaranteed delivery" : "Receive window ended — collar probably sleeping; sleep is not directly confirmed"} aria-label={collarAwake ? `Collar recently heard; ${props.awakeSeconds} seconds remaining` : "Collar probably sleeping"}>{collarAwake ? "💡" : "💤"}</span>}
             {!isHub && <GpsAgeBadge gps={gps} />}
@@ -190,7 +191,7 @@ export function DeviceCard(props: DeviceCardProps) {
               {!isHub && <GpsAsAt gps={gps} now={now} />}
               {!isHub && <><span className="label">Device ID</span><span className="value">{device.id}</span>
               <span className="label">{offline ? "Last reported profile" : "Power Profile"}</span><span className="value">{device.profile}</span>
-              <span className="label">{offline ? "Last known distance" : "Dist From Hub"}</span><span className={`value ${distanceMetricClass(homeDistanceMetres(device))}`}>{distance}</span></>}
+              <span className="label">{offline ? "Last known distance" : "Dist From Hub"}</span><span className={`value ${distanceMetricClass(distanceInfo.metres)}`} title={distanceInfo.title}>{distanceInfo.label}</span></>}
               {isHub && props.hubDetails}
               <span className="label">Last contact</span><span className={`value ${isHub ? "" : contactMetricClass(ageSeconds)}`}>{formatAge(ageSeconds)}</span>
             </div>
