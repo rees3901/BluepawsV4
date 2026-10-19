@@ -8,6 +8,14 @@ export const GPS_AMBER_AGE_CAP_SECONDS = 60 * 60;
 export const GPS_RED_AGE_CAP_SECONDS = 4 * 60 * 60;
 export const HOME_BEACON_NOTICE = "The collar recently detected the Home Hub beacon. This confirms Home presence, not a fresh GPS position.";
 export type GpsFreshness = ReturnType<typeof gpsFreshness>;
+export const GPS_RECENT_DISPLAY_SECONDS = 11 * 60;
+/** Presentation only: never changes fix time, profile cadence or warning state. */
+export function isRecentGps(gps: Pick<GpsFreshness, "ageSeconds">) {
+  return gps.ageSeconds !== null && gps.ageSeconds <= GPS_RECENT_DISPLAY_SECONDS;
+}
+export function gpsDisplayClass(gps: GpsFreshness) {
+  return isRecentGps(gps) ? "gps-recent" : gps.className;
+}
 export function homeStatusTooltip(gps: GpsFreshness) {
   return gps.homeConfirmed ? HOME_BEACON_NOTICE : "Home was last reported, but recent Home beacon confirmation is unavailable. This does not confirm a fresh GPS position.";
 }
@@ -69,8 +77,8 @@ export function gpsFreshness(device: Pick<TelemetryDevice, "hasGps" | "gnss" | "
 
 export function formatGpsAge(seconds: number) {
   if (seconds < 60) return `${seconds}s`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ${Math.floor(seconds % 3600 / 60)}m`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} min`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ${Math.floor(seconds % 3600 / 60)} min`;
   return `${Math.floor(seconds / 86400)}d ${Math.floor(seconds % 86400 / 3600)}h`;
 }
 

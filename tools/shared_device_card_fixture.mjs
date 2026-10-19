@@ -60,6 +60,15 @@ if (process.argv.includes('--serve')) {
       return res.end(readFileSync(new URL('../web/src/app'+req.url,import.meta.url)));
     }
     res.setHeader('Content-Type','text/html; charset=utf-8');
+    if(req.url === '/metric-colours') {
+      const now=Date.now();
+      const cards=[['Recent GPS',300,30,350],['Amber metrics',720,1861,700],['Red metrics',10800,7201,1200]].map(([name,gpsAge,ageSeconds,metres])=>{
+        const at=new Date(now-gpsAge*1000).toISOString();
+        const device={id:3001,name,seq:1,time:now/1000,status:'Out',profile:'PowerSave',error:'None',hasGps:true,lat:51+metres/111195,lon:-2,batt:3900,rssi:-90,snr:8,ingestPath:'lora_hub',bleHome:false,lastUpdate:now-ageSeconds*1000,positionRecordedAt:at,gnss:{accuracyM:6,satellites:8,fixAgeS:0,recordedAt:at},homeHub:{lat:51,lon:-2,fixAt:new Date(now).toISOString()}};
+        return '<section style="width:560px;max-width:100%"><h3>'+name+'</h3>'+renderCollar({device,now,ageSeconds,distance:load('@/lib/mapLocation').formatHomeDistance(load('@/lib/mapLocation').homeDistanceMetres(device))})+'</section>';
+      });
+      return res.end('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Metric colour fixture</title><link rel="stylesheet" href="/parity.css"><link rel="stylesheet" href="/web.css"><main id="deviceCards" style="padding:12px;display:flex;gap:12px;flex-wrap:wrap">'+cards.join('')+'</main>');
+    }
     if(req.url === '/packet-log') {
       const report=load('@/lib/deviceReports').buildDeviceReport({id:1,device_guid16:3001,msg_seq_id:12,time_unix:1770000000,recorded_at:new Date().toISOString(),received_at:new Date().toISOString(),status:0,power_profile:0,flags:200,tx_reason:4,gnss_valid:false,latitude:null,longitude:null,batt_mv:0,acc_m:0,fix_age_s:65535,sat_count:255,tlv_data:{fw_ver:258,reset_reason:4,uptime_s:0}},null);
       return res.end('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Packet diagnostics fixture</title><link rel="stylesheet" href="/parity.css"><link rel="stylesheet" href="/web.css">'+renderReport(report,'collar'));

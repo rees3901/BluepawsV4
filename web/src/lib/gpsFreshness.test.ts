@@ -30,7 +30,7 @@ test("GPS age uses the original fix, never newer check-ins", () => {
   assert.equal(heard.lastUpdate, now);
   assert.equal(gpsFreshness(heard, now).fixAt, gpsFreshness(device, now).fixAt);
   assert.equal(gpsFreshness(heard, now).ageSeconds, gpsFreshness(device, now).ageSeconds);
-  assert.equal(gpsFreshness(heard, now).label, "GPS 2h 14m old");
+  assert.equal(gpsFreshness(heard, now).label, "GPS 2h 14 min old");
   assert.equal(gpsFreshness(heard, now).state, "stale");
 });
 
@@ -95,7 +95,7 @@ test("only recent beacon evidence enables the less frequent Home GPS schedule", 
   assert.equal(gps.lastKnown, true);
   assert.equal(gps.ageSeconds, 7200);
   assert.equal(gps.fixAt, start);
-  assert.equal(gpsAgeLabel(gps), "GPS age: 2h 0m");
+  assert.equal(gpsAgeLabel(gps), "GPS age: 2h 0 min");
   assert.match(gps.notice, /not a current position/);
   assert.equal(gpsFreshness(home, now + 1860_000).homeConfirmed, true);
   assert.equal(gpsFreshness(home, now + 1861_000).homeConfirmed, false);
@@ -167,14 +167,14 @@ test("nine Home wake check-ins do not count as nine failed GPS telemetry message
 });
 
 test("age formatting and old-fix timestamps include a date", () => {
-  assert.equal(formatGpsAge(8049), "2h 14m");
+  assert.equal(formatGpsAge(8049), "2h 14 min");
   assert.equal(formatGpsAge(90061), "1d 1h");
   const now = start + 2 * 86400_000;
   assert.match(gpsAsAt(gpsFreshness(device, now), now), /2026/);
 });
 
 test("compact age copy preserves freshness and distinguishes unknown from no fix", () => {
-  assert.equal(gpsAgeLabel(gpsFreshness(device, start + 4980_000)), "GPS age: 1h 23m");
+  assert.equal(gpsAgeLabel(gpsFreshness(device, start + 4980_000)), "GPS age: 1h 23 min");
   assert.equal(gpsAgeLabel(gpsFreshness(device, start + 10_000)), "GPS age: 10s");
   assert.equal(gpsAgeLabel(gpsFreshness({ ...device, gnss: null }, start)), "GPS age: —");
   assert.equal(gpsAgeLabel(gpsFreshness({ ...device, hasGps: false }, start)), "GPS age: no fix");

@@ -4,6 +4,7 @@ import type { IngestPath } from "@/types/telemetry";
 import type { TelemetryDevice } from "@/types/telemetry";
 import { gnssQuality } from "@/lib/gnssQuality";
 import type { GpsFreshness } from "@/lib/gpsFreshness";
+import { contactMetricClass, distanceMetricClass } from "@/lib/metricPresentation";
 
 export function GnssIndicator({ device, gps }: { device: TelemetryDevice; gps?: GpsFreshness }) {
   const fix = device.gnss;
@@ -149,9 +150,9 @@ export function BatteryIndicator({ millivolts, percent }: { millivolts: number |
   );
 }
 
-export function HomeDistance({ children }: { children: ReactNode }) {
+export function HomeDistance({ children, metres }: { children: ReactNode; metres?: number | null }) {
   return (
-    <span className="card-indicator-group card-dist-group" title="Distance from home">
+    <span className={`card-indicator-group card-dist-group ${distanceMetricClass(metres)}`} title="Distance from Home Hub, based on last-known GPS positions, not guaranteed current separation">
       <svg className="indicator-icon icon-home" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M3 12l9-9 9 9" /><path d="M5 10v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V10" />
       </svg>
@@ -160,9 +161,9 @@ export function HomeDistance({ children }: { children: ReactNode }) {
   );
 }
 
-export function LastSeen({ children }: { children: ReactNode }) {
+export function LastSeen({ children, ageSeconds }: { children: ReactNode; ageSeconds?: number }) {
   return (
-    <span className="card-indicator-group card-lastseen-group" title="Last contact — not the GPS fix time">
+    <span className={`card-indicator-group card-lastseen-group ${contactMetricClass(ageSeconds)}`} title="Last contact — not the GPS fix time">
       <svg className="indicator-icon icon-stopwatch" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <circle cx="12" cy="13" r="8" /><line x1="12" y1="9" x2="12" y2="13" />
         <line x1="9" y1="1" x2="15" y2="1" /><line x1="12" y1="1" x2="12" y2="5" />

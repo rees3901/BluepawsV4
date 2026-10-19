@@ -1,3 +1,4 @@
+import { contactMetricClass, distanceMetricClass } from "./metricPresentation";
 import { batteryPresentation, signalQuality } from "@/components/Indicators";
 import { collarFault } from "@/lib/collarFault";
 import { emojiImageUrl } from "@/lib/emoji";
@@ -5,7 +6,7 @@ import { COLLAR_RECEIVE_WINDOW_SECONDS, collarCardFreshness, collarFreshnessClas
 import { formatHomeDistance, formatMapCoordinates, googleMapsUrl, homeDistanceMetres } from "@/lib/mapLocation";
 import { normalizeMarkerColor } from "@/lib/markerColor";
 import { gnssUncertainty } from "@/lib/gnssUncertainty";
-import { gpsAgeLabel, gpsAsAt, gpsFreshness, homeStatusTooltip } from "@/lib/gpsFreshness";
+import { gpsAgeLabel, gpsAsAt, gpsFreshness, gpsDisplayClass, isRecentGps, homeStatusTooltip } from "@/lib/gpsFreshness";
 import { transportPresentation } from "@/lib/transportPath";
 import type { DeviceAvatar, TelemetryDevice } from "@/types/telemetry";
 
@@ -13,8 +14,8 @@ export function mapPopupHtml(device: TelemetryDevice, avatar: DeviceAvatar, pres
   const name = escapeHtml(device.name);
   const isHub = device.entity === "hub";
   const gps = gpsFreshness(device, presenceNow);
-  const gpsBadge = isHub ? "" : `<span data-gps-age class="gps-age-badge ${gps.className}" title="${gps.label}. ${gps.notice}">${gps.warning ? "⚠ " : ""}${gpsAgeLabel(gps)}</span>`;
-  const gpsTime = isHub ? "" : `<span class="label">GPS as at</span><span data-gps-as-at class="value gps-as-at ${gps.className}" title="${gps.notice}">${escapeHtml(gpsAsAt(gps, presenceNow))}</span>`;
+  const gpsBadge = isHub ? "" : `<span data-gps-age class="gps-age-badge ${gpsDisplayClass(gps)}"${isRecentGps(gps) ? " hidden" : ""} title="${gps.label}. ${gps.notice}">${gps.warning ? "⚠ " : ""}${gpsAgeLabel(gps)}</span>`;
+  const gpsTime = isHub ? "" : `<span class="label">GPS as at</span><span data-gps-as-at class="value gps-as-at ${gpsDisplayClass(gps)}" title="${gps.notice}">${escapeHtml(gpsAsAt(gps, presenceNow))}</span>`;
   const coordinates = formatMapCoordinates(device.lat, device.lon);
   const uncertainty = gnssUncertainty(device);
   const mapsUrl = googleMapsUrl(device.lat, device.lon);
@@ -32,12 +33,12 @@ export function mapPopupHtml(device: TelemetryDevice, avatar: DeviceAvatar, pres
   const actions = `<div class="card-actions popup-actions"><button class="btn-action btn-jump" data-map-action="jump" data-device-id="${device.id}">↗ Jump To</button><button class="btn-action btn-follow${followed ? " active" : ""}" data-map-action="follow" data-device-id="${device.id}">● ${followed ? "Following" : "Follow"}</button><button class="btn-action btn-trail${trailVisible ? " active" : ""}" data-map-action="trail" data-device-id="${device.id}">⌁ Trail</button>${readOnly || isHub ? "" : `<button class="btn-action btn-find" data-map-action="find" data-device-id="${device.id}">✦ LED Flash</button><button class="btn-action btn-cmd" data-map-action="command" data-device-id="${device.id}">⌘ Profile</button>`}</div>`;
   const details = isHub
     ? `<span class="label">Hub ID</span><span class="value">${Math.abs(device.id)}</span>`
-    : `<span class="label">Device ID</span><span class="value">${device.id}</span><span class="label">${offline ? "Last reported profile" : "Power Profile"}</span><span class="value">${escapeHtml(device.profile)}</span><span class="label">${offline ? "Last known distance" : "Dist From Hub"}</span><span class="value">${distance}</span>`;
+    : `<span class="label">Device ID</span><span class="value">${device.id}</span><span class="label">${offline ? "Last reported profile" : "Power Profile"}</span><span class="value">${escapeHtml(device.profile)}</span><span class="label">${offline ? "Last known distance" : "Dist From Hub"}</span><span data-home-distance class="value ${distanceMetricClass(homeDistanceMetres(device))}">${distance}</span>`;
   const summary = offline
-    ? `<div class="card-name-row"><span class="card-name">${name}</span><span class="card-status status-offline">Offline</span></div><div class="card-offline-summary card-contact-gps-row">No reports for ${formatLastSeen(ageSeconds)}${gpsBadge}</div>`
-    : `<div class="card-name-row"><span class="card-name">${name}</span>${status.css === "status-error" ? "" : `<span class="card-status ${status.css}"${!isHub && device.status === "Home" ? ` data-home-beacon title="${homeStatusTooltip(gps)}"` : ""}>${status.emoji} ${status.label}</span>`}<span class="card-profile ${profile.css}">${profile.label}</span></div>${faultHtml}<div class="card-indicators card-indicators-primary"><span class="card-indicator-group">${batteryIndicatorHtml(isHub ? null : device.batt, device.batteryPercent)}</span><span class="card-indicator-group">${signalIndicatorHtml(device, isHub)}</span>${isHub ? "" : `<span class="collar-awake ${estimatedAwake ? "awake" : "sleeping"}" title="${estimatedAwake ? "Fresh report — command receive window may still be open" : "Receive window ended — collar probably sleeping"}">${estimatedAwake ? "💡" : "💤"}</span>`}</div><div class="card-indicators card-indicators-row3">${isHub ? "" : homeDistanceHtml(distance)}${lastSeenHtml(formatLastSeen(ageSeconds))}${gpsBadge}</div>`;
+    ? `<div class="card-name-row"><span class="card-name">${name}</span><span class="card-status status-offline">Offline</span></div><div class="card-offline-summary card-contact-gps-row"><span class="${contactMetricClass(ageSeconds)}">No reports for ${formatLastSeen(ageSeconds)}</span>${gpsBadge}</div>`
+    : `<div class="card-name-row"><span class="card-name">${name}</span>${status.css === "status-error" ? "" : `<span class="card-status ${status.css}"${!isHub && device.status === "Home" ? ` data-home-beacon title="${homeStatusTooltip(gps)}"` : ""}>${status.emoji} ${status.label}</span>`}<span class="card-profile ${profile.css}">${profile.label}</span></div>${faultHtml}<div class="card-indicators card-indicators-primary"><span class="card-indicator-group">${batteryIndicatorHtml(isHub ? null : device.batt, device.batteryPercent)}</span><span class="card-indicator-group">${signalIndicatorHtml(device, isHub)}</span>${isHub ? "" : `<span class="collar-awake ${estimatedAwake ? "awake" : "sleeping"}" title="${estimatedAwake ? "Fresh report — command receive window may still be open" : "Receive window ended — collar probably sleeping"}">${estimatedAwake ? "💡" : "💤"}</span>`}</div><div class="card-indicators card-indicators-row3">${isHub ? "" : homeDistanceHtml(distance, homeDistanceMetres(device))}${lastSeenHtml(formatLastSeen(ageSeconds), isHub ? undefined : ageSeconds)}${gpsBadge}</div>`;
   const offlineNotice = offline ? `<p class="card-offline-notice"><strong>Offline.</strong> These are last-known details from ${formatAge(ageSeconds)} and may no longer be current.</p>` : "";
-  return `<div data-map-device-id="${device.id}" class="popup-content device-card map-device-card${freshnessClass ? ` ${freshnessClass}` : ""} expanded"><div class="card-summary map-popup-summary">${popupAvatarHtml(avatar)}<div class="card-identity">${summary}</div></div><div class="card-detail map-popup-detail">${offlineNotice}<div class="card-grid"><span data-gps-coordinate-label class="label">${offline || (!isHub && gps.lastKnown) ? "Last known coordinates" : "Coordinates"}</span><span class="value"><a data-gps-coordinates class="card-coords card-coords-link${isHub ? "" : ` ${gps.className}`}" href="${mapsUrl}" target="_blank" rel="noopener noreferrer" title="Open this location in Google Maps">${coordinates}</a></span>${gpsTime}${details}${uncertainty ? `<span class="label">GPS uncertainty</span><span class="value">${escapeHtml(uncertainty.label)}</span>` : ""}<span class="label">Last contact</span><span data-last-contact class="value">${formatAge(ageSeconds)}</span>${source}</div>${actions}</div></div>`;
+  return `<div data-map-device-id="${device.id}" class="popup-content device-card map-device-card${freshnessClass ? ` ${freshnessClass}` : ""} expanded"><div class="card-summary map-popup-summary">${popupAvatarHtml(avatar)}<div class="card-identity">${summary}</div></div><div class="card-detail map-popup-detail">${offlineNotice}<div class="card-grid"><span data-gps-coordinate-label class="label">${offline || (!isHub && gps.lastKnown) ? "Last known coordinates" : "Coordinates"}</span><span class="value"><a data-gps-coordinates class="card-coords card-coords-link${isHub ? "" : ` ${gpsDisplayClass(gps)}`}" href="${mapsUrl}" target="_blank" rel="noopener noreferrer" title="Open this location in Google Maps">${coordinates}</a></span>${gpsTime}${details}${uncertainty ? `<span class="label">GPS uncertainty</span><span class="value">${escapeHtml(uncertainty.label)}</span>` : ""}<span class="label">Last contact</span><span data-last-contact class="value ${isHub ? "" : contactMetricClass(ageSeconds)}">${formatAge(ageSeconds)}</span>${source}</div>${actions}</div></div>`;
 }
 
 // Refresh in place: no reopening, map movement, or lost keyboard focus when
@@ -48,16 +49,27 @@ export function refreshMapPopupGps(root: HTMLElement, device: TelemetryDevice, n
   const home = root.querySelector<HTMLElement>("[data-home-beacon]");
   if (home) home.title = homeStatusTooltip(gps);
   const badge = root.querySelector<HTMLElement>("[data-gps-age]");
-  if (badge) { badge.className = `gps-age-badge ${gps.className}`; badge.textContent = `${gps.warning ? "⚠ " : ""}${gpsAgeLabel(gps)}`; badge.title = `${gps.label}. ${gps.notice}`; }
+  if (badge) { badge.hidden = isRecentGps(gps); badge.className = `gps-age-badge ${gpsDisplayClass(gps)}`; badge.textContent = `${gps.warning ? "⚠ " : ""}${gpsAgeLabel(gps)}`; badge.title = `${gps.label}. ${gps.notice}`; }
   const stamp = root.querySelector<HTMLElement>("[data-gps-as-at]");
-  if (stamp) { stamp.className = `value gps-as-at ${gps.className}`; stamp.textContent = gpsAsAt(gps, now); stamp.title = gps.notice; }
+  if (stamp) { stamp.className = `value gps-as-at ${gpsDisplayClass(gps)}`; stamp.textContent = gpsAsAt(gps, now); stamp.title = gps.notice; }
   const coords = root.querySelector<HTMLAnchorElement>("[data-gps-coordinates]");
-  if (coords) { coords.className = `card-coords card-coords-link ${gps.className}`; coords.textContent = formatMapCoordinates(device.lat, device.lon); coords.href = googleMapsUrl(device.lat, device.lon); }
+  if (coords) { coords.className = `card-coords card-coords-link ${gpsDisplayClass(gps)}`; coords.textContent = formatMapCoordinates(device.lat, device.lon); coords.href = googleMapsUrl(device.lat, device.lon); }
   const age = Math.max(0, Math.floor((now - device.lastUpdate) / 1000));
   const label = root.querySelector<HTMLElement>("[data-gps-coordinate-label]");
   if (label) label.textContent = gps.lastKnown || collarCardFreshness(age, false) === "offline" ? "Last known coordinates" : "Coordinates";
   const contact = root.querySelector<HTMLElement>("[data-last-contact]");
-  if (contact) contact.textContent = formatAge(age);
+  if (contact) { contact.textContent = formatAge(age); contact.className = `value ${contactMetricClass(age)}`; }
+  const summaryContact = root.querySelector<HTMLElement>(".card-lastseen-group");
+  if (summaryContact) summaryContact.className = `card-indicator-group card-lastseen-group ${contactMetricClass(age)}`;
+  const summaryTime = root.querySelector<HTMLElement>(".card-lastseen-value");
+  if (summaryTime) summaryTime.textContent = formatLastSeen(age);
+  const metres = homeDistanceMetres(device);
+  const distance = root.querySelector<HTMLElement>("[data-home-distance]");
+  if (distance) { distance.className = `value ${distanceMetricClass(metres)}`; distance.textContent = formatHomeDistance(metres); }
+  const summaryDistance = root.querySelector<HTMLElement>(".card-dist-group");
+  if (summaryDistance) summaryDistance.className = `card-indicator-group card-dist-group ${distanceMetricClass(metres)}`;
+  const distanceValue = root.querySelector<HTMLElement>(".card-dist-value");
+  if (distanceValue) distanceValue.textContent = formatHomeDistance(metres);
 }
 
 function popupStatus(device: TelemetryDevice) {
@@ -127,12 +139,12 @@ function antennaIcon() {
   return '<svg class="indicator-icon icon-antenna" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="24" x2="12" y2="10"/><line x1="12" y1="10" x2="3" y2="2"/><line x1="12" y1="10" x2="21" y2="2"/><line x1="3" y1="2" x2="21" y2="2"/></svg>';
 }
 
-function homeDistanceHtml(distance: string) {
-  return `<span class="card-indicator-group card-dist-group" title="Distance from home"><svg class="indicator-icon icon-home" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12l9-9 9 9"/><path d="M5 10v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V10"/></svg><span class="card-dist-value">${distance}</span></span>`;
+function homeDistanceHtml(distance: string, metres: number | null) {
+  return `<span class="card-indicator-group card-dist-group ${distanceMetricClass(metres)}" title="Distance from Home Hub, based on last-known GPS positions"><svg class="indicator-icon icon-home" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12l9-9 9 9"/><path d="M5 10v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V10"/></svg><span class="card-dist-value">${distance}</span></span>`;
 }
 
-function lastSeenHtml(value: string) {
-  return `<span class="card-indicator-group card-lastseen-group" title="Last seen"><svg class="indicator-icon icon-stopwatch" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="9" y1="1" x2="15" y2="1"/><line x1="12" y1="1" x2="12" y2="5"/></svg><span class="card-lastseen-value">${value}</span></span>`;
+function lastSeenHtml(value: string, ageSeconds?: number) {
+  return `<span class="card-indicator-group card-lastseen-group ${contactMetricClass(ageSeconds)}" title="Last contact, not the GPS fix time"><svg class="indicator-icon icon-stopwatch" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="9" y1="1" x2="15" y2="1"/><line x1="12" y1="1" x2="12" y2="5"/></svg><span class="card-lastseen-value">${value}</span></span>`;
 }
 
 function formatLastSeen(seconds: number) {

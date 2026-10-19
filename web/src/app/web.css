@@ -1204,10 +1204,29 @@ body.light .collar-awake.sleeping {
 
 /* Location freshness is separate from radio/contact freshness. */
 .gps-fresh { --gps-color: #4ade80; }
+.gps-recent { --gps-color: var(--text-primary); }
 .gps-aging, .gps-unknown { --gps-color: #fbbf24; }
 .gps-stale, .gps-missing { --gps-color: #f87171; }
 .gps-age-badge, .gps-as-at, .card-coords-link[class*="gps-"] { color: var(--gps-color); }
 .gps-age-badge { display: inline-flex; align-items: center; flex: 0 0 auto; white-space: nowrap; font-size: 0.65rem; font-weight: 650; line-height: 1.35; }
+.gps-age-badge[hidden] { display: none; }
+.metric-amber { --metric-color: #fbbf24; color: var(--metric-color); }
+.metric-red { --metric-color: #f87171; color: var(--metric-color); }
+body.light .metric-amber { --metric-color: #a85d00; }
+body.light .metric-red { --metric-color: #b91c1c; }
+.metric-amber :is(.card-dist-value, .card-lastseen-value),
+.metric-red :is(.card-dist-value, .card-lastseen-value) { color: var(--metric-color); }
+/* Fade decorative telemetry, not the warning text that users need to read. */
+body .device-card:is(.collar-sleeping, .freshness-subdued, .freshness-faded, .stale, .freshness-greyed, .offline),
+body.light .device-card:is(.collar-sleeping, .freshness-subdued, .freshness-faded, .stale, .freshness-greyed, .offline) { filter: none; }
+.device-card.collar-sleeping { --card-freshness-filter: grayscale(.02) saturate(.94) brightness(.99); }
+.device-card.freshness-subdued { --card-freshness-filter: grayscale(.1) saturate(.8) brightness(.96); }
+.device-card.freshness-faded { --card-freshness-filter: grayscale(.22) saturate(.62) brightness(.92); }
+.device-card.stale { --card-freshness-filter: grayscale(.42) saturate(.42) brightness(.88); }
+.device-card.freshness-greyed { --card-freshness-filter: grayscale(.95) saturate(.08) brightness(.82); }
+.device-card.offline { --card-freshness-filter: grayscale(.9) saturate(.08) brightness(.78); }
+.device-card :is(.card-avatar-wrap, .card-name-row, .card-fault-row, .gnss-indicator),
+.device-card .card-indicators-primary > .card-indicator-group { filter: var(--card-freshness-filter, none); }
 .device-report-modal { max-width: 1120px; }
 .report-table { table-layout: fixed; }
 .report-table tbody th { width: 14%; white-space: normal; }
