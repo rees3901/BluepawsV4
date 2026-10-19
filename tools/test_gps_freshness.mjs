@@ -15,7 +15,7 @@ const avatar = { kind: 'emoji', emoji: '🐱', color: '#0099ff' };
 test('expanded and collapsed cards cannot confuse new contact with old GPS', () => {
   for (const expanded of [false, true]) {
     const html = renderCollar({ device, now, expanded, ageSeconds: 0 });
-    assert.match(html, /gps-age-badge gps-stale[^>]*>⚠ GPS: 2h 14 min/);
+    assert.match(html, /gps-age-badge gps-stale[^>]*>⚠ GPS age: 2h 14 min old/);
     assert.match(html, /Last known coordinates/);
     assert.match(html, /GPS as at/);
     assert.match(html, /datetime="2026-10-15T15:13:55.000Z"/i);
@@ -64,11 +64,11 @@ test('on-schedule Power Save and Home presence never relabel old coordinates as 
       assert.doesNotMatch(html, /Recent GPS fix/);
       assert.match(html, /GPS as at/);
     }
-    assert.match(card, /GPS: (20 min|2h 14 min)/);
+    assert.match(card, /GPS age: (20 min|2h 14 min) old/);
     if (collar === home) {
       assert.match(card, /class="card-status status-home" title="The collar recently detected/);
       assert.doesNotMatch(card, /home-beacon-confirmed|>Home confirmed</);
-      assert.match(card, /gps-age-badge gps-aging[^>]*>⚠ GPS: 2h 14 min/);
+      assert.match(card, /gps-age-badge gps-aging[^>]*>⚠ GPS age: 2h 14 min old/);
     }
   }
 });
@@ -80,7 +80,7 @@ test('recent Home beacon confirmation stays independent when GPS hits the four-h
   for (const html of [renderCollar({device:home,now,ageSeconds:0}), fixtureModule('@/lib/mapPopup').mapPopupHtml(home,avatar,now)]) {
     assert.match(html, /class="card-status status-home"[^>]*title="The collar recently detected/);
     assert.doesNotMatch(html, /home-beacon-confirmed|>Home confirmed</);
-    assert.match(html, /gps-age-badge gps-stale[^>]*>⚠ GPS: 4h 0 min/);
+    assert.match(html, /gps-age-badge gps-stale[^>]*>⚠ GPS age: 4h 0 min old/);
     assert.match(html, /Last known coordinates/);
     assert.match(html, /not a current position/);
   }
@@ -95,7 +95,7 @@ test('open popup independently expires Home confirmation and updates GPS age wit
   const refresh = fixtureModule('@/lib/mapPopup').refreshMapPopupGps;
   refresh(root,home,now);
   assert.match(nodes['[data-home-beacon]'].title,/recently detected/);
-  assert.equal(nodes['[data-gps-age]'].textContent,'⚠ GPS: 4h 0 min');
+  assert.equal(nodes['[data-gps-age]'].textContent,'⚠ GPS age: 4h 0 min old');
   assert.match(nodes['[data-gps-age]'].className,/gps-stale/);
   refresh(root,home,now+1861_000);
   assert.match(nodes['[data-home-beacon]'].title,/recent Home beacon confirmation is unavailable/);
@@ -154,7 +154,7 @@ test('open vector popup updates GPS and contact in place, without replacing acti
   const root = { querySelector: selector => nodes[selector] };
   const refresh = fixtureModule('@/lib/mapPopup').refreshMapPopupGps;
   refresh(root, device, now);
-  assert.equal(nodes['[data-gps-age]'].textContent, '⚠ GPS: 2h 14 min');
+  assert.equal(nodes['[data-gps-age]'].textContent, '⚠ GPS age: 2h 14 min old');
   assert.match(nodes['[data-gps-age]'].title, /GPS 2h 14 min old/);
   assert.equal(nodes['[data-last-contact]'].textContent, 'just now');
   assert.match(nodes['[data-gps-as-at]'].title, /not a current position/);
@@ -178,7 +178,7 @@ test('collar GPS age follows distance, contact and awake state on the lower metr
     assert.doesNotMatch(primary, /gps-age-badge/);
     assert.match(lower, /card-dist-group.*card-lastseen-group.*collar-awake.*gps-age-badge/s);
     assert.match(lower, awakeSeconds ? /💡/ : /💤/);
-    assert.match(lower, /⚠ GPS: 2h 14 min/);
+    assert.match(lower, /⚠ GPS age: 2h 14 min old/);
   }
 });
 
@@ -248,5 +248,5 @@ test('GNSS copy is compact while detailed satellite and accuracy explanations re
   assert.match(html, /Estimated accuracy at the last GPS fix: 6 m/);
   const unknown=renderCollar({device:{...device,gnss:null},now,ageSeconds:0});
   assert.match(unknown, />acc:—<\/span>/);
-  assert.match(unknown, />⚠ GPS: —<\/span>/);
+  assert.match(unknown, />⚠ GPS age: —<\/span>/);
 });
