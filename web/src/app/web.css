@@ -6,6 +6,7 @@
 .card-indicators-primary { flex-wrap: wrap; }
 .card-indicators-primary > .gnss-indicator { flex: 0 0 auto; max-width: 100%; }
 .card-indicators-row3 .card-lastseen-group { font-variant-numeric: tabular-nums; }
+.card-dist-value.at-home { color: var(--text-secondary); font-size: 0.62rem; font-weight: 400; letter-spacing: -0.02em; white-space: nowrap; }
 @media (max-width: 768px) {
   :root { --panel-width: min(490px, calc(100vw - 12px)); }
   /* Keep the close/toggle reachable when the drawer fills a narrow screen. */
