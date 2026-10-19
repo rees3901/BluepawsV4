@@ -75,7 +75,7 @@ export function refreshMapPopupGps(root: HTMLElement, device: TelemetryDevice, n
   const summaryDistance = root.querySelector<HTMLElement>(".card-dist-group");
   if (summaryDistance) { summaryDistance.className = `card-indicator-group card-dist-group ${distanceMetricClass(metres)}`; summaryDistance.title = distanceInfo.title; }
   const distanceValue = root.querySelector<HTMLElement>(".card-dist-value");
-  if (distanceValue) distanceValue.textContent = distanceInfo.label;
+  if (distanceValue) { distanceValue.textContent = distanceInfo.label; distanceValue.className = `card-dist-value${gps.homeConfirmed ? " at-home" : ""}`; }
 }
 
 function popupStatus(device: TelemetryDevice) {
@@ -146,7 +146,7 @@ function antennaIcon() {
 }
 
 function homeDistanceHtml(distance: string, metres: number | null, title: string) {
-  return `<span class="card-indicator-group card-dist-group ${distanceMetricClass(metres)}" title="${escapeHtml(title)}"><svg class="indicator-icon icon-home" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12l9-9 9 9"/><path d="M5 10v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V10"/></svg><span class="card-dist-value">${distance}</span></span>`;
+  return `<span class="card-indicator-group card-dist-group ${distanceMetricClass(metres)}" title="${escapeHtml(title)}"><svg class="indicator-icon icon-home" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12l9-9 9 9"/><path d="M5 10v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V10"/></svg><span class="card-dist-value${distance === "At home" ? " at-home" : ""}">${distance}</span></span>`;
 }
 
 function lastSeenHtml(value: string, ageSeconds?: number) {

@@ -156,7 +156,7 @@ export function HomeDistance({ children, metres, title = "Distance from Home Hub
       <svg className="indicator-icon icon-home" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M3 12l9-9 9 9" /><path d="M5 10v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V10" />
       </svg>
-      <span className="card-dist-value">{children}</span>
+      <span className={`card-dist-value${children === "At home" ? " at-home" : ""}`}>{children}</span>
     </span>
   );
 }
