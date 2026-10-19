@@ -12,8 +12,30 @@ import {
   isCollarOffline,
   isCollarOfflineAge,
   isDeviceInactive,
+  visibleMapDevices,
 } from "./devicePresence.ts";
 import type { TelemetryDevice } from "../types/telemetry.ts";
+
+test("inactive pane gates map devices at the same boundary and restores them without mutating telemetry", () => {
+  const now = 20_000_000;
+  const live = { id:3001, lastUpdate: now } as TelemetryDevice;
+  const boundary = { id:3002, lastUpdate: now - COLLAR_OFFLINE_AFTER_SECONDS * 1000 } as TelemetryDevice;
+  const old = { id:3003, lastUpdate: now - 90000 * 1000 } as TelemetryDevice;
+  const hub = { id:-30, entity:"hub", hubReportingProfile:"normal", lastUpdate:now } as TelemetryDevice;
+  const staleHub = { ...hub, id:-31, lastUpdate:now - 90000 * 1000 } as TelemetryDevice;
+  const all = [live, boundary, old, hub, staleHub];
+  const snapshot = JSON.stringify(all);
+  assert.deepEqual(visibleMapDevices(all, now, false), [live, hub]);
+  assert.equal(visibleMapDevices(all, now, true), all);
+  assert.deepEqual(visibleMapDevices(all, now, false), [live, hub]);
+  assert.deepEqual(visibleMapDevices([boundary], now - 1, false), [boundary]);
+  // A new report makes a previously inactive device visible without opening.
+  const returned = { ...old, lastUpdate:now };
+  assert.deepEqual(visibleMapDevices([returned], now, false), [returned]);
+  assert.deepEqual(visibleMapDevices([old, staleHub], now, false), []);
+  assert.deepEqual(visibleMapDevices([], now, true), []);
+  assert.equal(JSON.stringify(all), snapshot);
+});
 
 test("header counts collars only and uses the card offline boundary", () => {
   const now = 20_000_000;

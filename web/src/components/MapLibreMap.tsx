@@ -228,6 +228,7 @@ export default function MapLibreMap(props: ConfiguredMapRendererProps) {
       const popup = devicePopupRef.current;
       const content = popup?.getElement()?.querySelector<HTMLElement>("[data-map-device-id]");
       const selected = content ? visible.find(device => device.id === Number(content.dataset.mapDeviceId)) : undefined;
+      if (popup && content && !selected) { popup.remove(); devicePopupRef.current = null; }
       if (popup && content && selected) {
         refreshMapPopupGps(content, selected, presenceNow);
         const point = popup.getLngLat();

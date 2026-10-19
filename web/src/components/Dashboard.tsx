@@ -10,7 +10,7 @@ import { GuidedTour } from "@/components/GuidedTour";
 import { SearchPartyViewer } from "@/components/SearchPartyViewer";
 import { AccountMenu } from "@/components/AccountMenu";
 import { defaultDeviceAvatar } from "@/lib/defaultDeviceAvatar";
-import { collarSummary, isDeviceInactive } from "@/lib/devicePresence";
+import { collarSummary, isDeviceInactive, visibleMapDevices } from "@/lib/devicePresence";
 import { queuePowerProfileCommand, queueLedFindCommand, cancelPowerProfileCommand } from "@/lib/deviceCommands";
 import { useCollarFeedback } from "@/lib/useCollarFeedback";
 import { useHubPresence } from "@/lib/useHubPresence";
@@ -85,6 +85,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [darkMode, setDarkMode] = useState(true);
   const [inactiveExpandedIds, setInactiveExpandedIds] = useState<number[]>([]);
+  const [inactivePaneOpen, setInactivePaneOpen] = useState(false);
   const [expandedIds, setExpandedIds] = useState<number[]>([]);
   const [initialisedCardIds, setInitialisedCardIds] = useState<number[]>([]);
   const [followedId, setFollowedId] = useState<number | null>(null);
@@ -736,6 +737,7 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
   const collarCounts = collarSummary(mapDevices, now);
   const activeDevices = orderedDevices.filter(device => !isDeviceInactive(device, now));
   const inactiveDevices = orderedDevices.filter(device => isDeviceInactive(device, now));
+  const visibleDevices = visibleMapDevices(mapDevices, now, inactivePaneOpen);
   const renderDevice = (device: TelemetryDevice, index: number, inactive = false) => {
     const hub = device.entity === "hub" ? hubs.find(h => h.gateway_guid16 === -device.id) : undefined;
     return <DashboardDeviceCard
@@ -845,15 +847,15 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
             </div>
           )}
           {activeDevices.map((device, index) => renderDevice(device, index))}
-          {inactiveDevices.length > 0 && <details className="inactive-devices" data-panel-static>
+          {inactiveDevices.length > 0 && <details className="inactive-devices" data-panel-static open={inactivePaneOpen} onToggle={event => setInactivePaneOpen(event.currentTarget.open)}>
             <summary>Inactive devices ({inactiveDevices.length})</summary>
             <div className="inactive-device-list">{inactiveDevices.map((device, index) => renderDevice(device, index, true))}</div>
           </details>}
         </div>
       </aside>
 
-      <TrackingMap devices={mapDevices} avatars={mapAvatars} presenceNow={Math.floor(now / 10_000) * 10_000} sidebarOpen={sidebarOpen} followedId={followedId} trailIds={trailIds} trailHistory={trailHistory}
-        allTrailsVisible={allTrailsVisible} trailsAvailable={mapDevices.length > 0} command={mapCommand} onAction={handleAction}
+      <TrackingMap devices={visibleDevices} avatars={mapAvatars} presenceNow={Math.floor(now / 10_000) * 10_000} sidebarOpen={sidebarOpen} followedId={followedId} trailIds={trailIds} trailHistory={trailHistory}
+        allTrailsVisible={allTrailsVisible} trailsAvailable={visibleDevices.length > 0} command={mapCommand} onAction={handleAction}
         onAllTrailsToggle={handleAllTrailsToggle} onUserNavigation={handleMapUserNavigation} onNotice={setMapNotice} />
 
       {settingsOpen && (
