@@ -150,9 +150,9 @@ export function BatteryIndicator({ millivolts, percent }: { millivolts: number |
   );
 }
 
-export function HomeDistance({ children, metres }: { children: ReactNode; metres?: number | null }) {
+export function HomeDistance({ children, metres, title = "Distance from Home Hub, based on last-known GPS positions, not guaranteed current separation" }: { children: ReactNode; metres?: number | null; title?: string }) {
   return (
-    <span className={`card-indicator-group card-dist-group ${distanceMetricClass(metres)}`} title="Distance from Home Hub, based on last-known GPS positions, not guaranteed current separation">
+    <span className={`card-indicator-group card-dist-group ${distanceMetricClass(metres)}`} title={title}>
       <svg className="indicator-icon icon-home" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M3 12l9-9 9 9" /><path d="M5 10v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V10" />
       </svg>

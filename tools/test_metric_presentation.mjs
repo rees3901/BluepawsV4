@@ -61,3 +61,31 @@ test('open popup updates contact colours and neutral GPS styling in place',()=>{
   refreshMapPopupGps(root,base,now+7201_000);
   assert.match(nodes['.card-lastseen-group'].className,/metric-red/);
 });
+
+test('recent Home beacon suppresses old GPS distance without inventing zero or changing the fix',()=>{
+  const at=new Date(now-3600000).toISOString();
+  const home={...base,status:'Home',bleHome:true,homeBeaconSeenAt:now,positionRecordedAt:at,gnss:{...base.gnss,recordedAt:at}};
+  const before=JSON.stringify(home);
+  const {homeDistancePresentation:present}=fixtureModule('@/lib/mapLocation');
+  for(const expanded of [true,false]) {
+    const html=renderCollar({device:home,now,expanded,ageSeconds:0,distance:'139 m'});
+    assert.match(html,/card-dist-value">—<\/span>/);
+    assert.match(html,/Home confirmed by the collar/);
+    assert.doesNotMatch(html,/139 m/);
+    assert.doesNotMatch(html,/card-dist-group metric-(amber|red)/);
+    assert.match(html,/GPS age: 1h 0 min old/);
+  }
+  assert.equal(present(home,true).metres,null);
+  const popup=mapPopupHtml(home,avatar,now);
+  assert.match(popup,/card-dist-value">—<\/span>/);
+  const nodes=Object.fromEntries(['[data-home-distance]','.card-dist-group','.card-dist-value'].map(k=>[k,{}]));
+  const root={querySelector:key=>nodes[key]};
+  refreshMapPopupGps(root,home,now);
+  assert.equal(nodes['[data-home-distance]'].textContent,'—');
+  assert.match(nodes['.card-dist-group'].title,/Exact distance.*not measured/);
+  // Home text without fresh beacon evidence must not mask GPS separation.
+  refreshMapPopupGps(root,home,now+1861_000);
+  assert.notEqual(nodes['[data-home-distance]'].textContent,'—');
+  assert.match(nodes['[data-home-distance]'].className,/metric-red/);
+  assert.equal(JSON.stringify(home),before);
+});
