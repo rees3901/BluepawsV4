@@ -18,6 +18,7 @@ import { updateGpsMarker } from "@/lib/gpsMarker";
 import { isDeviceInactive } from "@/lib/devicePresence";
 import { updateTrailPoints } from "@/lib/trailPoints";
 import { locatedDevices, type ConfiguredMapRendererProps } from "@/components/mapRenderer";
+import { mapPosition } from "@/lib/mapPosition";
 import type { DeviceAvatar, TelemetryDevice, TrailPoint } from "@/types/telemetry";
 
 const JUMP_TO_ZOOM = 17;
@@ -200,6 +201,7 @@ export default function MapLibreMap(props: ConfiguredMapRendererProps) {
         if (!activeIds.has(id)) { marker.remove(); markersRef.current.delete(id); }
       });
       for (const device of visible) {
+        const position = mapPosition(device);
         const avatar = avatars[device.id];
         if (!avatar) continue;
         const ageSeconds = Math.max(0, Math.floor((presenceNow - device.lastUpdate) / 1000));
@@ -207,7 +209,7 @@ export default function MapLibreMap(props: ConfiguredMapRendererProps) {
         let marker = markersRef.current.get(device.id);
         if (!marker) {
           const element = markerElement(device.name, avatar, normalizeMarkerColor(avatar.color), device.status, freshness);
-          marker = new maplibregl.Marker({ element, anchor: "bottom" }).setLngLat([device.lon, device.lat]).addTo(map);
+          marker = new maplibregl.Marker({ element, anchor: "bottom" }).setLngLat([position.lon, position.lat]).addTo(map);
           markersRef.current.set(device.id, marker);
           const openMarker = () => openPopup(map, marker!, device.id, propsRef, devicePopupRef);
           element.addEventListener("click", event => { event.stopPropagation(); openMarker(); });
@@ -218,7 +220,7 @@ export default function MapLibreMap(props: ConfiguredMapRendererProps) {
             openMarker();
           });
         } else {
-          marker.setLngLat([device.lon, device.lat]);
+          marker.setLngLat([position.lon, position.lat]);
           updateMarkerElement(marker.getElement(), device.name, avatar, normalizeMarkerColor(avatar.color), device.status, freshness);
         }
         updateGpsMarker(marker.getElement(), device, presenceNow);
@@ -229,7 +231,8 @@ export default function MapLibreMap(props: ConfiguredMapRendererProps) {
       if (popup && content && selected) {
         refreshMapPopupGps(content, selected, presenceNow);
         const point = popup.getLngLat();
-        if (point.lng !== selected.lon || point.lat !== selected.lat) popup.setLngLat([selected.lon, selected.lat]);
+        const position = mapPosition(selected);
+        if (point.lng !== position.lon || point.lat !== position.lat) popup.setLngLat([position.lon, position.lat]);
       }
       syncTrails(map, visible, avatars, trailIds, trailHistory, trailPointsRef.current, presenceNow);
       syncUncertainty(map, visible, avatars);
@@ -243,7 +246,7 @@ export default function MapLibreMap(props: ConfiguredMapRendererProps) {
     const map = mapRef.current;
     if (!map || followedId === null) return;
     const device = locatedDevices(devices).find(item => item.id === followedId);
-    if (device) map.easeTo({ center: [device.lon, device.lat] });
+    if (device) map.easeTo({ center: [mapPosition(device).lon, mapPosition(device).lat] });
   }, [devices, followedId]);
 
   useEffect(() => {
@@ -259,7 +262,7 @@ export default function MapLibreMap(props: ConfiguredMapRendererProps) {
     if ((command.type === "jump" || command.type === "open") && command.deviceId !== undefined) {
       const device = visible.find(item => item.id === command.deviceId);
       const marker = markersRef.current.get(command.deviceId);
-      if (device) map.easeTo({ center: [device.lon, device.lat], zoom: Math.max(map.getZoom(), JUMP_TO_ZOOM) });
+      if (device) map.easeTo({ center: [mapPosition(device).lon, mapPosition(device).lat], zoom: Math.max(map.getZoom(), JUMP_TO_ZOOM) });
       if (marker && command.type === "open") openPopup(map, marker, command.deviceId, propsRef, devicePopupRef);
     }
   }, [command]);
@@ -449,7 +452,7 @@ function syncTrails(map: MapLibre, devices: TelemetryDevice[], avatars: Record<n
 
 function fitDevices(map: MapLibre, devices: TelemetryDevice[], sidebarOpen: boolean) {
   if (devices.length === 0) return;
-  const bounds = devices.reduce((value, device) => value.extend([device.lon, device.lat]), new maplibregl.LngLatBounds());
+  const bounds = devices.reduce((value, device) => value.extend([mapPosition(device).lon, mapPosition(device).lat]), new maplibregl.LngLatBounds());
   map.fitBounds(bounds as LngLatBoundsLike, { padding: { top: 70, right: 70, bottom: 70, left: sidebarOpen ? 430 : 70 }, maxZoom: JUMP_TO_ZOOM });
 }
 

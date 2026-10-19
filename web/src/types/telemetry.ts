@@ -16,6 +16,8 @@ export interface TelemetryDevice {
   // Message/contact context must never replace the original GPS timestamp.
   lastReportReason?: number | null;
   homeBeaconSeenAt?: number | null;
+  // Map-only estimate; raw lat/lon and GNSS data remain unchanged.
+  mapPosition?: import("../lib/mapPosition").MapPosition;
   gpsFailedReports?: number;
   status: CollarStatus;
   profile: PowerProfile;
