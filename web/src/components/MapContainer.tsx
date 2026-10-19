@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 import { MAP_LAYER_PICKER_NAMES, type MapLayerPickerName } from "@/lib/mapLayers";
 import { EMPTY_MAP_CENTER, EMPTY_MAP_ZOOM } from "@/lib/mapViewport";
+import { HOME_ANCHORS_KEY, parseHomeAnchors, resolveMapPosition, type HomeAnchor } from "@/lib/mapPosition";
 import type { MapRendererName, MapRendererProps, MapViewport, VectorSourceName } from "@/components/mapRenderer";
 
 const LeafletMap = dynamic(() => import("@/components/TrackingMap"), { ssr: false });
@@ -16,6 +17,26 @@ const ROTATION_KEY = "bluepaws-raster-rotation";
 const PICKER_IDLE_MS = 20_000;
 
 export default function MapContainer(props: MapRendererProps) {
+  const [history, setHistory] = useState<{ devices: MapRendererProps["devices"] | null; now: number; anchors: Record<number, HomeAnchor> }>(() => {
+    let anchors: Record<number, HomeAnchor> = {};
+    try { if (typeof window !== "undefined") anchors = parseHomeAnchors(window.sessionStorage.getItem(HOME_ANCHORS_KEY), Date.now()); } catch { /* Storage is optional. */ }
+    return { devices: null, now: 0, anchors };
+  });
+  const mapDevices = props.devices.map(device => ({ ...device,
+    mapPosition: resolveMapPosition(device, props.presenceNow, history.anchors[device.id]) }));
+  // Retain observed Home history across renderer/style changes. Guarded derived
+  // state avoids an effect briefly painting the old GPS location on departure.
+  if (history.devices !== props.devices || history.now !== props.presenceNow) {
+    const anchors = { ...history.anchors };
+    for (const device of mapDevices) {
+      if (device.mapPosition) anchors[device.id] = device.mapPosition;
+      else delete anchors[device.id];
+    }
+    setHistory({ devices: props.devices, now: props.presenceNow, anchors });
+  }
+  useEffect(() => {
+    try { window.sessionStorage.setItem(HOME_ANCHORS_KEY, JSON.stringify(history.anchors)); } catch { /* Tracking still works if storage is disabled. */ }
+  }, [history.anchors]);
   const [renderer, setRenderer] = useState<MapRendererName>(() => {
     if (typeof window === "undefined") return "leaflet";
     const saved = window.localStorage.getItem(STORAGE_KEY);
@@ -85,8 +106,8 @@ export default function MapContainer(props: MapRendererProps) {
   return (
     <div className="map-renderer-shell">
       {renderer === "leaflet" && !rotateRaster
-        ? <LeafletMap {...props} rasterLayer={rasterLayer} vectorSource={vectorSource} onViewportChange={setViewport} />
-        : <MapLibreMap key={selectedStyle} {...props} initialViewport={viewport} mapStyle={renderer === "maplibre" ? "Vector" : rasterLayer} rasterLayer={rasterLayer} vectorSource={vectorSource} onViewportChange={setViewport} />}
+        ? <LeafletMap {...props} devices={mapDevices} rasterLayer={rasterLayer} vectorSource={vectorSource} onViewportChange={setViewport} />
+        : <MapLibreMap key={selectedStyle} {...props} devices={mapDevices} initialViewport={viewport} mapStyle={renderer === "maplibre" ? "Vector" : rasterLayer} rasterLayer={rasterLayer} vectorSource={vectorSource} onViewportChange={setViewport} />}
       <div ref={pickerRef} className={`map-style-picker${pickerOpen ? " open" : ""}`} data-tour="map-layers">
         <button type="button" className="map-style-preview" aria-label="Choose map style" aria-expanded={pickerOpen} onClick={() => setPickerOpen(open => !open)}>
           <MapStylePreview layer={previewLayer} viewport={viewport} />

@@ -1,4 +1,5 @@
 import { contactMetricClass, distanceMetricClass } from "./metricPresentation";
+import { mapPositionNotice } from "./mapPosition";
 import { batteryPresentation, signalQuality } from "@/components/Indicators";
 import { collarFault } from "@/lib/collarFault";
 import { emojiImageUrl } from "@/lib/emoji";
@@ -37,13 +38,16 @@ export function mapPopupHtml(device: TelemetryDevice, avatar: DeviceAvatar, pres
   const summary = offline
     ? `<div class="card-name-row"><span class="card-name">${name}</span><span class="card-status status-offline">Offline</span></div><div class="card-offline-summary card-contact-gps-row"><span class="${contactMetricClass(ageSeconds)}">No reports for ${formatLastSeen(ageSeconds)}</span>${gpsBadge}</div>`
     : `<div class="card-name-row"><span class="card-name">${name}</span>${status.css === "status-error" ? "" : `<span class="card-status ${status.css}"${!isHub && device.status === "Home" ? ` data-home-beacon title="${homeStatusTooltip(gps)}"` : ""}>${status.emoji} ${status.label}</span>`}<span class="card-profile ${profile.css}">${profile.label}</span></div>${faultHtml}<div class="card-indicators card-indicators-primary"><span class="card-indicator-group">${batteryIndicatorHtml(isHub ? null : device.batt, device.batteryPercent)}</span><span class="card-indicator-group">${signalIndicatorHtml(device, isHub)}</span>${isHub ? "" : `<span class="collar-awake ${estimatedAwake ? "awake" : "sleeping"}" title="${estimatedAwake ? "Fresh report — command receive window may still be open" : "Receive window ended — collar probably sleeping"}">${estimatedAwake ? "💡" : "💤"}</span>`}</div><div class="card-indicators card-indicators-row3">${isHub ? "" : homeDistanceHtml(distance, homeDistanceMetres(device))}${lastSeenHtml(formatLastSeen(ageSeconds), isHub ? undefined : ageSeconds)}${gpsBadge}</div>`;
-  const offlineNotice = offline ? `<p class="card-offline-notice"><strong>Offline.</strong> These are last-known details from ${formatAge(ageSeconds)} and may no longer be current.</p>` : "";
+  const positionNotice = mapPositionNotice(device);
+  const offlineNotice = `<p data-map-position-notice class="card-offline-notice"${positionNotice ? "" : " hidden"}>${escapeHtml(positionNotice)}</p>` + (offline ? `<p class="card-offline-notice"><strong>Offline.</strong> These are last-known details from ${formatAge(ageSeconds)} and may no longer be current.</p>` : "");
   return `<div data-map-device-id="${device.id}" class="popup-content device-card map-device-card${freshnessClass ? ` ${freshnessClass}` : ""} expanded"><div class="card-summary map-popup-summary">${popupAvatarHtml(avatar)}<div class="card-identity">${summary}</div></div><div class="card-detail map-popup-detail">${offlineNotice}<div class="card-grid"><span data-gps-coordinate-label class="label">${offline || (!isHub && gps.lastKnown) ? "Last known coordinates" : "Coordinates"}</span><span class="value"><a data-gps-coordinates class="card-coords card-coords-link${isHub ? "" : ` ${gpsDisplayClass(gps)}`}" href="${mapsUrl}" target="_blank" rel="noopener noreferrer" title="Open this location in Google Maps">${coordinates}</a></span>${gpsTime}${details}${uncertainty ? `<span class="label">GPS uncertainty</span><span class="value">${escapeHtml(uncertainty.label)}</span>` : ""}<span class="label">Last contact</span><span data-last-contact class="value ${isHub ? "" : contactMetricClass(ageSeconds)}">${formatAge(ageSeconds)}</span>${source}</div>${actions}</div></div>`;
 }
 
 // Refresh in place: no reopening, map movement, or lost keyboard focus when
 // the clock ticks or a presence-only report arrives.
 export function refreshMapPopupGps(root: HTMLElement, device: TelemetryDevice, now: number) {
+  const notice = root.querySelector<HTMLElement>("[data-map-position-notice]");
+  if (notice) { notice.textContent = mapPositionNotice(device); notice.hidden = !notice.textContent; }
   if (device.entity === "hub") return;
   const gps = gpsFreshness(device, now);
   const home = root.querySelector<HTMLElement>("[data-home-beacon]");

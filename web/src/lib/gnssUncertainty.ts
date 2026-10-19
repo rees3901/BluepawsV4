@@ -1,9 +1,9 @@
 import type { TelemetryDevice } from "../types/telemetry.ts";
 
 export const MAX_UNCERTAINTY_RADIUS_M = 50;
-export function gnssUncertainty(device: Pick<TelemetryDevice, "entity" | "hasGps" | "status" | "lat" | "lon" | "gnss">) {
+export function gnssUncertainty(device: Pick<TelemetryDevice, "entity" | "hasGps" | "status" | "lat" | "lon" | "gnss" | "mapPosition">) {
   const accuracy = device.gnss?.accuracyM;
-  if (device.entity === "hub" || device.status === "Home" || !device.hasGps ||
+  if (device.entity === "hub" || device.mapPosition || device.status === "Home" || !device.hasGps ||
       typeof accuracy !== "number" || !Number.isFinite(accuracy) || accuracy <= 0 || accuracy >= 65535 ||
       !Number.isFinite(device.lat) || !Number.isFinite(device.lon) || Math.abs(device.lat) > 90 || Math.abs(device.lon) > 180) return null;
   const radius = Math.min(accuracy, MAX_UNCERTAINTY_RADIUS_M);

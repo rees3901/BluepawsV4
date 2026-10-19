@@ -1,5 +1,6 @@
 import type { DeviceAction, DeviceAvatar, MapCommand, TelemetryDevice, TrailPoint } from "@/types/telemetry";
 import type { MapLayerPickerName } from "@/lib/mapLayers";
+import { mapPosition } from "@/lib/mapPosition";
 
 export type MapRendererName = "leaflet" | "maplibre";
 export type VectorSourceName = "online" | "pmtiles";
@@ -39,6 +40,6 @@ export interface ConfiguredMapRendererProps extends MapRendererProps {
 export function locatedDevices(devices: TelemetryDevice[]) {
   return devices.filter(device =>
     (device.entity !== "hub" || device.hasGps)
-    && Number.isFinite(device.lat)
-    && Number.isFinite(device.lon));
+    && Number.isFinite(mapPosition(device).lat)
+    && Number.isFinite(mapPosition(device).lon));
 }

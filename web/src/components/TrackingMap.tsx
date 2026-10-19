@@ -9,6 +9,7 @@ import { COLLAR_RECEIVE_WINDOW_SECONDS, collarCardFreshness, collarFreshnessClas
 import { formatMapCoordinates } from "@/lib/mapLocation";
 import { gnssUncertainty } from "@/lib/gnssUncertainty";
 import { updateGpsMarker } from "@/lib/gpsMarker";
+import { mapPosition } from "@/lib/mapPosition";
 import { contextMenuHtml, copyTextToClipboard, temporaryPinPopupHtml } from "@/lib/mapLocationPopup";
 import { MAP_LAYER_DEFINITIONS, type MapLayerName } from "@/lib/mapLayers";
 import { mapPopupHtml } from "@/lib/mapPopup";
@@ -386,7 +387,7 @@ export default function LeafletMap(props: ConfiguredMapRendererProps) {
       trailPointsRef.current.delete(deviceId);
     });
 
-    const positions = visibleDevices.map(device => `${device.id}:${device.lat}:${device.lon}`).join(",");
+    const positions = visibleDevices.map(device => `${device.id}:${mapPosition(device).lat}:${mapPosition(device).lon}`).join(",");
     if (positions !== positionsRef.current) spiderfierRef.current?.unspiderfy();
     positionsRef.current = positions;
     visibleDevices.forEach((device) => {
@@ -394,7 +395,8 @@ export default function LeafletMap(props: ConfiguredMapRendererProps) {
       const markerColor = normalizeMarkerColor(avatar.color);
       const ageSeconds = Math.max(0, Math.floor((presenceNow - device.lastUpdate) / 1000));
       const freshness = device.entity === "hub" ? null : collarCardFreshness(ageSeconds, ageSeconds < COLLAR_RECEIVE_WINDOW_SECONDS);
-      const latLng: TrailLatLng = [device.lat, device.lon];
+      const position = mapPosition(device);
+      const latLng: TrailLatLng = [position.lat, position.lon];
       const uncertainty = gnssUncertainty(device);
       if (uncertainty) {
         let circle = uncertaintyRef.current.get(device.id);
@@ -422,7 +424,7 @@ export default function LeafletMap(props: ConfiguredMapRendererProps) {
       } else {
         marker.setIcon(icon);
         if (!spiderfierRef.current?.getMarkers().some(item => item === marker && item._omsData))
-          slideMarkerTo(marker, L.latLng(device.lat, device.lon), markerAnimationsRef.current, device.id);
+          slideMarkerTo(marker, L.latLng(position.lat, position.lon), markerAnimationsRef.current, device.id);
       }
       const popupContent = mapPopupHtml(device, avatar, presenceNow, readOnly, followedId === device.id, trailIds.has(device.id));
       if (marker.getPopup()) marker.setPopupContent(popupContent);
@@ -465,7 +467,7 @@ export default function LeafletMap(props: ConfiguredMapRendererProps) {
     const map = mapRef.current;
     if (!map || followedId === null) return;
     const followed = devices.find((device) => device.id === followedId);
-    if (followed && (followed.entity !== "hub" || followed.hasGps)) map.panTo([followed.lat, followed.lon]);
+    if (followed && (followed.entity !== "hub" || followed.hasGps)) map.panTo([mapPosition(followed).lat, mapPosition(followed).lon]);
   }, [devices, followedId]);
 
   useEffect(() => {

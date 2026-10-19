@@ -108,7 +108,7 @@ test('map GPS adornment starts only after eleven minutes, independently of card/
   const require = createRequire(new URL('../web/package.json', import.meta.url));
   const ts = require('typescript');
   const source = readFileSync(new URL('../web/src/lib/gpsMarker.ts', import.meta.url), 'utf8');
-  const context = vm.createContext({ exports: {}, document: { createElement: () => ({ setAttribute() {} }) }, require: () => fixtureModule('@/lib/gpsFreshness') });
+  const context = vm.createContext({ exports: {}, document: { createElement: () => ({ setAttribute() {} }) }, require: name => fixtureModule(name === './mapPosition' ? '@/lib/mapPosition' : '@/lib/gpsFreshness') });
   vm.runInContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, context);
   const pin = { querySelector() {}, setAttribute() {}, append(value) { badge = value; } };
   const update=context.exports.updateGpsMarker;
@@ -190,7 +190,7 @@ test('marker badges never accumulate and disappear on a new fix; the pin is not 
   const require=createRequire(new URL('../web/package.json',import.meta.url));
   const ts=require('typescript');
   const source=readFileSync(new URL('../web/src/lib/gpsMarker.ts',import.meta.url),'utf8');
-  const context=vm.createContext({exports:{},document:{createElement:()=>new Element()},require:()=>fixtureModule('@/lib/gpsFreshness')});
+  const context=vm.createContext({exports:{},document:{createElement:()=>new Element()},require:name=>fixtureModule(name === './mapPosition' ? '@/lib/mapPosition' : '@/lib/gpsFreshness')});
   vm.runInContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS}}).outputText,context);
   const pin=new Element();
   const update=context.exports.updateGpsMarker;
