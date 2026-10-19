@@ -57,3 +57,9 @@ export function isDeviceInactive(device: TelemetryDevice, nowMs: number) {
   const age = Math.max(0, (nowMs - device.lastUpdate) / 1000);
   return device.entity === "hub" ? age >= hubContactGrace(device.hubReportingProfile) : isCollarOfflineAge(age);
 }
+
+// The sidebar pane and map share the same contact-based inactivity rules.
+// Keep source telemetry intact; this controls presentation, not device removal.
+export function visibleMapDevices(devices: TelemetryDevice[], nowMs: number, inactivePaneOpen: boolean) {
+  return inactivePaneOpen ? devices : devices.filter(device => !isDeviceInactive(device, nowMs));
+}
