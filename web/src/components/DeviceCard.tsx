@@ -4,12 +4,13 @@ import { CUSTOMER_POWER_PROFILES, type CustomerPowerProfile } from "@/lib/powerP
 import { BatteryIndicator, BleProximity, BluetoothBeaconIndicator, GnssIndicator, HomeDistance, LastSeen, SignalIndicator, WifiIndicator } from "@/components/Indicators";
 import { HUB_REPORTING, hubContactGrace } from "@/lib/hubReporting";
 import { emojiImageUrl } from "@/lib/emoji";
-import { formatMapCoordinates, googleMapsUrl } from "@/lib/mapLocation";
+import { formatMapCoordinates, googleMapsUrl, homeDistanceMetres } from "@/lib/mapLocation";
+import { contactMetricClass, distanceMetricClass } from "@/lib/metricPresentation";
 import type { DeviceAction, DeviceAvatar, TelemetryDevice } from "@/types/telemetry";
 import type { commandMessage } from "@/lib/collarFeedback";
 import { collarFault, type CollarFaultReport } from "@/lib/collarFault";
 import { collarCardFreshness, collarFreshnessClass } from "@/lib/devicePresence";
-import { gpsFreshness, homeStatusTooltip } from "@/lib/gpsFreshness";
+import { gpsFreshness, gpsDisplayClass, homeStatusTooltip } from "@/lib/gpsFreshness";
 import { GpsAgeBadge, GpsAsAt } from "@/components/GpsLocation";
 
 const STATUS = {
@@ -159,15 +160,15 @@ export function DeviceCard(props: DeviceCardProps) {
             </>}
           </div>
           {fault && <div className="card-fault-row"><span className="error-badge" title={fault.title} aria-label={fault.title}>{fault.label}</span></div>}
-          {offline ? <div className="card-offline-summary card-contact-gps-row">No reports for {lastSeen}{!isHub && <GpsAgeBadge gps={gps} />}</div> : <><div className="card-indicators card-indicators-primary">
+          {offline ? <div className="card-offline-summary card-contact-gps-row"><span className={contactMetricClass(ageSeconds)}>No reports for {lastSeen}</span>{!isHub && <GpsAgeBadge gps={gps} />}</div> : <><div className="card-indicators card-indicators-primary">
             <span className="card-indicator-group"><BatteryIndicator millivolts={isHub ? null : device.batt} percent={device.batteryPercent} /></span>
             <span className="card-indicator-group">{isHub ? <><WifiIndicator rssi={device.rssi} contactLost={ageSeconds >= hubContactGrace(device.hubReportingProfile)} /><BluetoothBeaconIndicator advertising={device.bleHome} enabled={props.bluetoothEnabled} disabled={props.bluetoothToggleDisabled} onToggle={props.onBluetoothToggle} /></> : <SignalIndicator rssi={device.rssi} snr={device.snr} ingestPath={device.ingestPath} />}</span>
             <GnssIndicator device={device} gps={isHub ? undefined : gps} />
             {!isHub && <GpsAgeBadge gps={gps} />}
           </div>
           <div className="card-indicators card-indicators-row3">
-            {!isHub && <HomeDistance>{distance}</HomeDistance>}
-            <LastSeen>{lastSeen}</LastSeen>
+            {!isHub && <HomeDistance metres={homeDistanceMetres(device)}>{distance}</HomeDistance>}
+            <LastSeen ageSeconds={isHub ? undefined : ageSeconds}>{lastSeen}</LastSeen>
             {!isHub && <span className={`collar-awake ${collarAwake ? "awake" : "sleeping"}`} title={collarAwake ? "Fresh packet received — expected ten-second command receive window, not guaranteed delivery" : "Receive window ended — collar probably sleeping; sleep is not directly confirmed"} aria-label={collarAwake ? `Collar recently heard; ${props.awakeSeconds} seconds remaining` : "Collar probably sleeping"}>{collarAwake ? "💡" : "💤"}</span>}
             {!isHub && portableMode && <span className="card-indicator-group"><BleProximity rssi={device.rssi === null ? null : device.rssi + 28} /></span>}
           </div></>}
@@ -182,16 +183,16 @@ export function DeviceCard(props: DeviceCardProps) {
             <div className="card-grid">
               <span className="label">{offline || (!isHub && gps.lastKnown) ? "Last known coordinates" : "Coordinates"}</span>
               <span className="value">
-                {hasGps ? <a className={`card-coords card-coords-link${isHub ? "" : ` ${gps.className}`}`} href={googleMapsUrl(device.lat, device.lon)} target="_blank" rel="noopener noreferrer">
+                {hasGps ? <a className={`card-coords card-coords-link${isHub ? "" : ` ${gpsDisplayClass(gps)}`}`} href={googleMapsUrl(device.lat, device.lon)} target="_blank" rel="noopener noreferrer">
                   {formatMapCoordinates(device.lat, device.lon)}
                 </a> : "Waiting for GPS fix"}
               </span>
               {!isHub && <GpsAsAt gps={gps} now={now} />}
               {!isHub && <><span className="label">Device ID</span><span className="value">{device.id}</span>
               <span className="label">{offline ? "Last reported profile" : "Power Profile"}</span><span className="value">{device.profile}</span>
-              <span className="label">{offline ? "Last known distance" : "Dist From Hub"}</span><span className="value">{distance}</span></>}
+              <span className="label">{offline ? "Last known distance" : "Dist From Hub"}</span><span className={`value ${distanceMetricClass(homeDistanceMetres(device))}`}>{distance}</span></>}
               {isHub && props.hubDetails}
-              <span className="label">Last contact</span><span className="value">{formatAge(ageSeconds)}</span>
+              <span className="label">Last contact</span><span className={`value ${isHub ? "" : contactMetricClass(ageSeconds)}`}>{formatAge(ageSeconds)}</span>
             </div>
             <ActionButtons followed={followed} trailVisible={trailVisible} onAction={onAction} collarControls={!isHub} hasGps={hasGps} extra={isHub ? props.hubActions : <InlineProfileControl device={device} onSend={props.onProfileCommand} />} />
             {!isHub && props.commandFeedback && <div role="status" className={`command-feedback ${props.commandFeedback.pending ? "pending" : props.commandFeedback.status}`}>{props.commandFeedback.text}<span className="command-feedback-help">{props.commandFeedback.help}</span>{props.commandFeedback.cancellable && props.onCancelCommand && <button type="button" className="btn-action" disabled={cancellingCommand} aria-label={`Cancel pending power profile command for ${device.name}`} onClick={async event => { event.stopPropagation(); setCancellingCommand(true); try { await props.onCancelCommand?.(props.commandFeedback!.id); } finally { setCancellingCommand(false); } }}>{cancellingCommand ? "Cancelling…" : "× Cancel"}</button>}</div>}

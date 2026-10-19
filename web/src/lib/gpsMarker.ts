@@ -1,7 +1,5 @@
-import { gpsFreshness } from "./gpsFreshness";
+import { gpsFreshness, isRecentGps } from "./gpsFreshness";
 import type { TelemetryDevice } from "@/types/telemetry";
-
-const MAP_GPS_WARNING_AFTER_SECONDS = 11 * 60;
 
 // Shared DOM adornment; never changes the pin size, transform or coordinate anchor.
 export function updateGpsMarker(element: HTMLElement, device: TelemetryDevice, now: number) {
@@ -13,7 +11,7 @@ export function updateGpsMarker(element: HTMLElement, device: TelemetryDevice, n
   // Map clutter has its own age threshold; retain the richer card/popup rules.
   // Missing timestamps cannot establish that a last-known position is recent.
   if (device.entity === "hub" || !gps.lastKnown
-    || (gps.ageSeconds !== null && gps.ageSeconds <= MAP_GPS_WARNING_AFTER_SECONDS)) return;
+    || isRecentGps(gps)) return;
   const badge = document.createElement("span");
   badge.className = `marker-gps-warning ${gps.className}`;
   badge.textContent = "🛰";
