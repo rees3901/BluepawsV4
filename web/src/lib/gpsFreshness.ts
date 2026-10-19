@@ -84,7 +84,7 @@ export function formatGpsAge(seconds: number) {
 
 /** Compact visible copy; the full GPS label and notice remain in tooltips. */
 export function gpsAgeLabel(gps: GpsFreshness) {
-  const age = gps.state === "missing" ? "GPS: no fix" : gps.ageSeconds === null ? "GPS: —" : `GPS: ${formatGpsAge(gps.ageSeconds)}`;
+  const age = gps.state === "missing" ? "GPS age: no fix" : gps.ageSeconds === null ? "GPS age: —" : `GPS age: ${formatGpsAge(gps.ageSeconds)} old`;
   return age;
 }
 
