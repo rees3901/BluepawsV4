@@ -598,7 +598,7 @@ body.light .device-card.offline {
     color: var(--text-secondary);
 }
 
-/* Shared status/profile pills: stable dimensions, including emoji labels. */
+/* Shared pill height and typography, with compact content-sized widths. */
 .card-status,
 .card-profile {
     box-sizing: border-box;
@@ -606,12 +606,11 @@ body.light .device-card.offline {
     align-items: center;
     justify-content: center;
     flex: 0 0 auto;
-    /* 20% narrower, then 15% smaller in both dimensions and typography. */
-    inline-size: 4.93rem;
+    inline-size: auto;
     block-size: 1.0625rem;
     font-size: 0.5525rem;
     line-height: 1;
-    padding: 0 6.8px;
+    padding: 0 4px;
     border: 0.85px solid transparent;
     border-radius: 999px;
     font-weight: 600;
@@ -625,12 +624,6 @@ body.light .device-card.offline {
 .card-profile.profile-active    { background: var(--warning);  color: #000; }
 .card-profile.profile-lost,
 .card-profile.profile-emergency-lost { background: var(--danger); color: #fff; }
-/* Keep the longest label inside the same compact pill, not over its edges. */
-.card-profile.profile-emergency-lost {
-    font-size: 0.48rem;
-    letter-spacing: 0;
-    padding-inline: 3px;
-}
 .card-profile.profile-debug     { background: #7c3aed;         color: #fff; }
 
 .card-coords {

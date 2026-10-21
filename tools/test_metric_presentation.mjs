@@ -9,10 +9,10 @@ const now=Date.parse('2026-10-19T12:00:00Z');
 const base={id:3001,name:'Cat',seq:1,time:now/1000,profile:'PowerSave',status:'Out',error:'None',lat:51,lon:-2,hasGps:true,batt:3900,rssi:-90,snr:8,ingestPath:'lora_hub',lastUpdate:now,positionRecordedAt:new Date(now).toISOString(),gnss:{accuracyM:6,satellites:8,fixAgeS:0,recordedAt:new Date(now).toISOString()},homeHub:{lat:51.01,lon:-2,fixAt:new Date(now).toISOString()}};
 const avatar={kind:'emoji',emoji:'🐱',color:'#0099ff'};
 
-test('status and profile pills share fixed geometry and whole-pill wrapping',()=>{
+test('status and profile pills share height and tight padding without forcing equal widths',()=>{
   const css=readFileSync(new URL('../web/src/app/parity.css',import.meta.url),'utf8');
   const common=css.match(/\.card-status,\s*\.card-profile\s*\{([^}]+)\}/)[1];
-  for(const rule of ['box-sizing: border-box','display: inline-flex','align-items: center','justify-content: center','flex: 0 0 auto','inline-size: 4.93rem','block-size: 1.0625rem','font-size: 0.5525rem','line-height: 1','white-space: nowrap']) assert.ok(common.includes(rule),rule);
+  for(const rule of ['box-sizing: border-box','display: inline-flex','align-items: center','justify-content: center','flex: 0 0 auto','inline-size: auto','block-size: 1.0625rem','font-size: 0.5525rem','padding: 0 4px','line-height: 1','white-space: nowrap']) assert.ok(common.includes(rule),rule);
   assert.match(css,/\.card-name-row\s*\{[^}]*flex-wrap: wrap/s);
   assert.match(css,/\.card-profile\.profile-emergency-lost\s*\{[^}]*background: var\(--danger\)/);
   for(const profile of ['Normal','PowerSave','Active','Emergency Lost','Debug']) for(const expanded of [true,false]) {
