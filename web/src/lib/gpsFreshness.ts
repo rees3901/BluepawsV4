@@ -13,6 +13,10 @@ export const GPS_RECENT_DISPLAY_SECONDS = 11 * 60;
 export function isRecentGps(gps: Pick<GpsFreshness, "ageSeconds">) {
   return gps.ageSeconds !== null && gps.ageSeconds <= GPS_RECENT_DISPLAY_SECONDS;
 }
+/** Only the compact summary is hidden; historical fix details stay available. */
+export function hideGpsAgeBadge(gps: GpsFreshness) {
+  return gps.homeConfirmed || isRecentGps(gps);
+}
 export function gpsDisplayClass(gps: GpsFreshness) {
   return isRecentGps(gps) ? "gps-recent" : gps.className;
 }

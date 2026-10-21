@@ -7,7 +7,7 @@ import { COLLAR_RECEIVE_WINDOW_SECONDS, collarCardFreshness, collarFreshnessClas
 import { formatMapCoordinates, googleMapsUrl, homeDistancePresentation } from "@/lib/mapLocation";
 import { normalizeMarkerColor } from "@/lib/markerColor";
 import { gnssUncertainty } from "@/lib/gnssUncertainty";
-import { gpsAgeLabel, gpsAsAt, gpsFreshness, gpsDisplayClass, isRecentGps, homeStatusTooltip } from "@/lib/gpsFreshness";
+import { gpsAgeLabel, gpsAsAt, gpsFreshness, gpsDisplayClass, hideGpsAgeBadge, homeStatusTooltip } from "@/lib/gpsFreshness";
 import { transportPresentation } from "@/lib/transportPath";
 import type { DeviceAvatar, TelemetryDevice } from "@/types/telemetry";
 
@@ -16,7 +16,7 @@ export function mapPopupHtml(device: TelemetryDevice, avatar: DeviceAvatar, pres
   const isHub = device.entity === "hub";
   const gps = gpsFreshness(device, presenceNow);
   const distanceInfo = homeDistancePresentation(device, gps.homeConfirmed);
-  const gpsBadge = isHub ? "" : `<span data-gps-age class="gps-age-badge ${gpsDisplayClass(gps)}"${isRecentGps(gps) ? " hidden" : ""} title="${gps.label}. ${gps.notice}">${gps.warning ? "⚠ " : ""}${gpsAgeLabel(gps)}</span>`;
+  const gpsBadge = isHub ? "" : `<span data-gps-age class="gps-age-badge ${gpsDisplayClass(gps)}"${hideGpsAgeBadge(gps) ? " hidden" : ""} title="${gps.label}. ${gps.notice}">${gps.warning ? "⚠ " : ""}${gpsAgeLabel(gps)}</span>`;
   const gpsTime = isHub ? "" : `<span class="label">GPS as at</span><span data-gps-as-at class="value gps-as-at ${gpsDisplayClass(gps)}" title="${gps.notice}">${escapeHtml(gpsAsAt(gps, presenceNow))}</span>`;
   const coordinates = formatMapCoordinates(device.lat, device.lon);
   const uncertainty = gnssUncertainty(device);
@@ -55,7 +55,7 @@ export function refreshMapPopupGps(root: HTMLElement, device: TelemetryDevice, n
   const home = root.querySelector<HTMLElement>("[data-home-beacon]");
   if (home) home.title = homeStatusTooltip(gps);
   const badge = root.querySelector<HTMLElement>("[data-gps-age]");
-  if (badge) { badge.hidden = isRecentGps(gps); badge.className = `gps-age-badge ${gpsDisplayClass(gps)}`; badge.textContent = `${gps.warning ? "⚠ " : ""}${gpsAgeLabel(gps)}`; badge.title = `${gps.label}. ${gps.notice}`; }
+  if (badge) { badge.hidden = hideGpsAgeBadge(gps); badge.className = `gps-age-badge ${gpsDisplayClass(gps)}`; badge.textContent = `${gps.warning ? "⚠ " : ""}${gpsAgeLabel(gps)}`; badge.title = `${gps.label}. ${gps.notice}`; }
   const stamp = root.querySelector<HTMLElement>("[data-gps-as-at]");
   if (stamp) { stamp.className = `value gps-as-at ${gpsDisplayClass(gps)}`; stamp.textContent = gpsAsAt(gps, now); stamp.title = gps.notice; }
   const coords = root.querySelector<HTMLAnchorElement>("[data-gps-coordinates]");
