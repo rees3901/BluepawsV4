@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
 import {fixtureModule,renderCollar,renderHub} from './shared_device_card_fixture.mjs';
 const {distanceMetricClass:distance,contactMetricClass:contact}=fixtureModule('@/lib/metricPresentation');
 const {gpsFreshness}=fixtureModule('@/lib/gpsFreshness');
@@ -7,6 +8,17 @@ const {mapPopupHtml,refreshMapPopupGps}=fixtureModule('@/lib/mapPopup');
 const now=Date.parse('2026-10-19T12:00:00Z');
 const base={id:3001,name:'Cat',seq:1,time:now/1000,profile:'PowerSave',status:'Out',error:'None',lat:51,lon:-2,hasGps:true,batt:3900,rssi:-90,snr:8,ingestPath:'lora_hub',lastUpdate:now,positionRecordedAt:new Date(now).toISOString(),gnss:{accuracyM:6,satellites:8,fixAgeS:0,recordedAt:new Date(now).toISOString()},homeHub:{lat:51.01,lon:-2,fixAt:new Date(now).toISOString()}};
 const avatar={kind:'emoji',emoji:'🐱',color:'#0099ff'};
+
+test('status and profile pills share fixed geometry and whole-pill wrapping',()=>{
+  const css=readFileSync(new URL('../web/src/app/parity.css',import.meta.url),'utf8');
+  const common=css.match(/\.card-status,\s*\.card-profile\s*\{([^}]+)\}/)[1];
+  for(const rule of ['box-sizing: border-box','display: inline-flex','align-items: center','justify-content: center','flex: 0 0 auto','inline-size: 7.25rem','block-size: 1.25rem','line-height: 1','white-space: nowrap']) assert.ok(common.includes(rule),rule);
+  assert.match(css,/\.card-name-row\s*\{[^}]*flex-wrap: wrap/s);
+  assert.match(css,/\.card-profile\.profile-emergency-lost\s*\{[^}]*background: var\(--danger\)/);
+  for(const profile of ['Normal','PowerSave','Active','Emergency Lost','Debug']) for(const expanded of [true,false]) {
+    assert.match(renderCollar({device:{...base,profile},expanded,now,ageSeconds:0}),/class="card-profile /);
+  }
+});
 
 test('sidebar grows immediately but ignores tiny shrink fluctuations before settling',()=>{
   const {PANEL_BASE_WIDTH,PANEL_SHRINK_DELAY_MS,panelResizeDirection:direction}=fixtureModule('@/lib/panelSizing');

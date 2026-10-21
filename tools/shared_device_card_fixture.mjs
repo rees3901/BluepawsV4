@@ -60,6 +60,13 @@ if (process.argv.includes('--serve')) {
       return res.end(readFileSync(new URL('../web/src/app'+req.url,import.meta.url)));
     }
     res.setHeader('Content-Type','text/html; charset=utf-8');
+    if (req.url === '/pills') {
+      const now=Date.now();
+      const profiles=['Normal','PowerSave','Active','Emergency Lost','Debug'];
+      const statuses=['Home','Out','Lost','Error'];
+      return res.end('<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Uniform card pills</title><link rel="stylesheet" href="/parity.css"><link rel="stylesheet" href="/web.css">'+
+        '<main id="deviceCards" style="width:600px;max-width:100%;padding:12px"><h3>Uniform status and profile pills</h3>'+profiles.map((profile,i)=>renderCollar({expanded:false,now,ageSeconds:0,device:{id:3001,name:'Test collar',profile,status:statuses[i%statuses.length],error:'None',hasGps:false,batt:3900,rssi:-90,snr:8,lastUpdate:now}})).join('')+renderHub({}, {expanded:false})+renderCollar({expanded:false,ageSeconds:14400})+'</main>');
+    }
     if(req.url === '/metric-colours') {
       const now=Date.now();
       const cards=[['Recent GPS',300,30,350],['Amber metrics',720,1861,700],['Red metrics',10800,7201,1200]].map(([name,gpsAge,ageSeconds,metres])=>{
