@@ -58,17 +58,18 @@ test('on-schedule Power Save and Home presence never relabel old coordinates as 
     const card = renderCollar({ device: collar, now, ageSeconds: 0 });
     const popup = fixtureModule('@/lib/mapPopup').mapPopupHtml(collar, avatar, now);
     for (const html of [card, popup]) {
-      assert.match(html, collar === home ? /gps-age-badge gps-aging/ : /gps-age-badge gps-fresh/);
+      if (collar !== home) assert.match(html, /gps-age-badge gps-fresh/);
       assert.match(html, /Last known coordinates/);
       assert.match(html, /not a current position/);
       assert.doesNotMatch(html, /Recent GPS fix/);
       assert.match(html, /GPS as at/);
     }
-    assert.match(card, /GPS age: (20 min|2h 14 min) old/);
+    if (collar !== home) assert.match(card, /GPS age: 20 min old/);
     if (collar === home) {
       assert.match(card, /class="card-status status-home" title="The collar recently detected/);
       assert.doesNotMatch(card, /home-beacon-confirmed|>Home confirmed</);
-      assert.match(card, /gps-age-badge gps-aging[^>]*>⚠ GPS age: 2h 14 min old/);
+      assert.doesNotMatch(card, /gps-age-badge/);
+      assert.match(popup, /gps-age-badge gps-aging" hidden/);
     }
   }
 });
@@ -80,7 +81,8 @@ test('recent Home beacon confirmation stays independent when GPS hits the four-h
   for (const html of [renderCollar({device:home,now,ageSeconds:0}), fixtureModule('@/lib/mapPopup').mapPopupHtml(home,avatar,now)]) {
     assert.match(html, /class="card-status status-home"[^>]*title="The collar recently detected/);
     assert.doesNotMatch(html, /home-beacon-confirmed|>Home confirmed</);
-    assert.match(html, /gps-age-badge gps-stale[^>]*>⚠ GPS age: 4h 0 min old/);
+    assert.doesNotMatch(html, /gps-age-badge gps-stale"(?! hidden)/);
+    assert.match(html, /gps-as-at gps-stale/);
     assert.match(html, /Last known coordinates/);
     assert.match(html, /not a current position/);
   }
@@ -96,11 +98,48 @@ test('open popup independently expires Home confirmation and updates GPS age wit
   refresh(root,home,now);
   assert.match(nodes['[data-home-beacon]'].title,/recently detected/);
   assert.equal(nodes['[data-gps-age]'].textContent,'⚠ GPS age: 4h 0 min old');
+  assert.equal(nodes['[data-gps-age]'].hidden,true);
   assert.match(nodes['[data-gps-age]'].className,/gps-stale/);
   refresh(root,home,now+1861_000);
+  assert.equal(nodes['[data-gps-age]'].hidden,false);
   assert.match(nodes['[data-home-beacon]'].title,/recent Home beacon confirmation is unavailable/);
   assert.match(nodes['[data-gps-age]'].className,/gps-stale/);
   assert.equal(nodes['[data-gps-coordinate-label]'].textContent,'Last known coordinates');
+});
+
+test('compact age follows confirmed Home evidence across profiles without altering expanded GPS time', () => {
+  const { gpsReportingSchedule } = fixtureModule('@/lib/gpsReporting');
+  const { gpsFreshness } = fixtureModule('@/lib/gpsFreshness');
+  for (const profile of ['PowerSave','Normal','Active','Debug']) {
+    const home = {...device,profile,status:'Home',bleHome:true,homeBeaconSeenAt:now,lastReportReason:7};
+    const expires = now + gpsReportingSchedule(profile).contactWindowSeconds * 1000;
+    for (const expanded of [false,true]) for (const awakeSeconds of [0,8]) {
+      for (const at of [now,expires]) {
+        const html = renderCollar({device:home,now:at,expanded,awakeSeconds,ageSeconds:0});
+        assert.doesNotMatch(html,/gps-age-badge/);
+        assert.match(html,/GPS as at/);
+        assert.match(html,/datetime="2026-10-15T15:13:55.000Z"/i);
+      }
+      for (const [collar,at] of [[home,expires+1000],[{...home,status:'Out'},now],[{...home,bleHome:false},now],[{...home,homeBeaconSeenAt:undefined},now]]) {
+        assert.match(renderCollar({device:collar,now:at,expanded,awakeSeconds,ageSeconds:0}),/gps-age-badge/);
+        assert.equal(gpsFreshness(collar,at).fixAt,gpsFreshness(home,now).fixAt);
+      }
+    }
+  }
+  const lost = {...device,profile:'Emergency Lost',status:'Home',bleHome:true,homeBeaconSeenAt:now};
+  assert.match(renderCollar({device:lost,now,ageSeconds:0}),/gps-age-badge/);
+  const nodes = Object.fromEntries(['gps-age','gps-as-at'].map(key => [`[data-${key}]`,{}]));
+  const root = {querySelector:selector=>nodes[selector]};
+  const home = {...device,status:'Home',bleHome:true,homeBeaconSeenAt:now};
+  const refresh = fixtureModule('@/lib/mapPopup').refreshMapPopupGps;
+  refresh(root,home,now);
+  const stamp = nodes['[data-gps-as-at]'].textContent;
+  assert.equal(nodes['[data-gps-age]'].hidden,true);
+  refresh(root,{...home,status:'Out'},now);
+  assert.equal(nodes['[data-gps-age]'].hidden,false);
+  assert.equal(nodes['[data-gps-as-at]'].textContent,stamp);
+  refresh(root,home,now);
+  assert.equal(nodes['[data-gps-age]'].hidden,true);
 });
 
 test('map GPS adornment starts only after eleven minutes, independently of card/profile warning bands', () => {

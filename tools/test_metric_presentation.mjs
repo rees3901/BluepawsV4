@@ -84,7 +84,9 @@ test('recent Home beacon suppresses old GPS distance without inventing zero or c
     assert.match(html,/Home confirmed by the collar/);
     assert.doesNotMatch(html,/139 m/);
     assert.doesNotMatch(html,/card-dist-group metric-(amber|red)/);
-    assert.match(html,/GPS age: 1h 0 min old/);
+    assert.doesNotMatch(html,/gps-age-badge/);
+    assert.match(html,/GPS as at/);
+    assert.match(html,/1h 0 min ago/);
   }
   assert.equal(present(home,true).metres,null);
   const popup=mapPopupHtml(home,avatar,now);
