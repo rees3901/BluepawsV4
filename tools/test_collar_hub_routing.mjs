@@ -22,6 +22,7 @@ const code = `
 #include "bp_protocol.h"
 #include "bp_hmac_sha256.h"
 #include "collar_routing.h"
+#include "collar_report_policy.h"
 #define MY_DEVICE_ID 1001
 #define BLUEPAWS_BUILD_UNIX_TIME 1787834096UL
 enum { HUB_COMM_HOME, HUB_COMM_PORTABLE, HUB_COMM_OFF_GRID };
@@ -34,7 +35,8 @@ int main() {
   uint8_t buf[BP_MAX_PACKET_SIZE], key[32]{}, tag[8];
   uint16_t messageSeq=1192, destinationId=32;
   uint32_t unixTime=1787834096;
-  uint8_t status=STATUS_OUT_AND_ABOUT, currentProfile=PROFILE_NORMAL, flags=3, txReason=TX_INTERRUPT;
+  uint8_t status=STATUS_OUT_AND_ABOUT, flags=3, txReason=TX_INTERRUPT;
+  bp_profile_t currentProfile=PROFILE_NORMAL;
   ${calls.map((call, index) => `
   ${call}
   assert(pkt_source_id(buf)==1001);
