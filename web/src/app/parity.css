@@ -606,17 +606,18 @@ body.light .device-card.offline {
     align-items: center;
     justify-content: center;
     flex: 0 0 auto;
-    inline-size: 7.25rem;
-    block-size: 1.25rem;
-    font-size: 0.65rem;
+    /* 20% narrower, then 15% smaller in both dimensions and typography. */
+    inline-size: 4.93rem;
+    block-size: 1.0625rem;
+    font-size: 0.5525rem;
     line-height: 1;
-    padding: 0 8px;
-    border: 1px solid transparent;
+    padding: 0 6.8px;
+    border: 0.85px solid transparent;
     border-radius: 999px;
     font-weight: 600;
     text-transform: uppercase;
     white-space: nowrap;
-    letter-spacing: 0.4px;
+    letter-spacing: 0.34px;
 }
 
 .card-profile.profile-normal    { background: var(--success);  color: #000; }
@@ -624,6 +625,12 @@ body.light .device-card.offline {
 .card-profile.profile-active    { background: var(--warning);  color: #000; }
 .card-profile.profile-lost,
 .card-profile.profile-emergency-lost { background: var(--danger); color: #fff; }
+/* Keep the longest label inside the same compact pill, not over its edges. */
+.card-profile.profile-emergency-lost {
+    font-size: 0.48rem;
+    letter-spacing: 0;
+    padding-inline: 3px;
+}
 .card-profile.profile-debug     { background: #7c3aed;         color: #fff; }
 
 .card-coords {

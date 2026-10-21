@@ -12,7 +12,7 @@ const avatar={kind:'emoji',emoji:'🐱',color:'#0099ff'};
 test('status and profile pills share fixed geometry and whole-pill wrapping',()=>{
   const css=readFileSync(new URL('../web/src/app/parity.css',import.meta.url),'utf8');
   const common=css.match(/\.card-status,\s*\.card-profile\s*\{([^}]+)\}/)[1];
-  for(const rule of ['box-sizing: border-box','display: inline-flex','align-items: center','justify-content: center','flex: 0 0 auto','inline-size: 7.25rem','block-size: 1.25rem','line-height: 1','white-space: nowrap']) assert.ok(common.includes(rule),rule);
+  for(const rule of ['box-sizing: border-box','display: inline-flex','align-items: center','justify-content: center','flex: 0 0 auto','inline-size: 4.93rem','block-size: 1.0625rem','font-size: 0.5525rem','line-height: 1','white-space: nowrap']) assert.ok(common.includes(rule),rule);
   assert.match(css,/\.card-name-row\s*\{[^}]*flex-wrap: wrap/s);
   assert.match(css,/\.card-profile\.profile-emergency-lost\s*\{[^}]*background: var\(--danger\)/);
   for(const profile of ['Normal','PowerSave','Active','Emergency Lost','Debug']) for(const expanded of [true,false]) {
