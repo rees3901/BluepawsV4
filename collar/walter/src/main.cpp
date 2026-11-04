@@ -25,8 +25,8 @@ std::atomic<bool> lteInspectionRequested{false};
 std::atomic<bool> assistanceRequested{false};
 std::atomic<unsigned> assistanceEvents{0};
 std::atomic<int> registrationRatRequested{-1};
-std::atomic<bool> offlineBench{true}; // Safe default after every ESP reboot.
-std::atomic<uint32_t> loraTxCount{0}, lteSkippedCount{0};
+std::atomic<bool> offlineBench{true}; // Unprovisioned builds remain idle.
+std::atomic<uint32_t> loraFailedCount{0}, lteSkippedCount{0};
 std::atomic<uint32_t> nextWakeUtc{0};
 std::atomic<uint8_t> selectedProfile{PROFILE_NORMAL};
 std::atomic<bool> simulatedHome{false};
@@ -665,7 +665,7 @@ bool testLteOnly() {
     uint8_t packet[BP_MAX_PACKET_SIZE]{};
     const uint8_t length = walter::buildPacket(packet, WALTER_DEVICE_ID, WALTER_HOME_HUB_ID, sequence,
         utcNow(), bp_profile_t(selectedProfile.load()), simulatedHome.load(), TX_INTERRUPT, walter::Fix{},
-        false, cellularFailure, uint32_t(monotonicMs() / 1000), hmacKey);
+        false, cellularFailure, false, uint32_t(monotonicMs() / 1000), hmacKey);
     if (!length) return false;
     char hex[BP_MAX_PACKET_SIZE * 2 + 1]{};
     for (uint8_t i = 0; i < length; ++i) snprintf(hex + i * 2, 3, "%02X", packet[i]);
@@ -674,22 +674,13 @@ bool testLteOnly() {
     cellularFailure = !accepted;
     return accepted;
 }
-bool transmitLoraStub(const uint8_t* packet, uint8_t length) {
-    if (cancelRequested.load() || !packet || length < BP_HEADER_SIZE + BP_AUTH_TAG_SIZE ||
-        length > BP_MAX_PACKET_SIZE) return false;
-    char b64[89]{};
-    size_t encoded = 0;
-    if (mbedtls_base64_encode(reinterpret_cast<unsigned char*>(b64), sizeof(b64), &encoded, packet, length)) return false;
-    char hex[BP_MAX_PACKET_SIZE * 2 + 1]{};
-    for (uint8_t i = 0; i < length; ++i) snprintf(hex + i * 2, 3, "%02X", packet[i]);
-    console.printf("[LORA-STUB] SIMULATED TX only; no RF, no ACK. seq=%u bytes=%u hex=%s\n", pkt_msg_seq(packet), length, hex);
-    console.printf("[LORA-STUB] base64=%s\n", b64);
-    ++loraTxCount;
-    console.printf("[LORA-STUB] TX_COMPLETE result=OK seq=%u count=%lu (simulated local send; delivery unknown)\n",
-        pkt_msg_seq(packet), (unsigned long)loraTxCount.load());
-    return true; // Transport completion only, never a hub ACK/cloud receipt.
+void recordUnavailableLoRa(const uint8_t* packet, uint8_t length) {
+    ++loraFailedCount;
+    console.printf("[LORA] TX_FAILED reason=SX1262_NOT_PRESENT seq=%u bytes=%u failed_total=%lu\n",
+        pkt_msg_seq(packet), length, (unsigned long)loraFailedCount.load());
 }
-void cycle(bool boot, bool force, bp_profile_t profile, uint32_t count, uint32_t homeCount, uint64_t& lastLteMs) {
+void cycle(bool boot, bool force, bp_profile_t profile, uint32_t count, uint32_t homeCount,
+           uint64_t& lastLteMs, uint8_t& failedLoRaCycles) {
     if (cancelRequested.load()) return;
     const auto decision = walter::decide(profile, count, homeCount, simulatedHome.load(), boot, force,
                                        uint32_t((monotonicMs() - lastLteMs) / 1000));
@@ -717,16 +708,18 @@ void cycle(bool boot, bool force, bp_profile_t profile, uint32_t count, uint32_t
     uint8_t packet[BP_MAX_PACKET_SIZE]{};
     const uint8_t length = walter::buildPacket(packet, WALTER_DEVICE_ID, WALTER_HOME_HUB_ID, sequence,
         utcNow(), profile, simulatedHome.load(), decision.reason, offline ? walter::Fix{} : lastFix, gpsFailure,
-        cellularFailure, uint32_t(monotonicMs() / 1000), hmacKey);
+        cellularFailure, true, uint32_t(monotonicMs() / 1000), hmacKey);
     if (!length) { console.println("[WALTER] Packet validation failed"); return; }
-    if (!transmitLoraStub(packet, length)) { console.println("[LORA-STUB] Local send failed"); return; }
-    console.printf("[LORA-STUB] Listen window=%lums; no receiver/hub ACK simulated\n", (unsigned long)CMD_LISTEN_WINDOW_MS);
-    if (!pauseMs(CMD_LISTEN_WINDOW_MS)) return;
-    if (decision.lte) {
+    recordUnavailableLoRa(packet, length); // Deterministic; never probes or waits for absent hardware.
+    const bool fallback = walter::noteLoRaFailure(failedLoRaCycles, profile);
+    console.printf("[LORA] Consecutive failed cycles=%u threshold=%u profile=%s\n", failedLoRaCycles,
+        bp_profile_config(profile)->lora_failed_cycles_before_cellular, bp_profile_name(profile));
+    if (fallback) console.println("[LTE] LoRa failure threshold reached; fallback due");
+    if (decision.lte || fallback) {
         if (offline) {
             ++lteSkippedCount;
             lastLteMs = monotonicMs(); // Advance simulated schedule, not a real LTE attempt.
-            console.printf("[LTE] Fallback due seq=%u; SKIPPED (offline bench; no modem/cloud traffic)\n", sequence);
+            console.printf("[LTE] Due seq=%u; SKIPPED (offline bench; no modem/cloud traffic)\n", sequence);
             return;
         }
         const bool accepted = prepareModem() && upload(packet, length); // Same immutable bytes, including HMAC.
@@ -785,6 +778,7 @@ void worker(void*) {
         }
         const bool single = oneShot.exchange(false);
         uint32_t count = 0, homeCount = 0;
+        uint8_t failedLoRaCycles = 0;
         uint64_t lastLteMs = monotonicMs();
         do {
             auto profile = bp_profile_t(selectedProfile.load());
@@ -796,7 +790,7 @@ void worker(void*) {
             const auto cycleStarted = monotonicMs();
             console.printf("[CYCLE] START n=%lu profile=%s home=%u offline=%u utc=%lu\n",
                 (unsigned long)count, bp_profile_name(profile), simulatedHome.load(), offlineBench.load(), (unsigned long)utcNow());
-            cycle(count == 1 && !single, single, profile, count, homeCount, lastLteMs);
+            cycle(count == 1 && !single, single, profile, count, homeCount, lastLteMs, failedLoRaCycles);
             if (!offlineBench.load() && begun && !radioOff()) {
                 console.println("[WALTER] Could not confirm radio off; session stopped, check board"); running = false;
             }
@@ -825,8 +819,8 @@ void command(const String& text) {
         console.printf("[SCHEDULE] next_wake_utc=%lu\n", (unsigned long)nextWakeUtc.load());
         console.printf("[WALTER] uptime=%lus reset_reason=%u free_heap=%u\n", (unsigned long)(monotonicMs()/1000),
             unsigned(esp_reset_reason()), unsigned(ESP.getFreeHeap()));
-        console.printf("[BENCH] offline=%u utc=%lu lora_tx_complete=%lu lte_skipped=%lu\n",
-            offlineBench.load(), (unsigned long)utcNow(), (unsigned long)loraTxCount.load(),
+        console.printf("[BENCH] offline=%u utc=%lu lora_tx_failed=%lu lte_skipped=%lu\n",
+            offlineBench.load(), (unsigned long)utcNow(), (unsigned long)loraFailedCount.load(),
             (unsigned long)lteSkippedCount.load()); return;
     }
     if (busy.load() || running.load() || oneShot.load() || inspectRequested.load()) { console.println("[WALTER] Stop and wait for Idle before changing settings"); return; }
@@ -837,7 +831,7 @@ void command(const String& text) {
     }
     if (text == "bench on" || text == "bench off") {
         offlineBench = text == "bench on";
-        console.printf("[BENCH] %s; LoRa always simulated; UTC must be seeded again after ESP reboot\n",
+        console.printf("[BENCH] %s; LoRa hardware unavailable; online UTC can bootstrap from LTE\n",
             offlineBench.load() ? "OFFLINE: cycles skip GNSS/LTE modem access" : "ONLINE: real GNSS/LTE enabled for next cycle");
         return;
     }
@@ -892,9 +886,14 @@ void setup() {
         console.println("[WALTER] Task/queue allocation failed");
         for (;;) delay(1000);
     }
-    console.println("[WALTER] Independent testbed. OFFLINE BENCH by default; seed clock then start/send. LoRa is simulated; Wi-Fi is unused.");
+    console.println("[WALTER] BluePaws collar mode. LoRa hardware unavailable; using profile LTE fallback. Wi-Fi is unused.");
     console.printf("[WALTER] firmware=BluePawsV4-Walter source_rev=%s build_utc=%lu protocol=%u\n",
         BLUEPAWS_WALTER_SOURCE_REV, (unsigned long)BLUEPAWS_BUILD_UNIX_TIME, unsigned(BP_PROTOCOL_VERSION));
+    if (credentialsReady()) {
+        offlineBench = false;
+        running = true;
+        console.println("[WALTER] Provisioned: starting online Normal collar schedule; UTC from LTE");
+    } else console.println("[WALTER] No credentials: idle in offline bench mode");
 }
 
 void loop() {

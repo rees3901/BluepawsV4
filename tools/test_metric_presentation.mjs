@@ -9,6 +9,14 @@ const now=Date.parse('2026-10-19T12:00:00Z');
 const base={id:3001,name:'Cat',seq:1,time:now/1000,profile:'PowerSave',status:'Out',error:'None',lat:51,lon:-2,hasGps:true,batt:3900,rssi:-90,snr:8,ingestPath:'lora_hub',lastUpdate:now,positionRecordedAt:new Date(now).toISOString(),gnss:{accuracyM:6,satellites:8,fixAgeS:0,recordedAt:new Date(now).toISOString()},homeHub:{lat:51.01,lon:-2,fixAt:new Date(now).toISOString()}};
 const avatar={kind:'emoji',emoji:'🐱',color:'#0099ff'};
 
+test('an unmeasured Walter battery is not shown as empty',()=>{
+  const device={...base,batt:0,batteryPercent:null};
+  for(const html of [renderCollar({device,now,ageSeconds:0}),mapPopupHtml(device,avatar,now)]) {
+    assert.match(html,/Battery not reported — No data/);
+    assert.doesNotMatch(html,/Nearly Empty/);
+  }
+});
+
 test('status and profile pills share height and tight padding without forcing equal widths',()=>{
   const css=readFileSync(new URL('../web/src/app/parity.css',import.meta.url),'utf8');
   const common=css.match(/\.card-status,\s*\.card-profile\s*\{([^}]+)\}/)[1];

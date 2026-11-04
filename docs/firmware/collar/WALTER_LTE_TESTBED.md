@@ -1,5 +1,10 @@
 # Walter LTE/GNSS testbed
 
+**Current Walter collar behaviour:** [Walter cellular collar mode](WALTER_COLLAR_MODE.md).
+The guide below records the earlier independent testbed, including its
+simulated-success LoRa stub and idle/offline boot. Those behaviours were
+superseded by the cellular collar firmware.
+
 For board-level power, antennas, modem interfaces and the vendor API, see the
 [Walter/GM02SP upstream reference](WALTER_GM02SP_UPSTREAM_REFERENCE.md). This
 document describes BluePaws testbed behaviour and its own USB console.

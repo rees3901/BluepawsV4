@@ -381,7 +381,8 @@ export function Dashboard({ householdId, householdAccessVersion, initialLiveDevi
         if (sequences.current.get(device.id) !== device.seq) {
           sequences.current.set(device.id, device.seq);
           const signal = device.rssi === null ? "not-reported" : `${device.rssi}dBm`;
-          const battery = device.batteryPercent === undefined || device.batteryPercent === null ? `${device.batt}mV` : `${device.batteryPercent}%`;
+          const battery = device.batteryPercent !== undefined && device.batteryPercent !== null ? `${device.batteryPercent}%`
+            : device.batt > 0 && device.batt < 65535 ? `${device.batt}mV` : "not-reported";
           newLines.push(`[${new Date().toLocaleTimeString()}] RX ${device.name} id=${device.id} lat=${device.lat.toFixed(5)} lon=${device.lon.toFixed(5)} rssi=${signal} batt=${battery}`);
         }
       });

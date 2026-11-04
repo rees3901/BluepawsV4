@@ -15,7 +15,8 @@ struct Decision {
 inline Decision decide(bp_profile_t profile, uint32_t cycle, uint32_t homeCycle,
                        bool home, bool boot, bool force, uint32_t sinceLteS) {
     const auto& p = *bp_profile_config(profile);
-    if (boot || force) return {true, true, true, uint8_t(boot ? TX_BOOT : TX_INTERRUPT)};
+    if (force) return {true, true, true, TX_INTERRUPT};
+    if (boot) return {true, true, false, TX_BOOT};
     if (home && profile != PROFILE_LOST) {
         const bool refresh = p.home_gnss_refresh_ratio && homeCycle % p.home_gnss_refresh_ratio == 0;
         const bool checkin = p.wake_checkin_ratio && homeCycle % p.wake_checkin_ratio == 0;
@@ -23,6 +24,19 @@ inline Decision decide(bp_profile_t profile, uint32_t cycle, uint32_t homeCycle,
         return {refresh || checkin || lte, refresh, lte, uint8_t(refresh ? TX_TELEMETRY : TX_WAKE_CHECKIN)};
     }
     return {true, true, bool(p.cellular_ratio && cycle % p.cellular_ratio == 0), TX_TELEMETRY};
+}
+
+// Walter has no SX1262. Count its unavailable LoRa path as a failed uplink
+// cycle, matching the production collar's bounded failure groups. No hardware
+// probe or ACK timeout is possible or needed on this board.
+inline bool noteLoRaFailure(uint8_t& failedCycles, bp_profile_t profile) {
+    if (failedCycles < UINT8_MAX) ++failedCycles;
+    const uint8_t threshold = bp_profile_config(profile)->lora_failed_cycles_before_cellular;
+    if (threshold && failedCycles >= threshold) {
+        failedCycles = 0;
+        return true;
+    }
+    return false;
 }
 
 inline uint32_t sleepSeconds(bp_profile_t profile) {
@@ -59,7 +73,7 @@ struct Fix {
 inline uint8_t buildPacket(uint8_t* bytes, uint16_t source, uint16_t destination,
                            uint16_t seq, uint32_t utc, bp_profile_t profile,
                            bool home, uint8_t reason, const Fix& fix,
-                           bool gpsFailure, bool cellularFailure, uint32_t uptime,
+                           bool gpsFailure, bool cellularFailure, bool radioFailure, uint32_t uptime,
                            const uint8_t key[32]) {
     if (!bp_is_collar_id(source) || !bp_is_hub_id(destination) ||
         !validUtc(utc) || profile > PROFILE_DEBUG || reason > TX_WAKE_CHECKIN) return 0;
@@ -72,7 +86,7 @@ inline uint8_t buildPacket(uint8_t* bytes, uint16_t source, uint16_t destination
     uint8_t flags = home ? FLAG_HOME_BEACON_SEEN : 0;
     if (fresh) flags |= FLAG_GNSS_VALID;
     if (wantsFix && fix.valid && !fresh) flags |= FLAG_STALE_FIX;
-    if (cellularFailure || (wantsFix && (gpsFailure || !fresh))) flags |= FLAG_ERROR_PRESENT;
+    if (cellularFailure || radioFailure || (wantsFix && (gpsFailure || !fresh))) flags |= FLAG_ERROR_PRESENT;
     const bp_status_t status = profile == PROFILE_LOST ? STATUS_LOST
         : home ? STATUS_HOME : fresh ? STATUS_OUT_AND_ABOUT : STATUS_ERROR;
     pkt_init(bytes, source, destination, seq, utc, status, profile, flags, reason);

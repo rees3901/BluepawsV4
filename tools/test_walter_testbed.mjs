@@ -75,7 +75,7 @@ struct SimModem {
 } modem;
 ${firmwareFunction('waitForSimReady')}
 std::atomic<bool> offlineBench{true},simulatedHome{false},running{false};
-std::atomic<uint32_t> loraTxCount{0},lteSkippedCount{0};
+std::atomic<uint32_t> loraFailedCount{0},lteSkippedCount{0};
 std::atomic<uint32_t> nextWakeUtc{0};
 std::atomic<uint8_t> selectedProfile{PROFILE_NORMAL};
 bool begun=false,cellularFailure=false,setupOk=true,uploadOk=false;
@@ -106,51 +106,47 @@ void scheduleTests(){
     cancelOnPause=false;cancelRequested=false;
 }
 ${firmwareFunction('testLteOnly')}
-${firmwareFunction('transmitLoraStub')}
+${firmwareFunction('recordUnavailableLoRa','void')}
 ${firmwareFunction('cycle','void')}
 void cycleTests(){
     sequenceReady=false;sequenceStore.fail=false;sequenceStore.stored=1;
     fakeMs=1000;nowUtc=utc;cancelRequested=false;cancelOnPause=false;
     uint64_t lastLte=0;
+    uint8_t failedLoRaCycles=0;
     lastFix={true,519084900,-22587900,utc,8,9}; // Offline must not pass an old fix as current.
-    cycle(true,false,PROFILE_NORMAL,1,1,lastLte);
-    assert(loraTxCount==1 && lteSkippedCount==1 && modemCalls==0);
-    assert(lastLte==11000 && !cellularFailure && uploadedPacket.empty());
-    assert(pkt_tx_reason(sentPacket.data())==TX_BOOT && pkt_msg_seq(sentPacket.data())==1);
-    assert(!(pkt_flags(sentPacket.data())&FLAG_GNSS_VALID) && pkt_lat_e7(sentPacket.data())==0);
-    assert(console.log.find("TX_COMPLETE result=OK")!=std::string::npos);
-    assert(console.log.find("Fallback due")!=std::string::npos);
-    cycle(false,false,PROFILE_NORMAL,2,2,lastLte);
-    assert(loraTxCount==2 && lteSkippedCount==1 && lastLte==11000 && modemCalls==0);
-    nowUtc=0;running=true;cycle(false,true,PROFILE_DEBUG,1,1,lastLte);
-    assert(loraTxCount==2 && !running && modemCalls==0);nowUtc=utc;
-    cancelOnPause=true;cycle(false,true,PROFILE_DEBUG,1,1,lastLte);
-    assert(loraTxCount==3 && lteSkippedCount==1 && modemCalls==0);
-    cancelOnPause=false;cancelRequested=false;
-    simulatedHome=true;cycle(false,false,PROFILE_NORMAL,3,3,lastLte);
-    assert(pkt_tx_reason(sentPacket.data())==TX_WAKE_CHECKIN);
-    assert(pkt_flags(sentPacket.data())==FLAG_HOME_BEACON_SEEN);
+    cycle(true,false,PROFILE_NORMAL,1,1,lastLte,failedLoRaCycles);
+    assert(loraFailedCount==1 && failedLoRaCycles==1 && lteSkippedCount==0 && modemCalls==0 && fakeMs==1000);
+    assert(console.log.find("TX_FAILED reason=SX1262_NOT_PRESENT")!=std::string::npos);
+    assert(console.log.find("TX_COMPLETE") == std::string::npos);
+    cycle(false,false,PROFILE_NORMAL,2,2,lastLte,failedLoRaCycles);
+    assert(loraFailedCount==2 && failedLoRaCycles==2 && lteSkippedCount==0 && modemCalls==0);
+    cycle(false,false,PROFILE_NORMAL,3,3,lastLte,failedLoRaCycles);
+    assert(loraFailedCount==3 && failedLoRaCycles==0 && lteSkippedCount==1 && lastLte==1000);
+    assert(console.log.find("LoRa failure threshold reached")!=std::string::npos);
+    nowUtc=0;running=true;cycle(false,true,PROFILE_DEBUG,1,1,lastLte,failedLoRaCycles);
+    assert(loraFailedCount==3 && !running && modemCalls==0);nowUtc=utc;
+    cancelRequested=true;cycle(false,true,PROFILE_DEBUG,1,1,lastLte,failedLoRaCycles);
+    assert(loraFailedCount==3 && modemCalls==0);cancelRequested=false;
+    simulatedHome=true;cycle(false,false,PROFILE_NORMAL,4,4,lastLte,failedLoRaCycles);
+    assert(loraFailedCount==4 && failedLoRaCycles==1);
     simulatedHome=false;
-    const auto txBefore=loraTxCount.load();
-    sequenceNext=sequenceEnd;sequenceStore.fail=true;cycle(false,true,PROFILE_DEBUG,1,1,lastLte);
-    assert(loraTxCount==txBefore && modemCalls==0);sequenceStore.fail=false;
+    const auto txBefore=loraFailedCount.load();
+    sequenceNext=sequenceEnd;sequenceStore.fail=true;cycle(false,true,PROFILE_DEBUG,1,1,lastLte,failedLoRaCycles);
+    assert(loraFailedCount==txBefore && modemCalls==0);sequenceStore.fail=false;
     offlineBench=false;setupOk=false;
-    cycle(false,true,PROFILE_NORMAL,1,1,lastLte); // Host UTC permits TX even when modem/TLS setup fails.
-    assert(loraTxCount==txBefore+1 && cellularFailure && uploadedPacket.empty());
+    cycle(false,true,PROFILE_NORMAL,1,1,lastLte,failedLoRaCycles); // Host UTC permits packet creation.
+    assert(loraFailedCount==txBefore+1 && cellularFailure && uploadedPacket.empty());
     setupOk=true;uploadOk=false;
-    cycle(false,true,PROFILE_NORMAL,1,1,lastLte);
-    assert(loraTxCount==txBefore+2 && sentPacket==uploadedPacket && cellularFailure);
-    uploadOk=true;cycle(false,true,PROFILE_NORMAL,1,1,lastLte);
-    assert(sentPacket==uploadedPacket && !cellularFailure);
-    assert(!transmitLoraStub(nullptr,46));
-    assert(!transmitLoraStub(sentPacket.data(),1));
-    assert(!transmitLoraStub(sentPacket.data(),BP_MAX_PACKET_SIZE+1));
-    cancelRequested=true;assert(!transmitLoraStub(sentPacket.data(),46));cancelRequested=false;
+    cycle(false,true,PROFILE_NORMAL,1,1,lastLte,failedLoRaCycles);
+    assert(loraFailedCount==txBefore+2 && !uploadedPacket.empty() && cellularFailure);
+    assert(pkt_flags(uploadedPacket.data())&FLAG_ERROR_PRESENT);
+    uploadOk=true;cycle(false,true,PROFILE_NORMAL,1,1,lastLte,failedLoRaCycles);
+    assert(!cellularFailure);
 }
 void lteOnlyTests(){
     WALTER_TLS_CA_PEM="-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----";
     modemCalls=0;uploadedPacket.clear();console.log.clear();
-    const auto txBefore=loraTxCount.load();
+    const auto txBefore=loraFailedCount.load();
     const auto skippedBefore=lteSkippedCount.load();
     offlineBench=true;nowUtc=0;assert(!testLteOnly() && modemCalls==0);
     nowUtc=utc;hmacKey[0]=0;assert(!testLteOnly() && modemCalls==0);hmacKey[0]=1;
@@ -168,8 +164,8 @@ void lteOnlyTests(){
     const auto seq=pkt_msg_seq(uploadedPacket.data());
     uploadOk=true;assert(testLteOnly() && modemCalls==6 && !cellularFailure);
     assert(pkt_msg_seq(uploadedPacket.data())==uint16_t(seq+1));
-    assert(loraTxCount==txBefore && lteSkippedCount==skippedBefore && offlineBench);
-    assert(console.log.find("[LORA-STUB]")==std::string::npos);
+    assert(loraFailedCount==txBefore && lteSkippedCount==skippedBefore && offlineBench);
+    assert(console.log.find("[LORA]")==std::string::npos);
     assert(console.log.find("No-fix test packet")!=std::string::npos);
 }
 namespace modemSetupTests {
@@ -255,18 +251,18 @@ void run(){
     r["command"]["type"]="exit_lost_alert";assert(walter::parseProfileCommand(r,1010,utc,c)&&c.profile==PROFILE_ACTIVE);
     r["command"]["payload"]["fallback_profile"]="lost_alert";assert(!walter::parseProfileCommand(r,1010,utc,c));
     reset();response(r);listenForLteCommands(r);
-    assert(fakeMs==10000 && polls==10 && acks==1 && selectedProfile==PROFILE_ACTIVE);
+    assert(fakeMs==CMD_LISTEN_WINDOW_MS && polls==CMD_LISTEN_WINDOW_MS/1000 && acks==1 && selectedProfile==PROFILE_ACTIVE);
     uint16_t acked=0;assert(pkt_tlv_get_u16(ackPacket.data(),TLV_ACKED_MSG_SEQ_ID,&acked)&&acked==17);
     assert(pkt_tx_reason(ackPacket.data())==TX_ACK && !(pkt_flags(ackPacket.data())&FLAG_GNSS_VALID));
     assert(pkt_power_profile(ackPacket.data())==PROFILE_ACTIVE);
-    reset();queuedAt=9999;response(r);listenForLteCommands(r);assert(acks==1&&fakeMs==10000);
+    reset();queuedAt=CMD_LISTEN_WINDOW_MS-1;response(r);listenForLteCommands(r);assert(acks==1&&fakeMs==CMD_LISTEN_WINDOW_MS);
     reset();assert(!deserializeJson(r,cloud));applyCloudCommand(r);auto first=lostProfileStartedMs;
     fakeMs=5000;applyCloudCommand(r);assert(acks==2 && lostProfileStartedMs==first);
     reset();sequenceNext=sequenceEnd;sequenceStore.fail=true;assert(!deserializeJson(r,cloud));applyCloudCommand(r);
     assert(!acks && selectedProfile==PROFILE_NORMAL);sequenceStore.fail=false;
     reset();failAck=true;assert(!deserializeJson(r,cloud));applyCloudCommand(r);assert(acks==1 && selectedProfile==PROFILE_ACTIVE);
     failAck=false;applyCloudCommand(r);assert(acks==2);
-    reset();failPoll=true;response(r);listenForLteCommands(r);assert(fakeMs==10000 && polls==1 && !acks);
+    reset();failPoll=true;response(r);listenForLteCommands(r);assert(fakeMs==CMD_LISTEN_WINDOW_MS && polls==1 && !acks);
     reset();cancelOnPause=true;response(r);listenForLteCommands(r);assert(polls==0 && !acks && fakeMs<10000);
     reset();assert(!deserializeJson(r,cloud));r["command"]["type"]="reboot";applyCloudCommand(r);assert(!acks);
     const uint8_t body[]={123,125,0};
@@ -367,7 +363,7 @@ void run(){
     reset();events={fix(57)};events[0].timeToFix=50000;
     assert(acquireFix()&&!clockWrites&&utcNow()==utc+50&&lastFix.utc==utc);
     uint8_t agedPacket[BP_MAX_PACKET_SIZE]{};
-    assert(walter::buildPacket(agedPacket,1010,16,1,utcNow(),PROFILE_ACTIVE,false,TX_TELEMETRY,lastFix,false,false,50,hmacKey));
+    assert(walter::buildPacket(agedPacket,1010,16,1,utcNow(),PROFILE_ACTIVE,false,TX_TELEMETRY,lastFix,false,false,false,50,hmacKey));
     assert(pkt_fix_age_s(agedPacket)==50); // A 50-second acquisition must not look age zero.
     reset();events={fix(20)};events[0].timeToFix=60000;
     assert(!acquireFix()&&!lastFix.valid&&utcNow()==utc+60);
@@ -488,18 +484,22 @@ int main() {
         }
         for (bool home : {false,true}) {
             const auto boot=walter::decide(p.profile,1,1,home,true,false,0);
-            assert(boot.packet && boot.gnss && boot.lte && boot.reason==TX_BOOT);
+            assert(boot.packet && boot.gnss && !boot.lte && boot.reason==TX_BOOT);
             const auto forced=walter::decide(p.profile,1,1,home,false,true,0);
             assert(forced.packet && forced.gnss && forced.lte && forced.reason==TX_INTERRUPT);
         }
         assert(walter::sleepSeconds(p.profile) == (p.profile==PROFILE_LOST ? 30 : p.sleep_interval_s));
+        uint8_t failures=0;
+        const auto threshold=p.lora_failed_cycles_before_cellular;
+        for(unsigned n=1;n<threshold;++n){assert(!walter::noteLoRaFailure(failures,p.profile));assert(failures==n);}
+        assert(walter::noteLoRaFailure(failures,p.profile) && failures==0);
     }
     walter::Fix fix{true,519084900,-22587900,utc,8,9};
     uint8_t key[32]; for(int i=0;i<32;++i)key[i]=i;
     uint8_t packet[BP_MAX_PACKET_SIZE]{};
     auto build=[&](walter::Fix f, uint32_t time=utc, uint8_t reason=TX_TELEMETRY,
-                   bool home=false, bool gpsFail=false, bool cellFail=false) {
-        return walter::buildPacket(packet,1010,16,42,time,PROFILE_NORMAL,home,reason,f,gpsFail,cellFail,123,key);
+                   bool home=false, bool gpsFail=false, bool cellFail=false, bool radioFail=false) {
+        return walter::buildPacket(packet,1010,16,42,time,PROFILE_NORMAL,home,reason,f,gpsFail,cellFail,radioFail,123,key);
     };
     const auto length=build(fix);
     assert(length==46 && pkt_flags(packet)==FLAG_GNSS_VALID && pkt_status(packet)==STATUS_OUT_AND_ABOUT);
@@ -515,13 +515,14 @@ int main() {
     build(fix,utc,TX_WAKE_CHECKIN,true,true); assert(pkt_flags(packet)==FLAG_HOME_BEACON_SEEN);
     assert(pkt_status(packet)==STATUS_HOME && pkt_fix_age_s(packet)==65535 && pkt_lat_e7(packet)==0);
     build(fix,utc,TX_TELEMETRY,false,false,true); assert(pkt_flags(packet)&FLAG_ERROR_PRESENT);
+    build(fix,utc,TX_TELEMETRY,false,false,false,true); assert(pkt_flags(packet)&FLAG_ERROR_PRESENT);
     build(fix,utc-1); assert(!(pkt_flags(packet)&FLAG_GNSS_VALID));
     auto bad=fix;bad.latE7=1000000000;build(bad);assert(!(pkt_flags(packet)&FLAG_GNSS_VALID));
     assert(build(fix,0)==0);
-    assert(walter::buildPacket(packet,16,16,1,utc,PROFILE_NORMAL,false,0,fix,false,false,0,key)==0);
-    assert(walter::buildPacket(packet,1010,1011,1,utc,PROFILE_NORMAL,false,0,fix,false,false,0,key)==0);
-    assert(walter::buildPacket(packet,1010,16,1,utc,PROFILE_UNKNOWN,false,0,fix,false,false,0,key)==0);
-    assert(walter::buildPacket(packet,1010,16,65535,utc,PROFILE_LOST,true,0,fix,false,false,0,key));
+    assert(walter::buildPacket(packet,16,16,1,utc,PROFILE_NORMAL,false,0,fix,false,false,false,0,key)==0);
+    assert(walter::buildPacket(packet,1010,1011,1,utc,PROFILE_NORMAL,false,0,fix,false,false,false,0,key)==0);
+    assert(walter::buildPacket(packet,1010,16,1,utc,PROFILE_UNKNOWN,false,0,fix,false,false,false,0,key)==0);
+    assert(walter::buildPacket(packet,1010,16,65535,utc,PROFILE_LOST,true,0,fix,false,false,false,0,key));
     assert(pkt_msg_seq(packet)==65535 && pkt_status(packet)==STATUS_LOST);
     JsonDocument receipt;
     const char* valid=R"({"accepted":true,"device_id":1010,"message_id":42,"payload_hash":"test-hash","ingest_path":"cellular_direct","link_type":"lte"})";
@@ -552,12 +553,13 @@ int main() {
 }
 `);
 const compiler=process.env.CXX||(process.platform==='win32'?'C:/ProgramData/mingw64/mingw64/bin/g++.exe':'g++');
+const compilerArgs=process.env.CXX_ARGS?.split(/\s+/).filter(Boolean) ?? [];
 function run(command,args) {
-    const result=spawnSync(command,args,{encoding:'utf8'});
+    const result=spawnSync(command,args,{encoding:'utf8',maxBuffer:16*1024*1024});
     assert.equal(result.status,0,result.error?.message||result.stderr||result.stdout);
     return result.stdout;
 }
-run(compiler,['-std=c++17','-Wall','-Wextra','-Ishared/lib/BluepawsProtocol','-Icollar/walter/include',
+run(compiler,[...compilerArgs,'-std=c++17','-Wall','-Wextra','-Ishared/lib/BluepawsProtocol','-Icollar/walter/include',
     '-I.pio/libdeps/walter/ArduinoJson/src',source,'-o',executable]);
 const [hex,json,ackHex]=run(executable,[]).trim().split(/\r?\n/);
 const ack=decodeTlvPacket(Buffer.from(ackHex,'hex'),Buffer.from(Array.from({length:32},(_,i)=>i)));
@@ -576,4 +578,4 @@ assert.equal(parsed.packet.deviceGuid16,1010);
 assert.deepEqual(Buffer.from(parsed.packet.rawBytes),packet);
 assert.equal(decoded.packet.sha256,createHash('sha256').update(packet).digest('hex'));
 writeFileSync(resolve(dir,'packet-fixture.json'),JSON.stringify({hex,wrapper,decoded},null,2));
-console.log('Walter PASS: applied-profile sleep scheduling/cancellation, bounded GNSS settling/consistency/fresh selection/hot-start/cancellation tests, GNSS assistance cache/refresh/event timeout/cancellation gates, ten-second LTE polling (including final-deadline command), expiry/type/identity rejection, duplicate ACK handling, stop and failed-poll gates, signed ACK decoded by backend, zero-content-length bounded HTTP read, explicit CGAUTH/PAP validation, CFUN0 RAT switching/reset/readback, CEREG parsing, actual offline/online cycle, isolated LTE-only diagnostic, TX completion, immutable fallback bytes, stop/no-clock gates, credential gates, NVS reservations/reboots/write failures, five-profile cadence, home/away, boot/forced LTE, GNSS validity/staleness, fault flags, strict receipts, C++ HMAC -> web workbench -> Supabase parser. No network or serial traffic.');
+console.log('Walter PASS: applied-profile sleep scheduling/cancellation, bounded GNSS settling/consistency/fresh selection/hot-start/cancellation tests, GNSS assistance cache/refresh/event timeout/cancellation gates, profile-sized LTE polling (including final-deadline command), expiry/type/identity rejection, duplicate ACK handling, stop and failed-poll gates, signed ACK decoded by backend, zero-content-length bounded HTTP read, explicit CGAUTH/PAP validation, CFUN0 RAT switching/reset/readback, CEREG parsing, actual offline/online cycle, isolated LTE-only diagnostic, immediate missing-LoRa failure and profile-threshold fallback, immutable LTE packet, stop/no-clock gates, credential gates, NVS reservations/reboots/write failures, five-profile cadence, home/away, boot/forced policy, GNSS validity/staleness, fault flags, strict receipts, C++ HMAC -> web workbench -> Supabase parser. No network or serial traffic.');

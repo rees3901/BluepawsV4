@@ -55,8 +55,9 @@ function batteryPercentLevel(percent: number) {
 
 export function batteryPresentation(millivolts: number | null, percent?: number | null) {
   const hasPercent = percent !== undefined && percent !== null;
-  const quality = hasPercent ? batteryPercentLevel(percent) : millivolts === null ? { level: 0, label: "No data", color: "#607d8b" } : batteryLevel(millivolts);
-  const measurement = hasPercent ? `${percent}%` : millivolts === null ? "Battery not reported" : `${(millivolts / 1000).toFixed(2)} V`;
+  const hasVoltage = millivolts !== null && Number.isFinite(millivolts) && millivolts > 0 && millivolts < 65535;
+  const quality = hasPercent ? batteryPercentLevel(percent) : !hasVoltage ? { level: 0, label: "No data", color: "#607d8b" } : batteryLevel(millivolts);
+  const measurement = hasPercent ? `${percent}%` : !hasVoltage ? "Battery not reported" : `${(millivolts / 1000).toFixed(2)} V`;
   return { ...quality, measurement };
 }
 

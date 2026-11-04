@@ -203,7 +203,7 @@ export function buildDeviceReport(observation: DeviceObservationRow, path: Devic
     },
     {
       field: "Battery",
-      data: `${observation.batt_mv} mV`,
+      data: observation.batt_mv > 0 && observation.batt_mv < 65535 ? `${observation.batt_mv} mV` : "Not reported",
       description: batteryDescription(observation.batt_mv),
     },
     {
@@ -364,6 +364,7 @@ function profileDescription(value: number) {
 }
 
 function batteryDescription(millivolts: number) {
+  if (millivolts <= 0 || millivolts >= 65535) return "No battery measurement was supplied by this device.";
   if (millivolts >= 4000) return "Healthy lithium battery voltage.";
   if (millivolts >= 3700) return "Normal working battery voltage.";
   if (millivolts >= 3400) return "Battery is getting low; charging should be considered.";
