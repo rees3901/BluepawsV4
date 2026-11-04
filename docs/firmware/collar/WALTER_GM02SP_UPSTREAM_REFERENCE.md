@@ -33,6 +33,8 @@ The `status`, `gnss`, `assist`, `send` and other USB console commands are
 **BluePaws testbed firmware commands**, listed in the
 [Walter LTE/GNSS testbed guide](WALTER_LTE_TESTBED.md); they are not modem AT
 commands or part of QuickSpot's console.
+For the current auto-running Walter firmware and missing-LoRa fallback, see
+[Walter cellular collar mode](WALTER_COLLAR_MODE.md).
 For planned direct AT work, start with the existing
 [BluePaws GM02SP command notes](USEFUL_GM02SP_COMMANDS.md), then verify the
 installed firmware against the upstream AT manual.
