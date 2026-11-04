@@ -15,17 +15,39 @@ together and must not share an identity or credentials.
 | WisMesh board 1 | Existing collar 1001 | COM23, 115200 | Real LoRa; no GNSS/LTE hardware attached |
 | LoRa home hub | Existing hub 16 / `0010` | COM7, 115200 | Receives LoRa and forwards to cloud |
 | LoRa sniffer | Existing sniffer | COM11, 115200 | Passive RF observation |
-| Walter | **1010**, separately provisioned | **COM26**, 115200 | Real GNSS and LTE; simulated LoRa TX |
+| Walter | **1010**, separately provisioned | **COM10** on `reesPC` (4 Nov 2026), 115200 | Real GNSS and LTE; simulated LoRa TX |
 
 The WisMesh build-time/spoof clock and missing-modem faults are expected on that
 hardware. This work does not try to fix them. Device 1005 has already been used for
 test data; confirm 1010 is still spare when provisioning.
 
 The initial target was compile/offline tested before hardware arrived. Hardware
-commissioning is now in progress on **COM26**, with a 1NCE SIM and separate device
+commissioning began on **COM26**, with a 1NCE SIM and separate device
 1010 credentials. See [the dated bench record](WALTER_BENCH_2026_08_28.md) for results; do not infer LTE/GNSS
 success merely from a successful firmware build. The existing TLV simulator and
 workbench are unchanged.
+
+### Live reporting check, 4 November 2026
+
+On `reesPC`, COM10 identified itself as the BluePaws Walter independent testbed,
+device 1010, with credentials configured and offline bench enabled. A single
+`clock <current UTC epoch>`, `bench off`, `send` run obtained a real GNSS fix
+with 9 satellite entries and 7.7 m modem-estimated uncertainty. The packet was
+accepted over LTE (`HTTP 201`, matching device/sequence/hash receipt). Supabase
+`device_latest_positions_with_home` advanced from message 11648 on 2 October to
+message 3073 at 11:27:43 UTC on 4 November. Observation 19667 has
+`gnss_valid=true`, `acc_m=8`, `sat_count=9`, `fix_age_s=3`, and
+`ingest_path=cellular_direct`. The web app reads this view and observation
+quality for its map and GPS display. The production Vercel deployment was built
+from `main` commit `8e9e132`; a signed-in visual GUI check was not performed.
+
+The running image prints no source revision. Its standard ESP application
+descriptor reports the Arduino/ESP-IDF base, not the BluePaws commit, so the
+exact installed source revision cannot be established from the console or image
+header. Future builds print a source revision (with `-dirty` when built from
+uncommitted changes) and UTC build epoch at boot and in `status`. The local
+`walter_secrets.h` provisioning header was absent during this check; do not flash
+a newly built image without restoring the existing device 1010 credentials.
 
 ## Build and architecture
 
@@ -103,10 +125,11 @@ not a reason to wire the two testbeds together.
 Use `tools/walter_soak.py` with the PlatformIO Python and an ignored run directory:
 
 ```powershell
-& "$env:USERPROFILE/.platformio/penv/Scripts/python.exe" tools/walter_soak.py --run-dir .pio/walter-soak --start
+& "$env:USERPROFILE/.platformio/penv/Scripts/python.exe" tools/walter_soak.py --port COM10 --run-dir .pio/walter-soak --start
 ```
 
-The monitor exclusively opens COM26 at 115200, checks for idle configured device
+The monitor opens the configured serial port at 115200 (COM10 on `reesPC` as of
+4 November 2026), checks for idle configured device
 1010, explicitly seeds host UTC, selects online/away/Normal and starts the normal
 worker. It does not open COM7/23/11, send cloud requests, read credentials, invent
 fixes, or accelerate the profile. Omit `--start` to attach without changing the
@@ -191,7 +214,7 @@ Lost falls back to Active after two hours, checked between cycles.
 
 ## Provisioning and repeat setup
 
-Device1010 is now provisioned for the COM26 board. Reuse its private local
+Device1010 is provisioned for the Walter board. Reuse its private local
 credentials for routine rebuilds; do not generate replacement keys or rerun its
 provisioning SQL. The following checklist also describes setup for another board,
 which must use a different spare identity.
@@ -279,7 +302,7 @@ boot-idle means no application-initiated traffic, not proof of modem RF state.
 
 ### Work on the ESP without LTE/GNSS reception
 
-On COM26 at 115200, send `clock <current UTC epoch>` (from
+On the current Walter port (COM10 on `reesPC` as of 4 November 2026) at 115200, send `clock <current UTC epoch>` (from
 `[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()` on the PC), then `send`. The default
 `bench on` mode produces a real signed packet on the ESP without any modem calls.
 `start` exercises normal profile scheduling; `stop` cancels the listen/sleep wait.
@@ -398,7 +421,7 @@ Deploy the updated `ingest-position` function before flashing this firmware.
 Older endpoints reject the new poll format; telemetry acceptance remains valid,
 but a rejected poll is reported as unavailable command delivery.
 
-For a manual test on COM26 at 115200 (DTR enabled), send `status`, seed actual UTC
+For a manual test on the current Walter port at 115200 (DTR enabled), send `status`, seed actual UTC
 after a reset using `clock <epoch>`, then use `gnss` for position only. PowerShell
 `[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()` supplies the current epoch.
 `bench off` then `send` runs GNSS, simulated LoRa and real LTE; **it still accepts
@@ -622,7 +645,7 @@ Family, and `--key-version` the key version. Omit `--gateway-guid16` for LTE-onl
 collars. `--force` overwrites local output files; it is not a safe key-rotation
 workflow. Rotation requires a separately planned device/backend rollout.
 
-On COM26 at115200, normal one-shot GNSS-to-LTE testing uses these serial commands
+On the current Walter port at 115200, normal one-shot GNSS-to-LTE testing uses these serial commands
 (calculate current epoch with `[DateTimeOffset]::UtcNow.ToUnixTimeSeconds()`):
 
 ```text
