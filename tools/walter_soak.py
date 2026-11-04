@@ -1,7 +1,7 @@
 """Capture a real Walter 1010 soak; never synthesize packets or cloud ACKs.
 
 Run with the PlatformIO Python (pyserial). Output belongs under ignored .pio/.
-Only this process may own COM26. Control through --request status/stop, not a
+Only this process may own the selected serial port. Control through --request status/stop, not a
 second serial terminal. Closing the monitor does NOT stop the collar.
 """
 import argparse
@@ -54,10 +54,10 @@ def monitor(args):
     # A stale lock requires explicit operator investigation; never steal a port.
     with lock.open('x', encoding='utf8') as f:
         f.write(str(os.getpid()))
-    state = {'pid': os.getpid(), 'started_at': utc(), 'port': 'COM26',
+    state = {'pid': os.getpid(), 'started_at': utc(), 'port': args.port,
              'baud': 115200, 'monitor': 'starting', 'events': []}
     port = serial.Serial(port=None, baudrate=115200, timeout=0.2, write_timeout=2)
-    port.port, port.dtr, port.rts = 'COM26', True, False
+    port.port, port.dtr, port.rts = args.port, True, False
     pending = bytearray()
     try:
         with (directory / 'serial.log').open('a', encoding='utf8', buffering=1) as log:
@@ -135,6 +135,7 @@ def monitor(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--run-dir', required=True, type=Path)
+    parser.add_argument('--port', default='COM10', help='Walter USB serial port (default: COM10 on reesPC)')
     action = parser.add_mutually_exclusive_group()
     action.add_argument('--start', action='store_true', help='Start idle 1010 online, Normal/away')
     action.add_argument('--request', choices=('status', 'stop'))

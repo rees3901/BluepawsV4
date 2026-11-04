@@ -817,6 +817,8 @@ void command(const String& text) {
         console.println("[WALTER] Stop requested; completing/cancelling current modem operation"); return;
     }
     if (text == "status") {
+        console.printf("[WALTER] firmware=BluePawsV4-Walter source_rev=%s build_utc=%lu protocol=%u\n",
+            BLUEPAWS_WALTER_SOURCE_REV, (unsigned long)BLUEPAWS_BUILD_UNIX_TIME, unsigned(BP_PROTOCOL_VERSION));
         console.printf("[WALTER] device=%u hub=%u busy=%u running=%u profile=%s home_stub=%u credentials=%s\n",
             WALTER_DEVICE_ID, WALTER_HOME_HUB_ID, busy.load(), running.load(),
             bp_profile_name(bp_profile_t(selectedProfile.load())), simulatedHome.load(), credentialsReady() ? "configured" : "missing");
@@ -891,6 +893,8 @@ void setup() {
         for (;;) delay(1000);
     }
     console.println("[WALTER] Independent testbed. OFFLINE BENCH by default; seed clock then start/send. LoRa is simulated; Wi-Fi is unused.");
+    console.printf("[WALTER] firmware=BluePawsV4-Walter source_rev=%s build_utc=%lu protocol=%u\n",
+        BLUEPAWS_WALTER_SOURCE_REV, (unsigned long)BLUEPAWS_BUILD_UNIX_TIME, unsigned(BP_PROTOCOL_VERSION));
 }
 
 void loop() {
