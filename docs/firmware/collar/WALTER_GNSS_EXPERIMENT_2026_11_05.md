@@ -6,6 +6,7 @@ Walter on COM10, device **1011**, existing bearer/HMAC/APN/CA retained. The user
 confirmed a stationary patch antenna pointing up with clear sky and supplied
 reference **51.905909, -2.239490**. This is a user-supplied point, not a surveyed
 reference. All “error” below means horizontal separation from that point.
+The exact patch part number and its ground-plane specification were not verified.
 Neither the reference nor a fabricated position is fed into the modem or used
 by firmware to select samples.
 
@@ -70,6 +71,8 @@ and the failed rule rather than guessing that every rejected event is poor RF.
 ## Reproduction
 
 ```powershell
+python -m pip install -r tools/requirements-lte-modem.txt
+npm --prefix tools/tlv-web-console ci
 pio run -e walter
 node tools/test_walter_testbed.mjs
 python tools/test_walter_gnss_tools.py
@@ -188,3 +191,45 @@ results contain no bearer token, HMAC key, TLS private key or SIM identifier.
 For future flashing, keep the private provisioning header and current NVS
 sequence reservations. The full flash backup includes an older counter; normal
 application rollback should retain current NVS rather than replay that old state.
+
+## Final firmware and handoff
+
+The final application is **`9c4774b7d7df`**, with the newest-target fallback rule.
+It was built, flashed and identified on COM10 with the original device 1011
+credentials. The firmware policy/packet/HTTP regression suite passed, including
+an isolated optimistic point versus a newer target-quality fallback, and all
+three host analysis tests passed.
+
+Three 10 second windows verified bounded unconfirmed fallback (10.218–10.305 s
+including cancellation); one selected the newer 8.9 m-uncertainty sample instead
+of an older 3.9 m sample. The choice used timestamps/quality, never the reference.
+Their reference separations ranged to 39.04 m, reinforcing that a short window
+and a small uncertainty estimate alone do not establish accuracy.
+
+Three subsequent 60 second windows all reached a settled group, finishing in
+12.981, 13.483 and 42.323 seconds. Selected separations were about 4–18 m
+(median 17.96 m, worst 17.98 m). These are additional small stationary samples,
+not proof of a universal 18 m bound or a causal improvement across changing skies.
+RF-off cleanup after these diagnostics was confirmed in 18 ms.
+
+Two final one-shot LTE reports (one on each later build) registered successfully
+but produced no matching application acceptance; their delivery is **unconfirmed**.
+The final attempt reported RSRP −102 dBm and RSRQ −19.5 dB. Do not claim a new
+cloud check-in from these tests or attribute the data-path failure to GNSS.
+No modem firmware update, SIM credential change or bearer/HMAC rotation occurred.
+
+Automatic **Normal** operation was restored and observed through a completed
+cycle: device 1011, `running=1`, `offline=0`, immediate missing-SX1262 failure,
+and a 600 second next wake. Its first post-LTE GNSS window used the full budget
+(60.251 s including cancellation), returned `UNCONFIRMED`, and preserved the
+newest qualifying sample's original timestamp/10.4 m uncertainty. That sample
+was about 21 m from the supplied reference. COM10 was then released.
+
+The retained dataset includes 54 normalised window records, 180 position samples
+and 1,635 satellite-entry/CN0 records. Three old single-event tests lacking
+coordinates are described above but excluded from position statistics. See
+[CN0 entries](experiments/2026-11-05-walter/cn0.csv) and
+[trace checksums/source revisions](experiments/2026-11-05-walter/manifest.json).
+Raw traces and `firmware-gnss-9c4774b.bin` are saved privately with the recovery
+files. Original provisioning header and device registry were byte-compared with
+their backups and remain unchanged.

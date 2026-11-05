@@ -101,7 +101,7 @@ def main():
         first_ttf=[r['samples'][0]['ttf_ms']/1000 for r in runs if r['samples']]
         medoid_errors=[r['medoid_replay_error_m'] for r in runs if r['medoid_replay_error_m'] is not None]
         rows.append(dict(file=file, mode=mode, trials=len(runs), selected=len(valid),
-            settled=sum(r['summary'].get('quality')=='SETTLED' for r in runs),
+            settled=sum(int(r['summary'].get('consistent','0'))>=3 for r in runs),
             median_error_m=round(statistics.median(errors),2) if errors else None,
             max_error_m=max(errors) if errors else None,
             within25m=sum(e<=25 for e in errors),

@@ -33,6 +33,10 @@ retains its actual uncertainty. No valid sample means no fabricated coordinate.
 The sampling deadline is separate from initial LTE/time bootstrap and bounded
 modem cancellation/RF cleanup. Detailed evidence and limitations are in the
 [dated experiment](WALTER_GNSS_EXPERIMENT_2026_11_05.md).
+After a settled group it selects within the final three samples. Without a
+settled group, it prefers the newest fresh sample meeting the target; if none
+does, it retains the lowest-uncertainty fresh coarse sample. The reference point
+used by the analysis tool is never supplied to the modem or firmware selector.
 
 Stop the schedule and wait for Idle before diagnostic commands:
 
