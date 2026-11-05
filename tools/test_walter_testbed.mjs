@@ -392,6 +392,16 @@ void run(){
     assert(lastFix.utc==utc+6); // Never relabel the capture time as selection time.
     reset();events={fix(24),fix(22),fix(20)};
     assert(settleGnss(true)&&hotStarts==2); // First shot is cold/warm, subsequent genuine fixes allow hot start.
+    reset();lastFix={true,519000000,-22000000,utc-2,10,9};events={fix(24),fix(22),fix(20)};
+    assert(settleGnss(true)&&hotStarts==3); // Recent real anchor permits a hot first request.
+    reset();lastFix={true,519000000,-22000000,utc-301,10,9};events={fix(24),fix(22),fix(20)};
+    assert(settleGnss(true)&&hotStarts==2); // Old anchor does not authorize a hot first request.
+    reset();events={fix(20),fix(20,51.9003),fix(20,51.9006)};
+    for(auto& e:events)e.northSpeed=12;
+    assert(settleGnss(false)&&fakeMs==8000); // Plausible reported motion is allowed.
+    reset();events={fix(1,52.9),fix(20),fix(18),fix(19)};
+    assert(settleGnss(false)&&eventIndex==4&&lastFix.accuracyM==18&&lastFix.latE7==519000000);
+    // Settled group overrides the isolated first point, despite its optimistic uncertainty.
     reset();events={fix(80),fix(70),fix(90)};
     assert(settleGnss(false)&&fakeMs==60000&&cancellations==1&&lastFix.accuracyM==70&&lastFix.utc==utc+3);
     reset();events={fix(10),fix(40),fix(30),fix(20)};events[0].timeToFix=20000;

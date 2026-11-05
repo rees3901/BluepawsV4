@@ -88,12 +88,17 @@ def main():
         valid=[r for r in runs if r['selected_error_m'] is not None]
         errors=sorted(r['selected_error_m'] for r in valid)
         durations=[float(r['summary']['elapsed_ms'])/1000 for r in runs if 'elapsed_ms' in r['summary']]
+        first_times=[r['first_event_s'] for r in runs if r['first_event_s'] is not None]
+        first_ttf=[r['samples'][0]['ttf_ms']/1000 for r in runs if r['samples']]
         rows.append(dict(file=file, mode=mode, trials=len(runs), selected=len(valid),
             settled=sum(r['summary'].get('quality')=='SETTLED' for r in runs),
             median_error_m=round(statistics.median(errors),2) if errors else None,
             max_error_m=max(errors) if errors else None,
             within25m=sum(e<=25 for e in errors),
+            median_first_event_s=round(statistics.median(first_times),2) if first_times else None,
+            median_modem_first_ttf_s=round(statistics.median(first_ttf),2) if first_ttf else None,
             median_window_s=round(statistics.median(durations),2) if durations else None,
+            max_window_s=max(durations) if durations else None,
             rejects=dict(collections.Counter(reason for r in runs for reason in r['rejects']))))
     (dest/'summary.json').write_text(json.dumps(rows,indent=2),encoding='utf-8')
     print(json.dumps(rows,indent=2))

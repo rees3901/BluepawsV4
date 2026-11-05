@@ -539,7 +539,9 @@ bool settleGnss(bool hot, uint32_t budgetMs = WALTER_GNSS_TIMEOUT_MS, bool singl
     }
     // Selection uses the original timestamp. Never rewind the host clock to the best earlier snapshot.
     double best = 1001;
-    if (!cancelRequested.load()) for (unsigned i = 0; i < count; ++i) {
+    // A completed three-sample group must not be overridden by an earlier isolated outlier.
+    const unsigned first = consistent >= 3 && count >= 3 ? count - 3 : 0;
+    if (!cancelRequested.load()) for (unsigned i = first; i < count; ++i) {
         const auto now = utcNow();
         if (now >= candidates[i].utc && now - candidates[i].utc < GPS_STALE_THRESHOLD_S && uncertainties[i] <= best) {
             lastFix = candidates[i]; best = uncertainties[i];
@@ -782,7 +784,13 @@ void worker(void*) {
                         if (mode == 2 && !modem.gnssConfig()) console.println("[GNSS] Could not restore cold/warm configuration; check modem");
                         console.printf("[GNSS] Inspection result=%s (no upload)\n", fixed ? "VALID FIX" : "NO FIX");
                     }
-                    if (begun && !radioOff()) console.println("[GNSS] Could not confirm RF off");
+                    if (begun) {
+                        const auto cleanupStarted = monotonicMs();
+                        const bool off = radioOff();
+                        console.printf("[GNSS CLEANUP] result=%s elapsed_ms=%llu\n", off ? "RF_OFF" : "UNCONFIRMED",
+                            (unsigned long long)(monotonicMs() - cleanupStarted));
+                        if (!off) console.println("[GNSS] Could not confirm RF off");
+                    }
                 } else if (lte) {
                     const bool accepted = testLteOnly();
                     console.printf("[LTE] Test result=%s (no automatic retry)\n", accepted ? "CLOUD ACCEPTED" : "DELIVERY UNCONFIRMED");
@@ -867,7 +875,7 @@ void command(const String& text) {
     uint32_t gnssBudget = WALTER_GNSS_TIMEOUT_MS;
     const bool timedGnss = text.startsWith("gnss window ") || text.startsWith("gnss hot ");
     if (timedGnss) {
-        const String seconds = text.substring(text.lastIndexOf(' ') + 1);
+        const String seconds = text.substring(text.startsWith("gnss window ") ? 12 : 9);
         bool digits = seconds.length() > 0;
         for (char c : seconds) if (c < '0' || c > '9') digits = false;
         if (!digits || seconds.length() > 2 || seconds.toInt() < 5 || seconds.toInt() > 60) {

@@ -15,6 +15,9 @@ parser.add_argument('--out', required=True)
 parser.add_argument('--commands', nargs='+', required=True)
 parser.add_argument('--repeat', type=int, default=1)
 parser.add_argument('--resume', action='store_true')
+parser.add_argument('--startup', action='store_true', help='Capture the first automatic cycle before stopping it')
+parser.add_argument('--seed-clock', action='store_true', help='Explicit diagnostic host UTC seed; never supplies coordinates')
+parser.add_argument('--abort-after', type=float, help='Cancellation stress: stop each GNSS trial after this many seconds')
 args = parser.parse_args()
 path = pathlib.Path(args.out)
 path.parent.mkdir(parents=True, exist_ok=True)
@@ -26,7 +29,12 @@ with path.open('w', encoding='utf-8') as log:
     def record(kind, text, trial=''):
         log.write(json.dumps(dict(elapsed_s=round(time.monotonic()-start, 3), kind=kind, trial=trial, text=text))+'\n')
         log.flush()
-        print(f'[{trial or kind}] {text}', flush=True)
+        # Always drain serial into the file. Keep stdout small so an unattended
+        # shell pipe cannot block CN0 reads and distort acquisition timing.
+        if kind == 'command' or any(marker in text for marker in (
+            '[GNSS SAMPLE]', '[GNSS REJECT]', '[GNSS SETTLE]', '[GNSS CLEANUP]',
+            '[ASSIST]', '[MODEM RELEASE]', 'bootstrap failed', '[LTE] ACCEPTED')):
+            print(f'[{trial or kind}] {text}', flush=True)
 
     def send(command, trial=''):
         record('command', command, trial)
@@ -51,15 +59,31 @@ with path.open('w', encoding='utf-8') as log:
         return False
 
     try:
+        if args.startup:
+            deadline=time.monotonic()+300
+            while time.monotonic()<deadline:
+                line=p.readline().decode('utf-8','replace').strip()
+                if line:
+                    record('serial',line,'0:startup')
+                    if '[CYCLE] SLEEP' in line: break
+            else:
+                raise RuntimeError('Automatic startup cycle did not reach sleep')
         send('stop')
         if not wait_idle(45):
             raise RuntimeError('No idle confirmation; refusing overlapping modem commands')
+        if args.seed_clock:
+            send(f'clock {int(time.time())}')
+            time.sleep(.3)
         for repeat in range(args.repeat):
             for command in args.commands:
                 trial = f'{repeat+1}:{command}'
                 send(command, trial)
                 # Host stop is an extra guard for the old 180-second single-fix image.
-                if not wait_idle(100, trial, time.monotonic()+61):
+                gnss=command.startswith('gnss')
+                # Sampling has its own device deadline; allow RF cleanup afterwards.
+                # Use --abort-after 61 if comparing the original 180 s single-fix image.
+                cutoff=args.abort_after if args.abort_after is not None else 90
+                if not wait_idle(130 if gnss else 360, trial, time.monotonic()+cutoff if gnss else None):
                     raise RuntimeError(f'No idle confirmation after {trial}')
                 send('status', trial)
                 until = time.monotonic()+.5
