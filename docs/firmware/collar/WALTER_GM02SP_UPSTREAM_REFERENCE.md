@@ -72,6 +72,12 @@ installed firmware against the upstream AT manual.
 
 ## GNSS acquisition, time and accuracy
 
+**Production acquisition policy:** the GM02SP supplies positions for both LoRa
+and LTE. Read [the runtime decision](COLLAR_RUNTIME_DECISIONS.md#gm02sp-acquisition-quality-before-either-uplink)
+before implementing either uplink, and [the November 2026 comparison](WALTER_GNSS_EXPERIMENT_2026_11_05.md)
+before choosing sampling windows or accuracy thresholds. The 60 second bounded
+Walter experiment is evidence for tuning, not proof of production accuracy.
+
 1. `gnssConfig` selects sensitivity (low/medium/high), acquisition mode and
    on-device positioning. Its settings persist over resets but may need restoring
    after modem firmware changes. Higher sensitivity uses more power. The default
