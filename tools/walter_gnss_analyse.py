@@ -46,6 +46,8 @@ def analyse(paths, ref):
                 samples.append(sample)
             elif '[GNSS REJECT]' in text:
                 run['rejects'].append(fields(text)['reason'])
+                if run['samples']:
+                    run['samples'][-1]['rejected'] = fields(text)['reason']
             elif '[GNSS SETTLE] CLOSED' in text:
                 run['summary'] = fields(text)
         for run in runs.values():
@@ -63,6 +65,13 @@ def analyse(paths, ref):
             run['first_event_s'] = round(run['samples'][0]['arrival_s'], 3) if run['samples'] else None
             run['first_error_m'] = round(run['samples'][0]['error_m'], 2) if run['samples'] else None
             run['mode'] = run['trial'].split(':', 1)[1]
+            # Offline replay only: compare a central original point with the
+            # firmware's lowest-uncertainty point on identical settled samples.
+            cluster=[s for s in run['samples'] if 'rejected' not in s][-3:]
+            medoid=None
+            if int(summary.get('consistent','0'))>=3 and len(cluster)==3:
+                medoid=min(cluster,key=lambda s:(sum(separation(s['lat'],s['lon'],(t['lat'],t['lon'])) for t in cluster),s['uncertainty'],-s['utc']))
+            run['medoid_replay_error_m']=round(medoid['error_m'],2) if medoid else None
             trials.append(run)
     return trials, samples
 
@@ -90,6 +99,7 @@ def main():
         durations=[float(r['summary']['elapsed_ms'])/1000 for r in runs if 'elapsed_ms' in r['summary']]
         first_times=[r['first_event_s'] for r in runs if r['first_event_s'] is not None]
         first_ttf=[r['samples'][0]['ttf_ms']/1000 for r in runs if r['samples']]
+        medoid_errors=[r['medoid_replay_error_m'] for r in runs if r['medoid_replay_error_m'] is not None]
         rows.append(dict(file=file, mode=mode, trials=len(runs), selected=len(valid),
             settled=sum(r['summary'].get('quality')=='SETTLED' for r in runs),
             median_error_m=round(statistics.median(errors),2) if errors else None,
@@ -99,6 +109,8 @@ def main():
             median_modem_first_ttf_s=round(statistics.median(first_ttf),2) if first_ttf else None,
             median_window_s=round(statistics.median(durations),2) if durations else None,
             max_window_s=max(durations) if durations else None,
+            medoid_replay_n=len(medoid_errors),
+            medoid_replay_median_error_m=round(statistics.median(medoid_errors),2) if medoid_errors else None,
             rejects=dict(collections.Counter(reason for r in runs for reason in r['rejects']))))
     (dest/'summary.json').write_text(json.dumps(rows,indent=2),encoding='utf-8')
     print(json.dumps(rows,indent=2))

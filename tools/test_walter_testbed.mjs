@@ -402,6 +402,9 @@ void run(){
     reset();events={fix(1,52.9),fix(20),fix(18),fix(19)};
     assert(settleGnss(false)&&eventIndex==4&&lastFix.accuracyM==18&&lastFix.latE7==519000000);
     // Settled group overrides the isolated first point, despite its optimistic uncertainty.
+    reset();events={fix(1,52.9),fix(18)};
+    assert(settleGnss(false)&&fakeMs==60000&&lastFix.accuracyM==18&&lastFix.latE7==519000000);
+    // With no settled group, prefer the newest target-quality sample, not an old optimistic one.
     reset();events={fix(80),fix(70),fix(90)};
     assert(settleGnss(false)&&fakeMs==60000&&cancellations==1&&lastFix.accuracyM==70&&lastFix.utc==utc+3);
     reset();events={fix(10),fix(40),fix(30),fix(20)};events[0].timeToFix=20000;

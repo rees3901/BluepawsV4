@@ -541,10 +541,16 @@ bool settleGnss(bool hot, uint32_t budgetMs = WALTER_GNSS_TIMEOUT_MS, bool singl
     double best = 1001;
     // A completed three-sample group must not be overridden by an earlier isolated outlier.
     const unsigned first = consistent >= 3 && count >= 3 ? count - 3 : 0;
+    bool haveTarget = false;
     if (!cancelRequested.load()) for (unsigned i = first; i < count; ++i) {
         const auto now = utcNow();
-        if (now >= candidates[i].utc && now - candidates[i].utc < GPS_STALE_THRESHOLD_S && uncertainties[i] <= best) {
-            lastFix = candidates[i]; best = uncertainties[i];
+        if (now >= candidates[i].utc && now - candidates[i].utc < GPS_STALE_THRESHOLD_S) {
+            const bool target = uncertainties[i] <= WALTER_GNSS_TARGET_M;
+            const bool choose = consistent >= 3 ? uncertainties[i] <= best
+                : target ? (!haveTarget || candidates[i].utc >= lastFix.utc)
+                : (!haveTarget && uncertainties[i] <= best);
+            if (choose) { lastFix = candidates[i]; best = uncertainties[i]; }
+            haveTarget = haveTarget || target;
         }
     }
     console.printf("[GNSS SETTLE] CLOSED elapsed_ms=%llu attempts=%u usable=%u consistent=%u selected=%u uncertainty=%.1fm utc=%lu quality=%s\n",

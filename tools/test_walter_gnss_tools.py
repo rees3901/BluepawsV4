@@ -32,6 +32,18 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(separation(51,-2,(51,-2)),0)
         self.assertAlmostEqual(separation(0,0,(.001,0)),111.195,places=2)
 
+    def test_medoid_replay_uses_original_central_point(self):
+        records=[]
+        for i,lon in enumerate((-2.0001,-2,-1.9999)):
+            text=f'[GNSS SAMPLE] n={i+1} elapsed_ms=1000 ttf_ms=900 status=0 uncertainty={1 if i==0 else 20}.0m lat=51.0 lon={lon} utc={100+i} entries=8 cn0_ge30=4'
+            records.append(dict(trial='1:gnss',text=text,elapsed_s=i+1,kind='serial'))
+        records.append(dict(trial='1:gnss',text='[GNSS SETTLE] CLOSED elapsed_ms=3000 attempts=3 usable=3 consistent=3 selected=1 uncertainty=1.0m utc=100',elapsed_s=3,kind='serial'))
+        with tempfile.TemporaryDirectory() as d:
+            p=pathlib.Path(d)/'log.jsonl';p.write_text('\n'.join(map(json.dumps,records)))
+            trials,_=analyse([str(p)],(51,-2))
+        self.assertGreater(trials[0]['selected_error_m'],5)
+        self.assertEqual(trials[0]['medoid_replay_error_m'],0)
+
 
 if __name__=='__main__':
     unittest.main()

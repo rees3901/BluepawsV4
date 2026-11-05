@@ -50,7 +50,8 @@ with path.open('w', encoding='utf-8') as log:
             line = p.readline().decode('utf-8', 'replace').strip()
             if line:
                 record('serial', line, trial)
-                if (trial and 'Idle after inspection' in line) or (not trial and (
+                if (trial and ('Idle after inspection' in line or
+                    (trial.endswith(':send') and 'Idle. No further scheduled' in line))) or (not trial and (
                     '[WALTER] Idle' in line or ('busy=0 running=0' in line and 'device=' in line))):
                     return True
             if stop_at is not None and not stopped and time.monotonic()>=stop_at:
@@ -83,7 +84,7 @@ with path.open('w', encoding='utf-8') as log:
                 # Sampling has its own device deadline; allow RF cleanup afterwards.
                 # Use --abort-after 61 if comparing the original 180 s single-fix image.
                 cutoff=args.abort_after if args.abort_after is not None else 90
-                if not wait_idle(130 if gnss else 360, trial, time.monotonic()+cutoff if gnss else None):
+                if not wait_idle(130 if gnss else 450, trial, time.monotonic()+cutoff if gnss else None):
                     raise RuntimeError(f'No idle confirmation after {trial}')
                 send('status', trial)
                 until = time.monotonic()+.5
@@ -94,4 +95,18 @@ with path.open('w', encoding='utf-8') as log:
         send('stop')
         if wait_idle(40) and args.resume:
             send('start')
+            deadline=time.monotonic()+150
+            while time.monotonic()<deadline:
+                line=p.readline().decode('utf-8','replace').strip()
+                if line:
+                    record('serial',line,'0:resume')
+                    if '[CYCLE] SLEEP' in line:
+                        send('status','0:resume')
+                        until=time.monotonic()+3
+                        while time.monotonic()<until:
+                            line=p.readline().decode('utf-8','replace').strip()
+                            if line: record('serial',line,'0:resume')
+                        break
+            else:
+                record('error','Resumed schedule did not reach sleep within 150 seconds')
         p.close()
