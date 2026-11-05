@@ -45,7 +45,8 @@
 constexpr const char* WALTER_HTTPS_HOST = "ykcdaonkvwemedotdpdr.supabase.co";
 constexpr const char* WALTER_HTTPS_PATH = "/functions/v1/ingest-position";
 constexpr uint32_t WALTER_NETWORK_TIMEOUT_MS = 180000;
-constexpr uint32_t WALTER_GNSS_TIMEOUT_MS = 180000;
+constexpr uint32_t WALTER_GNSS_TIMEOUT_MS = 60000; // Total sampling window; cancellation/RF cleanup follows.
+constexpr unsigned WALTER_GNSS_TARGET_M = 25;
 constexpr uint32_t WALTER_HTTP_TIMEOUT_MS = 130000;
 constexpr uint8_t WALTER_TLS_PROFILE = 2; // Profile 1 is reserved by BlueCherry.
 constexpr uint8_t WALTER_CA_SLOT = 12;   // Avoid vendor/preinstalled slots 0..10.
