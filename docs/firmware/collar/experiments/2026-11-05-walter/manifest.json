@@ -1,0 +1,74 @@
+{
+  "reference": [
+    51.905909,
+    -2.23949
+  ],
+  "reference_provenance": "User-supplied stationary point, not surveyed",
+  "inputs": [
+    {
+      "file": "gnss-baseline-valid.jsonl",
+      "sha256": "9c74f771a04d0ab3e79e38566894532c282b06ee000a447f8ce0071c39c3e33c",
+      "source_revisions": [
+        "a9102b9b8579"
+      ],
+      "records": 365
+    },
+    {
+      "file": "gnss-window-before-assist.jsonl",
+      "sha256": "e50d1b1ecca39cef4b49d5a057a8d637753b31dfcb0648cce68846ec996a2ffc",
+      "source_revisions": [
+        "29fc1a1eab80"
+      ],
+      "records": 545
+    },
+    {
+      "file": "gnss-refined-reverse.jsonl",
+      "sha256": "888ee462fae974f59691743a29456c184cbff84145dd35c30c6dd72c2b6a21b1",
+      "source_revisions": [
+        "c8d5e3a5b686"
+      ],
+      "records": 952
+    },
+    {
+      "file": "gnss-cancel-stress.jsonl",
+      "sha256": "d38da35ca9429b132d6a6a55d7b596769b40c3b64aa3cf8dc80c9adb5b5b6b3d",
+      "source_revisions": [
+        "c8d5e3a5b686"
+      ],
+      "records": 83
+    },
+    {
+      "file": "gnss-short-stress.jsonl",
+      "sha256": "004b2dc4d70bfefd8874103c09af336f516ba409e9a00b6a503f645301f5cdb0",
+      "source_revisions": [
+        "c8d5e3a5b686"
+      ],
+      "records": 82
+    },
+    {
+      "file": "gnss-final-policy.jsonl",
+      "sha256": "91295bf7a8efb57753bf578e6d895a7a84a98aa1ff7e0859b61e4272e9a0e6d1",
+      "source_revisions": [
+        "9c4774b7d7df"
+      ],
+      "records": 355
+    },
+    {
+      "file": "gnss-final-report.jsonl",
+      "sha256": "6fe23700dbc3e15824a0ae6428063826abb1474a2aa39d7037021c5270a188b8",
+      "source_revisions": [
+        "c8d5e3a5b686"
+      ],
+      "records": 230
+    },
+    {
+      "file": "gnss-final-live.jsonl",
+      "sha256": "efee3ac29e4ae9613846fd680e5f3357696bc48421e506f81a059d4cb6ddb799",
+      "source_revisions": [
+        "9c4774b7d7df"
+      ],
+      "records": 229
+    }
+  ],
+  "receipts": []
+}

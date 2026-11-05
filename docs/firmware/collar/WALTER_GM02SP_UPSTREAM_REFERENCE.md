@@ -72,6 +72,12 @@ installed firmware against the upstream AT manual.
 
 ## GNSS acquisition, time and accuracy
 
+**Production acquisition policy:** the GM02SP supplies positions for both LoRa
+and LTE. Read [the runtime decision](COLLAR_RUNTIME_DECISIONS.md#gm02sp-acquisition-quality-before-either-uplink)
+before implementing either uplink, and [the November 2026 comparison](WALTER_GNSS_EXPERIMENT_2026_11_05.md)
+before choosing sampling windows or accuracy thresholds. The 60 second bounded
+Walter experiment is evidence for tuning, not proof of production accuracy.
+
 1. `gnssConfig` selects sensitivity (low/medium/high), acquisition mode and
    on-device positioning. Its settings persist over resets but may need restoring
    after modem firmware changes. Higher sensitivity uses more power. The default
@@ -102,11 +108,15 @@ uncertainty, satellite entries and CN0, then accepts a sample only if
 [`usableGnssSnapshot`](../../../collar/walter/src/main.cpp) passes **all** checks:
 READY status, plausible and fresh UTC, valid coordinates, at least four
 satellite entries within the library's maximum, and estimated confidence in
-`(0, 1000]` metres. The diagnostic's 50 m target controls early stopping; it is
-**not** the general validity threshold.
+`(0, 1000]` metres. The current bounded-window experiment uses a provisional
+25 m target plus three consecutive fresh/consistent samples for early stopping;
+that is **not** the general validity threshold or a measured accuracy guarantee.
+The earlier September diagnostic used a 50 m target. Follow the dated experiment
+and current source rather than transferring either tuning value to a PCB requirement.
 Thus `status=0` together with `usable=0` points to another failed check. The
-September outdoor log does not show which one; capture `status`/seeded UTC and
-compare the fix timestamp, then instrument rejection reasons if needed. A
+September outdoor log does not show which one. Current firmware logs
+`[GNSS REJECT]` with the failed rule, host UTC, fix UTC and delta; use that
+evidence rather than inferring the cause from the uncertainty alone. A
 reported 95 m uncertainty and several CN0 values below 30 warrant an antenna
 and sky-view comparison even if the coordinate cluster looks tighter. See the
 [testbed settling procedure](WALTER_LTE_TESTBED.md#comparing-snapshots-with-a-bounded-settling-session).

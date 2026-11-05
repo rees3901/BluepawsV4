@@ -312,13 +312,13 @@ namespace settlingTests {
 constexpr unsigned WALTER_MODEM_GNSS_MAX_SATS=32, WALTER_MODEM_GNSS_FIX_STATUS_READY=0;
 constexpr unsigned WALTER_MODEM_GNSS_SENS_MODE_HIGH=3, WALTER_MODEM_GNSS_ACQ_MODE_HOT_START=1;
 constexpr unsigned WALTER_MODEM_GNSS_ACTION_CANCEL=1, BLUEPAWS_BUILD_UNIX_TIME=utc;
-constexpr unsigned WALTER_GNSS_TIMEOUT_MS=180000;
+constexpr unsigned WALTER_GNSS_TIMEOUT_MS=60000, WALTER_GNSS_TARGET_M=25;
 constexpr unsigned pdTRUE=1;
 unsigned pdMS_TO_TICKS(unsigned n){return n;}
 struct Sat {uint8_t satNo=1,signalStrength=35;};
 struct WMGNSSFixEvent {
     unsigned status=0;int64_t timestamp=utc;uint32_t timeToFix=2000;
-    double estimatedConfidence=80,latitude=51.9,longitude=-2.2;
+    double estimatedConfidence=80,latitude=51.9,longitude=-2.2,northSpeed=0,eastSpeed=0;
     uint8_t satCount=9;Sat sats[32];
 };
 std::vector<WMGNSSFixEvent> events;
@@ -348,6 +348,7 @@ struct Modem {
         return startOk;
     }
 }modem;
+${firmwareFunction('gnssRejectionReason','const char*')}
 ${firmwareFunction('usableGnssSnapshot')}
 ${firmwareFunction('gnssSeparationM','double')}
 ${firmwareFunction('settleGnss')}
@@ -361,7 +362,7 @@ void reset(){
 WMGNSSFixEvent fix(double uncertainty,double lat=51.9){WMGNSSFixEvent f;f.estimatedConfidence=uncertainty;f.latitude=lat;return f;}
 void run(){
     reset();events={fix(57)};events[0].timeToFix=50000;
-    assert(acquireFix()&&!clockWrites&&utcNow()==utc+50&&lastFix.utc==utc);
+    assert(settleGnss(false,60000,true)&&!clockWrites&&utcNow()==utc+50&&lastFix.utc==utc);
     uint8_t agedPacket[BP_MAX_PACKET_SIZE]{};
     assert(walter::buildPacket(agedPacket,1010,16,1,utcNow(),PROFILE_ACTIVE,false,TX_TELEMETRY,lastFix,false,false,false,50,hmacKey));
     assert(pkt_fix_age_s(agedPacket)==50); // A 50-second acquisition must not look age zero.
@@ -371,7 +372,14 @@ void run(){
     assert(!acquireFix()&&!lastFix.valid); // Future sample cannot reset the clock either.
     reset();noClock=true;assert(!acquireFix()&&fakeMs==0);
     reset();cancelAt=100;assert(!acquireFix()&&cancellations==1);
-    reset();assert(!acquireFix()&&fakeMs==180000&&cancellations==1);
+    reset();assert(!acquireFix()&&fakeMs==60000&&cancellations==1);
+    reset();events={fix(20),fix(18),fix(16)};
+    assert(acquireFix()&&eventIndex==3&&lastFix.accuracyM==16&&fakeMs<=60000);
+    reset();events={fix(20)};events[0].timeToFix=50000;
+    assert(!settleGnss(false,15000)&&fakeMs==15000&&cancellations==1);
+    reset();assert(!settleGnss(false,0)&&!settleGnss(false,60001)&&fakeMs==0);
+    reset();events={fix(20),fix(18),fix(16)};
+    assert(settleGnss(false,60000,true)&&eventIndex==1&&fakeMs==2000);
     reset();auto sample=fix(20);assert(usableGnssSnapshot(sample));
     sample.status=1;assert(!usableGnssSnapshot(sample));sample.status=0;
     sample.latitude=NAN;assert(!usableGnssSnapshot(sample));sample.latitude=51.9;
@@ -379,11 +387,24 @@ void run(){
     sample.timestamp=utc-60;assert(!usableGnssSnapshot(sample));
     reset();events.assign(25,fix(80));for(auto& e:events)e.timeToFix=100;
     assert(settleGnss(false)&&eventIndex==20&&fakeMs<60000); // Explicit attempt cap.
-    reset();events={fix(40),fix(30),fix(20)};
+    reset();events={fix(24),fix(22),fix(20)};
     assert(settleGnss(false)&&eventIndex==3&&lastFix.accuracyM==20&&fakeMs==8000&&!hotStarts);
     assert(lastFix.utc==utc+6); // Never relabel the capture time as selection time.
-    reset();events={fix(40),fix(30),fix(20)};
+    reset();events={fix(24),fix(22),fix(20)};
     assert(settleGnss(true)&&hotStarts==2); // First shot is cold/warm, subsequent genuine fixes allow hot start.
+    reset();lastFix={true,519000000,-22000000,utc-2,10,9};events={fix(24),fix(22),fix(20)};
+    assert(settleGnss(true)&&hotStarts==3); // Recent real anchor permits a hot first request.
+    reset();lastFix={true,519000000,-22000000,utc-301,10,9};events={fix(24),fix(22),fix(20)};
+    assert(settleGnss(true)&&hotStarts==2); // Old anchor does not authorize a hot first request.
+    reset();events={fix(20),fix(20,51.9003),fix(20,51.9006)};
+    for(auto& e:events)e.northSpeed=12;
+    assert(settleGnss(false)&&fakeMs==8000); // Plausible reported motion is allowed.
+    reset();events={fix(1,52.9),fix(20),fix(18),fix(19)};
+    assert(settleGnss(false)&&eventIndex==4&&lastFix.accuracyM==18&&lastFix.latE7==519000000);
+    // Settled group overrides the isolated first point, despite its optimistic uncertainty.
+    reset();events={fix(1,52.9),fix(18)};
+    assert(settleGnss(false)&&fakeMs==60000&&lastFix.accuracyM==18&&lastFix.latE7==519000000);
+    // With no settled group, prefer the newest target-quality sample, not an old optimistic one.
     reset();events={fix(80),fix(70),fix(90)};
     assert(settleGnss(false)&&fakeMs==60000&&cancellations==1&&lastFix.accuracyM==70&&lastFix.utc==utc+3);
     reset();events={fix(10),fix(40),fix(30),fix(20)};events[0].timeToFix=20000;

@@ -173,6 +173,42 @@ elapsed-time Home heartbeats continue independently even when LoRa is healthy.
 
 `WAKE_CHECKIN` does not automatically mutate any packet fields. The firmware path that chooses wake check-in explicitly sets `tx_reason = WAKE_CHECKIN` and `HOME_BEACON_SEEN`.
 
+## GM02SP acquisition quality before either uplink
+
+The final collar uses the GM02SP as its GNSS source for **both LoRa and LTE**.
+Acquire/select a timestamped position before choosing the transport. An LTE
+fallback must preserve that sample and its age; it must not imply a second,
+better GNSS solution. The Walter implementation is a separate hardware target.
+
+The November 2026 Walter experiments showed that a first READY event can have
+poor uncertainty and that a small uncertainty estimate can still disagree
+with a supplied reference position. The production integration must therefore
+support a bounded series of fixes, rather than equating READY or satellite
+entry count with acceptable accuracy. The sampling budget has a **60 second
+maximum**; profile-specific shorter budgets and early completion remain tuning
+decisions. Finish/cancel GNSS and confirm RF state before active LTE.
+GNSS for a LoRa report must remain possible without cellular coverage: design
+the trusted RTC/time-hint path and its provenance explicitly. Walter's LTE-only
+cold-boot time bootstrap is a test-fixture limitation; a diagnostic PC time seed
+does not demonstrate autonomous operation without LTE.
+
+The provisional Walter experiment uses a 25 m uncertainty target and three
+consecutive fresh samples, with a position-step check allowing bounded reported
+motion. These are experimental thresholds, not a validated production guarantee.
+Keep validity, uncertainty, consistency and actual measured position error
+separate. At the deadline, preserve the selected sample's original coordinates,
+timestamp and uncertainty, or explicitly report no usable fix. A coarse sample
+must remain visibly coarse. Never improve a reported accuracy number simply
+because several samples were collected.
+
+Log exact rejection reasons, host versus fix UTC, acquisition duration, first-fix
+time, start-mode request, assistance validity and CN0 distribution. A cold/warm
+configuration request with retained assistance is not proof of a cold start.
+Validate stationary reference error, moving behaviour and energy per acquisition
+before finalising profile budgets or transferring the policy to the production
+PCB. See [the Walter experiment record](WALTER_GNSS_EXPERIMENT_2026_11_05.md)
+and [vendor reference](WALTER_GM02SP_UPSTREAM_REFERENCE.md).
+
 ## GNSS failure while home
 
 If BLE Home is seen and a scheduled GNSS sanity refresh fails:

@@ -22,6 +22,36 @@ flashable onto Walter.
   over LTE, independent of the
   ordinary fallback interval.
 
+## GNSS acquisition experiment
+
+The experimental firmware uses a maximum 60 second sampling window and selects
+an original fresh sample. It requests additional fixes until three consecutive
+samples meet the provisional 25 m uncertainty/consistency target or the window
+ends. It logs `SETTLED`, `UNCONFIRMED`, `COARSE` or `NONE`; these diagnostic labels
+do not add protocol fields or promise a measured accuracy. A usable coarse result
+retains its actual uncertainty. No valid sample means no fabricated coordinate.
+The sampling deadline is separate from initial LTE/time bootstrap and bounded
+modem cancellation/RF cleanup. Detailed evidence and limitations are in the
+[dated experiment](WALTER_GNSS_EXPERIMENT_2026_11_05.md).
+After a settled group it selects within the final three samples. Without a
+settled group, it prefers the newest fresh sample meeting the target; if none
+does, it retains the lowest-uncertainty fresh coarse sample. The reference point
+used by the analysis tool is never supplied to the modem or firmware selector.
+
+Stop the schedule and wait for Idle before diagnostic commands:
+
+| Command | Arguments | Purpose |
+| --- | --- | --- |
+| `gnss` / `gnss settle` | None | Repeated cold/warm snapshots, maximum 60 seconds; no upload. |
+| `gnss single` | None | First-event comparison, maximum 60 seconds; no upload. |
+| `gnss window N` | `N=5..60` seconds | Compare shorter repeated-fix budgets. |
+| `gnss hot` / `gnss hot N` | Optional `N=5..60` | Hot start only after a recent valid fix; otherwise first fix uses cold/warm. |
+| `assist` | None | Inspect assistance and refresh expired almanac/real-time ephemeris over LTE. |
+| `start` | None | Restore automatic collar operation after inspection. |
+
+Cold/warm is the vendor's automatic choice according to retained assistance.
+Neither an ESP reboot nor that setting establishes a truly unaided cold start.
+
 ## Missing LoRa path and LTE fallback
 
 Walter never initializes or probes an SX1262. Each would-be LoRa uplink logs
